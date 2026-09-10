@@ -3,6 +3,7 @@
 //! A direct turn is one durable acceptance followed by a drive, so SQLite owes
 //! the same acceptance and recovery laws as every other backend.
 
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::SessionStoreFactory as _;
@@ -15,7 +16,7 @@ async fn sqlite_direct_turn_store(dir: &TempDir) -> Arc<dyn RuntimePersistence> 
     factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })

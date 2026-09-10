@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash_sansio::sync::MutexExt;
@@ -163,7 +164,7 @@ pub struct ToolDispatchContext<'run> {
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub agent_frame_id: crate::FrameNodeId,
     pub event_tx: mpsc::Sender<SessionStreamEvent>,
     pub(crate) checkpoint_messages: CheckpointMessageBuffer,
@@ -222,17 +223,19 @@ impl<'run> ToolDispatchContext<'run> {
 #[cfg(test)]
 mod parent_end_buffer_tests {
     use super::RecordedToolIntentOutcomeBuffer;
+    use crate::ProcessId;
+    use crate::SessionId;
 
     fn outcome(
         identity: crate::ToolIntentIdentity,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> crate::ToolIntentExecutionOutcome {
         crate::ToolIntentExecutionOutcome::Executed {
             identity,
             kind: crate::ToolIntentKind::StartProcess,
             result: serde_json::json!({"started": process_id}),
             parent_end: Some(crate::ToolIntentParentEnd {
-                process_id: process_id.to_string(),
+                process_id: ProcessId::from(process_id.to_string()),
                 policy: crate::ProcessParentEndPolicy::Cancel,
             }),
         }
@@ -241,7 +244,7 @@ mod parent_end_buffer_tests {
     #[test]
     fn parent_end_buffer_validates_full_identity_and_rejects_conflicting_sightings() {
         let valid = crate::derive_tool_intent_identity(
-            "buffer-session",
+            &SessionId::from("buffer-session"),
             "buffer-process",
             Some("buffer-call"),
             0,
@@ -258,26 +261,29 @@ mod parent_end_buffer_tests {
 
         let buffer = RecordedToolIntentOutcomeBuffer::default();
         buffer.record(&[
-            outcome(wrong_key, "wrong-key-child"),
-            outcome(malformed_v2, "malformed-v2-child"),
-            outcome(wrong_tuple_same_key, "wrong-tuple-child"),
-            outcome(wrong_emission_same_key, "wrong-emission-child"),
-            outcome(valid.clone(), "canonical-child"),
-            outcome(valid, "conflicting-child"),
+            outcome(wrong_key, &ProcessId::from("wrong-key-child")),
+            outcome(malformed_v2, &ProcessId::from("malformed-v2-child")),
+            outcome(wrong_tuple_same_key, &ProcessId::from("wrong-tuple-child")),
+            outcome(
+                wrong_emission_same_key,
+                &ProcessId::from("wrong-emission-child"),
+            ),
+            outcome(valid.clone(), &ProcessId::from("canonical-child")),
+            outcome(valid, &ProcessId::from("conflicting-child")),
         ]);
 
         assert_eq!(
             buffer.snapshot(),
             vec![crate::ToolIntentParentEndAction {
                 identity: crate::derive_tool_intent_identity(
-                    "buffer-session",
+                    &SessionId::from("buffer-session"),
                     "buffer-process",
                     Some("buffer-call"),
                     0,
                 )
                 .expect("canonical identity"),
                 parent_end: crate::ToolIntentParentEnd {
-                    process_id: "canonical-child".to_string(),
+                    process_id: ProcessId::from("canonical-child"),
                     policy: crate::ProcessParentEndPolicy::Cancel,
                 },
             }],

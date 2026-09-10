@@ -181,7 +181,7 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
                 TurnInput::text("stop after this step"),
                 TurnOptions::new(
                     CancellationToken::new(),
-                    named_turn_scope("root", &TurnId::from(turn_id)),
+                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
                 ),
             )
             .await
@@ -254,7 +254,7 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
                 TurnInput::text("stop after this step"),
                 TurnOptions::new(
                     CancellationToken::new(),
-                    named_turn_scope("root", &TurnId::from(turn_id)),
+                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
                 ),
             )
             .await
@@ -316,7 +316,7 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
                 TurnInput::text("stop, then abort"),
                 TurnOptions::new(
                     CancellationToken::new(),
-                    named_turn_scope("root", &TurnId::from(turn_id)),
+                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
                 ),
             )
             .await
@@ -413,7 +413,7 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
                 TurnInput::text("never runs"),
                 TurnOptions::new(
                     CancellationToken::new(),
-                    named_turn_scope("root", &TurnId::from(turn_id)),
+                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
                 ),
             )
             .await
@@ -770,7 +770,7 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
                 TurnInput::text("retry then stop"),
                 TurnOptions::new(
                     CancellationToken::new(),
-                    named_turn_scope("root", &TurnId::from(turn_id)),
+                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
                 ),
             )
             .await
@@ -836,7 +836,7 @@ async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
                 TurnInput::text("retry then abort"),
                 TurnOptions::new(
                     CancellationToken::new(),
-                    named_turn_scope("root", &TurnId::from(turn_id)),
+                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
                 ),
             )
             .await

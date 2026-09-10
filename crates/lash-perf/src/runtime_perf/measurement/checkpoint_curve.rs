@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 const CHECKPOINT_CURVE_SCALE: usize = 4;
 const CHECKPOINT_CURVE_COMMIT_BYTES: usize = 32 * 1024 * 1024;
@@ -176,12 +177,12 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     let seed_started = Instant::now();
     let mut fixtures = Vec::with_capacity(points.len());
     for point in points {
-        let session_id = format!(
+        let session_id = SessionId::from(format!(
             "runtime-perf-{}-{run_id}-{}-{}",
             scenario.name(),
             point.axis.name(),
             point.target
-        );
+        ));
         let store = store_factory
             .create_store(&runtime_perf_session_create_request(&session_id))
             .await?;

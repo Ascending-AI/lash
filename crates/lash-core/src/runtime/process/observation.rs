@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,7 @@ pub struct ProcessWorkObserver {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessWorkSnapshot {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub visible_processes: Vec<super::model::ProcessRef>,
     pub items: Vec<ObservedWorkItem>,
 }
@@ -78,7 +79,7 @@ pub struct ObservedProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<WaitState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_session_id: Option<String>,
+    pub child_session_id: Option<SessionId>,
     pub label: String,
 }
 
@@ -112,7 +113,7 @@ impl ProcessWorkObserver {
 
     pub async fn snapshot_for_session(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
     ) -> Result<ProcessWorkSnapshot, PluginError> {
         let session_id = session_id.into();
         let entries = self
@@ -209,7 +210,10 @@ impl ProcessWorkObserver {
         })
     }
 
-    pub async fn process(&self, process_id: &str) -> Result<Option<ObservedProcess>, PluginError> {
+    pub async fn process(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<ObservedProcess>, PluginError> {
         let Some(record) = self.registry.get_process(process_id).await? else {
             return Ok(None);
         };
@@ -286,7 +290,7 @@ impl ProcessWorkObserver {
 
     pub async fn events_after(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<ObservedProcessEvent>, PluginError> {
         Ok(self
@@ -339,7 +343,7 @@ impl ObservedProcess {
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
             wait: record.wait,
-            child_session_id: child_session_id(&input),
+            child_session_id: child_session_id(&input).map(Into::into),
             input,
             label,
         }
@@ -372,7 +376,9 @@ fn terminal_error(outcome: Option<&ProcessAwaitOutput>) -> Option<String> {
 
 fn child_session_id(input: &ProcessInput) -> Option<String> {
     match input {
-        ProcessInput::SessionTurn { create_request, .. } => create_request.session_id.clone(),
+        ProcessInput::SessionTurn { create_request, .. } => {
+            create_request.session_id.clone().map(Into::into)
+        }
         ProcessInput::ToolCall { .. }
         | ProcessInput::Engine { .. }
         | ProcessInput::External { .. } => None,
@@ -383,7 +389,7 @@ fn child_session_id(input: &ProcessInput) -> Option<String> {
 fn originator_matches(originator: &ProcessOriginator, scope: &SessionScope) -> bool {
     match originator {
         ProcessOriginator::Host { .. } => false,
-        ProcessOriginator::Session { session_id, .. } => session_id == &scope.session_id,
+        ProcessOriginator::Session { session_id, .. } => session_id == scope.session_id,
     }
 }
 
@@ -408,7 +414,7 @@ mod tests {
         ProcessWorkObserver::new(registry)
     }
 
-    fn external_registration(process_id: &str, label: &str) -> ProcessRegistration {
+    fn external_registration(process_id: &ProcessId, label: &str) -> ProcessRegistration {
         ProcessRegistration::new(
             process_id,
             ProcessInput::External {
@@ -447,18 +453,18 @@ mod tests {
         register_visible(
             &registry,
             &visible_scope,
-            external_registration("visible-process", "Visible"),
+            external_registration(&ProcessId::from("visible-process"), "Visible"),
         )
         .await;
         register_visible(
             &registry,
             &SessionScope::new("other"),
-            external_registration("hidden-process", "Hidden"),
+            external_registration(&ProcessId::from("hidden-process"), "Hidden"),
         )
         .await;
         registry
             .append_event(
-                "visible-process",
+                &ProcessId::from("visible-process"),
                 ProcessEventAppendRequest::new("process.cancel_requested", json!({"why": "test"}))
                     .with_replay_key("visible-process:cancel-requested"),
             )
@@ -511,7 +517,7 @@ mod tests {
         register_visible(
             &registry,
             &scope,
-            external_registration("mispaired-process", "Mispaired"),
+            external_registration(&ProcessId::from("mispaired-process"), "Mispaired"),
         )
         .await;
         let mut item = observer(registry)
@@ -536,12 +542,12 @@ mod tests {
         register_visible(
             &registry,
             &SessionScope::new("deleted-session"),
-            external_registration("surviving-process", "Survivor"),
+            external_registration(&ProcessId::from("surviving-process"), "Survivor"),
         )
         .await;
 
         let report = registry
-            .delete_session_process_state("deleted-session")
+            .delete_session_process_state(&SessionId::from("deleted-session"))
             .await
             .expect("delete session process edges");
         assert_eq!(report.removed_observer_count, 1);
@@ -570,13 +576,16 @@ mod tests {
         let registry = Arc::new(super::super::TestLocalProcessRegistry::default());
         for process_id in ["batch-leased", "batch-unleased", "batch-terminal"] {
             registry
-                .register_process(external_registration(process_id, process_id))
+                .register_process(external_registration(
+                    &ProcessId::from(process_id),
+                    process_id,
+                ))
                 .await
                 .expect("register batch observation fixture");
         }
         registry
             .claim_process_lease(
-                "batch-leased",
+                &ProcessId::from("batch-leased"),
                 &crate::LeaseOwnerIdentity::opaque("observer", "one"),
                 60_000,
             )
@@ -586,7 +595,7 @@ mod tests {
             .expect("observed lease acquired");
         registry
             .complete_process(
-                "batch-terminal",
+                &ProcessId::from("batch-terminal"),
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -625,13 +634,23 @@ mod tests {
         let registry =
             Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
         let scope = SessionScope::new("sort");
-        register_visible(&registry, &scope, external_registration("older", "Older")).await;
+        register_visible(
+            &registry,
+            &scope,
+            external_registration(&ProcessId::from("older"), "Older"),
+        )
+        .await;
         tokio::time::sleep(Duration::from_millis(2)).await;
-        register_visible(&registry, &scope, external_registration("newer", "Newer")).await;
+        register_visible(
+            &registry,
+            &scope,
+            external_registration(&ProcessId::from("newer"), "Newer"),
+        )
+        .await;
         tokio::time::sleep(Duration::from_millis(2)).await;
         registry
             .append_event(
-                "older",
+                &ProcessId::from("older"),
                 ProcessEventAppendRequest::new("process.cancel_requested", json!({}))
                     .with_replay_key("older:cancel-requested"),
             )
@@ -659,13 +678,16 @@ mod tests {
             Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
         for process_id in ["failed", "cancelled"] {
             registry
-                .register_process(external_registration(process_id, process_id))
+                .register_process(external_registration(
+                    &ProcessId::from(process_id),
+                    process_id,
+                ))
                 .await
                 .expect("register");
         }
         registry
             .complete_process(
-                "failed",
+                &ProcessId::from("failed"),
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
                     crate::ToolFailure::runtime(
                         ToolFailureClass::External,
@@ -679,7 +701,7 @@ mod tests {
             .expect("fail process");
         registry
             .complete_process(
-                "cancelled",
+                &ProcessId::from("cancelled"),
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
                     crate::ToolCancellation::runtime("cancelled intentionally"),
                 )),
@@ -690,12 +712,12 @@ mod tests {
 
         let observer = observer(Arc::clone(&registry));
         let failed = observer
-            .process("failed")
+            .process(&ProcessId::from("failed"))
             .await
             .expect("read failed process")
             .expect("failed process");
         let cancelled = observer
-            .process("cancelled")
+            .process(&ProcessId::from("cancelled"))
             .await
             .expect("read cancelled process")
             .expect("cancelled process");
@@ -716,7 +738,7 @@ mod tests {
         register_visible(
             &registry,
             &scope,
-            external_registration("waiting-process", "Waiting"),
+            external_registration(&ProcessId::from("waiting-process"), "Waiting"),
         )
         .await;
         let wait = WaitState {
@@ -729,13 +751,13 @@ mod tests {
             },
         };
         registry
-            .set_process_wait("waiting-process", wait.clone())
+            .set_process_wait(&ProcessId::from("waiting-process"), wait.clone())
             .await
             .expect("set wait");
 
         let observer = observer(Arc::clone(&registry));
         let observed = observer
-            .process("waiting-process")
+            .process(&ProcessId::from("waiting-process"))
             .await
             .expect("read waiting process")
             .expect("waiting process");
@@ -761,7 +783,7 @@ mod tests {
         )
         .with_session_id("child-session");
         child_request.subagent = Some(SubagentSessionContext {
-            parent_session_id: "labels".to_string(),
+            parent_session_id: SessionId::from("labels"),
             capability: "researcher".to_string(),
             depth: 1,
             max_depth: 4,
@@ -863,7 +885,7 @@ mod tests {
 
         assert!(
             observer(registry)
-                .process("missing")
+                .process(&ProcessId::from("missing"))
                 .await
                 .expect("read missing process")
                 .is_none()

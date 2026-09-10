@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::{ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _};
+use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
 use lash_core::ProcessInput;
@@ -176,15 +177,15 @@ async fn session_listing_statement_count_is_session_count_invariant() {
     let mut expected_relations = BTreeMap::new();
 
     for index in 0..8 {
-        let session_id = format!("listing-statement-count-{index}");
+        let session_id = SessionId::from(format!("listing-statement-count-{index}"));
         let relation = if index == 0 {
             lash_core::SessionRelation::Root
         } else {
             lash_core::SessionRelation::Fork {
-                source_session_id: "listing-statement-count-0".to_string(),
+                source_session_id: SessionId::from("listing-statement-count-0"),
                 source_node_id: format!("source-node-{index}"),
-                observer_inheritance: lash_core::ObserverInheritance::Only(vec![format!(
-                    "inherited-process-{index}"
+                observer_inheritance: lash_core::ObserverInheritance::Only(vec![ProcessId::from(
+                    format!("inherited-process-{index}"),
                 )]),
             }
         };
@@ -277,9 +278,9 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
     }
 }
 
-async fn durable_state(store: &Store, session_id: &str) -> lash_core::RuntimeSessionState {
+async fn durable_state(store: &Store, session_id: &SessionId) -> lash_core::RuntimeSessionState {
     let state = lash_core::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -296,7 +297,7 @@ async fn checkpoint_probe_skips_writes_for_deferred_head() {
     let store = Arc::new(Store::memory().await.expect("open counter store"));
     lash_conformance::checkpoint_claim_probe_transaction_counts(
         Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-        "sqlite-checkpoint-counter",
+        &SessionId::from("sqlite-checkpoint-counter"),
         || store.checkpoint_claim_counts(),
     )
     .await;
@@ -307,7 +308,11 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
     let mut observed = Vec::new();
     for depth in [10, 100, 1_000, 4_000] {
         let store = Arc::new(Store::memory().await.expect("open depth-invariance store"));
-        let mut state = durable_state(&store, &format!("sqlite-checkpoint-depth-{depth}")).await;
+        let mut state = durable_state(
+            &store,
+            &SessionId::from(format!("sqlite-checkpoint-depth-{depth}")),
+        )
+        .await;
         let mut seed = RuntimeCommit::persisted_state_for_test(&state, &[]);
         seed.checkpoint = checkpoint_with_changed_components(depth);
         let seeded = store
@@ -388,8 +393,10 @@ async fn real_locked_catalog_surfaces_typed_contention() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("contended.db");
     let store = Store::open(&path).await.expect("open store");
-    store.bind_session("contended").expect("bind store");
-    let state = durable_state(&store, "contended").await;
+    store
+        .bind_session(&SessionId::from("contended"))
+        .expect("bind store");
+    let state = durable_state(&store, &SessionId::from("contended")).await;
     store
         .conn
         .call(|conn| {
@@ -429,7 +436,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
             &store,
             lash_core::AttachmentIntent {
                 attachment_id: attachment_id.clone(),
-                session_id: "sess-1".to_string(),
+                session_id: SessionId::from("sess-1"),
                 canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
                 intent_at_epoch_ms: 1_000,
                 owner_kind: None,
@@ -439,7 +446,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
         .expect("record intent");
         lash_core::AttachmentManifest::commit_refs(
             &store,
-            "sess-1",
+            &SessionId::from("sess-1"),
             std::slice::from_ref(&attachment_id),
         )
         .expect("commit ref");
@@ -478,7 +485,7 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     let live_factory = SqliteSessionStoreFactory::new(&live_root);
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "live-attachment".to_string(),
+        session_id: SessionId::from("live-attachment"),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -580,7 +587,7 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "reset-empty-attachment-gc".to_string(),
+        session_id: SessionId::from("reset-empty-attachment-gc"),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -637,7 +644,7 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
     let factory = SqliteSessionStoreFactory::new(&root);
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "corrupt-session-meta".to_string(),
+        session_id: SessionId::from("corrupt-session-meta"),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -656,7 +663,7 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
     raw.execute(
         "UPDATE session_meta SET relation_kind = 'corrupt'
              WHERE session_id = ?1",
-        params![request.session_id],
+        params![request.session_id.as_str()],
     )
     .expect("corrupt requested session metadata");
     raw.pragma_update(None, "ignore_check_constraints", false)
@@ -688,17 +695,17 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
         },
     };
     registry
-        .put_segment_handover("segment-crash", handover(1))
+        .put_segment_handover(&ProcessId::from("segment-crash"), handover(1))
         .await
         .expect("persist current segment input");
     registry
-        .put_segment_handover("segment-crash", handover(2))
+        .put_segment_handover(&ProcessId::from("segment-crash"), handover(2))
         .await
         .expect("persist successor before send");
 
     assert_eq!(
         registry
-            .get_segment_handover("segment-crash", 1)
+            .get_segment_handover(&ProcessId::from("segment-crash"), 1)
             .await
             .expect("replay read"),
         Some(handover(1)),
@@ -706,7 +713,7 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
     );
     assert_eq!(
         registry
-            .latest_segment_handover("segment-crash")
+            .latest_segment_handover(&ProcessId::from("segment-crash"))
             .await
             .expect("latest handover"),
         Some(handover(2))
@@ -724,7 +731,7 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
         .expect("register");
     registry
         .put_segment_handover(
-            "segment-terminal",
+            &ProcessId::from("segment-terminal"),
             PersistedSegmentHandover {
                 segment_ordinal: 1,
                 handover: lash_core::SegmentHandover {
@@ -737,12 +744,12 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
         .await
         .expect("persist handover");
     registry
-        .delete_segment_handovers("segment-terminal")
+        .delete_segment_handovers(&ProcessId::from("segment-terminal"))
         .await
         .expect("terminal cleanup");
     assert!(
         registry
-            .latest_segment_handover("segment-terminal")
+            .latest_segment_handover(&ProcessId::from("segment-terminal"))
             .await
             .expect("latest handover")
             .is_none()
@@ -795,14 +802,14 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
         registry
             .add_observer(
                 &session_scope.session_id,
-                "proc-persist",
+                &ProcessId::from("proc-persist"),
                 lash_core::ProcessObserverBy::host("sqlite-reopen-test"),
             )
             .await
             .expect("observe");
         registry
             .complete_process(
-                "proc-persist",
+                &ProcessId::from("proc-persist"),
                 ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                     serde_json::json!({"ok": true}),
                 )),
@@ -819,7 +826,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     ) as Arc<dyn lash_core::ProcessRegistry>;
     let session_scope = lash_core::SessionScope::new("session");
     let record = registry
-        .get_process("proc-persist")
+        .get_process(&ProcessId::from("proc-persist"))
         .await
         .expect("read process")
         .expect("persisted process");
@@ -831,7 +838,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     );
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
-            .await_terminal("proc-persist")
+            .await_terminal(&ProcessId::from("proc-persist"))
             .await
             .expect("await persisted"),
         ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(

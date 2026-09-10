@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 pub(crate) fn max_change_sequence(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
     match watermark {
@@ -11,7 +12,7 @@ pub(crate) fn compact_process_tombstones_conn(
     conn: &Connection,
     cutoff_epoch_ms: i64,
     max_change_seq: Option<i64>,
-    outstanding_trigger_delivery_process_ids: &[String],
+    outstanding_trigger_delivery_process_ids: &[ProcessId],
 ) -> Result<usize, lash_core::PluginError> {
     let outstanding_trigger_delivery_process_ids =
         serde_json::to_string(outstanding_trigger_delivery_process_ids)
@@ -172,7 +173,7 @@ pub(crate) fn prune_terminal_processes_conn(
 
 fn prune_process_rows_conn(
     conn: &Connection,
-    prunable: &[String],
+    prunable: &[ProcessId],
     pruned_at_ms: i64,
 ) -> Result<ProcessPruneReport, lash_core::PluginError> {
     let process_ids_json = serde_json::to_string(&prunable).map_err(process_decode_error)?;
@@ -260,7 +261,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
     cutoff: i64,
     filter: Option<ProcessListFilter>,
     max_change_seq: Option<u64>,
-) -> Result<Vec<String>, lash_core::PluginError> {
+) -> Result<Vec<ProcessId>, lash_core::PluginError> {
     let max_change_seq = max_change_seq.map(|seq| seq as i64);
     let mut stmt = conn
         .prepare(
@@ -294,7 +295,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
             .as_ref()
             .is_none_or(|filter| filter.matches_record(&record))
         {
-            prunable.push(process_id);
+            prunable.push(ProcessId::from(process_id));
         }
     }
 
@@ -314,7 +315,7 @@ mod tests {
         let registry = SqliteProcessRegistry::memory()
             .await
             .expect("open prune rollback registry");
-        let process_id = format!("prune-rollback:{}", uuid::Uuid::new_v4());
+        let process_id = ProcessId::from(format!("prune-rollback:{}", uuid::Uuid::new_v4()));
         let ghost_id = format!("prune-rollback-ghost:{}", uuid::Uuid::new_v4());
         registry
             .register_process(ProcessRegistration::new(
@@ -362,7 +363,7 @@ mod tests {
             .write_flow(move |tx| {
                 Ok(tx_outcome(prune_process_rows_conn(
                     tx,
-                    &[divergent_process_id, ghost_id],
+                    &[divergent_process_id, ProcessId::from(ghost_id)],
                     123_456,
                 )))
             })
@@ -399,7 +400,7 @@ mod tests {
             .call(move |conn| {
                 conn.query_row(
                     "SELECT count(*) FROM process_tombstones WHERE process_id = ?1",
-                    params![tombstone_process_id],
+                    params![tombstone_process_id.as_str()],
                     |row| row.get::<_, i64>(0),
                 )
             })

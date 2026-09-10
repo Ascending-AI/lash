@@ -141,6 +141,23 @@ macro_rules! string_identity {
             }
         }
 
+        // `String` compares against `&str` without an explicit dereference, so
+        // code that compared an identity against a borrowed one kept compiling
+        // through `Deref`. Spelling the borrowed pair out keeps that working
+        // now that both sides are the newtype, rather than forcing call sites
+        // to sprinkle dereferences at every comparison.
+        impl PartialEq<&$name> for $name {
+            fn eq(&self, other: &&$name) -> bool {
+                self.as_str() == other.as_str()
+            }
+        }
+
+        impl PartialEq<$name> for &$name {
+            fn eq(&self, other: &$name) -> bool {
+                self.as_str() == other.as_str()
+            }
+        }
+
         impl std::str::FromStr for $name {
             type Err = std::convert::Infallible;
 

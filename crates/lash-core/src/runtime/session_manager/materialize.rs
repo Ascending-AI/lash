@@ -88,14 +88,14 @@ async fn bind_session_store(
         .map_err(|message| {
             crate::PluginError::Session(child_store_factory_error(
                 &plan.session_id,
-                plan.parent_session_id.as_deref(),
+                plan.parent_session_id.as_ref(),
                 message.to_string(),
             ))
         })?;
     validate_child_store_binding(
         store.as_ref(),
         &plan.session_id,
-        plan.parent_session_id.as_deref(),
+        plan.parent_session_id.as_ref(),
     )
     .await?;
     Ok(Some(store))
@@ -109,7 +109,7 @@ fn embedded_host(current: &CurrentSessionCapability) -> EmbeddedRuntimeHost {
     }
 }
 
-fn child_store_guidance(parent_session_id: Option<&str>) -> String {
+fn child_store_guidance(parent_session_id: Option<&SessionId>) -> String {
     let parent = parent_session_id
         .map(|id| format!(" for parent session `{id}`"))
         .unwrap_or_default();
@@ -122,8 +122,8 @@ fn child_store_guidance(parent_session_id: Option<&str>) -> String {
 }
 
 fn child_store_factory_error(
-    session_id: &str,
-    parent_session_id: Option<&str>,
+    session_id: &SessionId,
+    parent_session_id: Option<&SessionId>,
     message: String,
 ) -> String {
     format!(
@@ -134,8 +134,8 @@ fn child_store_factory_error(
 
 async fn validate_child_store_binding(
     store: &dyn crate::RuntimePersistence,
-    session_id: &str,
-    parent_session_id: Option<&str>,
+    session_id: &SessionId,
+    parent_session_id: Option<&SessionId>,
 ) -> Result<(), crate::PluginError> {
     let meta = store.load_session_meta().await.map_err(|err| {
         crate::PluginError::Session(format!(

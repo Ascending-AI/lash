@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 const PROCESS_LIST_STRESS_BATCH: usize = 128;
 
@@ -23,7 +24,7 @@ pub(super) async fn run_once_process_list_stress(
     let seed_started = Instant::now();
     let process_count = chat_turns.max(1) * PROCESS_LIST_STRESS_BATCH;
     for index in 0..process_count {
-        let process_id = format!("process-list-stress-{index:05}");
+        let process_id = ProcessId::from(format!("process-list-stress-{index:05}"));
         registry
             .register_process(process_list_stress_registration(
                 process_id.clone(),
@@ -176,7 +177,7 @@ pub(super) async fn run_once_process_list_stress(
         for signal_index in 0..SIGNALS_PER_TURN {
             registry
                 .append_event(
-                    signal_process_id,
+                    &ProcessId::from(signal_process_id),
                     lash_core::ProcessEventAppendRequest::new(
                         signal_event_type.clone(),
                         serde_json::json!({ "turn": turn_index, "n": signal_index }),
@@ -205,7 +206,7 @@ pub(super) async fn run_once_process_list_stress(
         let phase_before_memory = process_memory_sample();
         let waiting = registry
             .set_process_wait(
-                signal_process_id,
+                &ProcessId::from(signal_process_id),
                 lash_core::WaitState {
                     since_ms: turn_index as u64 + 1,
                     kind: lash_core::WaitKind::Signal {
@@ -223,7 +224,9 @@ pub(super) async fn run_once_process_list_stress(
         if waiting.wait.is_none() {
             anyhow::bail!("process_list_stress wait facet did not round-trip");
         }
-        registry.clear_process_wait(signal_process_id).await?;
+        registry
+            .clear_process_wait(&ProcessId::from(signal_process_id))
+            .await?;
         phase_profile.insert(
             "process_list_stress.wait_roundtrip".to_string(),
             RuntimePerfPhaseRunResult {
@@ -397,7 +400,7 @@ pub(super) async fn run_once_process_list_stress(
 }
 
 fn process_list_stress_registration(
-    process_id: String,
+    process_id: ProcessId,
     session_scope: lash_core::SessionScope,
     index: usize,
 ) -> lash_core::ProcessRegistration {

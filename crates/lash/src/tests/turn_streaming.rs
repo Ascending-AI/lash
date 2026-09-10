@@ -4,6 +4,7 @@ use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
 use lash_core::QueuedWorkStore as _;
 use lash_core::SessionExecutionLeaseStore as _;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::collections::BTreeSet;
@@ -237,7 +238,7 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
 #[cfg(feature = "rlm")]
 fn assert_sqlite_session_lane_free_at_generation(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    session_id: &str,
+    session_id: &SessionId,
     expected_generation: u64,
 ) {
     let conn = rusqlite::Connection::open(store_factory.catalog_path())
@@ -245,7 +246,7 @@ fn assert_sqlite_session_lane_free_at_generation(
     let (owner, generation) = conn
         .query_row(
             "SELECT lease_owner_id, lease_fencing_token FROM session_execution_leases WHERE session_id = ?1",
-            [session_id],
+            [session_id.as_str()],
             |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, u64>(1)?)),
         )
         .expect("read session execution lease row");
@@ -351,13 +352,16 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
         self.inner.create_store(request).await
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> std::result::Result<bool, String> {
+    async fn session_was_deleted(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
         lash_core::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
@@ -498,7 +502,7 @@ impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::RuntimeError> {
         self.native
             .revoke_await_events_for_session(session_id)
@@ -507,7 +511,7 @@ impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::RuntimeError> {
         self.native
             .cancel_await_events_for_session(session_id)

@@ -83,13 +83,13 @@ impl SessionStoreFactory for TestSessionStoreFactory {
 
     // Stateless: every create_store hands back a fresh in-memory store and no
     // tombstone is ever recorded, so no session has been deleted.
-    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
@@ -106,13 +106,13 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
 
     // Stateless: every create_store hands back a fresh in-memory store and no
     // tombstone is ever recorded, so no session has been deleted.
-    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
@@ -129,13 +129,13 @@ impl SessionStoreFactory for SegmentBoundarySessionStoreFactory {
 
     // Stateless: every create_store hands back a fresh in-memory store and no
     // tombstone is ever recorded, so no session has been deleted.
-    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }

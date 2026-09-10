@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
@@ -76,12 +77,12 @@ impl TurnCancelPeekIdentity {
 /// authorize the request before calling Lash.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TurnAddress {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_id: TurnId,
 }
 
 impl TurnAddress {
-    pub fn new(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> Self {
+    pub fn new(session_id: impl Into<SessionId>, turn_id: impl Into<TurnId>) -> Self {
         Self {
             session_id: session_id.into(),
             turn_id: turn_id.into(),

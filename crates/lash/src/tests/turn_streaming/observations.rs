@@ -975,7 +975,7 @@ impl FailingAppendReplayStore {
 impl lash_core::LiveReplayStore for FailingAppendReplayStore {
     fn prepare_publication(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _revision: lash_core::SessionRevision,
         _events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
@@ -1014,7 +1014,7 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
 
     fn current_cursor(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session_id, revision)
@@ -1022,7 +1022,7 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
 
     fn trim_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session_id)
     }
@@ -1134,7 +1134,7 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
                 .model(mock_model_spec())
                 .live_replay_store(replay_store.clone())
                 .build(crate::testing::runtime_lease_owner())?;
-        let session_id = format!("two-histories-{boundary:?}");
+        let session_id = SessionId::from(format!("two-histories-{boundary:?}"));
         let session = core.session(session_id).open().await?;
         let before = session.observe().recoverable_chat_snapshot();
         let turn_session = session.clone();
@@ -1514,7 +1514,7 @@ impl PublicationPause {
 impl lash_core::LiveReplayStore for PausedCommitReplayStore {
     fn prepare_publication(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision: lash_core::SessionRevision,
         events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
@@ -1571,7 +1571,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
 
     fn current_cursor(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session_id, revision)
@@ -1579,7 +1579,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
 
     fn trim_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session_id)
     }

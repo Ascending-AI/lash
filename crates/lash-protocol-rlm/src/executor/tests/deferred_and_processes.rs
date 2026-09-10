@@ -689,7 +689,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
     // non-atomic path.
     async fn start_from_recorded_intent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _request: lash_core::ProcessStartRequest,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessHandleView, lash_core::PluginError> {
@@ -700,8 +700,8 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _reason: Option<String>,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
@@ -712,9 +712,9 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn finish_recorded_intent_parent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _identity: lash_core::ToolIntentIdentity,
-        _process_id: String,
+        _process_id: ProcessId,
         _policy: lash_core::ProcessParentEndPolicy,
         _reason: String,
         _scope: lash_core::ProcessOpScope<'_>,
@@ -726,8 +726,8 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _signal: String,
         _call_id: String,
         _payload: serde_json::Value,
@@ -740,8 +740,8 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _event: String,
         _call_id: String,
         _payload: serde_json::Value,
@@ -754,7 +754,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn start(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         registration: lash_core::ProcessRegistration,
         options: lash_core::ProcessStartOptions,
         _scope: lash_core::ProcessOpScope<'_>,
@@ -769,7 +769,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
@@ -780,7 +780,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn list_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: lash_core::ProcessListMode,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<Vec<lash_core::ProcessRecord>, lash_core::PluginError> {
@@ -804,8 +804,8 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn validate_visible(
         &self,
-        session_id: &str,
-        process_ids: &[String],
+        session_id: &SessionId,
+        process_ids: &[ProcessId],
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<(), lash_core::PluginError> {
         for process_id in process_ids {
@@ -820,8 +820,8 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
         Err(lash_core::PluginError::Session(
@@ -831,8 +831,8 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn signal_possessed(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: Value,
@@ -893,9 +893,9 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn transfer(
         &self,
-        _from_session_id: &str,
-        _to_session_id: &str,
-        _process_ids: Vec<String>,
+        _from_session_id: &SessionId,
+        _to_session_id: &SessionId,
+        _process_ids: Vec<ProcessId>,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<(), lash_core::PluginError> {
         Err(lash_core::PluginError::Session(
@@ -1014,7 +1014,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         .expect("drive signalled TypeScript process");
     let records = registry
         .list_observed_by(
-            "test-session",
+            &SessionId::from("test-session"),
             &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..Default::default()

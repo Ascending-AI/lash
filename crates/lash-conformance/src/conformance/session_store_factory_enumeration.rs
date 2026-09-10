@@ -15,12 +15,12 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
     );
 
     let root_request = session_store_request(
-        "enumeration-root",
+        &SessionId::from("enumeration-root"),
         "enumeration-model",
         crate::SessionRelation::Root,
     );
     let child_request = session_store_request(
-        "enumeration-child",
+        &SessionId::from("enumeration-child"),
         "enumeration-model",
         crate::SessionRelation::Child {
             parent_session_id: root_request.session_id.clone(),

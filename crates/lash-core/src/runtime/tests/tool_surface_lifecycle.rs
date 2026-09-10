@@ -137,7 +137,7 @@ impl crate::ProcessToolVisibilityFilter for AllowNamedProcess {
             .collect::<Vec<_>>();
         // A foreign id proves the runtime intersects the answer with the
         // already edge-visible candidate set instead of trusting widening.
-        narrowed.push("foreign-process".to_string());
+        narrowed.push(ProcessId::from("foreign-process"));
         narrowed
     }
 }
@@ -154,7 +154,7 @@ fn hidden_authority(tool_name: &str) -> SessionAuthorityContext {
 
 fn build_hidden_session(
     plugin_host: &crate::PluginHost,
-    session_id: &str,
+    session_id: &SessionId,
     hidden_tool_name: &str,
     snapshot: Option<&crate::PluginState>,
 ) -> Arc<crate::PluginSession> {
@@ -162,7 +162,7 @@ fn build_hidden_session(
     match snapshot {
         Some(snapshot) => plugin_host.rematerialize_session_with_parent(
             session_id,
-            Some("parent".to_string()),
+            Some(SessionId::from("parent")),
             snapshot,
             crate::plugin::RecordedSessionConfig {
                 authority,
@@ -171,7 +171,7 @@ fn build_hidden_session(
         ),
         None => plugin_host.build_session_with_parent(
             session_id,
-            Some("parent".to_string()),
+            Some(SessionId::from("parent")),
             crate::plugin::SessionCreationConfig {
                 authority,
                 ..Default::default()
@@ -181,9 +181,9 @@ fn build_hidden_session(
     .expect("hidden child plugin session")
 }
 
-fn root_state(session_id: &str) -> RuntimeSessionState {
+fn root_state(session_id: &SessionId) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         policy: standard_test_policy(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     }
@@ -206,14 +206,14 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let store = Arc::new(RecordingStore::default());
     *store.session_meta.lock_recover() = Some(crate::SessionMeta {
         pending_observer_intents: Vec::new(),
-        session_id: "parked-session".to_string(),
+        session_id: SessionId::from("parked-session"),
         relation: crate::SessionRelation::Root,
     });
     let owner = crate::LeaseOwnerIdentity::opaque("parked-test-worker", "parked-test-boot");
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state("parked-session"),
+        root_state(&SessionId::from("parked-session")),
         Some(store.clone() as Arc<dyn crate::RuntimePersistence>),
         owner.clone(),
     )
@@ -275,7 +275,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
             hidden_tools: [hidden.name.to_string()].into_iter().collect(),
         },
         subagent: Some(crate::SubagentSessionContext {
-            parent_session_id: "authority-parent".to_string(),
+            parent_session_id: SessionId::from("authority-parent"),
             capability: "authority-capability".to_string(),
             depth: 2,
             max_depth: 4,
@@ -285,7 +285,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     let plugins = plugin_host
         .build_session_with_parent(
             "authority-child",
-            Some("authority-parent".to_string()),
+            Some(SessionId::from("authority-parent")),
             crate::plugin::SessionCreationConfig {
                 authority,
                 ..Default::default()
@@ -298,7 +298,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
         standard_test_policy(),
         test_host_config(),
         crate::PersistentRuntimeServices::new(plugins, store),
-        root_state("authority-child"),
+        root_state(&SessionId::from("authority-child")),
         owner.clone(),
     )
     .await
@@ -357,7 +357,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
         standard_test_policy(),
         test_host_config(),
         crate::PersistentRuntimeServices::new(plugins, store),
-        root_state("persisted-broader"),
+        root_state(&SessionId::from("persisted-broader")),
         owner.clone(),
     )
     .await
@@ -389,7 +389,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let target_store = factory
         .create_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: standard_test_policy(),
         })
@@ -415,7 +415,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state(session_id),
+        root_state(&SessionId::from(session_id)),
         None,
         crate::testing::runtime_lease_owner(),
     )
@@ -453,10 +453,13 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                         semantics: crate::ProcessEventSemanticsSpec::default(),
                     },
                 ])
-                .with_wake_session_id(Some(session_id.to_string()));
+                .with_wake_session_id(Some(SessionId::from(session_id.to_string())));
         }
         registry
-            .register_process_with_observers(registration, &[session_id.to_string()])
+            .register_process_with_observers(
+                registration,
+                &[SessionId::from(session_id.to_string())],
+            )
             .await
             .expect("register observed filter process");
     }
@@ -468,13 +471,17 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .model_tool_process_service();
     let scope = || {
         crate::ProcessOpScope::new(named_turn_scope(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
     };
     let unknown_process_id = "host-unknown-process";
     let unknown_process = host_service
-        .cancel(session_id, unknown_process_id, scope())
+        .cancel(
+            &SessionId::from(session_id),
+            &ProcessId::from(unknown_process_id),
+            scope(),
+        )
         .await
         .expect_err("cancelling an unknown process must be refused");
     assert!(matches!(
@@ -483,7 +490,11 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             if process_id == unknown_process_id
     ));
     let listed = service
-        .list_visible(session_id, crate::ProcessListMode::Live, scope())
+        .list_visible(
+            &SessionId::from(session_id),
+            crate::ProcessListMode::Live,
+            scope(),
+        )
         .await
         .expect("list filtered process tools");
     assert_eq!(
@@ -496,22 +507,34 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     );
     let filtered_cancel = async {
         service
-            .validate_visible(session_id, &["filtered-process".to_string()], scope())
+            .validate_visible(
+                &SessionId::from(session_id),
+                &[ProcessId::from("filtered-process")],
+                scope(),
+            )
             .await?;
         service
-            .cancel(session_id, "filtered-process", scope())
+            .cancel(
+                &SessionId::from(session_id),
+                &ProcessId::from("filtered-process"),
+                scope(),
+            )
             .await
             .map(|_| ())
     }
     .await;
     let filtered_signal = async {
         service
-            .validate_visible(session_id, &["filtered-process".to_string()], scope())
+            .validate_visible(
+                &SessionId::from(session_id),
+                &[ProcessId::from("filtered-process")],
+                scope(),
+            )
             .await?;
         service
             .signal_possessed(
-                session_id,
-                "filtered-process",
+                &SessionId::from(session_id),
+                &ProcessId::from("filtered-process"),
                 "ready".to_string(),
                 "filter-signal".to_string(),
                 serde_json::Value::Null,
@@ -523,7 +546,11 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     .await;
     for result in [
         service
-            .validate_visible(session_id, &["filtered-process".to_string()], scope())
+            .validate_visible(
+                &SessionId::from(session_id),
+                &[ProcessId::from("filtered-process")],
+                scope(),
+            )
             .await
             .map(|_| ()),
         filtered_cancel,
@@ -540,7 +567,11 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         );
     }
     let unobserved_error = service
-        .validate_visible(session_id, &["never-observed".to_string()], scope())
+        .validate_visible(
+            &SessionId::from(session_id),
+            &[ProcessId::from("never-observed")],
+            scope(),
+        )
         .await
         .expect_err("unobserved handle must be hidden");
     assert!(
@@ -554,7 +585,11 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
 
     assert_eq!(
         host_service
-            .list_visible(session_id, crate::ProcessListMode::Live, scope())
+            .list_visible(
+                &SessionId::from(session_id),
+                crate::ProcessListMode::Live,
+                scope()
+            )
             .await
             .expect("host read bypasses tool filter")
             .len(),
@@ -563,8 +598,8 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     );
     host_service
         .signal_possessed(
-            session_id,
-            "filtered-process",
+            &SessionId::from(session_id),
+            &ProcessId::from("filtered-process"),
             "ready".to_string(),
             "host-signal".to_string(),
             serde_json::Value::Null,
@@ -573,12 +608,16 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .await
         .expect("host signal bypasses model-tool filter");
     host_service
-        .cancel(session_id, "filtered-cancel", scope())
+        .cancel(
+            &SessionId::from(session_id),
+            &ProcessId::from("filtered-cancel"),
+            scope(),
+        )
         .await
         .expect("host cancel bypasses model-tool filter");
     registry
         .append_event(
-            "filtered-process",
+            &ProcessId::from("filtered-process"),
             crate::ProcessEventAppendRequest::new(
                 "filter.wake",
                 serde_json::json!({"wake_input": "still deliver"}),
@@ -598,7 +637,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     assert_eq!(report.enqueued, 1);
     assert_eq!(
         target_store
-            .list_queued_work(session_id)
+            .list_queued_work(&SessionId::from(session_id))
             .await
             .expect("read internally delivered wake")
             .len(),
@@ -626,7 +665,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state(session_id),
+        root_state(&SessionId::from(session_id)),
         None,
         crate::testing::runtime_lease_owner(),
     )
@@ -647,13 +686,13 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
                 payload_schema: crate::LashSchema::any(),
                 semantics: crate::ProcessEventSemanticsSpec::default(),
             }]),
-            &[session_id.to_string()],
+            &[SessionId::from(session_id.to_string())],
         )
         .await
         .expect("register process observed by the model session");
     let terminal = registry
         .complete_process(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("previous turn result"),
             )),
@@ -676,16 +715,20 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
         .model_tool_process_service();
     let scope = || {
         crate::ProcessOpScope::new(named_turn_scope(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
     };
     service
-        .validate_visible(session_id, &[process_id.to_string()], scope())
+        .validate_visible(
+            &SessionId::from(session_id),
+            &[ProcessId::from(process_id.to_string())],
+            scope(),
+        )
         .await
         .expect("a retained tombstone must pass model-handle validation");
     let await_output = service
-        .await_process(process_id, scope())
+        .await_process(&ProcessId::from(process_id), scope())
         .await
         .expect("await must reach the tombstone-aware registry path");
     assert!(matches!(
@@ -707,13 +750,17 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
 
     for error in [
         service
-            .cancel(session_id, process_id, scope())
+            .cancel(
+                &SessionId::from(session_id),
+                &ProcessId::from(process_id),
+                scope(),
+            )
             .await
             .expect_err("cancel must return its tombstone outcome"),
         service
             .signal_possessed(
-                session_id,
-                process_id,
+                &SessionId::from(session_id),
+                &ProcessId::from(process_id),
                 "ready".to_string(),
                 "previous-turn-signal".to_string(),
                 serde_json::Value::Null,
@@ -749,7 +796,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state(parent_session_id),
+        root_state(&SessionId::from(parent_session_id)),
         None,
         crate::testing::runtime_lease_owner(),
     )
@@ -766,7 +813,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     ] {
         process_service
             .start(
-                parent_session_id,
+                &SessionId::from(parent_session_id),
                 crate::ProcessRegistration::new(
                     process_id,
                     crate::ProcessInput::External {
@@ -777,7 +824,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                 ),
                 options,
                 crate::ProcessOpScope::new(named_turn_scope(
-                    parent_session_id,
+                    &SessionId::from(parent_session_id),
                     &TurnId::from(format!("{process_id}-turn")),
                 )),
             )
@@ -786,14 +833,20 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     }
     assert!(
         !registry
-            .is_observer(parent_session_id, "default-start")
+            .is_observer(
+                &SessionId::from(parent_session_id),
+                &ProcessId::from("default-start")
+            )
             .await
             .expect("read default start observer"),
         "the start scope and wake target must not imply an observer edge"
     );
     assert!(
         registry
-            .is_observer(parent_session_id, "explicit-start")
+            .is_observer(
+                &SessionId::from(parent_session_id),
+                &ProcessId::from("explicit-start")
+            )
             .await
             .expect("read explicit start observer"),
         "only the explicitly named initial observer must receive an edge"
@@ -814,7 +867,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     }
     let pruned = registry
         .complete_process(
-            "pruned-process",
+            &ProcessId::from("pruned-process"),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -831,7 +884,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         .await
         .expect("prune terminal process");
     let named_incarnation = registry
-        .get_process("named-process")
+        .get_process(&ProcessId::from("named-process"))
         .await
         .expect("read named process")
         .expect("named process retained")
@@ -860,7 +913,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     assert_eq!(
         child.observed_processes[0],
         crate::SessionObservedProcessReceipt {
-            process_id: "named-process".to_string(),
+            process_id: ProcessId::from("named-process"),
             outcome: crate::SessionObservedProcessOutcome::Observed {
                 incarnation: named_incarnation,
             },
@@ -870,7 +923,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     assert_eq!(
         child.observed_processes[1],
         crate::SessionObservedProcessReceipt {
-            process_id: "missing-process".to_string(),
+            process_id: ProcessId::from("missing-process"),
             outcome: crate::SessionObservedProcessOutcome::NotFound,
             attribution: crate::SessionObserverIntentAttribution::HostRequested,
         }
@@ -885,19 +938,25 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     ));
     assert!(
         registry
-            .is_observer("observer-child", "named-process")
+            .is_observer(
+                &SessionId::from("observer-child"),
+                &ProcessId::from("named-process")
+            )
             .await
             .expect("read named edge")
     );
     assert!(
         !registry
-            .is_observer("observer-child", "unnamed-process")
+            .is_observer(
+                &SessionId::from("observer-child"),
+                &ProcessId::from("unnamed-process")
+            )
             .await
             .expect("read unnamed edge"),
         "session creation must not mint an edge the host did not name"
     );
     let observer_events = registry
-        .events_after("named-process", 0)
+        .events_after(&ProcessId::from("named-process"), 0)
         .await
         .expect("read observer audit events")
         .into_iter()
@@ -910,7 +969,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     let child_store = factory
         .open_existing_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "observer-child".to_string(),
+            session_id: SessionId::from("observer-child"),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
@@ -1005,7 +1064,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state("persisted-live-surface"),
+        root_state(&SessionId::from("persisted-live-surface")),
         Some(store_dyn),
         owner.clone(),
     )
@@ -1058,7 +1117,10 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .run_turn_assembled(
             TurnInput::text("commit the rebuilt surface"),
             CancellationToken::new(),
-            named_turn_scope("persisted-live-surface", &TurnId::from("surface-commit")),
+            named_turn_scope(
+                &SessionId::from("persisted-live-surface"),
+                &TurnId::from("surface-commit"),
+            ),
         )
         .await
         .expect("commit after live rebuild");
@@ -1115,7 +1177,7 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state("fork-parent"),
+        root_state(&SessionId::from("fork-parent")),
         None,
         crate::testing::runtime_lease_owner(),
     )
@@ -1230,7 +1292,12 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     let provider: Arc<dyn crate::ToolProvider> =
         Arc::new(DynamicToolSurface::new(vec![hidden.clone()]));
     let plugin_host = dynamic_plugin_host(provider);
-    let parent = build_hidden_session(plugin_host.as_ref(), "narrow-parent", hidden.name, None);
+    let parent = build_hidden_session(
+        plugin_host.as_ref(),
+        &SessionId::from("narrow-parent"),
+        hidden.name,
+        None,
+    );
     assert!(
         parent
             .tool_registry()
@@ -1244,15 +1311,22 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     let child = parent
         .fork_for_child_session(
             "broader-child",
-            Some("narrow-parent".to_string()),
+            Some(SessionId::from("narrow-parent")),
             crate::plugin::SessionCreationConfig::default(),
         )
         .expect("fork with broader child authority");
-    let session = crate::Session::new(crate::RuntimeServices::new(child), "broader-child")
-        .await
-        .expect("broader child session");
+    let session = crate::Session::new(
+        crate::RuntimeServices::new(child),
+        &SessionId::from("broader-child"),
+    )
+    .await
+    .expect("broader child session");
     let surface = session
-        .pin_tool_surface("broader-child", &crate::SessionToolAccess::default(), None)
+        .pin_tool_surface(
+            &SessionId::from("broader-child"),
+            &crate::SessionToolAccess::default(),
+            None,
+        )
         .expect("broader child request surface");
 
     assert!(
@@ -1283,7 +1357,12 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
     let surface = Arc::new(DynamicToolSurface::new(vec![original.clone()]));
     let provider: Arc<dyn crate::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
-    let plugins = build_hidden_session(plugin_host.as_ref(), "compose-child", hidden.name, None);
+    let plugins = build_hidden_session(
+        plugin_host.as_ref(),
+        &SessionId::from("compose-child"),
+        hidden.name,
+        None,
+    );
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1301,7 +1380,7 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
         standard_test_policy(),
         test_host_config(),
         crate::RuntimeServices::new(plugins),
-        root_state("compose-child"),
+        root_state(&SessionId::from("compose-child")),
         crate::testing::runtime_lease_owner(),
     )
     .await
@@ -1314,7 +1393,10 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
         .run_turn_assembled(
             TurnInput::text("use the newly composed tool"),
             CancellationToken::new(),
-            named_turn_scope("compose-child", &TurnId::from("compose-boundary")),
+            named_turn_scope(
+                &SessionId::from("compose-child"),
+                &TurnId::from("compose-boundary"),
+            ),
         )
         .await
         .expect("turn through compose_session_catalog boundary");
@@ -1358,13 +1440,17 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     let provider: Arc<dyn crate::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
     let store = Arc::new(RecordingStore::default());
-    let plugins =
-        build_hidden_session(plugin_host.as_ref(), "cold-hidden-child", hidden.name, None);
+    let plugins = build_hidden_session(
+        plugin_host.as_ref(),
+        &SessionId::from("cold-hidden-child"),
+        hidden.name,
+        None,
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),
         crate::PersistentRuntimeServices::new(plugins, store.clone()),
-        root_state("cold-hidden-child"),
+        root_state(&SessionId::from("cold-hidden-child")),
         crate::testing::runtime_lease_owner(),
     )
     .await
@@ -1389,7 +1475,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         .expect("persisted hidden child");
     let plugins = build_hidden_session(
         plugin_host.as_ref(),
-        "cold-hidden-child",
+        &SessionId::from("cold-hidden-child"),
         hidden.name,
         state.plugin_state(),
     );
@@ -1435,7 +1521,7 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state("orphan-lifecycle"),
+        root_state(&SessionId::from("orphan-lifecycle")),
         Some(store),
         owner.clone(),
     )
@@ -1524,7 +1610,7 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing()
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
-        root_state("apply-state-round-trip"),
+        root_state(&SessionId::from("apply-state-round-trip")),
         None,
         crate::testing::runtime_lease_owner(),
     )
@@ -1619,7 +1705,7 @@ impl crate::ProcessEngine for PayloadGatedEngine {
 /// Shared fixture: a runtime whose only process engine is
 /// [`PayloadGatedEngine`], plus the registry the started rows land in.
 async fn payload_gated_engine_runtime(
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (Arc<crate::TestLocalProcessRegistry>, LashRuntime) {
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let core = test_host_config()
@@ -1648,7 +1734,7 @@ async fn payload_gated_engine_runtime(
     (registry, runtime)
 }
 
-fn payload_gated_scope(session_id: &str) -> crate::ProcessOpScope<'_> {
+fn payload_gated_scope(session_id: &SessionId) -> crate::ProcessOpScope<'_> {
     crate::ProcessOpScope::new(named_turn_scope(
         session_id,
         &TurnId::from(uuid::Uuid::new_v4().to_string()),
@@ -1656,8 +1742,8 @@ fn payload_gated_scope(session_id: &str) -> crate::ProcessOpScope<'_> {
 }
 
 fn payload_gated_request(
-    session_id: &str,
-    process_id: &str,
+    session_id: &SessionId,
+    process_id: &ProcessId,
     kind: &str,
     payload: serde_json::Value,
 ) -> crate::ProcessStartRequest {
@@ -1679,7 +1765,7 @@ fn payload_gated_request(
 
 async fn started_row_identity(
     registry: &Arc<crate::TestLocalProcessRegistry>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> crate::ProcessIdentity {
     crate::ProcessQuery::get_process(registry.as_ref(), process_id)
         .await
@@ -1691,7 +1777,7 @@ async fn started_row_identity(
 async fn no_rows_registered(registry: &Arc<crate::TestLocalProcessRegistry>, process_ids: &[&str]) {
     for process_id in process_ids {
         assert!(
-            crate::ProcessQuery::get_process(registry.as_ref(), process_id)
+            crate::ProcessQuery::get_process(registry.as_ref(), &ProcessId::from(*process_id))
                 .await
                 .expect("read refused row")
                 .is_none(),
@@ -1703,13 +1789,18 @@ async fn no_rows_registered(registry: &Arc<crate::TestLocalProcessRegistry>, pro
 #[tokio::test]
 async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_gate() {
     let session_id = "recorded-intent-engine-session";
-    let (registry, runtime) = payload_gated_engine_runtime(session_id).await;
+    let (registry, runtime) = payload_gated_engine_runtime(&SessionId::from(session_id)).await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
         .model_tool_process_service();
-    let request = |process_id: &str, payload: serde_json::Value| {
-        payload_gated_request(session_id, process_id, PAYLOAD_GATED_ENGINE_KIND, payload)
+    let request = |process_id: &ProcessId, payload: serde_json::Value| {
+        payload_gated_request(
+            &SessionId::from(session_id),
+            process_id,
+            PAYLOAD_GATED_ENGINE_KIND,
+            payload,
+        )
     };
     let invalid_payload = json!({"program": "smuggled"});
 
@@ -1717,17 +1808,20 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     // as the direct request-shaped start is, before anything is journaled.
     let direct_refusal = service
         .start_from_request(
-            session_id,
-            request("direct-invalid", invalid_payload.clone()),
-            payload_gated_scope(session_id),
+            &SessionId::from(session_id),
+            request(&ProcessId::from("direct-invalid"), invalid_payload.clone()),
+            payload_gated_scope(&SessionId::from(session_id)),
         )
         .await
         .expect_err("a direct start must not admit an unvalidated engine payload");
     let recorded_refusal = service
         .start_from_recorded_intent(
-            session_id,
-            request("recorded-invalid", invalid_payload.clone()),
-            payload_gated_scope(session_id),
+            &SessionId::from(session_id),
+            request(
+                &ProcessId::from("recorded-invalid"),
+                invalid_payload.clone(),
+            ),
+            payload_gated_scope(&SessionId::from(session_id)),
         )
         .await
         .expect_err("a recorded-intent start must not admit an unvalidated engine payload");
@@ -1750,17 +1844,17 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let valid_payload = json!({"program": "known"});
     let direct = service
         .start_from_request(
-            session_id,
-            request("direct-valid", valid_payload.clone()),
-            payload_gated_scope(session_id),
+            &SessionId::from(session_id),
+            request(&ProcessId::from("direct-valid"), valid_payload.clone()),
+            payload_gated_scope(&SessionId::from(session_id)),
         )
         .await
         .expect("valid direct engine start");
     let recorded = service
         .start_from_recorded_intent(
-            session_id,
-            request("recorded-valid", valid_payload.clone()),
-            payload_gated_scope(session_id),
+            &SessionId::from(session_id),
+            request(&ProcessId::from("recorded-valid"), valid_payload.clone()),
+            payload_gated_scope(&SessionId::from(session_id)),
         )
         .await
         .expect("valid recorded-intent engine start");
@@ -1776,14 +1870,14 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
 #[tokio::test]
 async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct_start() {
     let session_id = "recorded-intent-unregistered-kind-session";
-    let (registry, runtime) = payload_gated_engine_runtime(session_id).await;
+    let (registry, runtime) = payload_gated_engine_runtime(&SessionId::from(session_id)).await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
         .model_tool_process_service();
-    let request = |process_id: &str| {
+    let request = |process_id: &ProcessId| {
         payload_gated_request(
-            session_id,
+            &SessionId::from(session_id),
             process_id,
             "fig1488-never-registered",
             json!({"program": "known"}),
@@ -1794,9 +1888,9 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
             "direct",
             service
                 .start_from_request(
-                    session_id,
-                    request("direct-unregistered"),
-                    payload_gated_scope(session_id),
+                    &SessionId::from(session_id),
+                    request(&ProcessId::from("direct-unregistered")),
+                    payload_gated_scope(&SessionId::from(session_id)),
                 )
                 .await
                 .expect_err("a direct start must not admit an unregistered engine kind"),
@@ -1805,9 +1899,9 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
             "recorded",
             service
                 .start_from_recorded_intent(
-                    session_id,
-                    request("recorded-unregistered"),
-                    payload_gated_scope(session_id),
+                    &SessionId::from(session_id),
+                    request(&ProcessId::from("recorded-unregistered")),
+                    payload_gated_scope(&SessionId::from(session_id)),
                 )
                 .await
                 .expect_err("a recorded-intent start must not admit an unregistered engine kind"),
@@ -1825,15 +1919,15 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
 #[tokio::test]
 async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     let session_id = "recorded-intent-no-env-session";
-    let (registry, runtime) = payload_gated_engine_runtime(session_id).await;
+    let (registry, runtime) = payload_gated_engine_runtime(&SessionId::from(session_id)).await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
         .model_tool_process_service();
     let valid_payload = json!({"program": "known"});
-    let no_env = |process_id: &str| {
+    let no_env = |process_id: &ProcessId| {
         let mut request = payload_gated_request(
-            session_id,
+            &SessionId::from(session_id),
             process_id,
             PAYLOAD_GATED_ENGINE_KIND,
             valid_payload.clone(),
@@ -1853,9 +1947,9 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     // the engine gate.
     let direct_no_env = service
         .start_from_request(
-            session_id,
-            no_env("direct-no-env"),
-            payload_gated_scope(session_id),
+            &SessionId::from(session_id),
+            no_env(&ProcessId::from("direct-no-env")),
+            payload_gated_scope(&SessionId::from(session_id)),
         )
         .await
         .expect("a direct start captures the live session env for itself");
@@ -1865,9 +1959,9 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     );
     let recorded_no_env = service
         .start_from_recorded_intent(
-            session_id,
-            no_env("recorded-no-env"),
-            payload_gated_scope(session_id),
+            &SessionId::from(session_id),
+            no_env(&ProcessId::from("recorded-no-env")),
+            payload_gated_scope(&SessionId::from(session_id)),
         )
         .await
         .expect_err("a recorded start carries its own env or none at all");

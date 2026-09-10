@@ -40,9 +40,9 @@ use lash::plugins::{
 };
 use lash::process::{
     ObserverInheritance, ProcessChange, ProcessCompletionOutcome, ProcessEventSemantics,
-    ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessId, ProcessOutcome,
+    ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessOutcome,
     ProcessParentEndPlan, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
-    ProcessTombstone, SessionId, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason,
 };
@@ -62,6 +62,7 @@ use lash::tools::{
     ToolTriggerEffectOutcome, ToolValue,
 };
 use lash::triggers::TriggerEventCatalog;
+use lash::{ProcessId, SessionId};
 
 struct Protocol;
 
@@ -150,7 +151,7 @@ fn snapshot_agent_frame_can_target_queued_work_from_the_facade() {
     let mut snapshot = lash::runtime::SessionSnapshot::new(policy.clone());
     snapshot.agent_frames.push(AgentFrameRecord {
         frame_node_id,
-        session_id: "host-session".to_string(),
+        session_id: SessionId::from("host-session"),
         previous_frame_node_id: None,
         reason: AgentFrameReason::initial(),
         created_at: "2026-08-25T00:00:00Z".to_string(),

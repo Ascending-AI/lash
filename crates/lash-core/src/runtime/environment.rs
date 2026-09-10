@@ -20,6 +20,7 @@
 //!   their constructors, so the host can share one pool across every
 //!   materialized provider.
 
+use crate::SessionId;
 use std::sync::Arc;
 
 use lash_trace::{TraceContext, TraceLevel, TraceSink};
@@ -97,7 +98,7 @@ impl RuntimeEnvironment {
 /// `LashRuntime::resume` later. Cheap to cache per-session on a
 /// webserver; bounded memory cost regardless of session history size.
 pub struct ParkedSession {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) store: Arc<dyn crate::store::RuntimePersistence>,
     pub(crate) policy: crate::SessionPolicy,
     pub(crate) runtime_lease_owner: crate::LeaseOwnerIdentity,

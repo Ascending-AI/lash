@@ -783,6 +783,7 @@ impl LashRuntime {
 mod tests {
     use super::{bind_state_to_store, initial_park_operation, initial_park_preview};
     use crate::SessionError;
+    use crate::SessionId;
 
     fn user_message(id: &str, content: &str) -> crate::Message {
         crate::Message {
@@ -800,7 +801,7 @@ mod tests {
     #[test]
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
-            session_id: "park-identity".to_string(),
+            session_id: SessionId::from("park-identity"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -883,7 +884,7 @@ mod tests {
         let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
         let request = crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         };
@@ -893,11 +894,11 @@ mod tests {
             .await
             .expect("create session store before deletion");
         factory
-            .delete_session(session_id)
+            .delete_session(&SessionId::from(session_id))
             .await
             .expect("delete session before runtime binding");
         let mut state = crate::RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -930,7 +931,7 @@ mod tests {
         let policy = standard_test_policy();
         let request = crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         };
@@ -943,11 +944,11 @@ mod tests {
             policy.clone(),
             test_host_config(),
             crate::PersistentRuntimeServices::new(
-                plugin_session_with_tools(session_id, Arc::new(EmptyTools)),
+                plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
                 Arc::clone(&store),
             ),
             crate::RuntimeSessionState {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -958,7 +959,7 @@ mod tests {
         .await
         .expect("build runtime before concurrent deletion");
         factory
-            .delete_session(session_id)
+            .delete_session(&SessionId::from(session_id))
             .await
             .expect("delete session before park commit");
 
@@ -967,7 +968,7 @@ mod tests {
             Err(error) => error,
         };
         let canonical = crate::StoreError::SessionDeleted {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
         }
         .to_string();
 
@@ -1000,7 +1001,7 @@ mod tests {
         let store = factory
             .create_store(&crate::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
                 policy: policy.clone(),
             })
@@ -1010,11 +1011,11 @@ mod tests {
             policy.clone(),
             test_host_config(),
             crate::PersistentRuntimeServices::new(
-                plugin_session_with_tools(session_id, Arc::new(EmptyTools)),
+                plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
                 store,
             ),
             crate::RuntimeSessionState {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 policy,
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
@@ -1025,7 +1026,7 @@ mod tests {
         .await
         .expect("build runtime before injected backend failure");
         factory
-            .raw_store_for_testing(session_id)
+            .raw_store_for_testing(&SessionId::from(session_id))
             .expect("raw in-memory store")
             .fail_next_runtime_commit(crate::StoreError::Backend(
                 "temporary park backend outage".to_string(),

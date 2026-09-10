@@ -31,6 +31,7 @@
 //! the ordinal-shift question itself is settled at the endpoint tier against
 //! real captured journal bytes.
 
+use crate::SessionId;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -226,13 +227,19 @@ impl AwaitEventResolver for AttemptAtomicitySentinel<'_> {
         self.inner.await_await_event(key, cancel, deadline).await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.ledger
             .record(format!("revoke_await_events_for_session:{session_id}"));
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.ledger
             .record(format!("cancel_await_events_for_session:{session_id}"));
         self.inner.cancel_await_events_for_session(session_id).await

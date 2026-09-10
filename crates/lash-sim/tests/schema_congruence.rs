@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeSet;
 
@@ -871,7 +873,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     let encode = |relation| {
         codec
             .encode(&SessionMeta {
-                session_id: "session".to_string(),
+                session_id: SessionId::from("session"),
                 relation,
                 pending_observer_intents: Vec::new(),
             })
@@ -880,7 +882,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     assert_eq!(encode(SessionRelation::Root).relation_kind, "root");
     assert_eq!(
         encode(SessionRelation::Child {
-            parent_session_id: "parent".to_string(),
+            parent_session_id: SessionId::from("parent"),
             caused_by: None,
         })
         .relation_kind,
@@ -893,7 +895,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     ]
     .map(|observer_inheritance| {
         encode(SessionRelation::Fork {
-            source_session_id: "source".to_string(),
+            source_session_id: SessionId::from("source"),
             source_node_id: "node".to_string(),
             observer_inheritance,
         })
@@ -904,23 +906,23 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
 
     let causal_kinds = [
         CausalRef::Turn {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             turn_id: TurnId::from("turn"),
         },
         CausalRef::Effect {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             turn_id: None,
             effect_id: "effect".to_string(),
         },
         CausalRef::ToolCall {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             call_id: "call".to_string(),
         },
         CausalRef::Process {
-            process_id: "process".to_string(),
+            process_id: ProcessId::from("process"),
         },
         CausalRef::ProcessEvent {
-            process_id: "process".to_string(),
+            process_id: ProcessId::from("process"),
             sequence: 1,
         },
         CausalRef::TriggerOccurrence {
@@ -930,13 +932,13 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             subscription_revision: None,
         },
         CausalRef::SessionNode {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             node_id: "node".to_string(),
         },
     ]
     .map(|caused_by| {
         encode(SessionRelation::Child {
-            parent_session_id: "parent".to_string(),
+            parent_session_id: SessionId::from("parent"),
             caused_by: Some(caused_by),
         })
         .cause
@@ -1055,7 +1057,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     exhaustive_session_relation(&SessionRelation::Root);
     exhaustive_observer_inheritance(&ObserverInheritance::All);
     exhaustive_causal_ref(&CausalRef::Process {
-        process_id: "process".to_string(),
+        process_id: ProcessId::from("process"),
     });
 }
 

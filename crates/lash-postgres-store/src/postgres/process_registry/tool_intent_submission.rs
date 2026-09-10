@@ -2,6 +2,7 @@ use lash_core::{
     PluginError, ToolIntentExecutionOutcome, ToolIntentSubmissionAdmission,
     ToolIntentSubmissionRecord,
 };
+use lash_sansio::SessionId;
 use sqlx::{PgPool, Row};
 
 use crate::{plugin_sqlx_error, process_decode_error};
@@ -20,7 +21,7 @@ pub(super) async fn admit(
          ON CONFLICT (replay_key) DO NOTHING",
     )
     .bind(&submission.identity.replay_key)
-    .bind(&submission.identity.session_id)
+    .bind(submission.identity.session_id.as_str())
     .bind(&submission.identity.execution_scope_id)
     .bind(&submission.identity.tool_call_id)
     .bind(i64::from(submission.identity.intent_index))
@@ -79,7 +80,7 @@ pub(super) async fn complete(
 
 pub(super) async fn pending_parent_end(
     pool: &PgPool,
-    session_id: &str,
+    session_id: &SessionId,
     execution_scope_id: &str,
 ) -> Result<Vec<ToolIntentSubmissionRecord>, PluginError> {
     let rows = sqlx::query(
@@ -87,7 +88,7 @@ pub(super) async fn pending_parent_end(
          WHERE session_id = $1 AND execution_scope_id = $2
          ORDER BY intent_index",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(execution_scope_id)
     .fetch_all(pool)
     .await

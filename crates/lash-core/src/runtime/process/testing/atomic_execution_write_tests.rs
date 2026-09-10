@@ -24,14 +24,14 @@ async fn claim_cannot_interleave_between_authority_validation_and_append() {
         .expect("register");
     let owner = crate::LeaseOwnerIdentity::opaque("worker-a", "incarnation-a");
     let lease = registry
-        .claim_process_lease(PROCESS_ID, &owner, 60_000)
+        .claim_process_lease(&ProcessId::from(PROCESS_ID), &owner, 60_000)
         .await
         .expect("claim")
         .acquired()
         .expect("lease");
     registry
         .record_first_started_with_authority(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: lease.fencing_token,
@@ -49,8 +49,11 @@ async fn claim_cannot_interleave_between_authority_validation_and_append() {
     let writer = crate::task::spawn(async move {
         writer_registry
             .append_event_with_authority(
-                PROCESS_ID,
-                ProcessEventAppendRequest::cancel_requested(PROCESS_ID, Some("race".into())),
+                &ProcessId::from(PROCESS_ID),
+                ProcessEventAppendRequest::cancel_requested(
+                    &ProcessId::from(PROCESS_ID),
+                    Some("race".into()),
+                ),
                 &ProcessExecutionWriteAuthority::lease(writer_lease),
             )
             .await
@@ -65,7 +68,7 @@ async fn claim_cannot_interleave_between_authority_validation_and_append() {
             .await?;
         claimant_registry
             .claim_process_lease(
-                PROCESS_ID,
+                &ProcessId::from(PROCESS_ID),
                 &crate::LeaseOwnerIdentity::opaque("worker-b", "incarnation-b"),
                 60_000,
             )

@@ -85,7 +85,7 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
                 TurnInput::text("tear down after the cancellation watcher gives up"),
                 TurnOptions::new(
                     turn_cancel,
-                    named_turn_scope("root", &TurnId::from(turn_id)),
+                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
                 )
                 .with_turn_events(&turn_events_for_task),
             )
@@ -204,7 +204,10 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
                 TurnInput::text("cancel after partial stream"),
                 TurnOptions::new(
                     turn_cancel,
-                    named_turn_scope("root", &TurnId::from("cancel-partial-provider-stream")),
+                    named_turn_scope(
+                        &SessionId::from("root"),
+                        &TurnId::from("cancel-partial-provider-stream"),
+                    ),
                 )
                 .with_turn_events(&turn_events_for_task),
             )
@@ -432,7 +435,10 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("truncated-stream-retry")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("truncated-stream-retry"),
+                ),
             ),
         )
         .await
@@ -509,7 +515,10 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
             TurnInput::text("retry a pre-response transport failure"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("counted-regeneration-reset")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("counted-regeneration-reset"),
+                ),
             )
             .with_turn_events(&turn_events),
         )
@@ -595,7 +604,10 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
             TurnInput::text("defer to a provider retry-after"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("courtesy-regeneration-reset")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("courtesy-regeneration-reset"),
+                ),
             )
             .with_turn_events(&turn_events),
         )
@@ -708,7 +720,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
             TurnInput::text("retry after paid output"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("paid-output-retry")),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("paid-output-retry")),
             )
             .with_turn_events(&turn_events),
         )
@@ -823,7 +835,10 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
             TurnInput::text("follow up after the failed generation"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("paid-output-follow-up")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("paid-output-follow-up"),
+                ),
             ),
         )
         .await
@@ -886,7 +901,7 @@ pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
     let owner = lease_owner("other-runtime");
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &owner,
         "foreground-turn-is-refused-when-session-lane-is-held-executor",
         60_000,
@@ -900,7 +915,10 @@ pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
         .run_turn_assembled(
             TurnInput::text("foreground must wait"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("foreground-busy-lane-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("foreground-busy-lane-turn"),
+            ),
         )
         .await
         .expect_err("a foreign lease holder refuses the foreground turn");
@@ -910,7 +928,7 @@ pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
         crate::RuntimeErrorCode::SessionExecutionLaneBusy
     );
     assert!(
-        crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+        crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("read pending turn inputs after refusal")
             .is_empty(),
@@ -938,11 +956,16 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
         }),
     }]);
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
-    enqueue_idle_turn_input(store.as_ref(), "root", "queued while busy").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued while busy",
+    )
+    .await;
     let owner = lease_owner("foreground-runtime");
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &owner,
         "idle-queued-work-noops-without-claiming-when-session-lane-is-held-executor",
         60_000,
@@ -955,7 +978,7 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("queued-busy-turn")),
+            named_turn_scope(&SessionId::from("root"), &TurnId::from("queued-busy-turn")),
         ))
         .await
         .expect("busy queued drain should not error")
@@ -966,10 +989,13 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
         "idle queued drain must no-op while another owner holds the session lane"
     );
     assert_eq!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("queued turn input while busy")
-            .len(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("queued turn input while busy")
+        .len(),
         1,
         "busy drain must not consume queued turn input"
     );
@@ -983,7 +1009,10 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("queued-after-busy-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("queued-after-busy-turn"),
+            ),
         ))
         .await
         .expect("queued drain after release should succeed")
@@ -992,10 +1021,13 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
 
     assert_eq!(drained.assistant_output.safe_text, "queued answer");
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("queued turn input after drain")
-            .is_empty()
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("queued turn input after drain")
+        .is_empty()
     );
 }
 
@@ -1009,10 +1041,15 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
     )
     .await;
     runtime.host.core.clock = clock.clone();
-    enqueue_idle_turn_input(store.as_ref(), "root", "queued during failover").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued during failover",
+    )
+    .await;
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &lease_owner("crashed-worker"),
         "durable-controller-waits-for-busy-session-lane-before-draining-queued-input-executor",
         50,
@@ -1054,10 +1091,13 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
         .expect("durable queued drain consumes the pending input");
     assert_eq!(drained.assistant_output.safe_text, "finished");
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("list pending input after durable drain")
-            .is_empty(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list pending input after durable drain")
+        .is_empty(),
         "durable queued drain must settle the literal pending input"
     );
 }
@@ -1076,10 +1116,15 @@ pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_ho
     )
     .await;
     runtime.host.core.clock = clock.clone();
-    enqueue_idle_turn_input(store.as_ref(), "root", "queued behind a live holder").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued behind a live holder",
+    )
+    .await;
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &lease_owner("live-worker"),
         "live-holder-executor",
         100,
@@ -1143,7 +1188,7 @@ pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_ho
 
     let holder_after = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
     )
     .await
     .expect("read the holder row after the drain gave up")
@@ -1151,10 +1196,13 @@ pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_ho
     .expect("the live holder still holds the lane");
     assert_eq!(holder_after, renewed);
     assert_eq!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("list pending input after the drain gave up")
-            .len(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list pending input after the drain gave up")
+        .len(),
         1,
         "a drain that gave up must leave the queued row pending"
     );
@@ -1173,10 +1221,15 @@ pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pen
     )
     .await;
     runtime.host.core.clock = clock;
-    enqueue_idle_turn_input(store.as_ref(), "root", "queued during cancellation").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued during cancellation",
+    )
+    .await;
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &lease_owner("cancelled-wait-holder"),
         "cancelled-wait-holder-executor",
         100,
@@ -1227,7 +1280,7 @@ pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pen
     assert_eq!(
         crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
             store.as_ref(),
-            "root",
+            &SessionId::from("root"),
         )
         .await
         .expect("read holder after cancellation")
@@ -1236,10 +1289,13 @@ pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pen
         held_lease
     );
     assert_eq!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("list pending input after cancellation")
-            .len(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list pending input after cancellation")
+        .len(),
         1
     );
 }
@@ -1257,10 +1313,15 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
     )
     .await;
     runtime.host.core.clock = clock.clone();
-    enqueue_idle_turn_input(store.as_ref(), "root", "queued behind a frozen holder").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued behind a frozen holder",
+    )
+    .await;
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &lease_owner("frozen-worker"),
         "frozen-holder-executor",
         100,
@@ -1299,7 +1360,7 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
 
     let holder_after = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
     )
     .await
     .expect("read the holder row after the wait budget elapsed")
@@ -1307,10 +1368,13 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
     .expect("the frozen holder still holds the lane");
     assert_eq!(holder_after, held_lease);
     assert_eq!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("list pending input after the wait budget elapsed")
-            .len(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list pending input after the wait budget elapsed")
+        .len(),
         1,
         "a drain that hit the wait budget must leave the queued row pending"
     );
@@ -1324,10 +1388,15 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
 pub(super) async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_contract() {
     let (mut runtime, store) =
         standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
-    enqueue_idle_turn_input(store.as_ref(), "root", "queued behind a replay-owning host").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued behind a replay-owning host",
+    )
+    .await;
     let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &lease_owner("foreground-runtime"),
         "controller-owned-replay-alone-executor",
         60_000,
@@ -1356,15 +1425,18 @@ pub(super) async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_
         "controller-owned effect replay alone must keep the one-shot Busy no-op"
     );
     assert_eq!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("queued turn input after the one-shot no-op")
-            .len(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("queued turn input after the one-shot no-op")
+        .len(),
         1
     );
     let holder_after = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
     )
     .await
     .expect("read the holder row after the one-shot no-op")
@@ -1383,11 +1455,16 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
         store_clock,
     )
     .await;
-    let command = enqueue_session_command(store.as_ref(), "root", "wait for stale lease").await;
+    let command = enqueue_session_command(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "wait for stale lease",
+    )
+    .await;
     let owner = lease_owner("stale-session-command-owner");
     crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &owner,
         "session-command-waits-in-durable-queue-until-session-lease-ttl-expires-executor",
         50,
@@ -1400,7 +1477,10 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("command-before-lease-ttl")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("command-before-lease-ttl"),
+            ),
         ))
         .await
         .expect("busy command drain should not error")
@@ -1408,7 +1488,7 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
 
     assert!(busy_result.is_none());
     assert_eq!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("list command while lease is live")
             .iter()
@@ -1422,7 +1502,10 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
     let after_ttl = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("command-after-lease-ttl")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("command-after-lease-ttl"),
+            ),
         ))
         .await
         .expect("command drain after TTL should succeed")
@@ -1430,7 +1513,7 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
 
     assert!(after_ttl.is_none(), "a command-only drain returns no turn");
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("list command after TTL drain")
             .is_empty(),
@@ -1455,7 +1538,7 @@ pub(super) async fn session_command_claim_lease_expiry_surfaces_session_executio
     let owner = lease_owner("session-command-drain-test");
     let lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &owner,
         "session-command-claim-lease-expiry-surfaces-session-execution-lease-lost-executor",
         crate::LeaseTimings::default().ttl_ms(),
@@ -1493,7 +1576,10 @@ pub(super) async fn idle_queued_work_claim_lease_expiry_surfaces_session_executi
     let err = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("idle-claim-lease-expiry-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("idle-claim-lease-expiry-turn"),
+            ),
         ))
         .await
         .expect_err("expired idle queued-work claim lease must fail as lease lost");
@@ -1506,8 +1592,9 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
     const SESSION_ID: &str = "concurrent-real-turn-admission";
 
     let session_id = SESSION_ID;
-    let _ =
-        crate::runtime::commit_admission::take_product_commit_admission_observations(session_id);
+    let _ = crate::runtime::commit_admission::take_product_commit_admission_observations(
+        &SessionId::from(session_id),
+    );
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
     let store = Arc::new(RecordingStore::with_clock(store_clock));
@@ -1558,7 +1645,10 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
             .run_turn_assembled(
                 TurnInput::text("first concurrent commit"),
                 CancellationToken::new(),
-                named_turn_scope(session_id, &TurnId::from("product-admission-first")),
+                named_turn_scope(
+                    &SessionId::from(session_id),
+                    &TurnId::from("product-admission-first"),
+                ),
             )
             .await
     });
@@ -1579,13 +1669,17 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
             .run_turn_assembled(
                 TurnInput::text("second concurrent commit"),
                 CancellationToken::new(),
-                named_turn_scope(session_id, &TurnId::from("product-admission-second")),
+                named_turn_scope(
+                    &SessionId::from(session_id),
+                    &TurnId::from("product-admission-second"),
+                ),
             )
             .await
     });
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        while crate::runtime::commit_admission::process_commit_admission_queue_depth(session_id)
-            == 0
+        while crate::runtime::commit_admission::process_commit_admission_queue_depth(
+            &SessionId::from(session_id),
+        ) == 0
         {
             tokio::task::yield_now().await;
         }
@@ -1605,8 +1699,9 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
         "the stale/superseded real turn must still be refused by durable authority"
     );
 
-    let observations =
-        crate::runtime::commit_admission::take_product_commit_admission_observations(session_id);
+    let observations = crate::runtime::commit_admission::take_product_commit_admission_observations(
+        &SessionId::from(session_id),
+    );
     assert!(
         observations.iter().any(|observation| {
             observation.path == "turn_final_commit"
@@ -1641,7 +1736,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
                 payload_schema: crate::LashSchema::any(),
                 semantics: crate::ProcessEventSemanticsSpec::default(),
             }]),
-            &["root".to_string()],
+            &[SessionId::from("root")],
         )
         .await
         .expect("register same-turn CAS survivor target");
@@ -1707,7 +1802,10 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
             .run_turn_assembled(
                 TurnInput::text("emit evidence before losing CAS"),
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("cas-survivor-stale-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("cas-survivor-stale-turn"),
+                ),
             )
             .await
     });
@@ -1721,7 +1819,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
     assert_eq!(tool_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         registry
-            .events_after("cas-survivor-intent-target", 0)
+            .events_after(&ProcessId::from("cas-survivor-intent-target"), 0)
             .await
             .expect("read committed pre-CAS intent")
             .iter()
@@ -1761,7 +1859,10 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
         .run_turn_assembled(
             TurnInput::text("take over and win the head"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("cas-survivor-successor-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("cas-survivor-successor-turn"),
+            ),
         )
         .await
         .expect("successor wins the shared store head CAS");
@@ -1777,7 +1878,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
     );
     assert_eq!(
         registry
-            .events_after("cas-survivor-intent-target", 0)
+            .events_after(&ProcessId::from("cas-survivor-intent-target"), 0)
             .await
             .expect("read intent after CAS loss")
             .iter()
@@ -1857,7 +1958,7 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
             .run_turn_assembled(
                 TurnInput::text("lease can be lost"),
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("lease-loss-turn")),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("lease-loss-turn")),
             )
             .await
     });
@@ -1895,7 +1996,7 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
     let successor_owner = successor_runtime.runtime_lease_owner.clone();
     let stolen = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &successor_owner,
         &successor_runtime.runtime_lease_executor_id,
         60_000,
@@ -1924,7 +2025,7 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
     let still_owned =
         crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease_with_token(
             store.as_ref(),
-            "root",
+            &SessionId::from("root"),
             &successor_owner,
             &stolen.executor_id,
             &crate::LeaseClaimNonce::for_testing("successor-reentry-token"),
@@ -1943,7 +2044,10 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
         .run_turn_assembled(
             TurnInput::text("continue after predecessor tail"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("successor-after-landed-tail")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("successor-after-landed-tail"),
+            ),
         )
         .await
         .expect("the successor should continue from the newly committed head");

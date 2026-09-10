@@ -2,6 +2,7 @@
 
 use super::session_store_factory::session_store_request;
 use super::*;
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 /// Backend observation and fault seam for the session-delete blob laws.
@@ -78,7 +79,7 @@ struct CommittedCheckpoint {
 
 async fn committed_checkpoint(
     factory: &Arc<dyn crate::SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> CommittedCheckpoint {
     let request = session_store_request(
         session_id,
@@ -141,8 +142,8 @@ fn encoded_checkpoint_manifest(manifest: &crate::SessionCheckpoint) -> Vec<u8> {
 /// delete order that matters to a multi-root reclaim batch.
 pub(super) async fn commit_content_aliased_checkpoint_roots(
     factory: &Arc<dyn crate::SessionStoreFactory>,
-    dependent_session_id: &str,
-    aliased_session_id: &str,
+    dependent_session_id: &SessionId,
+    aliased_session_id: &SessionId,
 ) -> ContentAliasedCheckpointRoots {
     let aliased = committed_checkpoint(factory, aliased_session_id).await;
     let aliased_root_bytes = encoded_checkpoint_manifest(&aliased.manifest);
@@ -251,8 +252,8 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
     const ALIASED_SESSION_ID: &str = "delete-content-alias-root";
     let roots = commit_content_aliased_checkpoint_roots(
         &handles.factory,
-        DEPENDENT_SESSION_ID,
-        ALIASED_SESSION_ID,
+        &SessionId::from(DEPENDENT_SESSION_ID),
+        &SessionId::from(ALIASED_SESSION_ID),
     )
     .await;
     assert!(
@@ -262,7 +263,7 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
 
     handles
         .factory
-        .delete_session(ALIASED_SESSION_ID)
+        .delete_session(&SessionId::from(ALIASED_SESSION_ID))
         .await
         .expect("delete root B's session while root A still aliases it");
     assert!(
@@ -286,7 +287,7 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
 
     handles
         .factory
-        .delete_session(DEPENDENT_SESSION_ID)
+        .delete_session(&SessionId::from(DEPENDENT_SESSION_ID))
         .await
         .expect("delete root A's session and its content-aliased component");
     assert!(
@@ -299,7 +300,8 @@ async fn session_delete_reclaims_exclusive_checkpoint_blobs(
     backend: &str,
     handles: SessionDeleteBlobHandles,
 ) {
-    let committed = committed_checkpoint(&handles.factory, "delete-exclusive-blobs").await;
+    let committed =
+        committed_checkpoint(&handles.factory, &SessionId::from("delete-exclusive-blobs")).await;
     assert_components_exist(
         backend,
         handles.probe.as_ref(),
@@ -333,10 +335,11 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     backend: &str,
     handles: SessionDeleteBlobHandles,
 ) {
-    let committed = committed_checkpoint(&handles.factory, "delete-shared-source").await;
+    let committed =
+        committed_checkpoint(&handles.factory, &SessionId::from("delete-shared-source")).await;
     let fork_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "delete-shared-fork".to_string(),
+        session_id: SessionId::from("delete-shared-fork"),
         node_id: committed.leaf_node_id,
         relation: crate::SessionRelation::Root,
         policy: committed.request.policy.clone(),
@@ -384,7 +387,8 @@ async fn session_delete_blob_failure_rolls_back_with_partial_report(
     backend: &str,
     handles: SessionDeleteBlobHandles,
 ) {
-    let committed = committed_checkpoint(&handles.factory, "delete-blob-failure").await;
+    let committed =
+        committed_checkpoint(&handles.factory, &SessionId::from("delete-blob-failure")).await;
     handles.probe.fail_next_blob_delete().await;
     let failure = handles
         .factory
@@ -423,8 +427,16 @@ async fn session_delete_ignores_broken_factory_gc_scope(
     backend: &str,
     handles: SessionDeleteBlobHandles,
 ) {
-    let victim = committed_checkpoint(&handles.factory, "delete-with-broken-gc-victim").await;
-    let survivor = committed_checkpoint(&handles.factory, "delete-with-broken-gc-survivor").await;
+    let victim = committed_checkpoint(
+        &handles.factory,
+        &SessionId::from("delete-with-broken-gc-victim"),
+    )
+    .await;
+    let survivor = committed_checkpoint(
+        &handles.factory,
+        &SessionId::from("delete-with-broken-gc-survivor"),
+    )
+    .await;
     if !handles
         .probe
         .break_factory_gc_scope(&survivor.checkpoint_ref)
@@ -472,7 +484,7 @@ async fn attachment_prefix_retention(
     pinned: bool,
 ) {
     let request = session_store_request(
-        "attachment-prefix-parent",
+        &SessionId::from("attachment-prefix-parent"),
         "session-delete-blob-reclaim-model",
         crate::SessionRelation::Root,
     );
@@ -541,7 +553,7 @@ async fn attachment_prefix_retention(
     }
     let fork_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "attachment-prefix-child".to_string(),
+        session_id: SessionId::from("attachment-prefix-child"),
         node_id: leaf_node_id.clone(),
         relation: crate::SessionRelation::Root,
         policy: request.policy.clone(),

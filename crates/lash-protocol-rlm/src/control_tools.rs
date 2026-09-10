@@ -4,6 +4,7 @@ use lash_core::{
     ToolManifest, ToolOutcome, ToolProvider,
 };
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+use lash_sansio::SessionId;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -118,7 +119,7 @@ fn continue_as_switch_frame(
         .tool_call_id()
         .ok_or_else(|| "continue_as requires a stable tool call id".to_string())?;
     let frame_key = lash_core::FrameKey::from_call_site(
-        context.session_id(),
+        &SessionId::from(context.session_id()),
         context.agent_frame_id(),
         tool_call_id,
     );
@@ -165,6 +166,7 @@ fn finalise_tool_result(result: Result<ContinueAsResult, String>) -> ToolOutcome
 mod tests {
     use super::*;
     use crate::projection::{decode_rlm_protocol_event, rlm_protocol_event};
+    use lash_sansio::ProcessId;
     use lash_sansio::sync::MutexExt;
     use std::sync::{Arc, Mutex};
 
@@ -237,13 +239,13 @@ mod tests {
 
         async fn snapshot_session(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<SessionSnapshot, PluginError> {
             Ok(self.snapshot.to_snapshot())
         }
         async fn tool_catalog(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<Vec<serde_json::Value>, PluginError> {
             Ok(Vec::new())
         }
@@ -257,8 +259,10 @@ mod tests {
         ) -> Result<SessionHandle, PluginError> {
             self.created.lock_recover().push(request.clone());
             Ok(SessionHandle {
-                session_id: request.session_id.unwrap_or_else(|| "child".to_string()),
-                parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
+                session_id: request
+                    .session_id
+                    .unwrap_or_else(|| SessionId::from("child")),
+                parent_session_id: request.relation.parent_session_id().map(SessionId::from),
                 policy: request
                     .policy
                     .expect("test session creation requires an explicit policy"),
@@ -266,7 +270,7 @@ mod tests {
             })
         }
 
-        async fn close_session(&self, session_id: &str) -> Result<(), PluginError> {
+        async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
             self.closed.lock_recover().push(session_id.to_string());
             Ok(())
         }
@@ -279,7 +283,7 @@ mod tests {
     impl lash_core::ProcessService for BatonManager {
         async fn start_from_recorded_intent(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _request: lash_core::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessHandleView, PluginError> {
@@ -290,9 +294,9 @@ mod tests {
 
         async fn finish_recorded_intent_parent(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _identity: lash_core::ToolIntentIdentity,
-            _process_id: String,
+            _process_id: ProcessId,
             _policy: lash_core::ProcessParentEndPolicy,
             _reason: String,
             _scope: lash_core::ProcessOpScope<'_>,
@@ -304,7 +308,7 @@ mod tests {
 
         async fn start(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _registration: lash_core::ProcessRegistration,
             _options: lash_core::ProcessStartOptions,
             _scope: lash_core::ProcessOpScope<'_>,
@@ -316,7 +320,7 @@ mod tests {
 
         async fn await_process(
             &self,
-            _process_id: &str,
+            _process_id: &ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessAwaitOutput, PluginError> {
             Err(PluginError::Session(
@@ -326,7 +330,7 @@ mod tests {
 
         async fn list_visible(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
             _mode: lash_core::ProcessListMode,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<Vec<lash_core::ProcessRecord>, PluginError> {
@@ -335,8 +339,8 @@ mod tests {
 
         async fn validate_visible(
             &self,
-            _session_id: &str,
-            _handle_ids: &[String],
+            _session_id: &SessionId,
+            _handle_ids: &[ProcessId],
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
             Err(PluginError::Session(
@@ -346,8 +350,8 @@ mod tests {
 
         async fn cancel(
             &self,
-            _session_id: &str,
-            _process_id: &str,
+            _session_id: &SessionId,
+            _process_id: &ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, PluginError> {
             Err(PluginError::Session(
@@ -357,8 +361,8 @@ mod tests {
 
         async fn cancel_recorded_intent(
             &self,
-            _session_id: &str,
-            _process_id: &str,
+            _session_id: &SessionId,
+            _process_id: &ProcessId,
             _reason: Option<String>,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, PluginError> {
@@ -369,8 +373,8 @@ mod tests {
 
         async fn signal_possessed(
             &self,
-            _session_id: &str,
-            _process_id: &str,
+            _session_id: &SessionId,
+            _process_id: &ProcessId,
             _signal_name: String,
             _signal_id: String,
             _payload: serde_json::Value,
@@ -383,8 +387,8 @@ mod tests {
 
         async fn signal_recorded_intent(
             &self,
-            _session_id: &str,
-            _process_id: &str,
+            _session_id: &SessionId,
+            _process_id: &ProcessId,
             _signal_name: String,
             _signal_id: String,
             _payload: serde_json::Value,
@@ -397,8 +401,8 @@ mod tests {
 
         async fn emit_event_recorded_intent(
             &self,
-            _session_id: &str,
-            _process_id: &str,
+            _session_id: &SessionId,
+            _process_id: &ProcessId,
             _event_type: String,
             _replay_key: String,
             _payload: serde_json::Value,
@@ -411,9 +415,9 @@ mod tests {
 
         async fn transfer(
             &self,
-            _from_session_id: &str,
-            _to_session_id: &str,
-            _process_ids: Vec<String>,
+            _from_session_id: &SessionId,
+            _to_session_id: &SessionId,
+            _process_ids: Vec<ProcessId>,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<(), PluginError> {
             Err(PluginError::Session(
@@ -433,7 +437,7 @@ mod tests {
         let session_graph: Arc<dyn SessionGraphService> = manager.clone();
         let processes: Arc<dyn lash_core::ProcessService> = manager;
         let context = lash_core::ToolContext::__for_testing(
-            "test-session".to_string(),
+            SessionId::from("test-session"),
             sessions,
             session_lifecycle,
             session_graph,
@@ -448,7 +452,10 @@ mod tests {
         );
         let context = lash_core::ToolContext::with_agent_frame_id_for_testing(
             context,
-            lash_core::facade_support::frame_node_id("test-session", "test-lineage"),
+            lash_core::facade_support::frame_node_id(
+                &SessionId::from("test-session"),
+                "test-lineage",
+            ),
         );
         let context = lash_core::testing::mock_attempt_context_from(&context);
         provider

@@ -7,6 +7,7 @@
 //! Split out of `plugin/mod.rs` for file size; `pub use` there keeps
 //! the outer module path.
 
+use crate::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -126,11 +127,11 @@ impl ProtocolSessionRestoreView {
 /// Prevents protocol plugins from reaching into unrelated `Session`
 /// internals.
 pub struct ProtocolSessionContext<'a> {
-    session_id: &'a str,
+    session_id: &'a SessionId,
 }
 
 impl<'a> ProtocolSessionContext<'a> {
-    pub(crate) fn new(_session: &'a mut crate::Session, session_id: &'a str) -> Self {
+    pub(crate) fn new(_session: &'a mut crate::Session, session_id: &'a SessionId) -> Self {
         Self { session_id }
     }
 
@@ -142,7 +143,7 @@ impl<'a> ProtocolSessionContext<'a> {
 }
 
 pub struct ProtocolBeforeLlmCallContext {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub sessions: Arc<dyn crate::plugin::SessionStateService>,
     pub session_graph: Arc<dyn crate::plugin::SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,

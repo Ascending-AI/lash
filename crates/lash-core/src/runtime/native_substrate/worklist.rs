@@ -18,7 +18,10 @@ impl DurableProcessWorker {
             // already queued it — a second pass over the same row must not
             // relabel it as `Busy`.
             let externally_owned = record.disposition == RecoveryContract::ExternallyOwned;
-            if state.scheduled.insert(record.id.clone()) {
+            if state
+                .scheduled
+                .insert(ProcessId::from(record.id.clone().to_string()))
+            {
                 // The native worker still queues it, because a pending Abandon
                 // Request on such a row is reconciled there — but it reports
                 // the same typed deferral the Restate tier reports for it.
@@ -28,7 +31,9 @@ impl DurableProcessWorker {
                         disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
                     });
                 } else {
-                    report.admitted.push(record.id.clone());
+                    report
+                        .admitted
+                        .push(ProcessId::from(record.id.clone().to_string()));
                 }
                 state.pending.push_back(record);
             } else {
@@ -46,7 +51,9 @@ impl DurableProcessWorker {
                 // The row may have gained an Abandon Request or other
                 // execution-relevant state while its prior attempt was still
                 // queued or finishing.
-                state.rerun.insert(record.id.clone(), record);
+                state
+                    .rerun
+                    .insert(ProcessId::from(record.id.clone().to_string()), record);
             }
         }
         state.worklist_scan = match page.continuation {

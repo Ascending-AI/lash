@@ -2,6 +2,7 @@
 
 use super::process_registry::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
 use super::*;
+use lash_sansio::ProcessId;
 
 /// Unleased terminal completion, validated and appended as one atomic unit.
 ///
@@ -14,12 +15,12 @@ use super::*;
 /// window: the row we validate is the row we append to.
 pub(super) async fn complete_process(
     registry: &SqliteProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     await_output: ProcessAwaitOutput,
     authority: lash_core::ProcessCompletionAuthority,
     parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
 ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
-    let process_id = process_id.to_string();
+    let process_id = ProcessId::from(process_id.to_string());
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
     registry
@@ -80,7 +81,8 @@ pub(super) async fn complete_process_with_lease(
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
                 let process_id = lease.process_id.as_str();
-                let mut record = SqliteProcessRegistry::require_process_conn(tx, process_id)?;
+                let mut record =
+                    SqliteProcessRegistry::require_process_conn(tx, &ProcessId::from(process_id))?;
                 if record.is_terminal() {
                     return Ok(lash_core::ProcessCompletionOutcome::from_stored(
                         record,
@@ -88,7 +90,7 @@ pub(super) async fn complete_process_with_lease(
                     ));
                 }
                 let request = lash_core::facade_support::terminal_append_request(
-                    process_id,
+                    &ProcessId::from(process_id),
                     &await_output,
                     None,
                 );

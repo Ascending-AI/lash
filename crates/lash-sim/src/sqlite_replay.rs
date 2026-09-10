@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -68,7 +69,7 @@ pub struct SqliteBoundaryDivergence {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SqliteReopenedSessionEvidence {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub database_path: PathBuf,
     pub turn_index: usize,
     pub graph_node_count: usize,
@@ -783,7 +784,7 @@ async fn run_provider_turn_task(
             agent_frame_invariant: Some(agent_frame_invariant.clone()),
             usage_invariant: Some(usage_invariant.clone()),
         },
-        &event.actor_alias,
+        &SessionId::from(event.actor_alias.clone()),
         expected_turn_index,
         expected_text,
         expected_exchange_count,
@@ -959,7 +960,7 @@ impl SqliteRuntimeReplayWorld {
             let observation = session.observe().current_observation();
             let read_view = observation.read_view;
             evidence.push(SqliteReopenedSessionEvidence {
-                session_id: session_id.clone(),
+                session_id: SessionId::from(session_id.clone()),
                 database_path: lash_sqlite_store::SqliteSessionStoreFactory::new(
                     self.database_root.clone(),
                 )

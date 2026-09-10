@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 #[tokio::test]
 async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
@@ -46,7 +47,7 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
     .await
     .expect("project provider failure through the production recorder");
 
-    let serialized = serde_json::to_string(&state.event_tx.snapshot(&session_id))
+    let serialized = serde_json::to_string(&state.event_tx.snapshot(&SessionId::from(session_id)))
         .expect("serialize provider failure projection");
     assert!(serialized.contains(PUBLIC_TURN_FAILURE_MESSAGE));
     assert!(!serialized.contains(INTERNAL_PROVIDER_FAILURE));
@@ -79,13 +80,13 @@ fn authorization_seam_can_deny_observation_without_product_specific_auth() {
     let authorization = WorkbenchAuthorization::with_authorizer(Arc::new(DenyObservation));
     let denied = authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: "auth-session".to_string(),
+            session_id: SessionId::from("auth-session"),
         })
         .expect_err("host policy must be able to deny observation");
     assert_eq!(denied.status, StatusCode::FORBIDDEN);
     authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
-            session_id: "auth-session".to_string(),
+            session_id: SessionId::from("auth-session"),
         })
         .expect("independent enqueue policy remains pluggable");
 }

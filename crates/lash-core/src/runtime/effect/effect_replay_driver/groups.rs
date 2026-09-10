@@ -342,7 +342,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         let record = EffectGroupRecord::from_group(
             &group,
             journal_identity.key(),
-            journal_identity.session_id().map(str::to_string),
+            journal_identity.session_id().cloned(),
             self.clock.timestamp_ms(),
         );
         let persisted = self.row_store.open_group(&record).await?;

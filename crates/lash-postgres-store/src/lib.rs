@@ -30,6 +30,7 @@
 //! [`PostgresStorage::schema_advisory_lock_key`] publishes the key so a host's
 //! migrations can participate.
 
+use lash_sansio::SessionId;
 mod namespace;
 mod process_key;
 
@@ -339,7 +340,7 @@ pub struct PostgresSessionStore {
     lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
     pool: PgPool,
     clock: Arc<dyn lash_core::Clock>,
-    session_id: String,
+    session_id: SessionId,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -756,7 +757,7 @@ impl PostgresStorage {
     /// handle that can subsequently create the mistyped session. Call
     /// [`SessionStoreFactory::open_existing_store`](lash_core::SessionStoreFactory::open_existing_store)
     /// through [`Self::session_store_factory`] when existence must be checked.
-    pub fn session_store(&self, session_id: impl Into<String>) -> PostgresSessionStore {
+    pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
@@ -864,13 +865,13 @@ impl PostgresSessionStore {
         )
     }
 
-    fn bind_session_id(&self, attempted_session_id: &str) -> Result<(), StoreError> {
+    fn bind_session_id(&self, attempted_session_id: &SessionId) -> Result<(), StoreError> {
         if self.session_id == attempted_session_id {
             Ok(())
         } else {
             Err(StoreError::SessionBindingMismatch {
                 bound_session_id: self.session_id.clone(),
-                attempted_session_id: attempted_session_id.to_string(),
+                attempted_session_id: SessionId::from(attempted_session_id.to_string()),
             })
         }
     }

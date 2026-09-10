@@ -1,5 +1,7 @@
 //! Runs the shared `ProcessRegistry` conformance suite against SQLite.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_cross_owner_attachment_adoption_conformance() {
@@ -93,7 +95,7 @@ struct SqliteLineageConformanceInjector {
 
 #[async_trait::async_trait]
 impl LineageConformanceInjector for SqliteLineageConformanceInjector {
-    async fn force_lineage(&self, session_id: &str, ancestor_node_id: &str) {
+    async fn force_lineage(&self, session_id: &SessionId, ancestor_node_id: &str) {
         let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
         let (ancestor_session_id, generation): (String, i64) = conn
             .query_row(
@@ -107,7 +109,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
              (session_id, ancestor_session_id, fork_node_id, fork_generation)
              VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![
-                session_id,
+                session_id.as_str(),
                 ancestor_session_id,
                 ancestor_node_id,
                 generation
@@ -130,7 +132,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
 
     async fn lineage_ancestors(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Vec<lash_core::store::ForkLineageAncestor> {
         let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
         let mut stmt = conn
@@ -139,9 +141,9 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
                  WHERE session_id = ?1 ORDER BY ancestor_session_id",
             )
             .expect("prepare SQLite lineage observation");
-        stmt.query_map(rusqlite::params![session_id], |row| {
+        stmt.query_map(rusqlite::params![session_id.as_str()], |row| {
             Ok(lash_core::store::ForkLineageAncestor {
-                ancestor_session_id: row.get(0)?,
+                ancestor_session_id: SessionId::from(row.get::<_, String>(0)?),
                 fork_node_id: row.get(1)?,
                 fork_generation: u64::try_from(row.get::<_, i64>(2)?)
                     .expect("non-negative fork generation"),
@@ -152,13 +154,13 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
         .expect("collect SQLite lineage observation")
     }
 
-    async fn edge_path(&self, session_id: &str) -> Vec<GraphFactObservation> {
+    async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
         let mut facts = self.all_graph_facts().await;
         let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
         let mut current = conn
             .query_row(
                 "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
-                rusqlite::params![session_id],
+                rusqlite::params![session_id.as_str()],
                 |row| row.get::<_, Option<String>>(0),
             )
             .expect("read SQLite lineage head");
@@ -191,7 +193,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
             Ok(GraphFactObservation {
                 node_id: row.get(0)?,
                 parent_node_id: row.get(1)?,
-                owning_session_id: row.get(2)?,
+                owning_session_id: SessionId::from(row.get::<_, String>(2)?),
                 generation: u64::try_from(row.get::<_, i64>(3)?).expect("non-negative generation"),
                 frame_node_id: row.get(4)?,
                 is_frame: row.get(5)?,
@@ -237,7 +239,10 @@ fn fresh_db_path(dirs: &Arc<Mutex<Vec<TempDir>>>, file_name: &str) -> PathBuf {
     path
 }
 
-fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> ExecutionScope {
+fn durable_turn_scope(
+    session_id: impl Into<SessionId>,
+    turn_id: impl Into<TurnId>,
+) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
 }
@@ -307,7 +312,7 @@ struct SqliteSessionExecutionLeaseRenewalZeroRowInjector {
 impl SessionExecutionLeaseRenewalZeroRowInjector
     for SqliteSessionExecutionLeaseRenewalZeroRowInjector
 {
-    async fn arm(&self, session_id: &str) {
+    async fn arm(&self, session_id: &SessionId) {
         assert_eq!(session_id, "zero-row-session-lease-renewal");
         rusqlite::Connection::open(&self.path)
             .expect("open SQLite zero-row renewal injector")
@@ -400,11 +405,11 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
             ),
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn.execute(
                 "UPDATE session_head SET head_revision = ?1 WHERE session_id = ?2",
-                rusqlite::params![value, session_id],
+                rusqlite::params![value, session_id.as_str()],
             ),
             FenceIntegrityTarget::SessionLeaseFencingToken { session_id } => conn.execute(
                 "UPDATE session_execution_leases SET lease_fencing_token = ?1 WHERE session_id = ?2",
-                rusqlite::params![value, session_id],
+                rusqlite::params![value, session_id.as_str()],
             ),
             FenceIntegrityTarget::TriggerRevision { subscription_id } => conn.execute(
                 "UPDATE trigger_subscriptions
@@ -448,7 +453,7 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
                 .query_row(
                     "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
                      FROM session_head WHERE session_id = ?1",
-                    [session_id],
+                    [session_id.as_str()],
                     |row| {
                         let value: i64 = row.get(0)?;
                         let head_json: String = row.get(1)?;
@@ -466,7 +471,7 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
                     "SELECT lease_fencing_token, lease_owner_id, lease_token,
                             lease_claimed_at_ms, lease_expires_at_ms
                      FROM session_execution_leases WHERE session_id = ?1",
-                    [session_id],
+                    [session_id.as_str()],
                     |row| {
                         let value: i64 = row.get(0)?;
                         let owner: Option<String> = row.get(1)?;
@@ -586,7 +591,7 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                 let changed = conn
                     .execute(
                         "UPDATE session_head SET leaf_node_id = ?1 WHERE session_id = ?2",
-                        rusqlite::params![target.missing_node_id, target.session_id],
+                        rusqlite::params![target.missing_node_id, target.session_id.as_str()],
                     )
                     .expect("inject dangling SQLite graph leaf id");
                 assert_eq!(changed, 1);
@@ -628,7 +633,7 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
 
     async fn load_whole_graph(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<lash_core::SessionGraph, lash_core::StoreError> {
         self.runtime.load_session_graph().await
     }
@@ -665,7 +670,7 @@ async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
     );
     let session_id = "healthy-whole-session-graph";
     let mut state = lash_core::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -830,7 +835,7 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
         .expect("register recently retired pushdown fixture");
     let terminal = registry
         .complete_process(
-            "recent-pushdown",
+            &ProcessId::from("recent-pushdown"),
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!({}),
             )),
@@ -848,7 +853,7 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     assert_eq!(
         conn.execute(
             "UPDATE processes SET updated_at_ms = 0 WHERE process_id = ?1",
-            rusqlite::params![terminal.id],
+            rusqlite::params![terminal.id.as_str()],
         )
         .expect("age only the extracted process timestamp"),
         1
@@ -930,7 +935,7 @@ async fn sqlite_leased_completion_replay_repairs_projection() {
                 .execute(
                     "UPDATE processes SET record_json = ?2 WHERE process_id = ?1",
                     rusqlite::params![
-                        stale.id,
+                        stale.id.as_str(),
                         serde_json::to_string(&stale).expect("encode stale process projection")
                     ],
                 )
@@ -1184,7 +1189,7 @@ async fn sqlite_store_uses_injected_clock_for_expiry() {
     })
     .await;
     let observation = store
-        .get_session_execution_lease("sqlite-injected-clock-diagnostic")
+        .get_session_execution_lease(&SessionId::from("sqlite-injected-clock-diagnostic"))
         .await
         .expect("read SQLite session-lease diagnostics");
     assert_eq!(
@@ -1361,7 +1366,7 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance(
         move |session_id| {
             let dir = tempfile::tempdir().expect("runtime-persistence conformance tempdir");
             let factory_dir = dir.path().to_path_buf();
-            let session_id = session_id.to_string();
+            let session_id = SessionId::from(session_id.to_string());
             let clock = store_clock.clone();
             let (open, reopen) = sync_await(async move {
                 let factory = SqliteSessionStoreFactory::new(factory_dir)
@@ -1546,7 +1551,7 @@ async fn sqlite_cancelled_queued_append_publishes_usage_exactly_once() {
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -2327,8 +2332,8 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
             }),
             intents: lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
-                    session_id: "sqlite-intent-session".to_string(),
-                    process_id: "sqlite-intent-target".to_string(),
+                    session_id: SessionId::from("sqlite-intent-session"),
+                    process_id: ProcessId::from("sqlite-intent-target"),
                     event_type: "sqlite.intent.recorded".to_string(),
                     payload: serde_json::json!({"literal": true}),
                 },

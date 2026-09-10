@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 pub(crate) struct WorkbenchPluginFactory {
     pub(crate) tavily_api_key: String,
@@ -207,7 +208,7 @@ pub(crate) struct WorkbenchContextBudget {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkbenchContextObservation {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) message_count: usize,
     pub(crate) contribution_count: usize,
     pub(crate) tool_provider_count: usize,
@@ -279,7 +280,7 @@ pub(crate) struct WorkbenchConfigChanges {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkbenchConfigChange {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) previous_model_id: String,
     pub(crate) current_model_id: String,
     pub(crate) service_model_id: String,

@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::plugin::SessionRelation;
 
 /// Coarse durable relation carried by a host-facing session summary.
@@ -39,7 +40,7 @@ impl SessionRelationKind {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct SessionSummary {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub created_at_ms: u64,
     /// Time of the most recent settled runtime commit, or `None` before the
     /// first commit.
@@ -55,7 +56,7 @@ pub struct SessionSummary {
     /// [`Self::parent_session_id`], so they always return `None` here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub durable_relation: Option<SessionRelation>,
-    pub parent_session_id: Option<String>,
+    pub parent_session_id: Option<SessionId>,
     pub deleted: bool,
 }
 

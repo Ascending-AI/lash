@@ -1,3 +1,4 @@
+use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -704,7 +705,7 @@ async fn http_mcp_server(token: &str) -> (String, tokio::task::JoinHandle<()>) {
     )
 }
 
-async fn catalog_names(core: &lash::LashCore, session_id: &str) -> Vec<String> {
+async fn catalog_names(core: &lash::LashCore, session_id: &SessionId) -> Vec<String> {
     core.session(session_id)
         .open()
         .await
@@ -785,7 +786,7 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
 
-    let before = catalog_names(&runtime.core, "mcp-http-before").await;
+    let before = catalog_names(&runtime.core, &SessionId::from("mcp-http-before")).await;
     assert!(
         !before
             .iter()
@@ -802,7 +803,7 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
         .await
         .expect("attach the HTTP MCP server");
 
-    let attached = catalog_names(&runtime.core, "mcp-http-attached").await;
+    let attached = catalog_names(&runtime.core, &SessionId::from("mcp-http-attached")).await;
     for tool in [
         mcp_http_server::WORKSPACE_BADGE_TOOL,
         mcp_http_server::ROOTS_CHANGE_REPORT_TOOL,
@@ -837,7 +838,7 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
         .detach_server(mcp_http_server::SERVER_NAME)
         .await
         .expect("detach the HTTP MCP server");
-    let after = catalog_names(&runtime.core, "mcp-http-after").await;
+    let after = catalog_names(&runtime.core, &SessionId::from("mcp-http-after")).await;
     assert!(
         !after
             .iter()

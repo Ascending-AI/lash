@@ -1,3 +1,4 @@
+use lash::ProcessId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{
@@ -59,12 +60,12 @@ pub(crate) fn document_from_graph(
         let WorkflowDeclaration::Process(process) = declaration else {
             continue;
         };
-        let process_id = process.id.to_string();
+        let process_id = ProcessId::from(process.id.to_string());
         let scope = format!("process:{process_id}");
         let children = node_ids(&process.body);
-        roots.processes.push(process_id.clone());
+        roots.processes.push(process_id.to_string());
         nodes.push(FlowNode {
-            id: process_id.clone(),
+            id: process_id.to_string(),
             node_type: "process".to_string(),
             parent_id: None,
             data: NodeData {
@@ -113,7 +114,7 @@ pub(crate) fn document_from_graph(
         flatten_subgraph(
             &process.body,
             &scope,
-            Some(process_id),
+            Some(process_id.to_string()),
             &mut nodes,
             &mut edges,
         );
@@ -207,7 +208,7 @@ pub(crate) fn graph_from_document(
             baseline_processes.get(process_id).cloned(),
         )?;
         process.body = rebuild_process_body(
-            process_id,
+            &ProcessId::from(process_id),
             &flow_process.data,
             &nodes,
             &baseline_nodes,
@@ -222,7 +223,7 @@ pub(crate) fn graph_from_document(
 }
 
 fn rebuild_process_body(
-    process_id: &str,
+    process_id: &ProcessId,
     data: &NodeData,
     flow_nodes: &BTreeMap<&str, &FlowNode>,
     baseline_nodes: &BTreeMap<String, WorkflowNode>,

@@ -1,4 +1,6 @@
 use super::process::ProcessWakeDelivery;
+use crate::ProcessId;
+use crate::SessionId;
 use crate::store::QueuedWorkClass;
 use crate::{PluginMessage, TurnCause, TurnInput};
 
@@ -35,7 +37,7 @@ impl SessionCommand {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionCommandReceipt {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub batch_id: String,
     pub source_key: String,
 }
@@ -453,7 +455,7 @@ pub struct QueuedWorkItem {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkBatch {
     pub batch_id: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub enqueue_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
@@ -519,7 +521,7 @@ impl QueuedWorkEnqueueOutcome {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(try_from = "QueuedWorkDraftWire")]
 pub struct QueuedWorkBatchDraft {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     /// Structural producer identity for a process wake.
@@ -539,7 +541,7 @@ pub struct QueuedWorkBatchDraft {
 
 impl QueuedWorkBatchDraft {
     pub fn new(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         delivery_policy: DeliveryPolicy,
         payloads: impl Into<QueuedWorkBatchPayloads>,
     ) -> Self {
@@ -563,7 +565,7 @@ impl QueuedWorkBatchDraft {
 
     pub fn with_process_wake_source(
         mut self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         sequence: u64,
     ) -> Self {
         self.process_wake_source = Some(ProcessWakeSource {
@@ -648,7 +650,7 @@ impl QueuedWorkBatchDraft {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessWakeSource {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub sequence: u64,
 }
 
@@ -862,7 +864,7 @@ pub fn process_wake_batch_draft_with_delivery_policy(
     .with_merge_key(PROCESS_WAKE_MERGE_KEY)
 }
 
-pub fn process_wake_source_key(process_id: &str, sequence: u64) -> String {
+pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String {
     format!("process:{process_id}:event:{sequence}:wake")
 }
 
@@ -1060,7 +1062,7 @@ impl serde::Serialize for QueuedWorkBatchDraft {
 
 #[derive(serde::Deserialize)]
 struct QueuedWorkDraftWire {
-    session_id: String,
+    session_id: SessionId,
     source_key: Option<String>,
     process_wake_source: Option<ProcessWakeSource>,
     delivery_policy: DeliveryPolicy,
@@ -1143,7 +1145,7 @@ mod typed_payload_tests {
     fn queued_work_typed_payloads_reject_empty_mixed_and_multiple_commands() {
         let command = serde_json::json!({"type": "session_command", "command": {"kind": "refresh_tool_catalog", "reason": "refresh"}});
         let turn = serde_json::to_value(QueuedWorkPayload::agent_frame_task(
-            crate::facade_support::frame_node_id("s", "f"),
+            crate::facade_support::frame_node_id(&SessionId::from("s"), "f"),
             "task",
             None,
         ))
@@ -1162,7 +1164,7 @@ mod typed_payload_tests {
         // Independent pin of the pre-cutover draft envelope and raw item array.
         #[derive(serde::Serialize)]
         struct WireDraft<'a> {
-            session_id: &'a str,
+            session_id: &'a SessionId,
             #[serde(skip_serializing_if = "Option::is_none")]
             source_key: Option<&'a str>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -1179,7 +1181,7 @@ mod typed_payload_tests {
             reason: "wire-pin".into(),
         };
         let turn = QueuedWorkPayload::agent_frame_task(
-            crate::facade_support::frame_node_id("s", "f"),
+            crate::facade_support::frame_node_id(&SessionId::from("s"), "f"),
             "task",
             None,
         );

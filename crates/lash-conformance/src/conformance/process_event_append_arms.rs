@@ -1,6 +1,8 @@
 //! Cross-backend contract for the two arms of a process-event append.
 
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 /// The two arms of a process-event append leave different durable footprints,
@@ -22,16 +24,16 @@ use pretty_assertions::assert_eq;
 pub(super) async fn process_event_append_arms_are_ordered(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
-    let target_session_id = "append-arm-ordering-target";
+    let target_session_id = SessionId::from("append-arm-ordering-target");
 
     // Entry point 1: the unfenced host append, which reaches the replay arm
     // proper through a repeated replay key.
-    let host_id = "append-arm-host";
+    let host_id = ProcessId::from("append-arm-host");
     registry
         .register_process(
-            registration(host_id)
+            registration(host_id.as_str())
                 .with_extra_event_types([wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.to_string())),
+                .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
         .expect("register host-append arm process");
@@ -42,20 +44,20 @@ pub(super) async fn process_event_append_arms_are_ordered(
         )
         .with_replay_key("append-arm-host:wake:1")
     };
-    let baseline = append_arm_footprint(&registry, host_id, target_session_id).await;
+    let baseline = append_arm_footprint(&registry, &host_id, &target_session_id).await;
     assert_eq!(
         baseline,
         (0, None),
         "a registered process has no events and no sender floor yet"
     );
     let inserted = registry
-        .append_event(host_id, host_request())
+        .append_event(&host_id, host_request())
         .await
         .expect("host append takes the insert arm");
     assert_eq!(inserted.last_event_sequence, inserted.event.sequence);
     assert_eq!(
         registry
-            .get_process(host_id)
+            .get_process(&host_id)
             .await
             .expect("read inserted projection")
             .expect("inserted process")
@@ -64,13 +66,13 @@ pub(super) async fn process_event_append_arms_are_ordered(
         "the record fold and append receipt must carry the inserted event sequence"
     );
     assert_eq!(
-        append_arm_footprint(&registry, host_id, target_session_id).await,
+        append_arm_footprint(&registry, &host_id, &target_session_id).await,
         (1, Some(inserted.event.sequence)),
         "the insert arm writes one event row and advances the floor to it"
     );
     let later = registry
         .append_event(
-            host_id,
+            &host_id,
             ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "later append"}),
@@ -80,7 +82,7 @@ pub(super) async fn process_event_append_arms_are_ordered(
         .await
         .expect("a later host append takes the insert arm");
     let replayed = registry
-        .append_event(host_id, host_request())
+        .append_event(&host_id, host_request())
         .await
         .expect("host append takes the replay arm");
     assert_eq!(replayed.event.sequence, inserted.event.sequence);
@@ -89,16 +91,17 @@ pub(super) async fn process_event_append_arms_are_ordered(
         "a replay receipt reports the process fold position, not the older replayed event"
     );
     assert_eq!(
-        append_arm_footprint(&registry, host_id, target_session_id).await,
+        append_arm_footprint(&registry, &host_id, &target_session_id).await,
         (2, Some(later.event.sequence)),
         "the replay arm writes no event row and leaves the floor where the latest insert put it"
     );
 
     // Entry point 2: unleased completion under an explicit authority.
-    let unleased_id = "append-arm-unleased-completion";
+    let unleased_id = ProcessId::from("append-arm-unleased-completion");
     registry
         .register_process(
-            registration(unleased_id).with_wake_session_id(Some(target_session_id.to_string())),
+            registration(unleased_id.as_str())
+                .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
         .expect("register unleased-completion arm process");
@@ -108,7 +111,7 @@ pub(super) async fn process_event_append_arms_are_ordered(
     assert!(matches!(
         registry
             .complete_process(
-                unleased_id,
+                &unleased_id,
                 unleased_output.clone(),
                 ProcessCompletionAuthority::external_owner(),
             )
@@ -116,20 +119,21 @@ pub(super) async fn process_event_append_arms_are_ordered(
             .expect("unleased completion takes the insert arm"),
         crate::ProcessCompletionOutcome::Committed(_)
     ));
-    let unleased_footprint = append_arm_footprint(&registry, unleased_id, target_session_id).await;
+    let unleased_footprint =
+        append_arm_footprint(&registry, &unleased_id, &target_session_id).await;
     assert_eq!(
         unleased_footprint.0, 1,
         "unleased completion writes exactly one terminal event row"
     );
     assert_eq!(
         unleased_footprint.1,
-        Some(terminal_sequence(&registry, unleased_id).await),
+        Some(terminal_sequence(&registry, &unleased_id).await),
         "unleased completion advances the floor to its terminal event"
     );
     assert!(matches!(
         registry
             .complete_process(
-                unleased_id,
+                &unleased_id,
                 unleased_output,
                 ProcessCompletionAuthority::external_owner(),
             )
@@ -138,22 +142,22 @@ pub(super) async fn process_event_append_arms_are_ordered(
         crate::ProcessCompletionOutcome::AlreadyApplied { .. }
     ));
     assert_eq!(
-        append_arm_footprint(&registry, unleased_id, target_session_id).await,
+        append_arm_footprint(&registry, &unleased_id, &target_session_id).await,
         unleased_footprint,
         "a repeated unleased completion writes no event row and does not move the floor"
     );
 
     // Entry point 3: leased completion.
-    let leased_id = "append-arm-leased-completion";
+    let leased_id = ProcessId::from("append-arm-leased-completion");
     registry
         .register_process(
-            registration(leased_id).with_wake_session_id(Some(target_session_id.to_string())),
+            registration(leased_id.as_str()).with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
         .expect("register leased-completion arm process");
     let lease = registry
         .claim_process_lease(
-            leased_id,
+            &leased_id,
             &crate::LeaseOwnerIdentity::opaque("append-arm-owner", "append-arm-owner:i"),
             60_000,
         )
@@ -171,14 +175,14 @@ pub(super) async fn process_event_append_arms_are_ordered(
             .expect("leased completion takes the insert arm"),
         crate::ProcessCompletionOutcome::Committed(_)
     ));
-    let leased_footprint = append_arm_footprint(&registry, leased_id, target_session_id).await;
+    let leased_footprint = append_arm_footprint(&registry, &leased_id, &target_session_id).await;
     assert_eq!(
         leased_footprint.0, 1,
         "leased completion writes exactly one terminal event row"
     );
     assert_eq!(
         leased_footprint.1,
-        Some(terminal_sequence(&registry, leased_id).await),
+        Some(terminal_sequence(&registry, &leased_id).await),
         "leased completion advances the floor to its terminal event"
     );
     assert!(matches!(
@@ -189,7 +193,7 @@ pub(super) async fn process_event_append_arms_are_ordered(
         crate::ProcessCompletionOutcome::AlreadyApplied { .. }
     ));
     assert_eq!(
-        append_arm_footprint(&registry, leased_id, target_session_id).await,
+        append_arm_footprint(&registry, &leased_id, &target_session_id).await,
         leased_footprint,
         "a repeated leased completion writes no event row and does not move the floor"
     );
@@ -199,8 +203,8 @@ pub(super) async fn process_event_append_arms_are_ordered(
 /// where the sender floor for `target_session_id` stands.
 async fn append_arm_footprint(
     registry: &Arc<dyn crate::ConformanceProcessRegistry>,
-    process_id: &str,
-    target_session_id: &str,
+    process_id: &ProcessId,
+    target_session_id: &SessionId,
 ) -> (usize, Option<u64>) {
     let events = registry
         .events_after(process_id, 0)
@@ -216,7 +220,7 @@ async fn append_arm_footprint(
 
 async fn terminal_sequence(
     registry: &Arc<dyn crate::ConformanceProcessRegistry>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> u64 {
     registry
         .events_after(process_id, 0)

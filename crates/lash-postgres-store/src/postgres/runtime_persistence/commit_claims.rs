@@ -14,7 +14,7 @@ pub(super) async fn complete_queued_work_claims_tx(
                    AND claim_id = $3
                    AND claim_token = $4",
             )
-            .bind(&completed.session_id)
+            .bind(completed.session_id.as_str())
             .bind(batch_id)
             .bind(&completed.claim_id)
             .bind(&completed.lease_token)
@@ -33,7 +33,7 @@ pub(super) async fn complete_queued_work_claims_tx(
                  ORDER BY item.item_index ASC
                  LIMIT 1",
             )
-            .bind(&completed.session_id)
+            .bind(completed.session_id.as_str())
             .bind(batch_id)
             .bind(&completed.claim_id)
             .bind(&completed.lease_token)
@@ -69,8 +69,8 @@ pub(super) async fn complete_queued_work_claims_tx(
                          EXCLUDED.allocation_floor
                      )",
                 )
-                .bind(&completed.session_id)
-                .bind(process_id)
+                .bind(completed.session_id.as_str())
+                .bind(process_id.as_str())
                 .bind(sequence as i64)
                 .execute(&mut **tx)
                 .await
@@ -80,7 +80,7 @@ pub(super) async fn complete_queued_work_claims_tx(
                 "DELETE FROM lash_queued_work_batches
                  WHERE session_id = $1 AND batch_id = $2 AND claim_id = $3 AND claim_token = $4",
             )
-            .bind(&completed.session_id)
+            .bind(completed.session_id.as_str())
             .bind(batch_id)
             .bind(&completed.claim_id)
             .bind(&completed.lease_token)
@@ -138,13 +138,13 @@ pub(crate) async fn complete_turn_input_claims_tx(
                        AND claim_id = $4
                        AND claim_token = $5",
                 )
-                .bind(&completed.session_id)
+                .bind(completed.session_id.as_str())
                 .bind(input_id)
                 .bind(lash_core::TurnInputState::Completed.as_str())
                 .bind(&claim.claim_id)
                 .bind(&claim.lease_token),
                 None => sqlx::query(&unclaimed_settlement_statement)
-                    .bind(&completed.session_id)
+                    .bind(completed.session_id.as_str())
                     .bind(input_id)
                     .bind(lash_core::TurnInputState::Completed.as_str()),
             }

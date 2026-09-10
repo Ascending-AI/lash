@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use serde_json::json;
 
 use super::super::model::{
@@ -44,7 +46,7 @@ fn process_execution_env_identity_golden_corpus() {
                 sampling: crate::SamplingCapability::Pinned,
             }),
         provider_id: "provider".to_string(),
-        session_id: Some("session".to_string()),
+        session_id: Some(SessionId::from("session")),
         autonomous: true,
         turn_budget: crate::TurnBudget::bounded(1),
         no_progress_budget: Default::default(),
@@ -97,7 +99,7 @@ fn process_value(component: &str, pos: usize, name: &str) -> serde_json::Value {
 }
 
 fn engine_entry(
-    process_id: &str,
+    process_id: &ProcessId,
     definition: serde_json::Value,
     process_name: &str,
     status: ProcessStatus,
@@ -133,7 +135,7 @@ fn engine_entry(
 fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
     let process_ref = process_value("target", 0, "target");
     let mut waiting_entry = engine_entry(
-        "waiting",
+        &ProcessId::from("waiting"),
         process_ref.clone(),
         "target",
         ProcessStatus::Waiting,
@@ -147,7 +149,12 @@ fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
             ordinal: 1,
         },
     });
-    let idle_entry = engine_entry("idle", process_ref, "target", ProcessStatus::Running);
+    let idle_entry = engine_entry(
+        &ProcessId::from("idle"),
+        process_ref,
+        "target",
+        ProcessStatus::Running,
+    );
     let waiting_filter = ProcessListFilter::decode(&json!({ "status": {"in": ["waiting"]} }))
         .expect("decode waiting filter");
     let idle_filter =

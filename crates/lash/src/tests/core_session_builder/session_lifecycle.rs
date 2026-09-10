@@ -112,7 +112,7 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
     }
 }
 
-fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
+fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     let historical_policy = lash_core::SessionPolicy {
         provider_id: "persisted-provider".to_string(),
         model: model_spec("historical-model", None, 11_111),
@@ -124,7 +124,7 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: session_id.clone(),
         policy: historical_policy.clone(),
         agent_frames: Vec::new(),
         current_frame_node_id: None,
@@ -419,14 +419,14 @@ fn core_with_commit_budget(commit_budget: crate::CommitBudget) -> Result<LashCor
     .build(crate::testing::runtime_lease_owner())
 }
 
-fn pending_park_state(session_id: &str, text: &str) -> RuntimeSessionState {
+fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSessionState {
     let policy = lash_core::SessionPolicy {
         provider_id: mock_provider().kind().to_string(),
         model: mock_model_spec(),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState::new(policy);
-    state.session_id = session_id.to_string();
+    state.session_id = session_id.into();
     state.ensure_agent_frame_initialized();
     state.append_active_conversation_messages(&[text_message(lash_core::MessageRole::User, text)]);
     state
@@ -1296,9 +1296,9 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
         .admin()
         .children()
         .create_session(SessionCreateRequest {
-            session_id: Some("rlm-child-bad-extras".to_string()),
+            session_id: Some(SessionId::from("rlm-child-bad-extras")),
             relation: lash_core::SessionRelation::Child {
-                parent_session_id: "rlm-root".to_string(),
+                parent_session_id: SessionId::from("rlm-root"),
                 caused_by: None,
             },
             start: lash_core::SessionStartPoint::Empty,
@@ -1391,7 +1391,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id),
         policy,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1426,7 +1426,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
 #[tokio::test]
 async fn store_factory_reopens_persisted_session_state() -> Result<()> {
     let mut state = RuntimeSessionState {
-        session_id: "persisted".to_string(),
+        session_id: SessionId::from("persisted"),
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
@@ -1466,7 +1466,7 @@ async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
     persisted_policy.model = mock_model_spec();
     persisted_policy.prompt = expected_prompt.clone();
     let persisted = RuntimeSessionState {
-        session_id: "committed-session".to_string(),
+        session_id: SessionId::from("committed-session"),
         policy: persisted_policy,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1561,7 +1561,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
 
     core.delete_session(
         "deleted-while-parked",
-        session_delete_scope(&core, "deleted-while-parked").await,
+        session_delete_scope(&core, &SessionId::from("deleted-while-parked")).await,
     )
     .await?;
     assert!(
@@ -1642,7 +1642,7 @@ fn session_policy_serializes_provider_id_without_provider_config() -> Result<()>
 #[tokio::test]
 async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> {
     let mut state = RuntimeSessionState {
-        session_id: "provider-rebind".to_string(),
+        session_id: SessionId::from("provider-rebind"),
         policy: lash_core::SessionPolicy {
             provider_id: "embed-test".to_string(),
             model: mock_model_spec(),
@@ -1682,7 +1682,7 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
 #[tokio::test]
 async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> {
     let mut state = RuntimeSessionState {
-        session_id: "provider-mismatch".to_string(),
+        session_id: SessionId::from("provider-mismatch"),
         policy: lash_core::SessionPolicy {
             provider_id: "other-provider".to_string(),
             model: mock_model_spec(),
@@ -1723,7 +1723,7 @@ async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> 
 #[tokio::test]
 async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> {
     let mut state = RuntimeSessionState {
-        session_id: "frame-provider-mismatch".to_string(),
+        session_id: SessionId::from("frame-provider-mismatch"),
         policy: lash_core::SessionPolicy {
             provider_id: "embed-test".to_string(),
             model: mock_model_spec(),
@@ -1779,7 +1779,7 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
 #[tokio::test]
 async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> {
     let mut state = RuntimeSessionState {
-        session_id: "refresh-provider-mismatch".to_string(),
+        session_id: SessionId::from("refresh-provider-mismatch"),
         policy: lash_core::SessionPolicy {
             provider_id: "embed-test".to_string(),
             model: mock_model_spec(),
@@ -1879,7 +1879,7 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
     let report = core
         .delete_session(
             "delete-session",
-            session_delete_scope(&core, "delete-session").await,
+            session_delete_scope(&core, &SessionId::from("delete-session")).await,
         )
         .await?;
     // The tombstone the factory now keeps is the answer a resume needs; a
@@ -1935,7 +1935,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
     ] {
         let session = core.session(session_id).open().await?;
         factory
-            .delete_session(session_id)
+            .delete_session(&SessionId::from(session_id))
             .await
             .expect("retire session before public state append");
 
@@ -1973,7 +1973,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
             format!(
                 "runtime session error: failed to persist runtime state: {}",
                 lash_core::StoreError::SessionDeleted {
-                    session_id: session_id.to_string(),
+                    session_id: SessionId::from(session_id),
                 }
             )
         );
@@ -1984,7 +1984,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
 #[tokio::test]
 async fn store_session_id_mismatch_is_rejected() -> Result<()> {
     let state = RuntimeSessionState {
-        session_id: "actual-session".to_string(),
+        session_id: SessionId::from("actual-session"),
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
@@ -2019,7 +2019,7 @@ async fn store_session_id_mismatch_is_rejected() -> Result<()> {
 #[tokio::test]
 async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<()> {
     let mut state = RuntimeSessionState {
-        session_id: "manual-state".to_string(),
+        session_id: SessionId::from("manual-state"),
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
@@ -2092,7 +2092,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
 
     let session_id = "reconcile-open";
     let builder_model = model_spec("builder-model", None, 77_777);
-    let persisted = conflicting_reopen_state(session_id);
+    let persisted = conflicting_reopen_state(&SessionId::from(session_id));
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(SnapshotStore::with_state(persisted));
@@ -2198,7 +2198,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     let tool_access = lash_core::SessionToolAccess::default();
     let child = tier
         .build_session_request(lash_subagents::SubagentSpawnContext {
-            parent_session_id: session_id,
+            parent_session_id: &SessionId::from(session_id),
             parent_snapshot: &parent_snapshot,
             session_spec: &session_spec,
             base_tool_access: &tool_access,
@@ -2236,7 +2236,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
 #[tokio::test]
 async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history() -> Result<()> {
     let session_id = "reconcile-open-with-state";
-    let persisted = conflicting_reopen_state(session_id);
+    let persisted = conflicting_reopen_state(&SessionId::from(session_id));
     let supplied_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let builder_model = model_spec("builder-model", None, 77_777);
@@ -2284,19 +2284,19 @@ async fn open_with_state_keeps_supplied_policy_without_rewriting_frame_history()
 #[tokio::test]
 async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history() -> Result<()> {
     let session_id = "reconcile-queued-worker";
-    let persisted = conflicting_reopen_state(session_id);
+    let persisted = conflicting_reopen_state(&SessionId::from(session_id));
     let durable_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let store = SnapshotStore::with_state(persisted);
     let policy = lash_core::SessionPolicy {
         provider_id: "builder-provider".to_string(),
         model: model_spec("builder-model", None, 77_777),
-        session_id: Some(session_id.to_string()),
+        session_id: Some(SessionId::from(session_id)),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
 
     let state = crate::session::load_state_from_store(
-        session_id,
+        &SessionId::from(session_id),
         &policy,
         &store,
         &lash_core::LeaseOwnerIdentity::opaque("queued-worker-test", "incarnation"),
@@ -2345,9 +2345,9 @@ async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
         .admin()
         .children()
         .create_session(SessionCreateRequest {
-            session_id: Some("managed-child-store".to_string()),
+            session_id: Some(SessionId::from("managed-child-store")),
             relation: lash_core::SessionRelation::Child {
-                parent_session_id: "root-with-child-store".to_string(),
+                parent_session_id: SessionId::from("root-with-child-store"),
                 caused_by: None,
             },
             start: lash_core::SessionStartPoint::Empty,
@@ -2366,8 +2366,8 @@ async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
     assert_eq!(
         factory.session_ids(),
         vec![
-            "root-with-child-store".to_string(),
-            "managed-child-store".to_string()
+            SessionId::from("root-with-child-store"),
+            SessionId::from("managed-child-store")
         ]
     );
     Ok(())
@@ -2376,7 +2376,7 @@ async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
 #[tokio::test]
 async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> {
     let reused_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(BoundSessionStore {
-        session_id: "root-store".to_string(),
+        session_id: SessionId::from("root-store"),
     });
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
@@ -2391,9 +2391,9 @@ async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> 
         .admin()
         .children()
         .create_session(SessionCreateRequest {
-            session_id: Some("child-needs-own-store".to_string()),
+            session_id: Some(SessionId::from("child-needs-own-store")),
             relation: lash_core::SessionRelation::Child {
-                parent_session_id: "root-store".to_string(),
+                parent_session_id: SessionId::from("root-store"),
                 caused_by: None,
             },
             start: lash_core::SessionStartPoint::Empty,
@@ -2436,9 +2436,9 @@ async fn explicit_root_store_keeps_configured_child_store_factory() -> Result<()
         .admin()
         .children()
         .create_session(SessionCreateRequest {
-            session_id: Some("explicit-root-child".to_string()),
+            session_id: Some(SessionId::from("explicit-root-child")),
             relation: lash_core::SessionRelation::Child {
-                parent_session_id: "explicit-root-store".to_string(),
+                parent_session_id: SessionId::from("explicit-root-store"),
                 caused_by: None,
             },
             start: lash_core::SessionStartPoint::Empty,
@@ -2456,7 +2456,7 @@ async fn explicit_root_store_keeps_configured_child_store_factory() -> Result<()
 
     assert_eq!(
         factory.session_ids(),
-        vec!["explicit-root-child".to_string()]
+        vec![SessionId::from("explicit-root-child")]
     );
     Ok(())
 }
@@ -2464,7 +2464,7 @@ async fn explicit_root_store_keeps_configured_child_store_factory() -> Result<()
 #[tokio::test]
 async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Result<()> {
     let mut explicit_state = RuntimeSessionState {
-        session_id: "store-precedence".to_string(),
+        session_id: SessionId::from("store-precedence"),
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),

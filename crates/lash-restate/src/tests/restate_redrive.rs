@@ -309,7 +309,7 @@ pub(super) async fn fig779_sleep_suspension_and_cancellation_preserve_recorded_p
 /// commands are the deployed journal: the call, then the timer.
 pub(super) async fn park_process_on_its_timer(
     endpoint: &Endpoint,
-    process_id: &str,
+    process_id: &ProcessId,
     input: &RestateProcessWorkflowInput,
 ) -> Vec<u8> {
     let recording = invoke_endpoint(endpoint, "LashProcessWorkflow", "run", process_id, input)
@@ -381,7 +381,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         "https://restate.invalid",
         Arc::new(Fig779DurableCancelTransport {
             registry: Arc::clone(&registry),
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
         }),
     ));
     let endpoint = Endpoint::builder()
@@ -402,13 +402,13 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         execution_id: None,
     };
 
-    let parked = park_process_on_its_timer(&endpoint, process_id, &input).await;
+    let parked = park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
 
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                process_id,
+                &ProcessId::from(process_id),
                 Some("cancel while suspended".to_string()),
             ),
         )
@@ -442,7 +442,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
     );
     assert!(matches!(
         registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read process")
             .expect("read redriven process")
@@ -477,14 +477,14 @@ pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_comm
         execution_id: None,
     };
 
-    let parked = park_process_on_its_timer(&endpoint, process_id, &input).await;
+    let parked = park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
 
     let stored = process_cancellation("terminal outcome landed between attempts", None);
     registry
         .complete_process(
-            process_id,
+            &ProcessId::from(process_id),
             stored.clone(),
-            workflow_key_authority(process_id),
+            workflow_key_authority(&ProcessId::from(process_id)),
         )
         .await
         .expect("store terminal outcome between attempts");
@@ -522,10 +522,17 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         .register_process(registration.clone())
         .await
         .expect("register ordinal-one process");
-    let (execution_authority, started) =
-        invocation_started(process_id, "fig788-ordinal-one-execution", 1);
+    let (execution_authority, started) = invocation_started(
+        &ProcessId::from(process_id),
+        "fig788-ordinal-one-execution",
+        1,
+    );
     registry
-        .record_first_started_with_authority(process_id, started, &execution_authority)
+        .record_first_started_with_authority(
+            &ProcessId::from(process_id),
+            started,
+            &execution_authority,
+        )
         .await
         .expect("record retained Restate execution start");
     let persisted = lash_core::PersistedSegmentHandover {
@@ -537,7 +544,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         },
     };
     continuations
-        .put_segment_handover(process_id, persisted.clone())
+        .put_segment_handover(&ProcessId::from(process_id), persisted.clone())
         .await
         .expect("persist ordinal-one handover");
     let endpoint = Endpoint::builder()
@@ -574,7 +581,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     );
     assert_eq!(
         continuations
-            .get_segment_handover(process_id, 1)
+            .get_segment_handover(&ProcessId::from(process_id), 1)
             .await
             .expect("read handover during terminal delivery"),
         Some(persisted.clone()),
@@ -588,7 +595,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         .await
         .expect("ordinal-one redrive must reconstruct and resolve the terminal prefix");
     let stored = registry
-        .get_process(process_id)
+        .get_process(&ProcessId::from(process_id))
         .await
         .expect("read terminal process")
         .expect("terminal process record")
@@ -602,7 +609,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     );
     assert_eq!(
         continuations
-            .get_segment_handover(process_id, 1)
+            .get_segment_handover(&ProcessId::from(process_id), 1)
             .await
             .expect("read handover after terminal delivery"),
         Some(persisted),
@@ -619,15 +626,22 @@ pub(super) async fn fig811_post_terminal_redrive_replays_delivery_after_handover
         .register_process(registration.clone())
         .await
         .expect("register FIG-811 segmented process");
-    let (execution_authority, started) =
-        invocation_started(process_id, "fig811-post-terminal-execution", 1);
+    let (execution_authority, started) = invocation_started(
+        &ProcessId::from(process_id),
+        "fig811-post-terminal-execution",
+        1,
+    );
     registry
-        .record_first_started_with_authority(process_id, started, &execution_authority)
+        .record_first_started_with_authority(
+            &ProcessId::from(process_id),
+            started,
+            &execution_authority,
+        )
         .await
         .expect("record retained Restate execution start");
     continuations
         .put_segment_handover(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
                 handover: lash_core::SegmentHandover {
@@ -668,14 +682,14 @@ pub(super) async fn fig811_post_terminal_redrive_replays_delivery_after_handover
         ]
     );
     let stored = registry
-        .get_process(process_id)
+        .get_process(&ProcessId::from(process_id))
         .await
         .expect("read terminal process")
         .expect("terminal process record")
         .outcome
         .expect("stored terminal outcome");
     continuations
-        .delete_segment_handovers(process_id)
+        .delete_segment_handovers(&ProcessId::from(process_id))
         .await
         .expect("model crash after delivery and handover cleanup");
 
@@ -701,15 +715,22 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         .register_process(registration.clone())
         .await
         .expect("register effectful FIG-811 process");
-    let (execution_authority, started) =
-        invocation_started(process_id, "fig811-effectful-terminal-execution", 1);
+    let (execution_authority, started) = invocation_started(
+        &ProcessId::from(process_id),
+        "fig811-effectful-terminal-execution",
+        1,
+    );
     registry
-        .record_first_started_with_authority(process_id, started, &execution_authority)
+        .record_first_started_with_authority(
+            &ProcessId::from(process_id),
+            started,
+            &execution_authority,
+        )
         .await
         .expect("record retained effectful Restate execution start");
     continuations
         .put_segment_handover(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
                 handover: lash_core::SegmentHandover {
@@ -747,7 +768,8 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         execution_id: Some("fig811-effectful-terminal-execution".to_string()),
     };
 
-    let effect_suspension = park_process_on_its_timer(&endpoint, process_id, &input).await;
+    let effect_suspension =
+        park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
     assert!(trace_sink.records.lock_recover().iter().any(|record| {
         record.event.kind() == "durable_timer_started"
             && record.context.run_id.as_deref() == Some("fig811-workflow-trace")
@@ -822,7 +844,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     .await
     .expect("terminal delivery should complete before the modeled crash");
     let stored = registry
-        .get_process(process_id)
+        .get_process(&ProcessId::from(process_id))
         .await
         .expect("read effectful terminal process")
         .expect("effectful terminal process record")
@@ -893,9 +915,9 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
 
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                process_id,
+                &ProcessId::from(process_id),
                 Some("cancel landed after successor send".to_string()),
             ),
         )

@@ -413,7 +413,7 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     );
 
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     let selected = store
         .enqueue_queued_work(
@@ -421,7 +421,10 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
                 session_id,
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(session_id, "selected-start"),
+                    lash_core::facade_support::frame_node_id(
+                        &SessionId::from(session_id),
+                        "selected-start",
+                    ),
                     "selected queued builder",
                     None,
                 ),
@@ -448,7 +451,10 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
                 session_id,
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(session_id, "scoped-selected-start"),
+                    lash_core::facade_support::frame_node_id(
+                        &SessionId::from(session_id),
+                        "scoped-selected-start",
+                    ),
                     "scoped selected queued builder",
                     None,
                 ),
@@ -727,7 +733,7 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
         let store = store_factory
             .create_store(&crate::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session.session_id().to_string(),
+                session_id: SessionId::from(session.session_id()),
                 relation: crate::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
             })
@@ -738,7 +744,7 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(
-                        &session.session_id(),
+                        &SessionId::from(session.session_id()),
                         "oversized-frame",
                     ),
                     "w".repeat(64 * 1024),
@@ -832,7 +838,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
     let session_id = "selected-queued-turn-key-break-refusal";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     let enqueue = |source_key: &'static str, merge_key: &'static str| {
         let store = Arc::clone(&store);
@@ -844,7 +850,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
                         lash_core::DeliveryPolicy::EarliestSafeBoundary,
                         crate::persistence::TurnWorkPayload::agent_frame_task(
                             lash_core::facade_support::frame_node_id(
-                                session_id,
+                                &SessionId::from(session_id),
                                 "selected-refusal-frame",
                             ),
                             source_key,
@@ -920,7 +926,7 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
     let session_id = "selected-interrupted-composition";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     for source_key in ["interrupted-w1", "interrupted-w2"] {
         store
@@ -929,7 +935,10 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
                     crate::persistence::TurnWorkPayload::agent_frame_task(
-                        lash_core::facade_support::frame_node_id(session_id, "interrupted-frame"),
+                        lash_core::facade_support::frame_node_id(
+                            &SessionId::from(session_id),
+                            "interrupted-frame",
+                        ),
                         source_key,
                         None,
                     ),
@@ -945,14 +954,19 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
         "selected-interrupted-owner-a:incarnation",
     );
     let lease_a = store
-        .try_claim_session_execution_lease(session_id, &owner_a, "owner-a-executor", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &owner_a,
+            "owner-a-executor",
+            60_000,
+        )
         .await
         .expect("claim predecessor session execution lease")
         .acquired()
         .expect("predecessor session execution lane is free");
     let claim_a = store
         .claim_ready_queued_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease_a.fence(),
             &owner_a,
             crate::persistence::QueuedWorkClaimBoundary::Idle,
@@ -1055,7 +1069,7 @@ pub(super) async fn selected_queued_turn_reports_claimed_now_and_already_satisfi
     let session_id = "selected-idempotent-outcome";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     let batch = store
         .enqueue_queued_work(
@@ -1063,7 +1077,10 @@ pub(super) async fn selected_queued_turn_reports_claimed_now_and_already_satisfi
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(session_id, "selected-outcome-frame"),
+                    lash_core::facade_support::frame_node_id(
+                        &SessionId::from(session_id),
+                        "selected-outcome-frame",
+                    ),
                     "selected-outcome-task",
                     None,
                 ),
@@ -1129,7 +1146,7 @@ pub(super) async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_bu
     let session_id = "selected-duplicate-absent";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
 
     let expected = vec![
@@ -1150,7 +1167,12 @@ pub(super) async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_bu
         "selected-duplicate-absent-holder:incarnation",
     );
     let held_lease = store
-        .try_claim_session_execution_lease(session_id, &held_owner, "held-executor", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &held_owner,
+            "held-executor",
+            60_000,
+        )
         .await
         .expect("claim held session execution lease")
         .acquired()
@@ -1195,7 +1217,7 @@ pub(super) async fn selected_queued_turn_deduplicates_present_claimable_id() -> 
     let session_id = "selected-duplicate-present";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     let batch = store
         .enqueue_queued_work(
@@ -1204,7 +1226,7 @@ pub(super) async fn selected_queued_turn_deduplicates_present_claimable_id() -> 
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(
-                        session_id,
+                        &SessionId::from(session_id),
                         "selected-duplicate-present-frame",
                     ),
                     "selected-duplicate-present-task",
@@ -1303,7 +1325,7 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
     let session_id = "selected-two-interrupted-compositions";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     for source_key in ["claim-a1", "claim-a2", "claim-b1", "claim-b2"] {
         store
@@ -1312,7 +1334,10 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
                     crate::persistence::TurnWorkPayload::agent_frame_task(
-                        lash_core::facade_support::frame_node_id(session_id, "two-claims-frame"),
+                        lash_core::facade_support::frame_node_id(
+                            &SessionId::from(session_id),
+                            "two-claims-frame",
+                        ),
                         source_key,
                         None,
                     ),
@@ -1329,7 +1354,7 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
     );
     let predecessor_lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &predecessor_owner,
             "predecessor-executor",
             60_000,
@@ -1340,7 +1365,7 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         .expect("predecessor session execution lane is free");
     let claim_a = store
         .claim_ready_queued_work(
-            session_id,
+            &SessionId::from(session_id),
             &predecessor_lease.fence(),
             &predecessor_owner,
             crate::persistence::QueuedWorkClaimBoundary::Idle,
@@ -1352,7 +1377,7 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         .expect("predecessor A exists");
     let claim_b = store
         .claim_ready_queued_work(
-            session_id,
+            &SessionId::from(session_id),
             &predecessor_lease.fence(),
             &predecessor_owner,
             crate::persistence::QueuedWorkClaimBoundary::Idle,
@@ -1508,7 +1533,7 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
     let session_id = "selected-redrive-over-row-limit";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     for source_key in [
         "selected-limit-w1",
@@ -1522,7 +1547,7 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
                     crate::persistence::TurnWorkPayload::agent_frame_task(
                         lash_core::facade_support::frame_node_id(
-                            session_id,
+                            &SessionId::from(session_id),
                             "selected-limit-frame",
                         ),
                         source_key,
@@ -1541,7 +1566,7 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
     );
     let predecessor_lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &predecessor_owner,
             "predecessor-executor",
             60_000,
@@ -1552,7 +1577,7 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
         .expect("selected row-limit predecessor lane is free");
     let predecessor_claim = store
         .claim_ready_queued_work(
-            session_id,
+            &SessionId::from(session_id),
             &predecessor_lease.fence(),
             &predecessor_owner,
             crate::persistence::QueuedWorkClaimBoundary::Idle,
@@ -1624,7 +1649,7 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
     let session_id = "selected-execution-lane-busy";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("opened session retains its in-memory store");
     store
         .enqueue_queued_work(
@@ -1632,7 +1657,10 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(session_id, "busy-frame"),
+                    lash_core::facade_support::frame_node_id(
+                        &SessionId::from(session_id),
+                        "busy-frame",
+                    ),
                     "busy-w1",
                     None,
                 ),
@@ -1646,7 +1674,12 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
         "selected-busy-holder:incarnation",
     );
     let held_lease = store
-        .try_claim_session_execution_lease(session_id, &held_owner, "held-executor", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &held_owner,
+            "held-executor",
+            60_000,
+        )
         .await
         .expect("claim held session execution lease")
         .acquired()
@@ -1872,7 +1905,7 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
     let session_id = "selected-explicit-effects";
     let session = core.session(session_id).open().await?;
     let store = store_factory
-        .raw_store_for_testing(session_id)
+        .raw_store_for_testing(&SessionId::from(session_id))
         .expect("session store");
     let receipt = store
         .enqueue_queued_work(
@@ -1880,7 +1913,10 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
                 session_id,
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(session_id, "selected-handler"),
+                    lash_core::facade_support::frame_node_id(
+                        &SessionId::from(session_id),
+                        "selected-handler",
+                    ),
                     "selected handler",
                     None,
                 ),

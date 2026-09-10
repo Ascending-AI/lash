@@ -17,7 +17,7 @@ pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
 use super::ProcessAdmissionReport;
 use super::process::{ProcessRegistry, WatchedRegistry};
-use crate::{PluginError, ProcessAwaitOutput};
+use crate::{PluginError, ProcessAwaitOutput, SessionId};
 
 /// Deployment port for durable **queued session work**: work already committed
 /// to a session's durable queue that something must be told about and drain.
@@ -66,11 +66,11 @@ pub enum SessionWorkTarget {
     /// All sessions with claimable queued work.
     Any,
     /// One identified session.
-    Session(String),
+    Session(SessionId),
 }
 
 impl SessionWorkTarget {
-    fn as_session_id(&self) -> Option<&str> {
+    fn as_session_id(&self) -> Option<&SessionId> {
         match self {
             Self::Any => None,
             Self::Session(session_id) => Some(session_id),
@@ -209,12 +209,12 @@ mod tests {
         let port = NoQueuedWork::new();
 
         port.notify_session_work(
-            SessionWorkTarget::Session("deferred-session".to_string()),
+            SessionWorkTarget::Session(SessionId::from("deferred-session")),
             "test-notify",
         );
         let outcome = port
             .drain_session_work(
-                SessionWorkTarget::Session("deferred-session".to_string()),
+                SessionWorkTarget::Session(SessionId::from("deferred-session")),
                 "session_command",
             )
             .await

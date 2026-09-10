@@ -1,5 +1,7 @@
 use super::super::*;
 use super::harness::AgentScenarioRun;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeSet;
 
@@ -13,7 +15,7 @@ pub(super) struct GraphContract {
 #[derive(Debug)]
 struct GraphFact {
     graph_key: String,
-    session_id: String,
+    session_id: SessionId,
     turn_id: Option<TurnId>,
     subject_kind: String,
     subject_id: String,
@@ -63,7 +65,7 @@ impl GraphContract {
                     (format!("effect:{kind}"), effect_id.clone())
                 }
                 crate::tracing::TraceRuntimeSubject::Process { process_id } => {
-                    ("process".to_string(), process_id.clone())
+                    ("process".to_string(), process_id.to_string())
                 }
             };
             facts.push(GraphFact {
@@ -406,7 +408,7 @@ pub(super) fn assert_min_completed_process_graphs(contract: &GraphContract, expe
 
 pub(super) fn assert_min_completed_child_session_exec_graphs(
     run: &AgentScenarioRun,
-    root_session_id: &str,
+    root_session_id: &SessionId,
     expected_min: usize,
 ) {
     if expected_min == 0 {
@@ -464,8 +466,8 @@ pub(super) fn assert_subagent_bridge_exec_graphs(
 
 pub(super) fn assert_session_turn_child_graph(
     run: &AgentScenarioRun,
-    child_session_id: &str,
-    process_id: &str,
+    child_session_id: &SessionId,
+    process_id: &ProcessId,
 ) {
     let graph = run
         .graph_snapshots

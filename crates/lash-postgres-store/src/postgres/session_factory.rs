@@ -18,7 +18,7 @@ pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
 ];
 
 impl PostgresSessionStoreFactory {
-    fn store_for(&self, session_id: String) -> PostgresSessionStore {
+    fn store_for(&self, session_id: SessionId) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::clone(&self.clock),
@@ -56,7 +56,7 @@ impl PostgresSessionStoreFactory {
                 SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
              )",
         )
-        .bind(&request.session_id)
+        .bind(request.session_id.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -128,10 +128,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn open_existing_store_by_id(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
         lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
-        let store = self.store_for(session_id.to_string());
+        let store = self.store_for(session_id.clone());
         if store
             .load_session_meta()
             .await
@@ -163,7 +163,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                   AND pti.state = $3
             )",
         )
-        .bind(&request.session_id)
+        .bind(request.session_id.as_str())
         .bind(now_epoch_ms as i64)
         .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
         .fetch_one(&self.pool)
@@ -172,14 +172,14 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .map_err(store_sqlx_error)
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         sqlx::query_scalar(
             "SELECT EXISTS(
                 SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
              )",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .fetch_one(&self.pool)
         .await
         .map_err(|err| err.to_string())
@@ -187,7 +187,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         lash_core::store::validate_session_id(session_id)
             .map_err(lash_core::MaintenanceFailure::failed_before_any_work)?;
@@ -248,7 +248,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             return Ok(lash_core::ForkPoint {
                 node_id: node_id.to_string(),
                 checkpoint_ref: checkpoint_ref.into(),
-                source_session_id,
+                source_session_id: SessionId::from(source_session_id),
                 config,
                 pinned: true,
             });
@@ -271,7 +271,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         )
         .bind(node_id)
         .bind(&checkpoint_ref)
-        .bind(&source_session_id)
+        .bind(source_session_id.as_str())
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -344,7 +344,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 config: crate::support::retained_fork_config_tx(&mut tx, &node_id).await?,
                 node_id,
                 checkpoint_ref: BlobRef(row.get(1)),
-                source_session_id: row.get(2),
+                source_session_id: SessionId::from(row.get::<String, _>(2)),
                 pinned: row.get(3),
             });
         }
@@ -371,7 +371,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                     SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
                 )",
         )
-        .bind(&request.session_id)
+        .bind(request.session_id.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -403,7 +403,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                  SELECT 1 FROM lash_session_meta WHERE session_id = $1
              )",
         )
-        .bind(&request.session_id)
+        .bind(request.session_id.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -417,7 +417,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
              )",
         )
-        .bind(&request.session_id)
+        .bind(request.session_id.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -495,7 +495,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             edge_path.push(lash_core::store::ForkNodeFacts {
                 node_id: facts.0,
                 parent_node_id: facts.1,
-                owning_session_id: facts.2,
+                owning_session_id: SessionId::from(facts.2),
                 generation,
             });
             if expected_generation == 0 {
@@ -529,7 +529,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
              (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
              VALUES ($1, 0, $2, $3, $4)",
         )
-        .bind(&request.session_id)
+        .bind(request.session_id.as_str())
         .bind(encode_json(&head.payload())?)
         .bind(&checkpoint_ref)
         .bind(&request.node_id)
@@ -543,7 +543,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                  VALUES ($1, $2, $3, $4)",
             )
             .bind(fork_plan.session_id())
-            .bind(&ancestor.ancestor_session_id)
+            .bind(ancestor.ancestor_session_id.as_str())
             .bind(&ancestor.fork_node_id)
             .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
                 StoreError::Backend("fork generation does not fit PostgreSQL BIGINT".to_string())
@@ -583,10 +583,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn read_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<lash_core::SessionReadView>, StoreError> {
         lash_core::store::validate_session_id(session_id)?;
-        let store = self.store_for(session_id.to_string());
+        let store = self.store_for(session_id.clone());
         lash_core::store::load_persisted_session_read_view(&store).await
     }
 }
@@ -767,7 +767,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
 
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     report: &mut lash_core::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
@@ -778,7 +778,7 @@ pub(crate) async fn delete_session_tx(
              SELECT 1 FROM lash_sessions WHERE session_id = $1
          )",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -796,7 +796,7 @@ pub(crate) async fn delete_session_tx(
              WHERE meta.session_id = $1
              ON CONFLICT (session_id) DO NOTHING",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -807,7 +807,7 @@ pub(crate) async fn delete_session_tx(
              VALUES ($1, 0, NULL, 0, 'root', NULL)
              ON CONFLICT (session_id) DO NOTHING",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -820,7 +820,7 @@ pub(crate) async fn delete_session_tx(
         "SELECT leaf_node_id, checkpoint_ref FROM lash_sessions
          WHERE session_id = $1",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -840,7 +840,7 @@ pub(crate) async fn delete_session_tx(
     .await?;
     report.enumerated_blob_count = candidates.len();
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
-        .bind(session_id)
+        .bind(session_id.as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -865,7 +865,7 @@ pub(crate) async fn delete_session_tx(
            )
          ORDER BY g.generation DESC",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -885,7 +885,7 @@ pub(crate) async fn delete_session_tx(
            AND (session_id = $1
                 OR session_id IN (SELECT session_id FROM lash_deleted_sessions))",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -901,7 +901,7 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_session_meta WHERE session_id = $1",
     ] {
         sqlx::query(sql)
-            .bind(session_id)
+            .bind(session_id.as_str())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -942,12 +942,13 @@ pub(crate) async fn delete_session_tx(
 /// one of them could never be reached by a session-scoped vacuum again.
 pub(crate) async fn delete_process_sessions_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_ids: &[String],
+    session_ids: &[SessionId],
 ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
     if session_ids.is_empty() {
         return Ok(lash_core::SessionBlobReclaimReport::default());
     }
 
+    let session_id_texts: Vec<_> = session_ids.iter().map(SessionId::as_str).collect();
     let mut report = lash_core::SessionBlobReclaimReport::default();
     let outcome: Result<(), StoreError> = async {
         // Take every session-history mutation fence before deleting heads or
@@ -960,7 +961,7 @@ pub(crate) async fn delete_process_sessions_tx(
          WHERE session_id = ANY($1) AND checkpoint_ref IS NOT NULL
          ORDER BY checkpoint_ref",
         )
-        .bind(session_ids)
+        .bind(&session_id_texts[..])
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -1001,7 +1002,7 @@ pub(crate) async fn delete_process_sessions_tx(
                )
          ON CONFLICT (session_id) DO NOTHING",
         )
-        .bind(session_ids)
+        .bind(&session_id_texts[..])
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -1032,7 +1033,7 @@ pub(crate) async fn delete_process_sessions_tx(
                     )
              FROM deleted_sessions",
             )
-            .bind(session_ids)
+            .bind(&session_id_texts[..])
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1060,7 +1061,7 @@ pub(crate) async fn delete_process_sessions_tx(
                )
              ORDER BY graph.session_id, graph.generation DESC",
             )
-            .bind(session_ids)
+            .bind(&session_id_texts[..])
             .fetch_all(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1154,7 +1155,7 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_session_meta)
               + (SELECT count(*) FROM deleted_trigger_manifests)",
         )
-        .bind(session_ids)
+        .bind(&session_id_texts[..])
         .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
         .bind(&trigger_owner_namespaces)
         .execute(&mut **tx)
@@ -1190,7 +1191,7 @@ pub(crate) async fn delete_process_sessions_tx(
 pub(crate) struct QueuedBatchRow {
     pub(crate) enqueue_seq: u64,
     pub(crate) batch_id: String,
-    session_id: String,
+    session_id: SessionId,
     source_key: Option<String>,
     pub(crate) delivery_policy: DeliveryPolicy,
     pub(crate) kind: QueuedWorkKind,
@@ -1232,7 +1233,7 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
             row.get(QUEUED_WORK_COLUMNS[0]),
         )?,
         batch_id: row.get(QUEUED_WORK_COLUMNS[1]),
-        session_id: row.get(QUEUED_WORK_COLUMNS[2]),
+        session_id: SessionId::from(row.get::<String, _>(QUEUED_WORK_COLUMNS[2])),
         source_key: row.get(QUEUED_WORK_COLUMNS[3]),
         delivery_policy,
         kind,
@@ -1336,7 +1337,7 @@ pub(crate) async fn ensure_queued_work_completion_tx(
              LIMIT 1
              FOR UPDATE",
         )
-        .bind(&completed.session_id)
+        .bind(completed.session_id.as_str())
         .bind(batch_id)
         .fetch_optional(&mut **tx)
         .await
@@ -1382,7 +1383,7 @@ pub(crate) async fn ensure_queued_work_completion_tx(
 pub(crate) struct PendingTurnInputRow {
     pub(crate) enqueue_seq: u64,
     pub(crate) input_id: String,
-    session_id: String,
+    session_id: SessionId,
     source_key: Option<String>,
     ingress_json: String,
     state: lash_core::TurnInputState,
@@ -1401,7 +1402,7 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
     Ok(PendingTurnInputRow {
         enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get("enqueue_seq"))?,
         input_id: row.get("input_id"),
-        session_id: row.get("session_id"),
+        session_id: SessionId::from(row.get::<String, _>("session_id")),
         source_key: row.get("source_key"),
         ingress_json: row.get("ingress_json"),
         state,
@@ -1447,7 +1448,7 @@ pub(crate) fn pending_turn_input_from_row(
 
 pub(crate) async fn load_pending_turn_input(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     input_id: &str,
 ) -> Result<Option<lash_core::PendingTurnInput>, StoreError> {
     let row = sqlx::query(
@@ -1458,7 +1459,7 @@ pub(crate) async fn load_pending_turn_input(
          FROM lash_pending_turn_inputs
          WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(input_id)
     .fetch_optional(&mut **tx)
     .await
@@ -1471,7 +1472,7 @@ pub(crate) async fn load_pending_turn_input(
 
 pub(crate) async fn load_pending_turn_input_row_by_target_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     target: &lash_core::PendingTurnInputCancelTarget,
     for_update: bool,
 ) -> Result<Option<PendingTurnInputRow>, StoreError> {
@@ -1485,7 +1486,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND input_id = $2{for_update}"
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(input_id)
         .fetch_optional(&mut **tx)
         .await
@@ -1498,7 +1499,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
                  FROM lash_pending_turn_inputs
                  WHERE session_id = $1 AND source_key = $2{for_update}"
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(source_key)
         .fetch_optional(&mut **tx)
         .await
@@ -1570,7 +1571,7 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                      claim_session_lease_generation = 0
                  WHERE session_id = $1 AND input_id = $2",
             )
-            .bind(&row.session_id)
+            .bind(row.session_id.as_str())
             .bind(&row.input_id)
             .bind(lash_core::TurnInputState::Cancelled.as_str())
             .execute(&mut **tx)
@@ -1593,7 +1594,7 @@ pub(crate) struct TurnInputClaimLease {
 impl TurnInputClaimLease {
     pub(crate) fn derive(
         head: &PendingTurnInputRow,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         now_epoch_ms: u64,
         session_lease_generation: u64,

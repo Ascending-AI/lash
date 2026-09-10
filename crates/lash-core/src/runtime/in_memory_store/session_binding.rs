@@ -1,4 +1,5 @@
 use super::InMemorySessionStore;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
@@ -9,7 +10,7 @@ impl InMemorySessionStore {
     /// with it: the same commit-time authority the SQL backends read from
     /// their stored head row. Takes the binding and row locks itself; callers
     /// hold the coarse write transaction but no row locks.
-    pub(super) fn bind_or_verify(&self, session_id: &str) -> Result<(), crate::StoreError> {
+    pub(super) fn bind_or_verify(&self, session_id: &SessionId) -> Result<(), crate::StoreError> {
         let mut bound = self.bound_session_id.lock_recover();
         let authority = bound
             .clone()
@@ -17,7 +18,7 @@ impl InMemorySessionStore {
             .or_else(|| self.durable_meta_identity());
         Self::refuse_binding_mismatch(authority, session_id)?;
         if bound.is_none() {
-            *bound = Some(session_id.to_string());
+            *bound = Some(session_id.clone());
         }
         Ok(())
     }
@@ -29,7 +30,7 @@ impl InMemorySessionStore {
     /// write, where [`Self::bind_or_verify`] adjudicates it.
     pub(super) fn verify_binding_for_admission(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::StoreError> {
         let authority = self
             .bound_session_id
@@ -39,14 +40,14 @@ impl InMemorySessionStore {
         Self::refuse_binding_mismatch(authority, session_id)
     }
 
-    fn durable_head_identity(&self) -> Option<String> {
+    fn durable_head_identity(&self) -> Option<SessionId> {
         self.session_head_meta
             .lock_recover()
             .as_ref()
             .map(|head| head.session_id.clone())
     }
 
-    fn durable_meta_identity(&self) -> Option<String> {
+    fn durable_meta_identity(&self) -> Option<SessionId> {
         self.session_meta
             .lock_recover()
             .as_ref()
@@ -54,14 +55,14 @@ impl InMemorySessionStore {
     }
 
     fn refuse_binding_mismatch(
-        authority: Option<String>,
-        session_id: &str,
+        authority: Option<SessionId>,
+        session_id: &SessionId,
     ) -> Result<(), crate::StoreError> {
         match authority {
             Some(existing) if existing != session_id => {
                 Err(crate::StoreError::SessionBindingMismatch {
                     bound_session_id: existing,
-                    attempted_session_id: session_id.to_string(),
+                    attempted_session_id: session_id.clone(),
                 })
             }
             _ => Ok(()),
@@ -70,11 +71,11 @@ impl InMemorySessionStore {
 
     pub(super) fn ensure_session_not_deleted(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::StoreError> {
         if self.deleted_session_ids.lock_recover().contains(session_id) {
             Err(crate::StoreError::SessionDeleted {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
             })
         } else {
             Ok(())

@@ -3,6 +3,7 @@ use lash_core::store::{
     RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimePersistenceDecorator,
 };
 use lash_core::{AttachmentId, AttachmentRootSet, SessionStoreCreateRequest, SessionStoreFactory};
+use lash_sansio::SessionId;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
@@ -52,13 +53,16 @@ struct GrowthFactory {
 
 #[async_trait]
 impl SessionStoreFactory for GrowthFactory {
-    async fn session_was_deleted(&self, session_id: &str) -> std::result::Result<bool, String> {
+    async fn session_was_deleted(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash_core::store::MaintenanceResult<lash_core::store::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }

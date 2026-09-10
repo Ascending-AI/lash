@@ -1,4 +1,6 @@
 use super::*;
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 
 #[cfg(test)]
@@ -144,7 +146,7 @@ const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
 fn test_graph(
     graph_key: &str,
-    session_id: &str,
+    session_id: &SessionId,
     subject: TraceRuntimeSubject,
     children: Vec<TraceLashlangGraphChildLink>,
 ) -> TraceLashlangGraph {
@@ -209,11 +211,14 @@ fn turn_routing_state_survives_web_process_reconstruction() {
     let recovered_turns = ActiveTurns::persistent(turns_path).expect("recover turns");
     assert_eq!(recovered_ids.current(), session_id);
     assert_eq!(
-        recovered_turns.for_session(&session_id),
+        recovered_turns.for_session(&SessionId::from(session_id.clone())),
         vec![lash::TurnAddress::new(&session_id, "durable-stop-turn")]
     );
     let recovered_prompt = recovered_turns
-        .prompt_for(&session_id, &TurnId::from("durable-stop-turn"))
+        .prompt_for(
+            &SessionId::from(session_id),
+            &TurnId::from("durable-stop-turn"),
+        )
         .expect("restored prompt");
     assert_eq!(recovered_prompt.text, "actual restored prompt");
     assert_eq!(recovered_prompt.attachment_id, None);
@@ -272,7 +277,7 @@ fn lashlang_graph_store_builds_graph_state() {
     let identity = TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
         subject: TraceRuntimeSubject::Process {
-            process_id: "p1".to_string(),
+            process_id: ProcessId::from("p1"),
         },
         module_ref: "m1".to_string(),
         entry_kind: "process".to_string(),
@@ -338,7 +343,7 @@ fn lashlang_graph_store_builds_graph_state() {
             child: TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::new("s1"),
                 subject: TraceRuntimeSubject::Process {
-                    process_id: "p2".to_string(),
+                    process_id: ProcessId::from("p2"),
                 },
                 module_ref: Some("m1".to_string()),
                 entry_ref: Some("r2:1".to_string()),
@@ -457,9 +462,14 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = state.current_session_id();
-    let mut events = state.event_tx.subscribe(&session_id);
+    let mut events = state
+        .event_tx
+        .subscribe(&SessionId::from(session_id.clone()));
 
-    state.publish_turn_done(&session_id, &TurnId::from("transient-turn"));
+    state.publish_turn_done(
+        &SessionId::from(session_id),
+        &TurnId::from("transient-turn"),
+    );
 
     assert!(matches!(
         events.try_recv(),
@@ -539,10 +549,15 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = state.current_session_id();
-    let mut events = state.event_tx.subscribe(&session_id);
+    let mut events = state
+        .event_tx
+        .subscribe(&SessionId::from(session_id.clone()));
 
-    state.track_turn(&session_id, &TurnId::from("foreground-turn"));
-    state.publish_trigger_dispatch_done(&session_id, "trigger-running");
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("foreground-turn"),
+    );
+    state.publish_trigger_dispatch_done(&SessionId::from(session_id.clone()), "trigger-running");
     assert!(
         matches!(
             events.try_recv(),
@@ -551,10 +566,11 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         "trigger dispatch must not publish Done while a foreground turn is active"
     );
 
-    state
-        .active_turns
-        .remove(&session_id, &TurnId::from("foreground-turn"));
-    state.publish_trigger_dispatch_done(&session_id, "trigger-settled");
+    state.active_turns.remove(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("foreground-turn"),
+    );
+    state.publish_trigger_dispatch_done(&SessionId::from(session_id), "trigger-settled");
     assert!(matches!(
         events.try_recv(),
         Ok(ProductEvent {
@@ -819,8 +835,13 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = state.current_session_id();
-    let mut events = state.event_tx.subscribe(&session_id);
-    state.track_turn(&session_id, &TurnId::from("turn-cancel"));
+    let mut events = state
+        .event_tx
+        .subscribe(&SessionId::from(session_id.clone()));
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("turn-cancel"),
+    );
     let session = state
         .core
         .session(&session_id)
@@ -867,7 +888,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     // The execution publisher owns the terminal event; the cancel route
     // publishes nothing for this core-run turn.
     assert!(events.try_recv().is_err(), "cancel route owns no terminal");
-    state.publish_turn_done(&session_id, &TurnId::from("turn-cancel"));
+    state.publish_turn_done(&SessionId::from(session_id), &TurnId::from("turn-cancel"));
     assert!(matches!(
         events.try_recv(),
         Ok(ProductEvent {
@@ -1502,8 +1523,14 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let old_session_id = state.current_session_id();
-    let _deleted_session_events = state.event_tx.subscribe(&old_session_id);
-    assert!(state.event_tx.contains(&old_session_id));
+    let _deleted_session_events = state
+        .event_tx
+        .subscribe(&SessionId::from(old_session_id.clone()));
+    assert!(
+        state
+            .event_tx
+            .contains(&SessionId::from(old_session_id.clone()))
+    );
     let session = state
         .core
         .session(old_session_id.clone())
@@ -1513,8 +1540,11 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
     register_test_trigger(&session).await;
     let started = emit_test_button_trigger(&state.core, ButtonChoice::Red).await;
     assert_remote_trigger_emit_report_round_trip(&started);
-    let trigger_records =
-        assert_remote_trigger_subscription_records_round_trip(&data_dir, &old_session_id).await;
+    let trigger_records = assert_remote_trigger_subscription_records_round_trip(
+        &data_dir,
+        &SessionId::from(old_session_id.clone()),
+    )
+    .await;
     assert_eq!(trigger_records.len(), 1);
     assert_eq!(started.started_process_ids().len(), 1);
     let old_work_before_reset = state
@@ -1534,9 +1564,9 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         &state.lashlang_execution,
         &test_graph(
             "process:old-reset-process",
-            &old_session_id,
+            &SessionId::from(old_session_id.clone()),
             TraceRuntimeSubject::Process {
-                process_id: "old-reset-process".to_string(),
+                process_id: ProcessId::from("old-reset-process"),
             },
             Vec::new(),
         ),
@@ -1545,7 +1575,7 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
     assert_remote_started_process_surface(
         &state.core,
         process_registry.as_ref(),
-        &old_session_id,
+        &SessionId::from(old_session_id.clone()),
         &started.started_process_ids(),
     )
     .await;
@@ -1555,14 +1585,18 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         .expect("add account before reset");
     drop(session);
     let query = Query(SessionQuery {
-        session_id: Some(old_session_id.clone()),
+        session_id: Some(SessionId::from(old_session_id.clone())),
     });
     let Json(snapshot) = Box::pin(reset_chat(State(state.clone()), query))
         .await
         .expect("reset");
 
     assert_ne!(snapshot.settings.session_id, old_session_id);
-    assert!(!state.event_tx.contains(&old_session_id));
+    assert!(
+        !state
+            .event_tx
+            .contains(&SessionId::from(old_session_id.clone()))
+    );
     assert!(snapshot.messages.is_empty());
     assert!(state.messages_snapshot().is_empty());
     assert!(
@@ -1623,13 +1657,13 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         "new session graph index should be empty after reset: {graph_index:#?}"
     );
     core_store_factory
-        .delete_session(&old_session_id)
+        .delete_session(&SessionId::from(old_session_id.clone()))
         .await
         .expect("retire old session for route check");
     let retired_error = Box::pin(app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(old_session_id.clone()),
+            session_id: Some(SessionId::from(old_session_id.clone())),
         }),
     ))
     .await
@@ -1762,7 +1796,7 @@ async fn run_workbench_turn_via_restate(
     let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
-        session_id: state.current_session_id(),
+        session_id: SessionId::from(state.current_session_id()),
         text: text.to_string(),
         model: state.selected_model(),
         attachment_id: None,
@@ -1775,7 +1809,7 @@ async fn run_workbench_turn_via_restate(
     .expect("Restate-backed workbench turn timed out")
     .expect("finish Restate-backed workbench turn");
     state.track_turn_prompt(
-        &state.current_session_id(),
+        &SessionId::from(state.current_session_id()),
         &turn_id,
         text.to_string(),
         None,
@@ -1886,7 +1920,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let admission_gate = registered_session_open_admission_gates()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .get(&session_id)
+        .get(&SessionId::from(&session_id))
         .cloned();
     if let Some(gate) = admission_gate {
         core_store_factory = Arc::new(GatedSessionStoreFactory {
@@ -2356,7 +2390,7 @@ async fn emit_test_button_trigger(
 async fn emit_test_button_trigger_for_session(
     core: &LashCore,
     button: ButtonChoice,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> lash::triggers::TriggerEmitReport {
     emit_test_button_trigger_with_scope(core, button, Some(session_id)).await
 }
@@ -2364,7 +2398,7 @@ async fn emit_test_button_trigger_for_session(
 async fn emit_test_button_trigger_with_scope(
     core: &LashCore,
     button: ButtonChoice,
-    session_id: Option<&str>,
+    session_id: Option<&SessionId>,
 ) -> lash::triggers::TriggerEmitReport {
     let source_key =
         lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE).expect("source key");

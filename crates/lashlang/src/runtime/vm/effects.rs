@@ -1,3 +1,4 @@
+use lash_core::ProcessId;
 use std::sync::Arc;
 
 use crate::lexer::Span;
@@ -952,7 +953,7 @@ fn lashlang_execution_call_site(active: &ActiveLashlangExecutionNode) -> Lashlan
     }
 }
 
-fn process_handle_id_from_value(value: &Value) -> Option<String> {
+fn process_handle_id_from_value(value: &Value) -> Option<ProcessId> {
     let record = value.as_record()?;
     let Value::String(kind) = record.get("__handle__")? else {
         return None;
@@ -963,7 +964,7 @@ fn process_handle_id_from_value(value: &Value) -> Option<String> {
     let Value::String(id) = record.get("id")? else {
         return None;
     };
-    Some(id.to_string())
+    Some(ProcessId::from(id.to_string()))
 }
 
 /// A host value that clears the value-entry guard becomes a success result; one

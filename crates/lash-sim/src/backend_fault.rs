@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -74,7 +75,7 @@ impl GeneratedBackendFaultHarness {
             SqliteFaultPoint::CommitIo
         };
         let seed = event.at ^ ((attempt as u64) << 32) ^ 0x4649_4731_3135_3300;
-        let session_id = format!(
+        let session_id = SessionId::from(format!(
             "sim-fault-{}",
             event
                 .boundary_id
@@ -87,7 +88,7 @@ impl GeneratedBackendFaultHarness {
                     }
                 })
                 .collect::<String>()
-        );
+        ));
         let store = self.create_store(&session_id).await?;
         let state = RuntimeSessionState {
             session_id: session_id.clone(),
@@ -174,12 +175,12 @@ impl GeneratedBackendFaultHarness {
 
     async fn create_store(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<dyn RuntimePersistence>, FixedScriptRunnerError> {
         self.factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
                 policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })

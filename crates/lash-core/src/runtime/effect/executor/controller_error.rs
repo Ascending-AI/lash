@@ -139,19 +139,20 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProcessId;
 
     #[test]
     fn process_target_discriminators_survive_the_effect_controller_boundary() {
         for (error, expected) in [
             (
                 PluginError::ProcessNotVisible {
-                    process_id: "missing".to_string(),
+                    process_id: ProcessId::from("missing"),
                 },
                 RuntimeErrorCode::ProcessNotVisible,
             ),
             (
                 PluginError::ProcessAlreadyTerminal {
-                    process_id: "done".to_string(),
+                    process_id: ProcessId::from("done"),
                     status: crate::ProcessStatus::Completed,
                 },
                 RuntimeErrorCode::ProcessAlreadyTerminal,
@@ -165,7 +166,7 @@ mod tests {
             ),
             (
                 PluginError::ProcessIncarnationSuperseded {
-                    process_id: "reused".to_string(),
+                    process_id: ProcessId::from("reused"),
                     requested_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
                     current_incarnation: crate::ProcessIncarnation::from_registration_sequence(2),
                 },

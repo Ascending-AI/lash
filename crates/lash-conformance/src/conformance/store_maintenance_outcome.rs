@@ -11,6 +11,7 @@
 //! reading counters.
 
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use super::session_store_factory::session_store_request;
@@ -25,7 +26,7 @@ use pretty_assertions::assert_eq;
 #[async_trait::async_trait]
 pub trait StoreMaintenanceFaultInjector: Send + Sync {
     /// Corrupt the store so the next sweep over `session_id` fails.
-    async fn break_gc_scope(&self, session_id: &str);
+    async fn break_gc_scope(&self, session_id: &SessionId);
 }
 
 /// Every arm of the maintenance outcome contract, on one backend.
@@ -123,7 +124,7 @@ async fn idle_store_reports_witnessed_nothing_to_do(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "maintenance-nothing-to-do",
+        &SessionId::from("maintenance-nothing-to-do"),
         "maintenance-outcome-model",
         crate::SessionRelation::Root,
     );
@@ -163,7 +164,7 @@ async fn superseded_checkpoint_is_a_witnessed_sweep(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "maintenance-swept",
+        &SessionId::from("maintenance-swept"),
         "maintenance-outcome-model",
         crate::SessionRelation::Root,
     );
@@ -205,7 +206,7 @@ async fn empty_root_set_refusal_returns_its_partial_report(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "maintenance-refusal",
+        &SessionId::from("maintenance-refusal"),
         "maintenance-outcome-model",
         crate::SessionRelation::Root,
     );
@@ -265,7 +266,7 @@ async fn sweep_failure_is_not_an_empty_report(
     fault: &dyn StoreMaintenanceFaultInjector,
 ) {
     let request = session_store_request(
-        "maintenance-failure",
+        &SessionId::from("maintenance-failure"),
         "maintenance-outcome-model",
         crate::SessionRelation::Root,
     );
@@ -297,12 +298,12 @@ async fn sweep_failure_is_not_an_empty_report(
 /// new head revision.
 async fn commit_generation(
     store: &Arc<dyn crate::RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     generation: u64,
     expected_head_revision: u64,
 ) -> u64 {
     let mut state = crate::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         head_revision: expected_head_revision,
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };

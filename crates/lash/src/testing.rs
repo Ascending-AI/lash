@@ -418,7 +418,10 @@ finish "registered"
                 .expect("reopen session");
         }
 
-        async fn await_success(registry: &Arc<dyn lash_core::ProcessRegistry>, process_id: &str) {
+        async fn await_success(
+            registry: &Arc<dyn lash_core::ProcessRegistry>,
+            process_id: &lash_core::ProcessId,
+        ) {
             let awaiter = lash_core::NativeProcessWork::for_registry(Arc::clone(registry));
             let outcome =
                 tokio::time::timeout(Duration::from_secs(10), awaiter.await_terminal(process_id))
@@ -644,7 +647,7 @@ finish "registered"
                             Some(lash_core::MessageOrigin::Process {
                                 process_id: message_process_id,
                                 ..
-                            }) if message_process_id == &process_id
+                            }) if message_process_id == process_id
                         )
                     })
                     .map(|message| format!("{message:?}"))
@@ -661,7 +664,7 @@ finish "registered"
                                 sequence,
                                 caused_by,
                                 ..
-                            }) if wake_process_id == &process_id
+                            }) if wake_process_id == process_id
                                 && event_type == "process.wake"
                                 && *sequence == wake_sequence
                                 && caused_by.as_ref() == Some(&process_caused_by)
@@ -765,7 +768,7 @@ finish "registered"
                                 sequence,
                                 caused_by,
                                 ..
-                            }) if wake_process_id == &process_id
+                            }) if wake_process_id == process_id
                                 && event_type == "process.wake"
                                 && *sequence == wake_sequence
                                 && caused_by.as_ref() == Some(&process_caused_by)
@@ -798,7 +801,7 @@ finish "registered"
             );
             let registration = attach_rebuild_process_env(&core, registration).await;
             open_mutate_and_restart(&core, Some(registration), &registry).await;
-            await_success(&registry, "proc-tool-call").await;
+            await_success(&registry, &lash_core::ProcessId::from("proc-tool-call")).await;
         }
 
         async fn worker_recovers_session_turn_process_in_restarted_session(
@@ -829,7 +832,7 @@ finish "registered"
                 "proc-session-turn",
             );
             open_mutate_and_restart(&core, Some(registration), &registry).await;
-            await_success(&registry, "proc-session-turn").await;
+            await_success(&registry, &lash_core::ProcessId::from("proc-session-turn")).await;
         }
     }
 

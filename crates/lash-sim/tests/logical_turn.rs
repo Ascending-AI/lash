@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -477,7 +478,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .iter()
         .any(|input| input.input_id == second.input_id);
     let expected_frame_id = lash_core::facade_support::frame_node_id(
-        "logical-turn-sim",
+        &SessionId::from("logical-turn-sim"),
         lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
             .expect("non-empty caller material")
             .as_str(),

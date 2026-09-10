@@ -9,6 +9,8 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
@@ -96,20 +98,20 @@ pub(super) async fn superseded_config_settlement_adopts_the_newer_head() {
 pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionStoreFactory>) {
     const SESSION_ID: &str = "read-only-session-view";
     let expected_relation = crate::SessionRelation::Child {
-        parent_session_id: "read-only-session-parent".to_string(),
+        parent_session_id: SessionId::from("read-only-session-parent"),
         caused_by: Some(crate::CausalRef::Turn {
-            session_id: "read-only-session-parent".to_string(),
+            session_id: SessionId::from("read-only-session-parent"),
             turn_id: TurnId::from("read-only-session-parent-turn"),
         }),
     };
     let request = session_store_request(
-        SESSION_ID,
+        &SessionId::from(SESSION_ID),
         "read-only-session-model",
         expected_relation.clone(),
     );
     assert!(
         factory
-            .read_session(SESSION_ID)
+            .read_session(&SessionId::from(SESSION_ID))
             .await
             .expect("read a missing session")
             .is_none(),
@@ -121,7 +123,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         .await
         .expect("create read-session writer");
     let mut state = crate::RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         token_usage: crate::TokenUsage {
             input_tokens: 11,
             output_tokens: 7,
@@ -170,14 +172,19 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         "read-only-session-writer:incarnation",
     );
     let held = writer
-        .try_claim_session_execution_lease(SESSION_ID, &owner, "live-writer", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from(SESSION_ID),
+            &owner,
+            "live-writer",
+            60_000,
+        )
         .await
         .expect("claim live writer lease")
         .acquired()
         .expect("live writer owns the session");
 
     let view = factory
-        .read_session(SESSION_ID)
+        .read_session(&SessionId::from(SESSION_ID))
         .await
         .expect("read alongside live writer")
         .expect("committed session has a read view");
@@ -224,12 +231,12 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         .expect("release live writer after inspection");
 
     factory
-        .delete_session(SESSION_ID)
+        .delete_session(&SessionId::from(SESSION_ID))
         .await
         .expect("delete read-session fixture");
     assert!(
         factory
-            .read_session(SESSION_ID)
+            .read_session(&SessionId::from(SESSION_ID))
             .await
             .expect("read deleted session disposition")
             .is_none(),
@@ -247,9 +254,9 @@ where
     F: FnOnce(&str) -> Arc<dyn crate::RuntimePersistence>,
 {
     let binding = crate::SessionBinding {
-        session_id: "fresh-admission-created".to_string(),
+        session_id: SessionId::from("fresh-admission-created"),
         relation: crate::SessionRelation::Child {
-            parent_session_id: "fresh-admission-parent".to_string(),
+            parent_session_id: SessionId::from("fresh-admission-parent"),
             caused_by: None,
         },
     };
@@ -271,7 +278,7 @@ async fn session_store_factory_claimable_queued_work_peek(
 ) {
     const NOW_MS: u64 = 100;
     let request = session_store_request(
-        "claimable-queued-work-peek",
+        &SessionId::from("claimable-queued-work-peek"),
         "claimable-queued-work-model",
         crate::SessionRelation::Root,
     );
@@ -371,7 +378,7 @@ async fn session_store_factory_claimable_queued_work_peek(
     );
 
     let fenced_request = session_store_request(
-        "claimable-queued-work-fences",
+        &SessionId::from("claimable-queued-work-fences"),
         "claimable-queued-work-model",
         crate::SessionRelation::Root,
     );
@@ -542,7 +549,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "delete-fence-stale-handle",
+        &SessionId::from("delete-fence-stale-handle"),
         "delete-fence-model",
         crate::SessionRelation::Root,
     );
@@ -660,7 +667,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             ensure_error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "stale session binding must be fenced as deleted, got: {ensure_error}"
     );
@@ -672,7 +679,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             save_error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "stale metadata writes must be fenced as deleted, got: {save_error}"
     );
@@ -685,7 +692,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "a stale commit into a deleted session must be fenced as deleted, got: {error}"
     );
@@ -712,7 +719,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             stale_error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "a pre-delete handle must remain fenced after refused recreation, got: {stale_error}"
     );
@@ -739,7 +746,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         .expect("register process with owned stores");
 
     let mut requests = Vec::new();
-    for (index, session_id) in crate::process_runtime_session_ids(PROCESS_ID)
+    for (index, session_id) in crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))
         .into_iter()
         .enumerate()
     {
@@ -773,7 +780,7 @@ pub async fn process_prune_deletes_owned_session_stores(
 
     let terminal = registry
         .complete_process(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -842,12 +849,12 @@ pub async fn attachment_reference_lifecycle_with_store(
     backend: Arc<dyn crate::AttachmentStore>,
 ) {
     let a_request = session_store_request(
-        "attachment-owner-a",
+        &SessionId::from("attachment-owner-a"),
         "attachment-model",
         crate::SessionRelation::Root,
     );
     let b_request = session_store_request(
-        "attachment-owner-b",
+        &SessionId::from("attachment-owner-b"),
         "attachment-model",
         crate::SessionRelation::Root,
     );
@@ -992,10 +999,10 @@ fn assert_meta_matches_request(meta: &SessionMeta, request: &crate::SessionStore
 
 async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>) {
     let request = session_store_request(
-        "admission-created",
+        &SessionId::from("admission-created"),
         "admission-model",
         crate::SessionRelation::Child {
-            parent_session_id: "admission-parent".to_string(),
+            parent_session_id: SessionId::from("admission-parent"),
             caused_by: None,
         },
     );
@@ -1053,7 +1060,7 @@ async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>
     );
 
     let cross_session = crate::SessionBinding {
-        session_id: "admission-other".to_string(),
+        session_id: SessionId::from("admission-other"),
         ..binding
     };
     assert!(matches!(
@@ -1065,7 +1072,7 @@ async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>
     ));
 
     let deleted_request = session_store_request(
-        "admission-deleted",
+        &SessionId::from("admission-deleted"),
         "admission-model",
         crate::SessionRelation::Root,
     );
@@ -1106,7 +1113,7 @@ where
 {
     let empty_factory = make();
     let missing = session_store_request(
-        "binding-cardinality-b",
+        &SessionId::from("binding-cardinality-b"),
         "binding-cardinality-model",
         crate::SessionRelation::Root,
     );
@@ -1123,7 +1130,7 @@ where
         let factory = make();
         if earlier_session_count == 1 {
             let earlier = session_store_request(
-                "binding-cardinality-a",
+                &SessionId::from("binding-cardinality-a"),
                 "binding-cardinality-model",
                 crate::SessionRelation::Root,
             );
@@ -1134,7 +1141,7 @@ where
         }
 
         let target = session_store_request(
-            "binding-cardinality-b",
+            &SessionId::from("binding-cardinality-b"),
             "binding-cardinality-model",
             crate::SessionRelation::Root,
         );
@@ -1167,7 +1174,7 @@ async fn session_store_factory_never_used_delete_is_noop(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "never-used-delete",
+        &SessionId::from("never-used-delete"),
         "never-used-model",
         crate::SessionRelation::Root,
     );
@@ -1185,7 +1192,7 @@ async fn session_store_factory_rejects_writes_after_delete(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "write-after-delete",
+        &SessionId::from("write-after-delete"),
         "write-after-delete-model",
         crate::SessionRelation::Root,
     );
@@ -1281,7 +1288,11 @@ async fn session_store_factory_rejects_writes_after_delete(
         .expect("re-delete cleans any historical post-delete orphans");
 }
 
-fn assert_deleted_write<T>(result: Result<T, crate::StoreError>, session_id: &str, surface: &str) {
+fn assert_deleted_write<T>(
+    result: Result<T, crate::StoreError>,
+    session_id: &SessionId,
+    surface: &str,
+) {
     let error = match result {
         Ok(_) => panic!("{surface} write unexpectedly succeeded"),
         Err(error) => error,
@@ -1301,7 +1312,7 @@ async fn session_store_factory_open_missing_returns_none(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "missing-session",
+        &SessionId::from("missing-session"),
         "missing-model",
         crate::SessionRelation::Root,
     );
@@ -1319,10 +1330,10 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let relation = crate::SessionRelation::Child {
-        parent_session_id: "parent-session".to_string(),
+        parent_session_id: SessionId::from("parent-session"),
         caused_by: None,
     };
-    let request = session_store_request("session-a", "model-a", relation);
+    let request = session_store_request(&SessionId::from("session-a"), "model-a", relation);
 
     let created = factory
         .create_store(&request)
@@ -1352,7 +1363,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let child = |caused_by| crate::SessionRelation::Child {
-        parent_session_id: "roundtrip-parent".to_string(),
+        parent_session_id: SessionId::from("roundtrip-parent"),
         caused_by,
     };
     let relations = vec![
@@ -1361,14 +1372,14 @@ async fn session_store_factory_round_trips_every_relation_shape(
         (
             "child-turn",
             child(Some(crate::CausalRef::Turn {
-                session_id: "cause-session".to_string(),
+                session_id: SessionId::from("cause-session"),
                 turn_id: TurnId::from("cause-turn"),
             })),
         ),
         (
             "child-effect-no-turn",
             child(Some(crate::CausalRef::Effect {
-                session_id: "cause-session".to_string(),
+                session_id: SessionId::from("cause-session"),
                 turn_id: None,
                 effect_id: "cause-effect".to_string(),
             })),
@@ -1376,7 +1387,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
         (
             "child-effect-with-turn",
             child(Some(crate::CausalRef::Effect {
-                session_id: "cause-session".to_string(),
+                session_id: SessionId::from("cause-session"),
                 turn_id: Some(TurnId::from("cause-turn")),
                 effect_id: "cause-effect".to_string(),
             })),
@@ -1384,20 +1395,20 @@ async fn session_store_factory_round_trips_every_relation_shape(
         (
             "child-tool-call",
             child(Some(crate::CausalRef::ToolCall {
-                session_id: "cause-session".to_string(),
+                session_id: SessionId::from("cause-session"),
                 call_id: "cause-call".to_string(),
             })),
         ),
         (
             "child-process",
             child(Some(crate::CausalRef::Process {
-                process_id: "cause-process".to_string(),
+                process_id: ProcessId::from("cause-process"),
             })),
         ),
         (
             "child-process-event",
             child(Some(crate::CausalRef::ProcessEvent {
-                process_id: "cause-process".to_string(),
+                process_id: ProcessId::from("cause-process"),
                 sequence: u64::MAX,
             })),
         ),
@@ -1422,14 +1433,14 @@ async fn session_store_factory_round_trips_every_relation_shape(
         (
             "child-session-node",
             child(Some(crate::CausalRef::SessionNode {
-                session_id: "cause-session".to_string(),
+                session_id: SessionId::from("cause-session"),
                 node_id: "cause-node".to_string(),
             })),
         ),
         (
             "fork-empty",
             crate::SessionRelation::Fork {
-                source_session_id: "declared-missing-session".to_string(),
+                source_session_id: SessionId::from("declared-missing-session"),
                 source_node_id: "declared-missing-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::All,
             },
@@ -1437,7 +1448,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
         (
             "fork-only-empty",
             crate::SessionRelation::Fork {
-                source_session_id: "declared-source".to_string(),
+                source_session_id: SessionId::from("declared-source"),
                 source_node_id: "declared-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::Only(Vec::new()),
             },
@@ -1445,18 +1456,18 @@ async fn session_store_factory_round_trips_every_relation_shape(
         (
             "fork-only-processes",
             crate::SessionRelation::Fork {
-                source_session_id: "declared-source".to_string(),
+                source_session_id: SessionId::from("declared-source"),
                 source_node_id: "declared-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::Only(vec![
-                    "inherit-a".to_string(),
-                    "inherit-b".to_string(),
+                    ProcessId::from("inherit-a".to_string()),
+                    ProcessId::from("inherit-b".to_string()),
                 ]),
             },
         ),
     ];
 
     for (label, relation) in relations {
-        let session_id = format!("session-meta-roundtrip-{label}");
+        let session_id = SessionId::from(format!("session-meta-roundtrip-{label}"));
         let request = session_store_request(
             &session_id,
             "session-meta-roundtrip-model",
@@ -1503,7 +1514,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
 
 async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::SessionStoreFactory>) {
     let initial = session_store_request(
-        "stable-session",
+        &SessionId::from("stable-session"),
         "initial-model",
         crate::SessionRelation::Root,
     );
@@ -1514,9 +1525,9 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
     created
         .save_session_meta(SessionMeta {
             pending_observer_intents: Vec::new(),
-            session_id: "stable-session".to_string(),
+            session_id: SessionId::from("stable-session"),
             relation: crate::SessionRelation::Child {
-                parent_session_id: "custom-parent".to_string(),
+                parent_session_id: SessionId::from("custom-parent"),
                 caused_by: None,
             },
         })
@@ -1524,7 +1535,7 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
         .expect("write custom meta");
 
     let changed = session_store_request(
-        "stable-session",
+        &SessionId::from("stable-session"),
         "changed-model",
         crate::SessionRelation::Root,
     );
@@ -1548,12 +1559,12 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let first_request = session_store_request(
-        "graph-parent-owner",
+        &SessionId::from("graph-parent-owner"),
         "graph-parent-model",
         crate::SessionRelation::Root,
     );
     let second_request = session_store_request(
-        "graph-parent-intruder",
+        &SessionId::from("graph-parent-intruder"),
         "graph-parent-model",
         crate::SessionRelation::Root,
     );
@@ -1657,8 +1668,11 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
 /// forks write no graph nodes, and deleting either sibling cannot reclaim the
 /// prefix still reachable from the other.
 async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionStoreFactory>) {
-    let source_request =
-        session_store_request("fork-source", "fork-model", crate::SessionRelation::Root);
+    let source_request = session_store_request(
+        &SessionId::from("fork-source"),
+        "fork-model",
+        crate::SessionRelation::Root,
+    );
     let source = factory
         .create_store(&source_request)
         .await
@@ -1750,7 +1764,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
 
     let delete_first_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "aaa-fork-delete-first".to_string(),
+        session_id: SessionId::from("aaa-fork-delete-first"),
         node_id: source_tip_node_id.clone(),
         relation: crate::SessionRelation::Root,
         policy: source_request.policy.clone(),
@@ -1786,7 +1800,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     let unretained_error = factory
         .fork_at(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "fork-unretained".to_string(),
+            session_id: SessionId::from("fork-unretained"),
             node_id: unpinned_past_node_id.clone(),
             relation: crate::SessionRelation::Root,
             policy: source_request.policy.clone(),
@@ -1801,7 +1815,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
 
     let fork_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "fork-branch".to_string(),
+        session_id: SessionId::from("fork-branch"),
         node_id: root_node_id.clone(),
         relation: crate::SessionRelation::Root,
         policy: source_request.policy.clone(),
@@ -1818,10 +1832,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     let lineage_relation_fork = factory
         .fork_at(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "fork-relation-lineage".to_string(),
+            session_id: SessionId::from("fork-relation-lineage"),
             node_id: root_node_id.clone(),
             relation: crate::SessionRelation::Fork {
-                source_session_id: "no-such-session".to_string(),
+                source_session_id: SessionId::from("no-such-session"),
                 source_node_id: "no-such-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::default(),
             },
@@ -1834,7 +1848,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         "fork result reports anchor provenance, never the relation's declared lineage"
     );
     factory
-        .delete_session("fork-relation-lineage")
+        .delete_session(&SessionId::from("fork-relation-lineage"))
         .await
         .expect("remove lineage fork");
     let branch = factory
@@ -1955,7 +1969,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "delete-session",
+        &SessionId::from("delete-session"),
         "delete-model",
         crate::SessionRelation::Root,
     );
@@ -2083,7 +2097,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     assert_session_id_was_used_and_deleted(after_vacuum_error, &request.session_id);
 }
 
-fn assert_session_id_was_used_and_deleted(error: crate::StoreError, session_id: &str) {
+fn assert_session_id_was_used_and_deleted(error: crate::StoreError, session_id: &SessionId) {
     assert!(
         matches!(
             &error,
@@ -2116,7 +2130,7 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         return;
     }
     let request = session_store_request(
-        "attachment-gc-fence-state-machine",
+        &SessionId::from("attachment-gc-fence-state-machine"),
         "attachment-gc-fence-model",
         crate::SessionRelation::Root,
     );
@@ -2280,7 +2294,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "attachment-gc-fenced-sweep",
+        &SessionId::from("attachment-gc-fenced-sweep"),
         "attachment-gc-fenced-sweep-model",
         crate::SessionRelation::Root,
     );
@@ -2365,7 +2379,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "attachment-large-cutoff-session",
+        &SessionId::from("attachment-large-cutoff-session"),
         "attachment-large-cutoff-model",
         crate::SessionRelation::Root,
     );

@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -26,7 +28,7 @@ pub use permit::release_process_execution_permit_while;
 /// delivery whose process row was never registered. It exists only to admit
 /// that one process, so the process's retention pass retires it alongside the
 /// process journal (FIG-2500).
-pub fn trigger_delivery_reconcile_scope(process_id: &str) -> crate::ExecutionScope {
+pub fn trigger_delivery_reconcile_scope(process_id: &ProcessId) -> crate::ExecutionScope {
     crate::ExecutionScope::runtime_operation(format!("trigger-delivery-reconcile:{process_id}"))
 }
 #[cfg(test)]
@@ -303,8 +305,8 @@ impl Drop for ProcessWorkerLifetime {
 #[derive(Default)]
 struct ProcessExecutionSchedulerState {
     pending: VecDeque<ProcessRecord>,
-    scheduled: BTreeSet<String>,
-    rerun: BTreeMap<String, ProcessRecord>,
+    scheduled: BTreeSet<ProcessId>,
+    rerun: BTreeMap<ProcessId, ProcessRecord>,
     active: usize,
     dispatcher_running: bool,
     worklist_scan: ProcessWorklistScan,
@@ -355,7 +357,7 @@ impl ProcessExecutionScheduler {
         }
     }
 
-    fn complete_execution(&self, process_id: &str) {
+    fn complete_execution(&self, process_id: &ProcessId) {
         let mut state = self.state.lock_recover();
         state.active = state
             .active
@@ -423,7 +425,7 @@ impl Drop for ProcessExecutionDispatcherGuard {
 }
 
 struct ProcessExecutionTaskCompletion {
-    process_id: String,
+    process_id: ProcessId,
     scheduler: Arc<ProcessExecutionScheduler>,
 }
 
@@ -934,7 +936,7 @@ impl DurableProcessWorker {
     /// contention, absence, peer settlement, lease loss, and backend failure.
     async fn drain_one_owner_bound(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: crate::LeaseOwnerIdentity,
     ) -> RecoveryCompletionDisposition {
         let lease_ttl_ms = self.lease_timings().ttl_ms();
@@ -1164,7 +1166,10 @@ impl DurableProcessWorker {
     /// `Abandoned{reconciled_request}` terminal. Lash never executed the row, so
     /// there is no owner lease to wait out — but the sweep claims its own lease
     /// and completes through the atomic fenced path so it stays the single writer.
-    async fn reconcile_externally_owned_abandon(&self, process_id: &str) -> ProcessRecoveryOutcome {
+    async fn reconcile_externally_owned_abandon(
+        &self,
+        process_id: &ProcessId,
+    ) -> ProcessRecoveryOutcome {
         let lease_ttl_ms = self.lease_timings().ttl_ms();
         let owner = self.recovery_lease_owner();
         let lease = match self
@@ -1458,7 +1463,7 @@ impl DurableProcessWorker {
 
     async fn cancellation_was_already_requested(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<bool, RecoverFailure> {
         self.config
             .process_registry()
@@ -1476,7 +1481,7 @@ impl DurableProcessWorker {
 
     pub async fn request_process_cancel(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         reason: Option<String>,
     ) -> Result<(), PluginError> {
         self.config
@@ -1563,7 +1568,7 @@ impl DurableProcessWorker {
 
     async fn build_process_runtime(
         &self,
-        session_id: String,
+        session_id: SessionId,
         policy: crate::SessionPolicy,
         plugin_options: crate::PluginOptions,
         source_label: &str,

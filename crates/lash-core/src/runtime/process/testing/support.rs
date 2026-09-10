@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -308,15 +309,15 @@ impl ExecutionWritePauseHandle {
 }
 
 /// Loud, stable error for a superseded or expired process lease.
-pub(super) fn process_lease_expired(process_id: &str) -> PluginError {
+pub(super) fn process_lease_expired(process_id: &ProcessId) -> PluginError {
     PluginError::ProcessLeaseSuperseded {
-        process_id: process_id.to_string(),
+        process_id: ProcessId::from(process_id.to_string()),
     }
 }
 
 pub(super) fn validate_in_memory_execution_authority(
     leases: &ManagedLeaseMap,
-    process_id: &str,
+    process_id: &ProcessId,
     record: &ProcessRecord,
     authority: &ProcessExecutionWriteAuthority,
     start: Option<&ProcessStarted>,
@@ -361,7 +362,7 @@ pub(super) fn validate_in_memory_execution_authority(
 pub trait TestProcessRegistryWriteExt: ProcessRegistry {
     async fn record_first_started(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         started: ProcessStarted,
     ) -> Result<ProcessRecord, PluginError> {
         let lease = claim_fixture_write_lease(self, process_id).await?;
@@ -378,7 +379,7 @@ pub trait TestProcessRegistryWriteExt: ProcessRegistry {
 
     async fn set_process_wait(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         wait: WaitState,
     ) -> Result<ProcessRecord, PluginError> {
         let lease = claim_fixture_write_lease(self, process_id).await?;
@@ -392,7 +393,10 @@ pub trait TestProcessRegistryWriteExt: ProcessRegistry {
         finish_fixture_write(self, &lease, result).await
     }
 
-    async fn clear_process_wait(&self, process_id: &str) -> Result<ProcessRecord, PluginError> {
+    async fn clear_process_wait(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<ProcessRecord, PluginError> {
         let lease = claim_fixture_write_lease(self, process_id).await?;
         let result = self
             .clear_process_wait_with_authority(
@@ -408,7 +412,7 @@ impl<T> TestProcessRegistryWriteExt for T where T: ProcessRegistry + ?Sized {}
 
 async fn claim_fixture_write_lease(
     registry: &(impl ProcessRegistry + ?Sized),
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<ProcessLease, PluginError> {
     let owner =
         crate::LeaseOwnerIdentity::opaque(format!("test-fixture:{process_id}"), "lifecycle-write");
@@ -461,7 +465,7 @@ struct ManagedRegistrationProbe {
 
 #[async_trait::async_trait]
 impl crate::ProcessRegistrationProbe for ManagedRegistrationProbe {
-    async fn process_is_registered(&self, process_id: &str) -> Result<bool, PluginError> {
+    async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, PluginError> {
         Ok(self.managed.lock().await.contains_key(process_id))
     }
 }

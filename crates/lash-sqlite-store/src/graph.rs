@@ -12,11 +12,12 @@
 //! ceremony.
 
 use super::*;
+use lash_sansio::SessionId;
 
 impl Store {
     pub(crate) fn load_session_graph_from_conn(
         conn: &Connection,
-        session_id: &str,
+        session_id: &SessionId,
         leaf_node_id: Option<String>,
     ) -> Result<lash_core::SessionGraph, StoreError> {
         Self::load_readable_graph_from_conn(conn, session_id, leaf_node_id, false)
@@ -24,7 +25,7 @@ impl Store {
 
     pub(crate) fn load_active_path_session_graph_from_conn(
         conn: &Connection,
-        session_id: &str,
+        session_id: &SessionId,
         leaf_node_id: Option<String>,
     ) -> Result<lash_core::SessionGraph, StoreError> {
         let Some(leaf_node_id) = leaf_node_id else {
@@ -35,7 +36,7 @@ impl Store {
 
     fn load_readable_graph_from_conn(
         conn: &Connection,
-        session_id: &str,
+        session_id: &SessionId,
         leaf_node_id: Option<String>,
         active_path_only: bool,
     ) -> Result<lash_core::SessionGraph, StoreError> {
@@ -79,7 +80,7 @@ impl Store {
             )
             .map_err(sqlite_error)?;
         let rows = stmt
-            .query_map(params![session_id, leaf_generation], |row| {
+            .query_map(params![session_id.as_str(), leaf_generation], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -147,7 +148,7 @@ impl Store {
                 let leaf_node_id = conn
                     .query_row(
                         "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
-                        params![session_id],
+                        params![session_id.as_str()],
                         |row| row.get::<_, Option<String>>(0),
                     )
                     .optional()?
@@ -316,7 +317,7 @@ mod tests {
             .expect("open healthy whole-graph store");
         let session_id = "healthy-leafless-whole-graph";
         let mut state = lash_core::RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
@@ -337,7 +338,7 @@ mod tests {
             .await
             .expect("seed healthy whole-graph session");
 
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let graph = store
             .conn
             .call(move |conn| {

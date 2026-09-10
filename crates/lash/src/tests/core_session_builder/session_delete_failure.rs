@@ -22,7 +22,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
     let error = core
         .delete_session(
             "delete-partial-report",
-            session_delete_scope(&core, "delete-partial-report").await,
+            session_delete_scope(&core, &SessionId::from("delete-partial-report")).await,
         )
         .await
         .expect_err("injected storage failure must reach the facade caller");

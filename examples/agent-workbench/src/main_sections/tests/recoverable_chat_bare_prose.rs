@@ -1,15 +1,19 @@
 use super::*;
+use lash::SessionId;
 
 /// The projection of a bare-prose reply the runtime committed itself.
 ///
 /// Read through the production `/api/state` handler so the assertion covers the
 /// same projection the browser reads, settled — after the turn stopped running,
 /// its live workbench-owned row has retired and only durable truth remains.
-async fn settled_assistant_rows(state: &AppState, session_id: &str) -> (Vec<String>, Vec<String>) {
+async fn settled_assistant_rows(
+    state: &AppState,
+    session_id: &SessionId,
+) -> (Vec<String>, Vec<String>) {
     let Json(snapshot) = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(session_id.to_string()),
+            session_id: Some(SessionId::from(session_id.to_string())),
         }),
     )
     .await
@@ -103,13 +107,13 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     );
     crate::restate::settle_workbench_turn(
         &state,
-        &session.session_id(),
+        &SessionId::from(session.session_id()),
         &TurnId::from("bare-prose-turn"),
     )
     .await
     .expect("settle bare prose turn");
     drop(session);
-    let (assistant_texts, _) = settled_assistant_rows(&state, &session_id).await;
+    let (assistant_texts, _) = settled_assistant_rows(&state, &SessionId::from(session_id)).await;
     assert_eq!(
         assistant_texts,
         vec![BARE_PROSE_REPLY.to_string()],
@@ -203,13 +207,14 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     );
     crate::restate::settle_workbench_turn(
         &state,
-        &session.session_id(),
+        &SessionId::from(session.session_id()),
         &TurnId::from("reasoned-prose-turn"),
     )
     .await
     .expect("settle reasoned prose turn");
     drop(session);
-    let (assistant_texts, reasoning_rows) = settled_assistant_rows(&state, &session_id).await;
+    let (assistant_texts, reasoning_rows) =
+        settled_assistant_rows(&state, &SessionId::from(session_id)).await;
     assert_eq!(
         assistant_texts,
         vec![REASONED_REPLY.to_string()],
@@ -294,13 +299,14 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     .expect("record mid-turn prose turn output");
     crate::restate::settle_workbench_turn(
         &state,
-        &session.session_id(),
+        &SessionId::from(session.session_id()),
         &TurnId::from("mid-turn-prose-turn"),
     )
     .await
     .expect("settle mid-turn prose turn");
     drop(session);
-    let (assistant_texts, reasoning_rows) = settled_assistant_rows(&state, &session_id).await;
+    let (assistant_texts, reasoning_rows) =
+        settled_assistant_rows(&state, &SessionId::from(session_id)).await;
     assert_eq!(
         assistant_texts,
         vec![FINAL_REPLY.to_string()],

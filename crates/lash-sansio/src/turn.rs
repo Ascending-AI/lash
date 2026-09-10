@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::TurnId;
 use std::sync::Arc;
 
@@ -7,7 +8,7 @@ use crate::sansio::{TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtoc
 use crate::turn_driver::TurnDriverPreamble;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_id: TurnId,
     pub autonomous: bool,
     pub model: String,
@@ -176,7 +177,7 @@ mod tests {
             contributions: prompt_contributions,
         });
         let prepared = build_turn(SansIoTurnInput {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session".to_string()),
             turn_id: TurnId::from("turn"),
             autonomous: false,
             model: "gpt-5".to_string(),

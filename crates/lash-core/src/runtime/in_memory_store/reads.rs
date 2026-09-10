@@ -24,7 +24,7 @@ impl InMemorySessionStore {
             .global_node_owners
             .lock_recover()
             .get(node_id)
-            .is_some_and(|owner| owner == &session_id)
+            .is_some_and(|owner| owner == session_id)
         {
             return Ok(true);
         }
@@ -73,13 +73,15 @@ mod conformance_mapping_tests {
         let factory = super::super::InMemorySessionStoreFactory::new();
         factory
             .create_store(&crate::testing::store_fixtures::session_store_request(
-                "reader",
+                &SessionId::from("reader"),
                 "mapping-test",
                 crate::SessionRelation::Root,
             ))
             .await
             .unwrap();
-        let store = factory.raw_store_for_testing("reader").unwrap();
+        let store = factory
+            .raw_store_for_testing(&SessionId::from("reader"))
+            .unwrap();
         // A foreign-node read must walk the bound session's active path. A
         // dangling head forces the path-validation error through reads.rs,
         // rather than the separately classified load_session path.

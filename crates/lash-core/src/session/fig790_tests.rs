@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -51,7 +53,7 @@ impl crate::RuntimeEffectController for DeletedSessionProcessEffectController {
         );
         Err(crate::RuntimeEffectControllerError::from(
             crate::StoreError::SessionDeleted {
-                session_id: "fig790-session".to_string(),
+                session_id: SessionId::from("fig790-session"),
             },
         ))
     }
@@ -192,7 +194,7 @@ impl EffectBackedProcessService {
 impl crate::ProcessService for EffectBackedProcessService {
     async fn start_from_recorded_intent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _request: crate::ProcessStartRequest,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
@@ -203,9 +205,9 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn finish_recorded_intent_parent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         identity: crate::ToolIntentIdentity,
-        process_id: String,
+        process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
         reason: String,
         scope: crate::ProcessOpScope<'_>,
@@ -229,7 +231,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn start(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _registration: crate::ProcessRegistration,
         _options: crate::ProcessStartOptions,
         _scope: crate::ProcessOpScope<'_>,
@@ -241,7 +243,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         match self
@@ -263,7 +265,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn list_visible(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _mode: crate::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
@@ -274,8 +276,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn validate_visible(
         &self,
-        _session_id: &str,
-        _process_ids: &[String],
+        _session_id: &SessionId,
+        _process_ids: &[ProcessId],
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         Err(crate::PluginError::Session(
@@ -285,8 +287,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         match self
@@ -310,8 +312,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         _reason: Option<String>,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
@@ -320,8 +322,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_possessed(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
         _payload: serde_json::Value,
@@ -334,8 +336,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _signal_name: String,
         _signal_id: String,
         _payload: serde_json::Value,
@@ -348,8 +350,8 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &str,
-        _process_id: &str,
+        _session_id: &SessionId,
+        _process_id: &ProcessId,
         _event_type: String,
         _replay_key: String,
         _payload: serde_json::Value,
@@ -362,9 +364,9 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn transfer(
         &self,
-        _from_session_id: &str,
-        _to_session_id: &str,
-        _process_ids: Vec<String>,
+        _from_session_id: &SessionId,
+        _to_session_id: &SessionId,
+        _process_ids: Vec<ProcessId>,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         Err(crate::PluginError::Session(
@@ -421,7 +423,7 @@ fn fig790_process_await_context(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "fig790-session".to_string(),
+        session_id: SessionId::from("fig790-session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -433,7 +435,7 @@ fn fig790_process_await_context(
         clock: Arc::new(crate::SystemClock),
     });
     RuntimeExecutionContext::new(
-        "fig790-session".to_string(),
+        SessionId::from("fig790-session"),
         dispatch,
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         attachment_store,
@@ -504,7 +506,7 @@ async fn mid_await_process_cancellation_emits_exactly_one_await_effect() {
 #[tokio::test]
 async fn deleted_session_process_await_latches_typed_enclosing_effect_abort() {
     let context = fig790_process_await_context(Arc::new(DeletedSessionProcessEffectController));
-    context.record_started_process("fig790-process");
+    context.record_started_process(&ProcessId::from("fig790-process"));
 
     let reply = context
         .await_process_handle(
@@ -523,7 +525,7 @@ async fn deleted_session_process_await_latches_typed_enclosing_effect_abort() {
     assert_eq!(
         error.cause,
         Some(crate::RuntimeErrorCause::SessionDeleted {
-            session_id: "fig790-session".to_string(),
+            session_id: SessionId::from("fig790-session"),
         })
     );
 }

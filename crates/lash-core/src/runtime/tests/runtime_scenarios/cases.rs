@@ -234,7 +234,7 @@ proptest! {
 #[tokio::test]
 async fn runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint() {
     RuntimeScenario::new(COMMAND_BEFORE_TURN_WORK.display_name)
-        .session_id("runtime-scenario-command-before-turn")
+        .session_id(SessionId::from("runtime-scenario-command-before-turn"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-worker",
         })
@@ -267,7 +267,7 @@ async fn runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint
 #[tokio::test]
 async fn runtime_scenario_command_only_queue_drain_completes_without_turn_work() {
     RuntimeScenario::new(COMMAND_ONLY_QUEUE_DRAIN.display_name)
-        .session_id("runtime-scenario-command-only")
+        .session_id(SessionId::from("runtime-scenario-command-only"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-command-only-worker",
         })
@@ -288,7 +288,7 @@ async fn runtime_scenario_command_only_queue_drain_completes_without_turn_work()
 #[tokio::test]
 async fn runtime_scenario_queued_work_claim_keeps_pending_next_turn_input() {
     RuntimeScenario::new(QUEUED_WORK_KEEPS_NEXT_INPUT.display_name)
-        .session_id("runtime-scenario-queue-keeps-turn-input")
+        .session_id(SessionId::from("runtime-scenario-queue-keeps-turn-input"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-queue-turn-input-owner",
         })
@@ -320,7 +320,7 @@ async fn runtime_scenario_queued_work_claim_keeps_pending_next_turn_input() {
 #[tokio::test]
 async fn runtime_scenario_claims_process_wake_at_active_checkpoint_boundary() {
     RuntimeScenario::new(ACTIVE_CHECKPOINT_WAKE_CLAIM.display_name)
-        .session_id("runtime-scenario-active-checkpoint-wake")
+        .session_id(SessionId::from("runtime-scenario-active-checkpoint-wake"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-active-checkpoint-owner",
         })
@@ -342,7 +342,7 @@ async fn runtime_scenario_claims_process_wake_at_active_checkpoint_boundary() {
 #[tokio::test]
 async fn runtime_scenario_claims_queued_turn_input_and_completes_it() {
     RuntimeScenario::new(QUEUED_TURN_INPUT_COMPLETION.display_name)
-        .session_id("runtime-scenario-queued-turn-input")
+        .session_id(SessionId::from("runtime-scenario-queued-turn-input"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-turn-input-owner",
         })
@@ -359,7 +359,7 @@ async fn runtime_scenario_claims_queued_turn_input_and_completes_it() {
                     source_key: None,
                 })
                 .enqueue_turn_input(RuntimeTurnInputIngress::NextTurnForSession {
-                    session_id: "runtime-scenario-other-session",
+                    session_id: SessionId::from("runtime-scenario-other-session"),
                     text: "other session input",
                 }),
         )
@@ -379,7 +379,7 @@ async fn runtime_scenario_claims_queued_turn_input_and_completes_it() {
 #[tokio::test]
 async fn runtime_scenario_observation_replay_keeps_original_turn_input() {
     RuntimeScenario::new(OBSERVATION_REPLAY.display_name)
-        .session_id("runtime-scenario-observation-replay")
+        .session_id(SessionId::from("runtime-scenario-observation-replay"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-observation-replay-owner",
         })
@@ -417,7 +417,9 @@ async fn runtime_scenario_observation_replay_keeps_original_turn_input() {
 async fn runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel() {
     let turn_id = "runtime-scenario-redrive-turn";
     RuntimeScenario::new(CHECKPOINT_REDRIVE_CANCEL.display_name)
-        .session_id("runtime-scenario-checkpoint-redrive-cancel")
+        .session_id(SessionId::from(
+            "runtime-scenario-checkpoint-redrive-cancel",
+        ))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-redrive-input-owner",
         })
@@ -462,7 +464,7 @@ async fn runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel() {
 #[tokio::test]
 async fn runtime_scenario_commits_after_advisory_session_lease_release() {
     RuntimeScenario::new(SESSION_LEASE_RELEASE_FAULT.display_name)
-        .session_id("runtime-scenario-lease-failure")
+        .session_id(SessionId::from("runtime-scenario-lease-failure"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-lease-owner",
         })
@@ -474,7 +476,7 @@ async fn runtime_scenario_commits_after_advisory_session_lease_release() {
 #[tokio::test]
 async fn runtime_scenario_waits_for_stale_session_lease_ttl() {
     RuntimeScenario::new(STALE_LEASE_EXPIRY.display_name)
-        .session_id("runtime-scenario-stale-lease-expiry")
+        .session_id(SessionId::from("runtime-scenario-stale-lease-expiry"))
         .host_behavior(RuntimeHostBehavior {
             lease_owner_id: "runtime-scenario-reclaim-owner",
         })
@@ -519,7 +521,7 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
             crate::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
             crate::ToolIntents::v1(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                    session_id: session_id.clone(),
+                    session_id: SessionId::from(session_id.clone()),
                     request: crate::ProcessStartRequest::external(
                         "runtime-scenario-intent-child",
                         crate::ProcessOriginator::host_scoped("runtime-scenario"),
@@ -528,20 +530,20 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
                     on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-                    session_id: session_id.clone(),
-                    process_id: "runtime-scenario-intent-target".to_string(),
+                    session_id: SessionId::from(session_id.clone()),
+                    process_id: ProcessId::from("runtime-scenario-intent-target"),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"kind": "signal"}),
                 }),
                 crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                    session_id: session_id.clone(),
-                    process_id: "runtime-scenario-intent-target".to_string(),
+                    session_id: SessionId::from(session_id.clone()),
+                    process_id: ProcessId::from("runtime-scenario-intent-target"),
                     event_type: "runtime.intent.note".to_string(),
                     payload: serde_json::json!({"kind": "emit"}),
                 }),
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-                    session_id,
-                    process_id: "runtime-scenario-intent-target".to_string(),
+                    session_id: SessionId::from(session_id),
+                    process_id: ProcessId::from("runtime-scenario-intent-target"),
                     reason: Some("runtime scenario complete".to_string()),
                 }),
             ]),
@@ -618,12 +620,15 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 },
             ]),
-            &["root".to_string()],
+            &[SessionId::from("root")],
         )
         .await
         .expect("register runtime scenario intent target");
 
-    let turn_scope = named_turn_scope("root", &TurnId::from("runtime-scenario-intent-turn"));
+    let turn_scope = named_turn_scope(
+        &SessionId::from("root"),
+        &TurnId::from("runtime-scenario-intent-turn"),
+    );
     let wake_controller = turn_scope
         .owned_controller()
         .expect("runtime scenario turn owns its controller");
@@ -667,7 +672,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         crate::Resolution::Ok(serde_json::json!({"kind": "signal"}))
     );
     let events = registry
-        .events_after("runtime-scenario-intent-target", 0)
+        .events_after(&ProcessId::from("runtime-scenario-intent-target"), 0)
         .await
         .expect("read literal intent target events");
     assert_eq!(

@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 /// Journaled outcome of a workflow-entry session admission.
 ///
@@ -19,11 +20,11 @@ enum JournaledSessionAdmission {
 pub(super) async fn journaled_session_admission(
     state: &AppState,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
-    session_id: &str,
+    session_id: &SessionId,
     surface: &'static str,
 ) -> Result<(), AppError> {
     let admission_state = state.clone();
-    let admission_session_id = session_id.to_string();
+    let admission_session_id = SessionId::from(session_id.to_string());
     let Json(admission) = controller
         .context()
         .run(move || async move {

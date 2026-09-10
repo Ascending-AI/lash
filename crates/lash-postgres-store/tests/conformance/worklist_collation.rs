@@ -35,7 +35,7 @@ async fn ordered_ids(registry: &dyn ProcessRegistry) -> Vec<String> {
                 "maximum must use byte order"
             );
         }
-        ids.extend(page.records.into_iter().map(|record| record.id));
+        ids.extend(page.records.into_iter().map(|record| record.id.to_string()));
         continuation = page.continuation;
         if continuation.is_none() {
             return ids;

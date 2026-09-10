@@ -6,6 +6,8 @@
 //! revokes waits through the ingress and fails loudly for anything else instead
 //! of falling back to native execution.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::{
@@ -109,13 +111,19 @@ impl AwaitEventResolver for RestateEffectHost {
             .await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.controller
             .revoke_await_events_for_session(session_id)
             .await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.controller
             .cancel_await_events_for_session(session_id)
             .await
@@ -335,13 +343,19 @@ impl AwaitEventResolver for FencedRestateController {
             .await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.controller
             .revoke_await_events_for_session(session_id)
             .await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.controller
             .cancel_await_events_for_session(session_id)
             .await
@@ -498,7 +512,7 @@ async fn resolve_restate_await_event_via_ingress(
 
 async fn update_restate_session_waits_via_ingress(
     ingress: &RestateAwaitEventIngress,
-    session_id: &str,
+    session_id: &SessionId,
     revoke: bool,
 ) -> Result<(), RuntimeError> {
     let handler = if revoke { "revoke_all" } else { "cancel_all" };
@@ -715,12 +729,18 @@ impl AwaitEventResolver for RestateEffectHostController {
         await_restate_await_event_via_ingress(ingress, key, cancel, deadline, None).await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         let ingress = &self.await_event_ingress;
         update_restate_session_waits_via_ingress(ingress, session_id, true).await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         let ingress = &self.await_event_ingress;
         update_restate_session_waits_via_ingress(ingress, session_id, false).await
     }
@@ -837,7 +857,7 @@ impl RestateEffectHostController {
 
     /// Whether the bound registry has `process_id` registered; `false` with no
     /// registry bound, so an unbound host trusts its index alone.
-    async fn process_is_registered(&self, process_id: &str) -> Result<bool, RuntimeError> {
+    async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, RuntimeError> {
         let probe = self
             .registrations
             .lock()

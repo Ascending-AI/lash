@@ -355,7 +355,7 @@ pub struct RuntimeTurnPhaseProbeSlot {
 impl RuntimeTurnPhaseProbeSlot {
     pub fn set_for_session(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         probe: Arc<dyn RuntimeTurnPhaseProbe>,
     ) {
         self.set_for_scope(&crate::SessionScope::new(session_id), probe);
@@ -1143,7 +1143,7 @@ pub enum TurnEvent {
         cumulative: TokenUsage,
     },
     ChildUsage {
-        session_id: String,
+        session_id: SessionId,
         source: String,
         model: String,
         protocol_iteration: usize,
@@ -1315,7 +1315,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// inspection hosts that must coexist with a live writer.
     async fn read_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<Option<crate::SessionReadView>, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "read_session",
@@ -1339,7 +1339,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// Open an existing session when only its durable routing identity is known.
     async fn open_existing_store_by_id(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
         Ok(None)
     }
@@ -1390,7 +1390,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// an inherited `false` is a factory claiming "no session was ever deleted
     /// here" without having been asked. A factory that keeps no tombstone says
     /// so explicitly; a decorator forwards to the store it wraps.
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String>;
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String>;
 
     /// Delete one session and reclaim blobs whose final exact reference edge is
     /// severed by that transaction.
@@ -1400,7 +1400,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// never an unreported reclaim failure.
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport>;
 
     /// Reclaim factory-wide evidence before an explicit host horizon (FIG-653).
@@ -1487,7 +1487,7 @@ pub struct LashRuntime {
     /// Set for the current turn when the lane was busy and the turn proceeded
     /// under the commit CAS anyway, so a rejected commit still names the writer
     /// and the generation it knowingly raced.
-    pub(in crate::runtime) managed_sessions: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
+    pub(in crate::runtime) managed_sessions: Arc<Mutex<HashMap<SessionId, RuntimeHandle>>>,
     /// Active managed child turns, keyed by turn id. Guarded by a synchronous
     /// mutex so a `ManagedTurnLease` can release its registration from `Drop`:
     /// a cancelled child turn must never leave a ghost "running turn" behind.

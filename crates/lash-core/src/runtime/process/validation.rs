@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use std::collections::{HashMap, HashSet};
 
 use crate::SessionId;
@@ -133,7 +134,10 @@ pub fn prepare_process_start(
     {
         return Ok(ProcessStartPlan::AlreadyApplied);
     }
-    authority.validate_resume_predecessor(record.id.as_str(), record.first_started.as_deref())?;
+    authority.validate_resume_predecessor(
+        &ProcessId::from(record.id.as_str()),
+        record.first_started.as_deref(),
+    )?;
 
     let expected_attempt = match record.first_started.as_deref() {
         None => 1,
@@ -454,7 +458,7 @@ where
 }
 
 fn process_external_ref_conflict(
-    process_id: &str,
+    process_id: &ProcessId,
     existing: &super::model::ProcessExternalRef,
     requested: &super::model::ProcessExternalRef,
 ) -> PluginError {
@@ -480,7 +484,7 @@ pub fn prepare_process_event_append(
     last_event_sequence: Option<u64>,
     replay_lookup: Option<ProcessEvent>,
     occurred_at_ms: u64,
-    wake_session_id: Option<&str>,
+    wake_session_id: Option<&SessionId>,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = record.id.as_str();
     if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str())
@@ -495,7 +499,7 @@ pub fn prepare_process_event_append(
                 None
             };
             let wake_delivery = prepare_wake_delivery(
-                process_id,
+                &ProcessId::from(process_id),
                 record,
                 existing.sequence,
                 existing.event_type.clone(),
@@ -518,7 +522,7 @@ pub fn prepare_process_event_append(
         && super::events::process_signal_name_from_event_type(&request.event_type).is_some()
     {
         return Err(PluginError::ProcessAlreadyTerminal {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             status: record.status,
         });
     }
@@ -537,7 +541,7 @@ pub fn prepare_process_event_append(
                 request.event_type
             ))
         })?;
-    require_event_replay(process_id, &request, &declared.semantics)?;
+    require_event_replay(&ProcessId::from(process_id), &request, &declared.semantics)?;
     declared
         .payload_schema
         .validate(&request.payload)
@@ -545,25 +549,25 @@ pub fn prepare_process_event_append(
             PluginError::Session(format!("invalid `{}` payload: {err}", request.event_type))
         })?;
     let semantics = materialize_process_event_semantics(
-        process_id,
+        &ProcessId::from(process_id),
         sequence,
         &request.payload,
         &declared.semantics,
     )?;
     if semantics.terminal.is_some() && record.is_terminal() {
         return Err(PluginError::ProcessAlreadyTerminal {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             status: record.status,
         });
     }
     let event = ProcessEvent {
-        process_id: process_id.to_string(),
+        process_id: ProcessId::from(process_id.to_string()),
         process_incarnation: record.incarnation,
         sequence,
         event_type: request.event_type,
         payload: request.payload,
         invocation: crate::runtime::causal::process_event_invocation(
-            process_id,
+            &ProcessId::from(process_id),
             sequence,
             declared.name.as_str(),
             request.replay,
@@ -574,7 +578,7 @@ pub fn prepare_process_event_append(
     let mut projected_record = record.clone();
     apply_process_event_projection(&mut projected_record, &event)?;
     let wake_delivery = prepare_wake_delivery(
-        process_id,
+        &ProcessId::from(process_id),
         record,
         event.sequence,
         event.event_type.clone(),
@@ -603,14 +607,14 @@ pub fn prepare_process_event_append(
     reason = "wake delivery mirrors the persisted event plus its optional materialized wake"
 )]
 fn prepare_wake_delivery(
-    process_id: &str,
+    process_id: &ProcessId,
     record: &ProcessRecord,
     sequence: u64,
     event_type: String,
     event_invocation: crate::RuntimeInvocation,
     occurred_at: u64,
     wake: Option<super::events::ProcessWake>,
-    wake_session_id: Option<&str>,
+    wake_session_id: Option<&SessionId>,
 ) -> Result<Option<ProcessWakeDelivery>, PluginError> {
     let Some(wake) = wake else {
         return Ok(None);
@@ -619,8 +623,8 @@ fn prepare_wake_delivery(
         return Ok(None);
     };
     process_wake_delivery(ProcessWakeDeliveryRequest {
-        target_session_id: target_session_id.to_string(),
-        process_id: process_id.to_string(),
+        target_session_id: SessionId::from(target_session_id.to_string()),
+        process_id: ProcessId::from(process_id.to_string()),
         process_incarnation: record.incarnation,
         sequence,
         event_type,
@@ -1030,7 +1034,7 @@ pub fn process_registration_fingerprint(
 }
 
 pub fn require_event_replay(
-    process_id: &str,
+    process_id: &ProcessId,
     request: &ProcessEventAppendRequest,
     spec: &ProcessEventSemanticsSpec,
 ) -> Result<(), PluginError> {

@@ -25,7 +25,7 @@ impl TurnInputStore for PostgresSessionStore {
                          mode = $7
                      WHERE session_id = $1 AND turn_id = $2",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .bind(turn_id.as_str())
                 .bind(&request.request_id)
                 .bind(&request.origin)
@@ -46,7 +46,7 @@ impl TurnInputStore for PostgresSessionStore {
                          session_id, turn_id, request_id, origin, reason, disposition, mode
                      ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .bind(turn_id.as_str())
                 .bind(&request.request_id)
                 .bind(&request.origin)
@@ -122,7 +122,7 @@ impl TurnInputStore for PostgresSessionStore {
             )
             .bind(enqueue_seq)
             .bind(&input_id)
-            .bind(&draft.session_id)
+            .bind(draft.session_id.as_str())
             .bind(source_key)
             .bind(&ingress_json)
             .bind(state.as_str())
@@ -154,7 +154,7 @@ impl TurnInputStore for PostgresSessionStore {
             )
             .bind(enqueue_seq)
             .bind(&input_id)
-            .bind(&draft.session_id)
+            .bind(draft.session_id.as_str())
             .bind(&draft.source_key)
             .bind(&ingress_json)
             .bind(state.as_str())
@@ -175,7 +175,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::PendingTurnInput>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -198,7 +198,7 @@ impl TurnInputStore for PostgresSessionStore {
                ))
              ORDER BY enqueue_seq ASC"
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(lash_core::TurnInputState::PendingActive.as_str())
         .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
         .bind(now as i64)
@@ -216,7 +216,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn list_turn_input_applications(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let rows = sqlx::query(
@@ -224,7 +224,7 @@ impl TurnInputStore for PostgresSessionStore {
              FROM lash_runtime_turn_commits
              WHERE session_id = $1",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .fetch_all(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
@@ -249,7 +249,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -276,7 +276,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &lash_core::PendingTurnInputCancelTarget,
     ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -299,7 +299,7 @@ impl TurnInputStore for PostgresSessionStore {
              ORDER BY enqueue_seq ASC
              FOR UPDATE"
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(anchor_row.enqueue_seq as i64)
         .fetch_all(&mut *tx)
         .await
@@ -317,7 +317,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn claim_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
@@ -342,7 +342,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -384,7 +384,7 @@ impl TurnInputStore for PostgresSessionStore {
                  claim_session_lease_generation = 0
              WHERE session_id = $1 AND claim_id = $2 AND claim_token = $3",
         )
-        .bind(&claim.session_id)
+        .bind(claim.session_id.as_str())
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
         .bind(lash_core::TurnInputState::Accepted.as_str())
@@ -462,7 +462,7 @@ impl TurnInputStore for PostgresSessionStore {
                  WHERE (session_id, claim_id, claim_token) IN ",
             );
             query.push_tuples(batch, |mut row, claim| {
-                row.push_bind(&claim.session_id)
+                row.push_bind(claim.session_id.as_str())
                     .push_bind(&claim.claim_id)
                     .push_bind(&claim.lease_token);
             });
@@ -478,7 +478,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {

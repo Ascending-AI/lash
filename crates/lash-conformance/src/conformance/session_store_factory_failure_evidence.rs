@@ -1,6 +1,7 @@
 //! Durable failed-generation evidence shared by every session-store backend.
 
 use super::session_store_factory::session_store_request;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -15,7 +16,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     const PARTIAL_TEXT: &str = "provider-visible prefix before the stream failed";
 
     let request = session_store_request(
-        SESSION_ID,
+        &SessionId::from(SESSION_ID),
         "failure-evidence-model",
         crate::SessionRelation::Root,
     );
@@ -74,9 +75,9 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     host.control.effect_host = Arc::clone(&effect_host);
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = request.policy.clone();
-    policy.session_id = Some(SESSION_ID.to_string());
+    policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));
     let state = crate::RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         policy: policy.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -129,7 +130,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     drop(runtime);
 
     let reopened = factory
-        .read_session(SESSION_ID)
+        .read_session(&SessionId::from(SESSION_ID))
         .await
         .expect("reopen failure-evidence session")
         .expect("failed turn remains readable");

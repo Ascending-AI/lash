@@ -56,7 +56,7 @@ impl ConformanceProcessWaitTransport {
         }
     }
 
-    fn assert_reattached_to(&self, process_id: &str) {
+    fn assert_reattached_to(&self, process_id: &ProcessId) {
         let requests = self.request_urls.lock_recover();
         assert_eq!(requests.len(), 2, "Restate process wait must reattach once");
         let expected = format!("/LashProcessWorkflow/{process_id}/await_terminal");
@@ -199,7 +199,7 @@ pub(super) async fn restate_public_signal_intent_wakes_parked_process_conformanc
         process_work,
     )
     .await;
-    wait_transport.assert_reattached_to("restate-public-signal-intent-target");
+    wait_transport.assert_reattached_to(&ProcessId::from("restate-public-signal-intent-target"));
 }
 
 #[tokio::test]
@@ -219,7 +219,7 @@ pub(super) async fn restate_wake_delivery_ordering_group_conformance() {
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
     )
     .await;
-    wait_transport.assert_reattached_to("wake-ordering-terminal");
+    wait_transport.assert_reattached_to(&ProcessId::from("wake-ordering-terminal"));
 }
 
 #[tokio::test]
@@ -255,7 +255,7 @@ pub(super) async fn restate_wake_delivery_crash_matrix_conformance() {
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
     )
     .await;
-    wait_transport.assert_reattached_to("wake-crash-terminal");
+    wait_transport.assert_reattached_to(&ProcessId::from("wake-crash-terminal"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -778,14 +778,14 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::ParentEnd {
                 identity: lash_core::ToolIntentIdentity {
-                    session_id: "fig1767".to_string(),
+                    session_id: SessionId::from("fig1767"),
                     execution_scope_id: "scope".to_string(),
                     tool_call_id: "call".to_string(),
                     intent_index: 0,
                     replay_key: "key".to_string(),
                     minting_emission_replay_key: None,
                 },
-                process_id: "fig1767-proc".to_string(),
+                process_id: ProcessId::from("fig1767-proc"),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
                 reason: "fig1767-test".to_string(),
             }),
@@ -821,7 +821,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         assert_eq!(
             refusal["message"],
             lash_core::PluginError::ProcessUnknown {
-                process_id: "fig1767-proc".to_string(),
+                process_id: ProcessId::from("fig1767-proc"),
             }
             .to_string()
         );
@@ -919,14 +919,14 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::ParentEnd {
                 identity: lash_core::ToolIntentIdentity {
-                    session_id: "fig1767".to_string(),
+                    session_id: SessionId::from("fig1767"),
                     execution_scope_id: "scope".to_string(),
                     tool_call_id: "call".to_string(),
                     intent_index: 0,
                     replay_key: "key".to_string(),
                     minting_emission_replay_key: None,
                 },
-                process_id: "fig1767-proc".to_string(),
+                process_id: ProcessId::from("fig1767-proc"),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
                 reason: "fig1767-test".to_string(),
             }),
@@ -1069,7 +1069,7 @@ pub(super) async fn journaled_cancel_peeks_replay_while_live_watcher_observes_la
         RuntimeEffectEnvelope::new(
             RuntimeInvocation::effect(
                 RuntimeScope {
-                    session_id: "journaled-peek-session".to_string(),
+                    session_id: SessionId::from("journaled-peek-session"),
                     turn_id: Some(TurnId::from("journaled-peek-turn")),
                     turn_index: None,
                     protocol_iteration: None,
@@ -1516,7 +1516,7 @@ impl lash_core::SessionCommitStore for CommitRetryStore {
 impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &lash_core::LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
@@ -1553,7 +1553,7 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
 
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<lash_core::SessionExecutionLeaseObservation, lash_core::StoreError> {
         self.inner.get_session_execution_lease(session_id).await
     }
@@ -1570,7 +1570,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
     ) -> Result<Option<lash_core::runtime::QueuedWorkClaim>, lash_core::StoreError> {
@@ -1581,7 +1581,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
@@ -1594,7 +1594,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
@@ -1623,7 +1623,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
@@ -1651,7 +1651,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
     async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<lash_core::runtime::QueuedWorkBatch>, lash_core::StoreError> {
         self.inner
@@ -1661,7 +1661,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
     async fn queued_work_batch_completed(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<bool, lash_core::StoreError> {
         self.inner
@@ -1671,21 +1671,21 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
     async fn pending_session_work_ordering(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<lash_core::store::PendingSessionWorkOrdering, lash_core::StoreError> {
         self.inner.pending_session_work_ordering(session_id).await
     }
 
     async fn list_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::StoreError> {
         self.inner.list_queued_work(session_id).await
     }
 
     async fn list_pending_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::StoreError> {
         self.inner.list_pending_queued_work(session_id).await
     }
@@ -1702,21 +1702,21 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::PendingTurnInput>, lash_core::StoreError> {
         self.inner.list_pending_turn_inputs(session_id).await
     }
 
     async fn list_turn_input_applications(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::TurnInputApplication>, lash_core::StoreError> {
         self.inner.list_turn_input_applications(session_id).await
     }
 
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, lash_core::StoreError> {
         self.inner
@@ -1726,7 +1726,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &lash_core::PendingTurnInputCancelTarget,
     ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, lash_core::StoreError> {
         self.inner
@@ -1736,7 +1736,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
     async fn claim_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
@@ -1757,7 +1757,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -1776,7 +1776,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> Result<lash_core::TurnCancelInputOutcome, lash_core::StoreError> {

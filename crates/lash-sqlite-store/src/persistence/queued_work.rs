@@ -50,11 +50,11 @@ impl QueuedWorkStore for Store {
 
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let session_execution_lease = session_execution_lease.clone();
         let owner = owner.clone();
         let now = self.clock.timestamp_ms();
@@ -108,7 +108,7 @@ impl QueuedWorkStore for Store {
 
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
@@ -119,7 +119,7 @@ impl QueuedWorkStore for Store {
                 QueuedWorkClaimRefusal::ZeroLimit,
             ));
         }
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let session_execution_lease = session_execution_lease.clone();
         let owner = owner.clone();
         let now = self.clock.timestamp_ms();
@@ -205,7 +205,7 @@ impl QueuedWorkStore for Store {
 
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
@@ -235,7 +235,7 @@ impl QueuedWorkStore for Store {
         #[cfg(test)]
         self.checkpoint_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let session_execution_lease = session_execution_lease.clone();
         let owner = owner.clone();
         let turn_id = turn_id.clone();
@@ -295,7 +295,7 @@ impl QueuedWorkStore for Store {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
@@ -305,7 +305,7 @@ impl QueuedWorkStore for Store {
         if batch_ids.is_empty() {
             return Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
         }
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let fence = session_execution_lease.clone();
         let owner = owner.clone();
         let batch_ids = batch_ids.to_vec();
@@ -326,7 +326,7 @@ impl QueuedWorkStore for Store {
                         sql.push_str(&vec!["?"; batch_ids.len()].join(", "));
                         sql.push(')');
                         let mut values: Vec<rusqlite::types::Value> =
-                            vec![session_id.clone().into()];
+                            vec![session_id.as_str().to_string().into()];
                         values.extend(batch_ids.iter().cloned().map(Into::into));
                         let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
                         stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
@@ -360,7 +360,7 @@ impl QueuedWorkStore for Store {
                         sql.push_str(&vec!["?"; batch_ids.len()].join(", "));
                         sql.push_str(") ORDER BY enqueue_seq ASC");
                         let mut values: Vec<rusqlite::types::Value> = vec![
-                            session_id.clone().into(),
+                            session_id.as_str().to_string().into(),
                             (now as i64).into(),
                             sql_session_lease_generation(generation)?.into(),
                         ];
@@ -400,7 +400,7 @@ impl QueuedWorkStore for Store {
                         sql.push_str(&vec!["?"; involved_claim_ids.len()].join(", "));
                         sql.push_str(") ORDER BY enqueue_seq ASC");
                         let mut values: Vec<rusqlite::types::Value> = vec![
-                            session_id.clone().into(),
+                            session_id.as_str().to_string().into(),
                             (now as i64).into(),
                             sql_session_lease_generation(generation)?.into(),
                         ];
@@ -471,7 +471,7 @@ impl QueuedWorkStore for Store {
                                 .map_err(sqlite_error)?;
                             stmt.query_map(
                                 params![
-                                    session_id,
+                                    session_id.as_str(),
                                     now as i64,
                                     sql_session_lease_generation(generation)?,
                                     requested_rows[0].enqueue_seq as i64,
@@ -579,8 +579,8 @@ impl QueuedWorkStore for Store {
                          claim_session_lease_generation = 0
                      WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
                     params![
-                        session_id,
-                        claim_id,
+                        session_id.as_str(),
+                        claim_id.as_str(),
                         lease_token,
                         restore_claim_id,
                         restore_claim_token
@@ -611,8 +611,8 @@ impl QueuedWorkStore for Store {
                              claim_session_lease_generation = 0
                          WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
                         params![
-                            claim.session_id,
-                            claim.claim_id,
+                            claim.session_id.as_str(),
+                            claim.claim_id.as_str(),
                             claim.lease_token,
                             lash_core::store_backend_support::queued_work_abandon_restore_claim_id(
                                 &claim,
@@ -632,10 +632,10 @@ impl QueuedWorkStore for Store {
 
     async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let batch_id = batch_id.to_string();
         let now = self.clock.timestamp_ms() as i64;
         self.conn
@@ -658,7 +658,7 @@ impl QueuedWorkStore for Store {
                                    ))",
                                 QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
                             ),
-                            params![session_id, batch_id, now],
+                            params![session_id.as_str(), batch_id.as_str(), now],
                             queued_batch_row_from_sql,
                         )
                         .optional()
@@ -679,7 +679,7 @@ impl QueuedWorkStore for Store {
                                   AND sel.lease_fencing_token
                                       = queued_work_batches.claim_session_lease_generation
                            ))",
-                        params![session_id, batch_id, now],
+                        params![session_id.as_str(), batch_id.as_str(), now],
                     )
                     .map_err(sqlite_error)?;
                     Ok(Some(batch))
@@ -695,10 +695,10 @@ impl QueuedWorkStore for Store {
 
     async fn queued_work_batch_completed(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<bool, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let marker = lash_core::store_backend_support::session_command_batch_completion_key(
             &session_id,
             batch_id,
@@ -710,7 +710,7 @@ impl QueuedWorkStore for Store {
                         SELECT 1 FROM runtime_turn_commits
                         WHERE session_id = ?1 AND turn_id = ?2
                      )",
-                    params![session_id, marker],
+                    params![session_id.as_str(), marker],
                     |row| row.get(0),
                 )
             })
@@ -718,8 +718,11 @@ impl QueuedWorkStore for Store {
             .map_err(sqlite_error)
     }
 
-    async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let session_id = session_id.to_string();
+    async fn list_queued_work(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        let session_id = SessionId::from(session_id.to_string());
         self.conn
             .call(move |conn| {
                 let outcome: Result<Vec<QueuedWorkBatch>, StoreError> = (|| {
@@ -734,7 +737,7 @@ impl QueuedWorkStore for Store {
                             ))
                             .map_err(sqlite_error)?;
                         let rows = stmt
-                            .query_map(params![session_id], queued_batch_row_from_sql)
+                            .query_map(params![session_id.as_str()], queued_batch_row_from_sql)
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
@@ -750,9 +753,9 @@ impl QueuedWorkStore for Store {
 
     async fn pending_session_work_ordering(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
@@ -802,7 +805,7 @@ impl QueuedWorkStore for Store {
                                  LEFT JOIN earliest_command AS command ON TRUE
                                  LEFT JOIN earliest_input AS input ON TRUE",
                                 params![
-                                    session_id,
+                                    session_id.as_str(),
                                     now as i64,
                                     lash_core::TurnInputState::DeferredNextTurn.as_str(),
                                     QueuedWorkKind::Control.as_str()
@@ -844,9 +847,9 @@ impl QueuedWorkStore for Store {
 
     async fn list_pending_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
@@ -870,7 +873,10 @@ impl QueuedWorkStore for Store {
                             ))
                             .map_err(sqlite_error)?;
                         let rows = stmt
-                            .query_map(params![session_id, now as i64], queued_batch_row_from_sql)
+                            .query_map(
+                                params![session_id.as_str(), now as i64],
+                                queued_batch_row_from_sql,
+                            )
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };

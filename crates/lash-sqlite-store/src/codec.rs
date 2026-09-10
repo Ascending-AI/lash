@@ -1,6 +1,7 @@
 //! Shared blob/record codecs for the SQLite store: JSON + msgpack envelopes
 //! and the compressed artifact-blob encoding.
 use super::*;
+use lash_sansio::SessionId;
 
 pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
     serde_json::to_string(value).map_err(|error| StoreError::RecordEncodingFailed {
@@ -82,13 +83,13 @@ pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> 
 /// inside a `conn.call`/`conn.write` closure on the connection thread.
 pub(crate) fn try_load_session_head_meta_from_conn(
     conn: &Connection,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
             "SELECT head_json, head_revision, leaf_node_id, checkpoint_ref
              FROM session_head WHERE session_id = ?1",
-            params![session_id],
+            params![session_id.as_str()],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

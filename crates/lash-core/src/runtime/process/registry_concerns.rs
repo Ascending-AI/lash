@@ -42,7 +42,7 @@ pub trait ProcessQuery: Send + Sync {
     /// Resolve a host-facing reusable process name to the currently retained
     /// structural identity. Internal durable references must keep the returned
     /// pair rather than resolving the name again.
-    async fn resolve_process_ref(&self, process_id: &str) -> Result<ProcessRef, PluginError> {
+    async fn resolve_process_ref(&self, process_id: &ProcessId) -> Result<ProcessRef, PluginError> {
         match self.get_process(process_id).await? {
             Some(record) => Ok(ProcessRef::from_record(&record)),
             None => Err(super::registry_transitions::unknown_process(process_id)),
@@ -65,7 +65,10 @@ pub trait ProcessQuery: Send + Sync {
         }
     }
 
-    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError>;
+    async fn get_process(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<ProcessRecord>, PluginError>;
 
     async fn list_processes(
         &self,
@@ -120,8 +123,8 @@ pub trait ProcessQuery: Send + Sync {
     /// read per candidate.
     async fn filter_unregistered_process_ids(
         &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, PluginError> {
+        process_ids: &[ProcessId],
+    ) -> Result<Vec<ProcessId>, PluginError> {
         let mut missing = Vec::new();
         for process_id in process_ids {
             match self.get_process(process_id).await {
@@ -130,7 +133,7 @@ pub trait ProcessQuery: Send + Sync {
                 Err(error) => return Err(error),
             }
         }
-        Ok(missing)
+        Ok(missing.into_iter().collect())
     }
 
     /// Return the candidate ids retained as terminal-process tombstones,
@@ -140,8 +143,8 @@ pub trait ProcessQuery: Send + Sync {
     /// their deterministic process ids have been durably pruned.
     async fn filter_tombstoned_process_ids(
         &self,
-        process_ids: &[String],
-    ) -> Result<Vec<String>, PluginError> {
+        process_ids: &[ProcessId],
+    ) -> Result<Vec<ProcessId>, PluginError> {
         let mut tombstoned = Vec::new();
         for process_id in process_ids {
             match self.get_process(process_id).await {
@@ -152,7 +155,7 @@ pub trait ProcessQuery: Send + Sync {
                 Err(error) => return Err(error),
             }
         }
-        Ok(tombstoned)
+        Ok(tombstoned.into_iter().collect())
     }
 
     /// Count non-terminal process rows by their captured definition and
@@ -233,7 +236,7 @@ pub trait ProcessRegistrar: Send + Sync {
     /// different reference after one has been stored is a registry model error.
     async fn set_external_ref(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError>;
 }
@@ -247,15 +250,15 @@ pub trait ProcessRegistrar: Send + Sync {
 pub trait ProcessObserverRegistry: ProcessQuery {
     async fn add_observer(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
 
     /// Attach an observer edge to one exact process incarnation.
     async fn add_observer_ref(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         process_ref: &ProcessRef,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
@@ -266,16 +269,16 @@ pub trait ProcessObserverRegistry: ProcessQuery {
 
     async fn remove_observer(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
 
     async fn transfer_observers(
         &self,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: &[String],
+        from_session_id: &SessionId,
+        to_session_id: &SessionId,
+        process_ids: &[ProcessId],
         by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
 
@@ -283,7 +286,7 @@ pub trait ProcessObserverRegistry: ProcessQuery {
     /// Stores bound status and retired-row retention before decoding records.
     async fn list_observed_by(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError>;
 
@@ -297,7 +300,7 @@ pub trait ProcessObserverRegistry: ProcessQuery {
     /// nothing can ever advance.
     async fn list_live_observed_by(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
         Ok(self
             .list_observed_by(
@@ -313,7 +316,11 @@ pub trait ProcessObserverRegistry: ProcessQuery {
             .collect())
     }
 
-    async fn is_observer(&self, session_id: &str, process_id: &str) -> Result<bool, PluginError> {
+    async fn is_observer(
+        &self,
+        session_id: &SessionId,
+        process_id: &ProcessId,
+    ) -> Result<bool, PluginError> {
         if self.get_process(process_id).await?.is_none() {
             return Ok(false);
         }
@@ -330,13 +337,16 @@ pub trait ProcessObserverRegistry: ProcessQuery {
             .any(|record| record.id == process_id))
     }
 
-    async fn observers_for_process(&self, process_id: &str) -> Result<Vec<SessionId>, PluginError>;
+    async fn observers_for_process(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Vec<SessionId>, PluginError>;
 
     /// Append a subscription-retarget audit event, update the indexed target,
     /// and discard pending deliveries to the old target atomically.
     async fn retarget_subscription(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         target: Option<&str>,
     ) -> Result<(), PluginError>;
 
@@ -346,7 +356,7 @@ pub trait ProcessObserverRegistry: ProcessQuery {
     /// per-process observer or retarget audit events.
     async fn delete_session_process_state(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<ProcessSessionDeleteReport, PluginError>;
 }
 
@@ -364,7 +374,7 @@ pub trait ProcessEventLog: ProcessQuery {
     /// execution-owned events must use its authority-bound emitter.
     async fn append_event(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
@@ -383,14 +393,14 @@ pub trait ProcessEventLog: ProcessQuery {
     /// Implementations validate `authority` and append in one atomic write.
     async fn append_event_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
     async fn events_after(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError>;
 
@@ -413,7 +423,7 @@ pub trait ProcessEventLog: ProcessQuery {
     /// instead of growing with a long-lived process's history.
     async fn count_events_through(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         event_type: &str,
         up_to_sequence: u64,
     ) -> Result<u64, PluginError> {
@@ -447,7 +457,7 @@ pub trait ProcessEventLog: ProcessQuery {
     /// the event log; store backends override it with ORDER BY ... LIMIT.
     async fn recent_events(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         limit: usize,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         let mut events = self.events_after(process_id, 0).await?;
@@ -486,7 +496,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// fences the terminal append and lease release in one atomic operation.
     async fn complete_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
@@ -494,7 +504,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// Complete without a Lash lease and atomically retain parent-end work.
     async fn complete_process_with_parent_end(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
         actions: Vec<crate::ToolIntentParentEndAction>,
@@ -549,11 +559,11 @@ pub trait ProcessLifecycle: Send + Sync {
     /// Load the durable post-terminal teardown plan for one process, if any.
     async fn get_pending_parent_end_plan(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessParentEndPlan>, PluginError>;
 
     /// Clear one plan after all replay-keyed commands settle. Repetition is idempotent.
-    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError>;
+    async fn complete_parent_end_plan(&self, process_id: &ProcessId) -> Result<(), PluginError>;
 
     /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
     ///
@@ -562,7 +572,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// attempt; OwnerBound recovery rejects a distinct execution.
     async fn record_first_started_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         started: ProcessStarted,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessStartOutcome, PluginError>;
@@ -577,7 +587,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// so there is nothing to abandon.
     async fn request_process_abandon(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError>;
 
@@ -596,19 +606,21 @@ pub trait ProcessLifecycle: Send + Sync {
     /// Idempotent: a row already in that state is returned unchanged. Refused
     /// for rows that are not Externally-Owned and for rows that already
     /// recorded a terminal outcome.
-    async fn record_caller_departure(&self, process_id: &str)
-    -> Result<ProcessRecord, PluginError>;
+    async fn record_caller_departure(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<ProcessRecord, PluginError>;
 
     async fn set_process_wait_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         wait: WaitState,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 
     async fn clear_process_wait_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 }
@@ -644,7 +656,7 @@ pub trait ProcessToolIntents: Send + Sync {
     /// to reconstruct teardown after a crash.
     async fn pending_tool_intent_parent_end(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         execution_scope_id: &str,
     ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError>;
 
@@ -719,7 +731,7 @@ pub trait ProcessLeases: Send + Sync {
     /// writer is rejected.
     async fn claim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<ProcessLeaseClaimOutcome, PluginError>;
@@ -730,7 +742,7 @@ pub trait ProcessLeases: Send + Sync {
     /// acquire it with a monotonically advanced fencing token.
     async fn reclaim_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &crate::LeaseOwnerIdentity,
         observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
@@ -757,7 +769,7 @@ pub trait ProcessLeases: Send + Sync {
     /// process ids return `None`.
     async fn get_process_lease(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessLease>, PluginError>;
 
     /// Read current lease rows for `process_ids` in input order.
@@ -883,7 +895,7 @@ pub trait ProcessRetention: Send + Sync {
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
         watermark: ProjectionWatermark,
-    ) -> Result<Vec<String>, PluginError>;
+    ) -> Result<Vec<ProcessId>, PluginError>;
 }
 
 /// Rebinding a registry backend to the runtime's clock.
@@ -1032,7 +1044,7 @@ mod concern_isolation_tests {
     impl ProcessQuery for ObserverOnly {
         async fn get_process(
             &self,
-            process_id: &str,
+            process_id: &ProcessId,
         ) -> Result<Option<ProcessRecord>, PluginError> {
             self.inner.get_process(process_id).await
         }
@@ -1070,25 +1082,25 @@ mod concern_isolation_tests {
     impl ProcessObserverRegistry for ObserverOnly {
         async fn add_observer(
             &self,
-            session_id: &str,
-            process_id: &str,
+            session_id: &SessionId,
+            process_id: &ProcessId,
             by: ProcessObserverBy,
         ) -> Result<(), PluginError> {
             self.inner.add_observer(session_id, process_id, by).await
         }
         async fn remove_observer(
             &self,
-            session_id: &str,
-            process_id: &str,
+            session_id: &SessionId,
+            process_id: &ProcessId,
             by: ProcessObserverBy,
         ) -> Result<(), PluginError> {
             self.inner.remove_observer(session_id, process_id, by).await
         }
         async fn transfer_observers(
             &self,
-            from_session_id: &str,
-            to_session_id: &str,
-            process_ids: &[String],
+            from_session_id: &SessionId,
+            to_session_id: &SessionId,
+            process_ids: &[ProcessId],
             by: ProcessObserverBy,
         ) -> Result<(), PluginError> {
             self.inner
@@ -1097,27 +1109,27 @@ mod concern_isolation_tests {
         }
         async fn list_observed_by(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
             filter: &ProcessListFilter,
         ) -> Result<Vec<ProcessRecord>, PluginError> {
             self.inner.list_observed_by(session_id, filter).await
         }
         async fn observers_for_process(
             &self,
-            process_id: &str,
+            process_id: &ProcessId,
         ) -> Result<Vec<SessionId>, PluginError> {
             self.inner.observers_for_process(process_id).await
         }
         async fn retarget_subscription(
             &self,
-            process_id: &str,
+            process_id: &ProcessId,
             target: Option<&str>,
         ) -> Result<(), PluginError> {
             self.inner.retarget_subscription(process_id, target).await
         }
         async fn delete_session_process_state(
             &self,
-            session_id: &str,
+            session_id: &SessionId,
         ) -> Result<ProcessSessionDeleteReport, PluginError> {
             self.inner.delete_session_process_state(session_id).await
         }
@@ -1146,22 +1158,25 @@ mod concern_isolation_tests {
 
         wrapper
             .add_observer(
-                "session-a",
-                "proc-observer-isolation",
+                &SessionId::from("session-a"),
+                &ProcessId::from("proc-observer-isolation"),
                 ProcessObserverBy::host("op-observer-isolation"),
             )
             .await
             .expect("add observer through the observer-only wrapper");
         assert!(
             wrapper
-                .is_observer("session-a", "proc-observer-isolation")
+                .is_observer(
+                    &SessionId::from("session-a"),
+                    &ProcessId::from("proc-observer-isolation")
+                )
                 .await
                 .expect("is_observer provided method resolves through ProcessQuery"),
             "observer edge added through the wrapper must be visible through it"
         );
         let observed = wrapper
             .list_observed_by(
-                "session-a",
+                &SessionId::from("session-a"),
                 &crate::ProcessListFilter {
                     status: crate::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -1180,7 +1195,7 @@ mod concern_isolation_tests {
 #[async_trait::async_trait]
 pub trait ProcessRegistrationProbe: Send + Sync {
     /// Whether `process_id` has a registration row now.
-    async fn process_is_registered(&self, process_id: &str) -> Result<bool, PluginError>;
+    async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, PluginError>;
 }
 
 /// What a registry hands the effect host it binds
@@ -1245,7 +1260,7 @@ impl ProcessScopeFenceHosts {
     }
 
     /// Lift the scope-retirement fence of `process_id` on every bound host.
-    pub async fn reinstate_process_scope(&self, process_id: &str) -> Result<(), PluginError> {
+    pub async fn reinstate_process_scope(&self, process_id: &ProcessId) -> Result<(), PluginError> {
         let hosts: Vec<Arc<dyn EffectHost>> = self
             .hosts
             .lock()

@@ -1,5 +1,6 @@
 //! Cross-backend conformance for process retention's trigger-store effects.
 
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -54,7 +55,7 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
     const KEY: &str = "frontier-trigger-retention-key";
     const REGISTER_OPERATION: &str = "frontier-trigger-retention-register";
     let request = super::session_store_factory::session_store_request(
-        SESSION,
+        &SessionId::from(SESSION),
         "frontier-trigger-retention-model",
         crate::SessionRelation::Root,
     );
@@ -63,14 +64,18 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .create_store(&request)
         .await
         .expect("materialize trigger owner session");
-    let original_draft = draft(SESSION, KEY, "frontier-trigger-retention-source");
+    let original_draft = draft(
+        &SessionId::from(SESSION),
+        KEY,
+        "frontier-trigger-retention-source",
+    );
     let created = handles
         .triggers
         .execute_command(
             REGISTER_OPERATION,
             TriggerCommand::Register {
-                owner_scope: owner(SESSION),
-                actor: actor(SESSION),
+                owner_scope: owner(&SessionId::from(SESSION)),
+                actor: actor(&SessionId::from(SESSION)),
                 draft: original_draft.clone(),
             },
         )
@@ -85,8 +90,8 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .execute_command(
             "frontier-trigger-retention-delete",
             TriggerCommand::Delete {
-                owner_scope: owner(SESSION),
-                actor: actor(SESSION),
+                owner_scope: owner(&SessionId::from(SESSION)),
+                actor: actor(&SessionId::from(SESSION)),
                 subscription_key: KEY.to_string(),
                 expected_revision: created.revision,
             },
@@ -96,11 +101,11 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .expect("frontier-owned delete succeeds");
     handles
         .sessions
-        .delete_session(SESSION)
+        .delete_session(&SessionId::from(SESSION))
         .await
         .expect("delete trigger owner session");
     let receipt_only_request = super::session_store_factory::session_store_request(
-        RECEIPT_ONLY_SESSION,
+        &SessionId::from(RECEIPT_ONLY_SESSION),
         "frontier-trigger-receipt-only-model",
         crate::SessionRelation::Root,
     );
@@ -114,8 +119,8 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .execute_command(
             "frontier-trigger-receipt-only-operation",
             TriggerCommand::Prune {
-                owner_scope: owner(RECEIPT_ONLY_SESSION),
-                actor: actor(RECEIPT_ONLY_SESSION),
+                owner_scope: owner(&SessionId::from(RECEIPT_ONLY_SESSION)),
+                actor: actor(&SessionId::from(RECEIPT_ONLY_SESSION)),
                 subscription_keys: Vec::new(),
             },
         )
@@ -124,7 +129,7 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .expect("receipt-only trigger command succeeds");
     handles
         .sessions
-        .delete_session(RECEIPT_ONLY_SESSION)
+        .delete_session(&SessionId::from(RECEIPT_ONLY_SESSION))
         .await
         .expect("delete receipt-only trigger owner session");
 
@@ -145,8 +150,8 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .execute_command(
             REGISTER_OPERATION,
             TriggerCommand::Register {
-                owner_scope: owner(SESSION),
-                actor: actor(SESSION),
+                owner_scope: owner(&SessionId::from(SESSION)),
+                actor: actor(&SessionId::from(SESSION)),
                 draft: replacement,
             },
         )
@@ -162,8 +167,8 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .execute_command(
             "frontier-trigger-receipt-only-operation",
             TriggerCommand::Prune {
-                owner_scope: owner(RECEIPT_ONLY_SESSION),
-                actor: actor(RECEIPT_ONLY_SESSION),
+                owner_scope: owner(&SessionId::from(RECEIPT_ONLY_SESSION)),
+                actor: actor(&SessionId::from(RECEIPT_ONLY_SESSION)),
                 subscription_keys: vec!["different-content-after-reclaim".to_string()],
             },
         )
@@ -212,7 +217,7 @@ async fn delivery_delete_is_bound_to_observed_row_identity(
     const SESSION: &str = "delivery-retention-identity-session";
     register_trigger(
         &handles.triggers,
-        SESSION,
+        &SessionId::from(SESSION),
         "delivery-retention-identity-key",
         "delivery-retention-identity-source",
         "delivery-retention-identity-register",
@@ -290,7 +295,7 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
     const SESSION: &str = "process-compact-interleave-session";
     register_trigger(
         &handles.triggers,
-        SESSION,
+        &SessionId::from(SESSION),
         "process-compact-interleave-key",
         "process-compact-interleave-source",
         "process-compact-interleave-register",
@@ -423,15 +428,15 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
     );
 }
 
-fn owner(session_id: &str) -> TriggerOwnerScope {
+fn owner(session_id: &SessionId) -> TriggerOwnerScope {
     TriggerOwnerScope::session(session_id)
 }
 
-fn actor(session_id: &str) -> ProcessOriginator {
+fn actor(session_id: &SessionId) -> ProcessOriginator {
     ProcessOriginator::session(SessionScope::new(session_id))
 }
 
-fn draft(session_id: &str, key: &str, source_key: &str) -> TriggerSubscriptionDraft {
+fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscriptionDraft {
     let mut input_template = BTreeMap::new();
     input_template.insert("event".to_string(), crate::TriggerInputBinding::Event);
     TriggerSubscriptionDraft {
@@ -463,7 +468,7 @@ fn draft(session_id: &str, key: &str, source_key: &str) -> TriggerSubscriptionDr
 
 async fn register_trigger(
     triggers: &Arc<dyn TriggerStore>,
-    session_id: &str,
+    session_id: &SessionId,
     key: &str,
     source_key: &str,
     operation_id: &str,
@@ -489,17 +494,17 @@ async fn process_prune_preserves_trigger_mutation_receipts(
     const KEY: &str = "process-prune-receipt-key";
     register_trigger(
         &handles.triggers,
-        SESSION,
+        &SessionId::from(SESSION),
         KEY,
         "process-prune-receipt-v1",
         "process-prune-receipt-register",
     )
     .await;
     let update = TriggerCommand::Update {
-        owner_scope: owner(SESSION),
-        actor: actor(SESSION),
+        owner_scope: owner(&SessionId::from(SESSION)),
+        actor: actor(&SessionId::from(SESSION)),
         subscription_key: KEY.to_string(),
-        draft: draft(SESSION, KEY, "process-prune-receipt-v2"),
+        draft: draft(&SessionId::from(SESSION), KEY, "process-prune-receipt-v2"),
         expected_revision: 1,
     };
     let committed = handles
@@ -549,7 +554,7 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
     const SESSION: &str = "process-prune-scope-session";
     register_trigger(
         &handles.triggers,
-        SESSION,
+        &SessionId::from(SESSION),
         "process-prune-scope-key",
         "process-prune-scope-source",
         "process-prune-scope-register",
@@ -638,7 +643,7 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
     const SESSION: &str = "process-prune-tombstone-session";
     register_trigger(
         &handles.triggers,
-        SESSION,
+        &SessionId::from(SESSION),
         "process-prune-tombstone-key",
         "process-prune-tombstone-source",
         "process-prune-tombstone-register",
@@ -711,7 +716,7 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
     const SESSION: &str = "process-prune-reuse-session";
     register_trigger(
         &handles.triggers,
-        SESSION,
+        &SessionId::from(SESSION),
         "process-prune-reuse-key",
         "process-prune-reuse-source",
         "process-prune-reuse-register",

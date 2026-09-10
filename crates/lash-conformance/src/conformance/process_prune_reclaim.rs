@@ -9,6 +9,8 @@
 //! tell a physically reclaimed row from a merely hidden one. A reclaiming prune
 //! or delete leaves nothing for that vacuum to remove.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -28,8 +30,9 @@ pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
     probe: Arc<dyn SessionDeleteBlobProbe>,
 ) {
     const PROCESS_ID: &str = "prune-reclaims-content-aliased-roots";
-    register_process(registry.as_ref(), PROCESS_ID).await;
-    let [aliased_session_id, dependent_session_id] = crate::process_runtime_session_ids(PROCESS_ID);
+    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    let [aliased_session_id, dependent_session_id] =
+        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID));
     let roots = commit_content_aliased_checkpoint_roots(
         &factory,
         &dependent_session_id,
@@ -45,7 +48,7 @@ pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
         "{backend}: the content-aliased root must exist before process prune"
     );
 
-    prune_completed_process(registry.as_ref(), PROCESS_ID).await;
+    prune_completed_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
     assert!(
         !probe.blob_exists(&roots.aliased_root).await,
         "{backend}: process prune must reclaim root B after severing root A's edge"
@@ -67,11 +70,12 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
 ) {
     const PROCESS_ID: &str = "prune-reclaims-checkpoint-blobs";
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-    let process_session_id = crate::process_runtime_session_ids(PROCESS_ID)[0].clone();
-    register_process(registry.as_ref(), PROCESS_ID).await;
+    let process_session_id =
+        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))[0].clone();
+    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
     let store = create_store(&factory, &process_session_id, &policy).await;
     let mut state = crate::RuntimeSessionState {
-        session_id: process_session_id,
+        session_id: process_session_id.clone(),
         ..crate::RuntimeSessionState::new(policy)
     };
     state.ensure_agent_frame_initialized();
@@ -96,7 +100,7 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
 
     let terminal = registry
         .complete_process(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -120,7 +124,7 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     );
     assert!(
         registry
-            .get_process(PROCESS_ID)
+            .get_process(&ProcessId::from(PROCESS_ID))
             .await
             .expect("read process after failed prune")
             .is_some(),
@@ -164,13 +168,19 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
     const OWNER_SESSION_ID: &str = "prune-reclaim-outside-owner-session";
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
 
-    let owner_store = create_store(&factory, OWNER_SESSION_ID, &policy).await;
-    let owner_leaf = commit_root_node(owner_store.as_ref(), OWNER_SESSION_ID, &policy).await;
+    let owner_store = create_store(&factory, &SessionId::from(OWNER_SESSION_ID), &policy).await;
+    let owner_leaf = commit_root_node(
+        owner_store.as_ref(),
+        &SessionId::from(OWNER_SESSION_ID),
+        &policy,
+    )
+    .await;
 
     // The process session forks at the owner's tip and grows its own node, so
     // the owner's node has a live child owned by another session.
-    let process_session_id = crate::process_runtime_session_ids(PROCESS_ID)[0].clone();
-    register_process(registry.as_ref(), PROCESS_ID).await;
+    let process_session_id =
+        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))[0].clone();
+    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
     fork_and_advance(
         &factory,
         &owner_leaf,
@@ -184,11 +194,11 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
     // off it. The row only becomes a tombstone when the prune retires the
     // child's ancestry, by which point the owner is long gone.
     factory
-        .delete_session(OWNER_SESSION_ID)
+        .delete_session(&SessionId::from(OWNER_SESSION_ID))
         .await
         .expect("delete the outside owner session");
 
-    prune_completed_process(registry.as_ref(), PROCESS_ID).await;
+    prune_completed_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
 
     let report = owner_store
         .vacuum()
@@ -214,21 +224,22 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
     const FORK_SESSION_ID: &str = "prune-recorded-fork-child-session";
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
 
-    let process_session_id = crate::process_runtime_session_ids(PROCESS_ID)[0].clone();
-    register_process(registry.as_ref(), PROCESS_ID).await;
+    let process_session_id =
+        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))[0].clone();
+    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
     let process_store = create_store(&factory, &process_session_id, &policy).await;
     let process_leaf = commit_root_node(process_store.as_ref(), &process_session_id, &policy).await;
 
     fork_and_advance(
         &factory,
         &process_leaf,
-        FORK_SESSION_ID,
+        &SessionId::from(FORK_SESSION_ID),
         "prune-recorded-fork-child-node",
         &policy,
     )
     .await;
 
-    prune_completed_process(registry.as_ref(), PROCESS_ID).await;
+    prune_completed_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
     assert!(
         factory
             .session_was_deleted(&process_session_id)
@@ -241,7 +252,7 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
     // Its owner is gone, so this delete's reclaim arm is the last chance to
     // physically remove it.
     factory
-        .delete_session(FORK_SESSION_ID)
+        .delete_session(&SessionId::from(FORK_SESSION_ID))
         .await
         .expect("delete the fork child session");
 
@@ -258,13 +269,13 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
 
 async fn create_store(
     factory: &Arc<dyn crate::SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
     policy: &crate::SessionPolicy,
 ) -> Arc<dyn crate::RuntimePersistence> {
     factory
         .create_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         })
@@ -275,11 +286,11 @@ async fn create_store(
 /// Commit one root node and return its node id.
 async fn commit_root_node(
     store: &dyn crate::RuntimePersistence,
-    session_id: &str,
+    session_id: &SessionId,
     policy: &crate::SessionPolicy,
 ) -> String {
     let mut state = crate::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..crate::RuntimeSessionState::new(policy.clone())
     };
     state.ensure_agent_frame_initialized();
@@ -300,14 +311,14 @@ async fn commit_root_node(
 async fn fork_and_advance(
     factory: &Arc<dyn crate::SessionStoreFactory>,
     node_id: &str,
-    child_session_id: &str,
+    child_session_id: &SessionId,
     child_node_id: &str,
     policy: &crate::SessionPolicy,
 ) {
     factory
         .fork_at(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: child_session_id.to_string(),
+            session_id: SessionId::from(child_session_id.to_string()),
             node_id: node_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
@@ -317,7 +328,7 @@ async fn fork_and_advance(
     let child = factory
         .open_existing_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: child_session_id.to_string(),
+            session_id: SessionId::from(child_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         })
@@ -354,7 +365,7 @@ async fn fork_and_advance(
         .expect("advance the forked child");
 }
 
-async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &str) {
+async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &ProcessId) {
     registry
         .register_process(crate::ProcessRegistration::new(
             process_id,
@@ -368,7 +379,7 @@ async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &st
         .expect("register the pruned process");
 }
 
-async fn prune_completed_process(registry: &dyn crate::ProcessRegistry, process_id: &str) {
+async fn prune_completed_process(registry: &dyn crate::ProcessRegistry, process_id: &ProcessId) {
     let terminal = registry
         .complete_process(
             process_id,

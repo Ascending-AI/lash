@@ -35,7 +35,7 @@ pub(in crate::runtime::session_manager) struct ChannelEventSink {
 #[derive(Clone)]
 pub(in crate::runtime::session_manager) struct LiveChildUsageForwarder {
     pub(in crate::runtime::session_manager) turn_id: TurnId,
-    pub(in crate::runtime::session_manager) session_id: String,
+    pub(in crate::runtime::session_manager) session_id: SessionId,
     pub(in crate::runtime::session_manager) source: String,
     pub(in crate::runtime::session_manager) model: String,
     pub(in crate::runtime::session_manager) token_ledger:
@@ -547,7 +547,7 @@ mod staging_tests {
     use super::*;
 
     fn operation(id: &str) -> crate::OperationId {
-        super::super::state::boundary_operation("root", id, "usage-ledger")
+        super::super::state::boundary_operation(&SessionId::from("root"), id, "usage-ledger")
     }
 
     fn entry(input_tokens: i64) -> TokenLedgerEntry {

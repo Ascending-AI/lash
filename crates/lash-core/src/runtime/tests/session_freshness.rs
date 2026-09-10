@@ -645,7 +645,10 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         .run_turn_assembled(
             TurnInput::text("drive the invalidated turn"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("reload-settles-freshness")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("reload-settles-freshness"),
+            ),
         )
         .await
         .expect("the invalidated turn reloads and runs");

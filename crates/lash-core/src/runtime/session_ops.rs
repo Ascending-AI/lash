@@ -3,6 +3,7 @@
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`;
 //! no types live here and no public API is changed.
 
+use crate::SessionId;
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::sync::Arc;
 
@@ -428,7 +429,10 @@ impl LashRuntime {
     /// Child sessions created through `SessionLifecycleService::create_session` are real
     /// runtimes, not serialized placeholders. Foreground activation must therefore
     /// claim that runtime instead of reconstructing a new empty state in the UI.
-    pub async fn activate_managed_session(&mut self, session_id: &str) -> Result<(), SessionError> {
+    pub async fn activate_managed_session(
+        &mut self,
+        session_id: &SessionId,
+    ) -> Result<(), SessionError> {
         // Extraction is transactional: the registry entry is only surrendered
         // once the handle has actually yielded its runtime. `try_into_runtime`
         // hands the intact handle back in `Err`, so the still-in-use case
@@ -439,7 +443,7 @@ impl LashRuntime {
             let registered = registry.len();
             let Some(handle) = registry.remove(session_id) else {
                 tracing::debug!(
-                    session_id,
+                    session_id = session_id.as_str(),
                     managed_sessions = registered,
                     consulted = "managed_session_registry",
                     outcome = "unknown_session",
@@ -457,7 +461,7 @@ impl LashRuntime {
             match handle.try_into_runtime() {
                 Ok(child) => {
                     tracing::debug!(
-                        session_id,
+                        session_id = session_id.as_str(),
                         managed_sessions = registered,
                         runtime_references,
                         consulted = "managed_session_handle_references",
@@ -469,9 +473,9 @@ impl LashRuntime {
                 }
                 Err(handle) => {
                     let runtime_references_on_refusal = handle.runtime_reference_count();
-                    registry.insert(session_id.to_string(), handle);
+                    registry.insert(SessionId::from(session_id.to_string()), handle);
                     tracing::debug!(
-                        session_id,
+                        session_id = session_id.as_str(),
                         managed_sessions = registered,
                         runtime_references,
                         runtime_references_on_refusal,
@@ -598,7 +602,7 @@ impl LashRuntime {
         &mut self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
     ) -> Result<(String, serde_json::Value), PluginOperationInvokeError> {
         self.reload_invalidated_resident_session_state()
             .await
@@ -627,7 +631,7 @@ impl LashRuntime {
         &mut self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         operation_scope: crate::ExecutionScope,
     ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {
         self.reload_invalidated_resident_session_state()
@@ -672,7 +676,7 @@ impl LashRuntime {
         &mut self,
         name: &str,
         args: serde_json::Value,
-        session_id: Option<String>,
+        session_id: Option<SessionId>,
         scoped_effect_controller: crate::ScopedEffectController<'static>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Result<crate::PluginOperationReceipt<serde_json::Value>, PluginOperationInvokeError> {

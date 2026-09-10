@@ -23,7 +23,11 @@ impl TurnInputStore for Store {
                             tx.execute(
                                 "UPDATE turn_cancel_requests SET record_json = ?3
                                  WHERE session_id = ?1 AND turn_id = ?2",
-                                params![session_id, turn_id.as_str(), encode_json(&existing)?],
+                                params![
+                                    session_id.as_str(),
+                                    turn_id.as_str(),
+                                    encode_json(&existing)?
+                                ],
                             )
                             .map_err(sqlite_error)?;
                         }
@@ -36,7 +40,7 @@ impl TurnInputStore for Store {
                     tx.execute(
                         "INSERT OR IGNORE INTO turn_cancel_requests
                          (session_id, turn_id, record_json) VALUES (?1, ?2, ?3)",
-                        params![session_id, turn_id.as_str(), encode_json(&record)?],
+                        params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
                     )
                     .map_err(sqlite_error)?;
                     load_turn_cancel_request_conn(tx, &session_id, &turn_id)?.ok_or_else(|| {
@@ -80,7 +84,7 @@ impl TurnInputStore for Store {
                                 "SELECT input_id
                                  FROM pending_turn_inputs
                                  WHERE session_id = ?1 AND source_key = ?2",
-                                params![draft.session_id, source_key],
+                                params![draft.session_id.as_str(), source_key],
                                 |row| row.get(0),
                             )
                             .optional()
@@ -126,8 +130,8 @@ impl TurnInputStore for Store {
                          )
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                         params![
-                            input_id,
-                            draft.session_id,
+                            input_id.as_str(),
+                            draft.session_id.as_str(),
                             draft.source_key.as_deref(),
                             encode_json(&draft.ingress)?,
                             state.as_str(),
@@ -152,9 +156,9 @@ impl TurnInputStore for Store {
 
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::PendingTurnInput>, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
@@ -180,7 +184,7 @@ impl TurnInputStore for Store {
                         let rows = stmt
                             .query_map(
                                 params![
-                                    session_id,
+                                    session_id.as_str(),
                                     lash_core::TurnInputState::PendingActive.as_str(),
                                     lash_core::TurnInputState::DeferredNextTurn.as_str(),
                                     now as i64
@@ -201,9 +205,9 @@ impl TurnInputStore for Store {
 
     async fn list_turn_input_applications(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         self.conn
             .call(move |conn| {
                 let outcome = (|| {
@@ -215,7 +219,7 @@ impl TurnInputStore for Store {
                         )
                         .map_err(sqlite_error)?;
                     let rows = stmt
-                        .query_map(params![session_id], |row| {
+                        .query_map(params![session_id.as_str()], |row| {
                             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                         })
                         .map_err(sqlite_error)?;
@@ -250,10 +254,10 @@ impl TurnInputStore for Store {
 
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let targets = targets.to_vec();
         let now = self.clock.timestamp_ms();
         self.conn
@@ -286,10 +290,10 @@ impl TurnInputStore for Store {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &lash_core::PendingTurnInputCancelTarget,
     ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let anchor = anchor.clone();
         let now = self.clock.timestamp_ms();
         self.conn
@@ -316,7 +320,7 @@ impl TurnInputStore for Store {
                                 .map_err(sqlite_error)?;
                             let rows = stmt
                                 .query_map(
-                                    params![session_id, anchor_row.enqueue_seq as i64],
+                                    params![session_id.as_str(), anchor_row.enqueue_seq as i64],
                                     pending_turn_input_row_from_sql,
                                 )
                                 .map_err(sqlite_error)?;
@@ -342,7 +346,7 @@ impl TurnInputStore for Store {
 
     async fn claim_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
@@ -366,7 +370,7 @@ impl TurnInputStore for Store {
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -411,8 +415,8 @@ impl TurnInputStore for Store {
                          claim_session_lease_generation = 0
                      WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
                     params![
-                        session_id,
-                        claim_id,
+                        session_id.as_str(),
+                        claim_id.as_str(),
                         lease_token,
                         lash_core::TurnInputState::Accepted.as_str(),
                         restored_state.as_str(),
@@ -426,11 +430,11 @@ impl TurnInputStore for Store {
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let session_execution_lease = session_execution_lease.clone();
         let scope = OwnedOrphanedScope::from(scope);
         let now = self.clock.timestamp_ms();
@@ -545,7 +549,7 @@ fn abandon_turn_input_claims_statement(
             sql.push_str(", ");
         }
         sql.push_str("(?, ?, ?)");
-        values.push(claim.session_id.clone().into());
+        values.push(claim.session_id.as_str().to_string().into());
         values.push(claim.claim_id.clone().into());
         values.push(claim.lease_token.clone().into());
     }

@@ -2,20 +2,20 @@
 use crate::*;
 use std::sync::Arc;
 pub fn durable_turn_scope(
-    session_id: impl Into<String>,
+    session_id: impl Into<SessionId>,
     turn_id: impl Into<TurnId>,
 ) -> ExecutionScope {
     ExecutionScope::turn(session_id, turn_id)
 }
 
 pub fn durable_turn_address(
-    session_id: impl Into<String>,
+    session_id: impl Into<SessionId>,
     turn_id: impl Into<TurnId>,
 ) -> crate::TurnAddress {
     crate::TurnAddress::new(session_id, turn_id)
 }
 
-pub async fn bind_conformance_session(store: &Arc<dyn RuntimePersistence>, session_id: &str) {
+pub async fn bind_conformance_session(store: &Arc<dyn RuntimePersistence>, session_id: &SessionId) {
     store
         .admit_and_bind_session(&crate::SessionBinding::root(session_id))
         .await
@@ -64,13 +64,13 @@ pub async fn commit_conformance_state(
 }
 
 pub fn session_store_request(
-    session_id: &str,
+    session_id: &SessionId,
     model_id: &str,
     relation: crate::SessionRelation,
 ) -> crate::SessionStoreCreateRequest {
     crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation,
         policy: crate::SessionPolicy {
             model: crate::ModelSpec::builder(model_id)
@@ -78,7 +78,7 @@ pub fn session_store_request(
                 .build()
                 .expect("valid conformance model"),
             provider_id: "conformance-provider".to_string(),
-            session_id: Some(session_id.to_string()),
+            session_id: Some(SessionId::from(session_id.to_string())),
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
             no_progress_budget: Default::default(),
@@ -103,7 +103,7 @@ pub async fn commit_runtime_state_for_test(
 
 pub async fn claim_session_execution_lease_for_test(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     owner_id: &str,
 ) -> crate::SessionExecutionLease {
     let owner = crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"));

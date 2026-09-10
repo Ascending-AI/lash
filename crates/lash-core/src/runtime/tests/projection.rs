@@ -196,7 +196,10 @@ async fn tool_result_projector_only_changes_model_observation() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("projection-tool-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("projection-tool-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -246,7 +249,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     }]);
 
     let store = Arc::new(RecordingStore::default());
-    let plugins = plugin_session_with_tools("root", Arc::new(EmptyTools));
+    let plugins = plugin_session_with_tools(&SessionId::from("root"), Arc::new(EmptyTools));
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),
@@ -283,7 +286,10 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("custom-store-projection-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("custom-store-projection-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -311,7 +317,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
         .await
         .expect("preopen store binding");
     let mut state = RuntimeSessionState {
-        session_id: "preopened-session".to_string(),
+        session_id: SessionId::from("preopened-session"),
         policy: policy.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -324,7 +330,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
         policy,
         test_host_config(),
         crate::PersistentRuntimeServices::new(
-            plugin_session_with_tools("preopened-session", Arc::new(EmptyTools)),
+            plugin_session_with_tools(&SessionId::from("preopened-session"), Arc::new(EmptyTools)),
             store as Arc<dyn crate::store::RuntimePersistence>,
         ),
         state,
@@ -345,7 +351,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     assert_eq!(frame.frame_node_id, provisional_frame);
     assert_eq!(
         frame.frame_node_id,
-        crate::frame_node_id("preopened-session", frame_key.as_str()),
+        crate::frame_node_id(&SessionId::from("preopened-session"), frame_key.as_str()),
         "frame identity is stable before and after store binding"
     );
     assert!(matches!(
@@ -363,7 +369,7 @@ async fn park_returns_error_when_final_commit_fails() {
     store
         .save_session_head_meta(crate::SessionHeadMeta::assemble(
             crate::SessionHeadPayload {
-                session_id: "other-session".to_string(),
+                session_id: SessionId::from("other-session"),
                 ..crate::SessionHeadPayload::default()
             },
             0,
@@ -371,7 +377,7 @@ async fn park_returns_error_when_final_commit_fails() {
             None,
         ))
         .await;
-    let plugins = plugin_session_with_tools("park-session", Arc::new(EmptyTools));
+    let plugins = plugin_session_with_tools(&SessionId::from("park-session"), Arc::new(EmptyTools));
     let runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),
@@ -380,7 +386,7 @@ async fn park_returns_error_when_final_commit_fails() {
             store as Arc<dyn crate::store::RuntimePersistence>,
         ),
         RuntimeSessionState {
-            session_id: "park-session".to_string(),
+            session_id: SessionId::from("park-session"),
             policy: standard_test_policy(),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
@@ -730,7 +736,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
             store.clone() as Arc<dyn crate::store::RuntimePersistence>,
         ),
         RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         },
         crate::testing::runtime_lease_owner(),
@@ -739,7 +745,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
     .expect("runtime");
     fail_restore.store(true, Ordering::SeqCst);
     store.fail_next_runtime_commit(crate::StoreError::SessionDeleted {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
     });
 
     let error = runtime
@@ -772,7 +778,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
     assert!(
         error.to_string().contains(
             &crate::StoreError::SessionDeleted {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
             }
             .to_string()
         ),
@@ -845,7 +851,10 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("parked-custom-store-projection-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("parked-custom-store-projection-turn"),
+            ),
         )
         .await
         .expect("turn");

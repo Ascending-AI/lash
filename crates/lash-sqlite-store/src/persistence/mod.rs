@@ -26,6 +26,7 @@
 use super::*;
 use lash_core::SelectedQueuedWorkClaimOutcome;
 use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
@@ -52,13 +53,13 @@ struct SessionLoadWithWarnings {
 
 fn load_turn_failure_settlements_conn(
     conn: &rusqlite::Connection,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<TurnFailureSettlementLoad, StoreError> {
     let mut statement = conn
         .prepare(LOAD_TURN_FAILURE_SETTLEMENTS_SQL)
         .map_err(sqlite_error)?;
     let rows = statement
-        .query_map(params![session_id], |row| {
+        .query_map(params![session_id.as_str()], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(sqlite_error)?;
@@ -92,12 +93,12 @@ fn load_turn_failure_settlements_conn(
 
 fn read_session_state_version_conn(
     conn: &rusqlite::Connection,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<u32, StoreError> {
     let marker = conn
         .query_row(
             "SELECT session_state_version FROM session_meta WHERE session_id = ?1",
-            params![session_id],
+            params![session_id.as_str()],
             |row| row.get::<_, Option<i64>>(0),
         )
         .optional()
@@ -118,12 +119,12 @@ fn read_session_state_version_conn(
 
 pub(crate) fn ensure_session_not_deleted_conn(
     conn: &rusqlite::Connection,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), StoreError> {
     let deleted = conn
         .query_row(
             "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
-            params![session_id],
+            params![session_id.as_str()],
             |_| Ok(()),
         )
         .optional()
@@ -131,7 +132,7 @@ pub(crate) fn ensure_session_not_deleted_conn(
         .is_some();
     if deleted {
         Err(StoreError::SessionDeleted {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
         })
     } else {
         Ok(())

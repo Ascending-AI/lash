@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -38,7 +39,7 @@ fn catalog_state(root: &Path) -> std::collections::BTreeMap<String, (u64, std::t
 
 async fn committed_catalog(
     root: &Path,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (
     SqliteSessionStoreFactory,
     Arc<dyn lash_core::RuntimePersistence>,
@@ -47,7 +48,7 @@ async fn committed_catalog(
     let factory = SqliteSessionStoreFactory::new(root);
     let request = lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -56,7 +57,7 @@ async fn committed_catalog(
         .await
         .expect("create no-write proof session");
     let mut state = lash_core::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..lash_core::RuntimeSessionState::new(request.policy)
     };
     state.append_active_conversation_messages(&[lash_core::Message {
@@ -102,11 +103,12 @@ async fn wait_for_cold_catalog(root: &Path) {
 async fn sqlite_session_read_view_does_not_change_live_catalog_files() {
     const SESSION_ID: &str = "sqlite-read-only-no-write";
     let dir = tempfile::tempdir().expect("read-only proof tempdir");
-    let (factory, _writer, _expected) = committed_catalog(dir.path(), SESSION_ID).await;
+    let (factory, _writer, _expected) =
+        committed_catalog(dir.path(), &SessionId::from(SESSION_ID)).await;
 
     let before = catalog_state(dir.path());
     let view = factory
-        .open_read_only(SESSION_ID)
+        .open_read_only(&SessionId::from(SESSION_ID))
         .await
         .expect("open mode=ro session")
         .expect("committed session has a read view");
@@ -122,7 +124,8 @@ async fn sqlite_session_read_view_does_not_change_live_catalog_files() {
 async fn sqlite_session_read_view_materializes_sidecars_for_a_cold_wal_catalog() {
     const SESSION_ID: &str = "sqlite-read-only-cold-wal";
     let dir = tempfile::tempdir().expect("cold WAL proof tempdir");
-    let (factory, writer, expected) = committed_catalog(dir.path(), SESSION_ID).await;
+    let (factory, writer, expected) =
+        committed_catalog(dir.path(), &SessionId::from(SESSION_ID)).await;
     drop(writer);
     wait_for_cold_catalog(dir.path()).await;
 
@@ -137,7 +140,7 @@ async fn sqlite_session_read_view_materializes_sidecars_for_a_cold_wal_catalog()
         .expect("read cold database modified time");
 
     let actual = factory
-        .open_read_only(SESSION_ID)
+        .open_read_only(&SessionId::from(SESSION_ID))
         .await
         .expect("read cold mode=ro catalog")
         .expect("cold catalog contains the committed session");
@@ -208,14 +211,15 @@ impl Drop for PermissionRestore {
 async fn sqlite_session_read_view_reports_cold_read_only_media_as_backend_error() {
     const SESSION_ID: &str = "sqlite-read-only-media";
     let dir = tempfile::tempdir().expect("read-only media proof tempdir");
-    let (factory, writer, _expected) = committed_catalog(dir.path(), SESSION_ID).await;
+    let (factory, writer, _expected) =
+        committed_catalog(dir.path(), &SessionId::from(SESSION_ID)).await;
     drop(writer);
     wait_for_cold_catalog(dir.path()).await;
 
     let _database_permissions = PermissionRestore::set(factory.catalog_path(), 0o444);
     let _directory_permissions = PermissionRestore::set(dir.path(), 0o555);
     let error = factory
-        .open_read_only(SESSION_ID)
+        .open_read_only(&SessionId::from(SESSION_ID))
         .await
         .expect_err("cold WAL catalog on read-only media must fail");
     match error {

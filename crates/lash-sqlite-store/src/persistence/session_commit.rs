@@ -104,7 +104,7 @@ impl SessionCommitStore for Store {
         for corrupt in corrupt_failure_receipts {
             tracing::warn!(
                 target: "lash_sqlite_store::persistence",
-                session_id = warning_session_id,
+                session_id = warning_session_id.as_str(),
                 turn_id = corrupt.turn_id.as_str(),
                 error = corrupt.error,
                 "skipping corrupt runtime turn receipt while loading failure evidence"
@@ -145,7 +145,7 @@ impl SessionCommitStore for Store {
                                      AND node.generation <= lineage.fork_generation
                                )
                            )",
-                            params![node_id, session_id],
+                            params![node_id, session_id.as_str()],
                             |row| {
                                 Ok((
                                     row.get::<_, String>(0)?,
@@ -193,7 +193,7 @@ impl SessionCommitStore for Store {
                              WHERE head.session_id = ?1",
                         )?;
                         let rows = stmt
-                            .query_map(params![session_id, candidate_generation], |row| {
+                            .query_map(params![session_id.as_str(), candidate_generation], |row| {
                                 Ok((
                                     row.get::<_, Option<String>>(0)?,
                                     row.get::<_, Option<i64>>(1)?,
@@ -308,7 +308,7 @@ impl SessionCommitStore for Store {
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
                     planner.validate_session_binding(
-                        existing.as_ref().map(|meta| meta.session_id.as_str()),
+                        existing.as_ref().map(|meta| &meta.session_id),
                     )?;
                     crate::session_meta::write_session_meta(
                         tx,
@@ -335,7 +335,7 @@ impl SessionCommitStore for Store {
                                         requested_node_count
                                  FROM runtime_turn_commits
                                  WHERE session_id = ?1 AND turn_id = ?2",
-                                params![commit.session_id, planner.operation_key()],
+                                params![commit.session_id.as_str(), planner.operation_key()],
                                 |row| {
                                     Ok((
                                         row.get(0)?,
@@ -440,7 +440,7 @@ impl SessionCommitStore for Store {
                                              AND node.generation <= lineage.fork_generation
                                        )
                                    )",
-                                params![required, commit.session_id, i64::try_from(parent.generation).map_err(|_| {
+                                params![required, commit.session_id.as_str(), i64::try_from(parent.generation).map_err(|_| {
                                     StoreError::Backend("parent generation does not fit SQLite INTEGER".to_string())
                                 })?],
                                 |_| Ok(()),
@@ -483,7 +483,7 @@ impl SessionCommitStore for Store {
                             "SELECT 1 FROM graph_nodes
                              WHERE session_id = ?1 AND tombstoned = 0
                              LIMIT 1",
-                            params![commit.session_id],
+                            params![commit.session_id.as_str()],
                             |_| Ok(()),
                         )
                         .optional()
@@ -519,7 +519,7 @@ impl SessionCommitStore for Store {
                                     "SELECT claim_id, claim_token, claim_session_lease_generation, state
                                      FROM pending_turn_inputs
                                      WHERE session_id = ?1 AND input_id = ?2",
-                                    params![completed.session_id, input_id],
+                                    params![completed.session_id.as_str(), input_id.as_str()],
                                     |row| {
                                         Ok((
                                             row.get::<_, Option<String>>(0)?,
@@ -620,7 +620,7 @@ impl SessionCommitStore for Store {
                                     )
                                 })?;
                             stmt.execute(params![
-                                commit.session_id,
+                                commit.session_id.as_str(),
                                 entry.identity.operation_storage_key,
                                 entry_ordinal,
                                 i64::from(entry.identity.payload_encoding_version),
@@ -656,13 +656,13 @@ impl SessionCommitStore for Store {
                              (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                             params![
-                                commit.session_id,
-                                node.node_id,
+                                commit.session_id.as_str(),
+                                node.node_id.as_str(),
                                 node.parent_node_id,
                                 i64::try_from(facts.generation).map_err(|_| StoreError::Backend(
                                     "node generation does not fit SQLite INTEGER".to_string()
                                 ))?,
-                                facts.frame_node_id,
+                                facts.frame_node_id.as_str(),
                                 node_json
                             ],
                         )
@@ -681,7 +681,7 @@ impl SessionCommitStore for Store {
                          (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
                         params![
-                            meta.session_id,
+                            meta.session_id.as_str(),
                             encode_json(&meta.payload())?,
                             sql_head_revision,
                             meta.leaf_node_id,
@@ -691,7 +691,7 @@ impl SessionCommitStore for Store {
                     .map_err(sqlite_error)?;
                     tx.execute(
                         "UPDATE session_meta SET last_commit_at_ms = ?2 WHERE session_id = ?1",
-                        params![commit.session_id, crate::clamp_epoch_ms(now)],
+                        params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
                     )
                     .map_err(sqlite_error)?;
                     if plan.head_changed()
@@ -722,7 +722,7 @@ impl SessionCommitStore for Store {
                                        excluded.allocation_floor
                                    )",
                                 params![
-                                    completed.session_id,
+                                    completed.session_id.as_str(),
                                     batch_id,
                                     completed.claim_id,
                                     completed.lease_token
@@ -736,7 +736,7 @@ impl SessionCommitStore for Store {
                                    AND claim_id = ?3
                                    AND claim_token = ?4",
                                 params![
-                                    completed.session_id,
+                                    completed.session_id.as_str(),
                                     batch_id,
                                     completed.claim_id,
                                     completed.lease_token
@@ -762,7 +762,7 @@ impl SessionCommitStore for Store {
                                            AND claim_token = ?5"
                                     ),
                                     params![
-                                        completed.session_id,
+                                        completed.session_id.as_str(),
                                         input_id,
                                         lash_core::TurnInputState::Completed.as_str(),
                                         claim.claim_id,
@@ -781,7 +781,7 @@ impl SessionCommitStore for Store {
                                             unclaimed_turn_input_terminal_states_sql()
                                     ),
                                     params![
-                                        completed.session_id,
+                                        completed.session_id.as_str(),
                                         input_id,
                                         lash_core::TurnInputState::Completed.as_str(),
                                     ],
@@ -823,7 +823,7 @@ impl SessionCommitStore for Store {
                             let rows = stmt
                                 .query_map(
                                     params![
-                                        commit.session_id,
+                                        commit.session_id.as_str(),
                                         lash_core::TurnInputState::PendingActive.as_str()
                                     ],
                                     |row| {
@@ -861,7 +861,7 @@ impl SessionCommitStore for Store {
                             .map_err(sqlite_error)?;
                         for (input_id, payload) in input_ids {
                             stmt.execute(params![
-                                commit.session_id,
+                                commit.session_id.as_str(),
                                 input_id,
                                 match disposition {
                                     lash_core::TurnCancelDisposition::Defer => lash_core::TurnInputState::DeferredNextTurn.as_str(),
@@ -891,7 +891,7 @@ impl SessionCommitStore for Store {
                                    AND committed_at_ms IS NULL",
                             params![
                                 now as i64,
-                                commit.session_id,
+                                commit.session_id.as_str(),
                                 turn_id.as_str(),
                                 AttachmentOwnerKind::Turn.as_str()
                             ],
@@ -930,7 +930,7 @@ impl SessionCommitStore for Store {
                              )
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                             params![
-                                receipt.session_id,
+                                receipt.session_id.as_str(),
                                 receipt.operation_key,
                                 receipt.turn_commit_hash,
                                 result_json,
@@ -958,7 +958,7 @@ impl SessionCommitStore for Store {
                                         requested_node_count, identity_encoding_version
                                      ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL)",
                                     params![
-                                        commit.session_id,
+                                        commit.session_id.as_str(),
                                         marker,
                                         receipt.turn_commit_hash,
                                         result_json,

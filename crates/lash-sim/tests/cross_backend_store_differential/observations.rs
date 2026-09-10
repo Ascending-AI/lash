@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct DurableNode {
@@ -155,7 +156,7 @@ pub(super) struct AttachmentManifestObservation {
 pub(super) struct NodeAnchorObservation {
     pub(super) node_id: String,
     pub(super) checkpoint_ref: BlobRef,
-    pub(super) source_session_id: String,
+    pub(super) source_session_id: SessionId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

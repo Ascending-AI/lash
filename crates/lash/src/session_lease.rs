@@ -7,6 +7,7 @@
 //! session, and since when?
 
 use lash_core::LeaseOwnerIdentity;
+use lash_sansio::SessionId;
 
 use crate::{EmbedError, LashCore, Result};
 
@@ -34,7 +35,7 @@ use crate::{EmbedError, LashCore, Result};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionLeaseDiagnostics {
     /// The session whose lane was read.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Store-clock reading taken alongside the row, so `renewal` compares two
     /// instants from one clock domain instead of mixing store and host time.
     pub observed_at_epoch_ms: u64,
@@ -108,7 +109,7 @@ impl SessionLeaseDiagnostics {
     }
 
     pub(crate) fn from_row(
-        session_id: String,
+        session_id: SessionId,
         observed_at_epoch_ms: u64,
         row: Option<lash_core::SessionExecutionLease>,
     ) -> Self {
@@ -151,7 +152,7 @@ impl LashCore {
         &self,
         session_id: impl AsRef<str>,
     ) -> Result<Option<crate::session_lease::SessionLeaseDiagnostics>> {
-        let session_id = session_id.as_ref().to_string();
+        let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
@@ -207,7 +208,7 @@ mod tests {
         );
         let request = lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             relation: lash_core::SessionRelation::default(),
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
@@ -257,7 +258,7 @@ mod tests {
         fixture
             .store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &LeaseOwnerIdentity::opaque("worker-a", "worker-a:boot-1"),
                 "executor-a",
                 2_500,
@@ -283,7 +284,7 @@ mod tests {
         fixture
             .store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &LeaseOwnerIdentity::opaque("worker-a", "worker-a:boot-1"),
                 "executor-a",
                 0,
@@ -316,7 +317,7 @@ mod tests {
         let lease = fixture
             .store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &LeaseOwnerIdentity::opaque("worker-b", "worker-b:boot-2"),
                 "executor-b",
                 4_000,

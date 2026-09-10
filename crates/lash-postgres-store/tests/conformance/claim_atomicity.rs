@@ -1,4 +1,5 @@
 use lash_core::{QueuedWorkStore, RuntimePersistence, SessionExecutionLeaseStore, StoreError};
+use lash_sansio::SessionId;
 use std::sync::Arc;
 #[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
 mod law;
@@ -58,7 +59,7 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
     let owner = lash_core::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
     let lease = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "postgres-conformance-executor",
             &lash_core::LeaseClaimNonce::new(),
@@ -85,7 +86,7 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         .await
         .expect("inject negative fence");
     let corrupt = store
-        .list_queued_work(session_id)
+        .list_queued_work(&SessionId::from(session_id))
         .await
         .expect_err("negative fence must refuse");
     assert!(matches!(
@@ -103,7 +104,11 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         .await
         .expect("seed exhausted fence");
     let exhausted = store
-        .claim_leading_ready_session_command(session_id, &lease.authority(), &owner)
+        .claim_leading_ready_session_command(
+            &SessionId::from(session_id),
+            &lease.authority(),
+            &owner,
+        )
         .await
         .expect_err("exhausted SQL fence must refuse");
     assert!(matches!(

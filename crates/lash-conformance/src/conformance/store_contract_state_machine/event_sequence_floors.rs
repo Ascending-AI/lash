@@ -3,8 +3,8 @@ use super::*;
 /// Capture the sender before an operation: retarget appends against its old
 /// target, while pruning must preserve floors independently of process rows.
 pub(super) struct EventSequenceStep {
-    prior: Vec<(String, Option<String>, u64)>,
-    floors: BTreeMap<String, u64>,
+    prior: Vec<(ProcessId, Option<SessionId>, u64)>,
+    floors: BTreeMap<ProcessId, u64>,
 }
 
 impl EventSequenceStep {

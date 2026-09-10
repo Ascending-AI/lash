@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
 use crate::store::SessionExecutionLeaseStore;
@@ -131,7 +132,7 @@ fn stored_graph_with_head_leaf(store: &RecordingStore) -> SessionGraph {
 }
 fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
-        session_id: "session-1".to_string(),
+        session_id: SessionId::from("session-1"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
     };
     state.ensure_agent_frame_initialized();
@@ -345,7 +346,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
 fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
-        session_id: "frame-switch-back".to_string(),
+        session_id: SessionId::from("frame-switch-back"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
     };
     state.ensure_agent_frame_initialized_with_clock(&clock);
@@ -982,7 +983,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
             "session-1",
             crate::DeliveryPolicy::EarliestSafeBoundary,
             crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id("session-1", "fig905-frame"),
+                crate::session_graph::frame_node_id(&SessionId::from("session-1"), "fig905-frame"),
                 "peer-owned row",
                 None,
             ),
@@ -992,7 +993,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
     .expect("enqueue FIG-905 row");
     let predecessor_claim = crate::QueuedWorkStore::claim_ready_queued_work(
         &store,
-        "session-1",
+        &SessionId::from("session-1"),
         &predecessor_lease.fence(),
         &predecessor_lease.owner,
         crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
@@ -1011,7 +1012,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
     let peer_owner = lease_owner("fig905-peer");
     let peer_lease = store
         .try_claim_session_execution_lease(
-            "session-1",
+            &SessionId::from("session-1"),
             &peer_owner,
             "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor",
             60_000,
@@ -1022,7 +1023,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
         .expect("peer lease acquired");
     let peer_claim = crate::QueuedWorkStore::claim_ready_queued_work(
         &store,
-        "session-1",
+        &SessionId::from("session-1"),
         &peer_lease.fence(),
         &peer_owner,
         crate::QueuedWorkClaimBoundary::Idle,
@@ -1040,7 +1041,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
     let recovery_owner = lease_owner("fig905-recovery");
     let recovery_lease = store
         .try_claim_session_execution_lease(
-            "session-1",
+            &SessionId::from("session-1"),
             &recovery_owner,
             "recovered-final-commit-drops-only-the-peer-superseded-queue-row-executor-2",
             60_000,
@@ -1083,7 +1084,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
         .await
         .expect("recovered commit drops stale settlement and reaches terminal state");
 
-    let queued = crate::QueuedWorkStore::list_queued_work(&store, "session-1")
+    let queued = crate::QueuedWorkStore::list_queued_work(&store, &SessionId::from("session-1"))
         .await
         .expect("list peer-owned row");
     assert_eq!(queued.len(), 1);
@@ -1101,7 +1102,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
         "claimed content",
     )]);
     let queue_origin = crate::QueuedWorkCompletion {
-        session_id: "session-1".to_string(),
+        session_id: SessionId::from("session-1"),
         claim_id: "queue-claim".to_string(),
         lease_token: "queue-token".to_string(),
         data: crate::QueuedWorkCompletionData {
@@ -1109,7 +1110,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
         },
     };
     let turn_input_origin = crate::TurnInputCompletion {
-        session_id: "session-1".to_string(),
+        session_id: SessionId::from("session-1"),
         claim: Some(crate::TurnInputSettlementClaim {
             claim_id: "turn-input-claim".to_string(),
             lease_token: "turn-input-token".to_string(),

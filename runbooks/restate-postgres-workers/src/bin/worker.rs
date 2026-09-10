@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use axum::{
     Json as AxumJson, Router, extract::State, http::StatusCode, routing::get, routing::post,
 };
+use lash::ProcessId;
 use lash::durability::DurableProcessWorker;
 use lash::observe::SessionResume;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
@@ -532,7 +533,10 @@ impl AppState {
         let response = TurnResponse {
             workflow_id: request.workflow_id.clone(),
             worker_id: self.worker_id.clone(),
-            process_id: process_ids.first().cloned().unwrap_or_default(),
+            process_id: process_ids
+                .first()
+                .cloned()
+                .unwrap_or_else(|| ProcessId::from(String::new())),
             process_ids,
             attachment_id,
             final_text,
@@ -608,7 +612,7 @@ impl AppState {
         .await
     }
 
-    async fn load_session_process_ids(&self) -> HandlerResult<Vec<String>> {
+    async fn load_session_process_ids(&self) -> HandlerResult<Vec<ProcessId>> {
         Ok(sqlx::query_scalar::<_, String>(
             "SELECT process_id
              FROM lash_processes
@@ -618,7 +622,10 @@ impl AppState {
         .bind(default_session_originator_id())
         .fetch_all(self.storage.pool())
         .await
-        .map_err(terminal_error)?)
+        .map_err(terminal_error)?
+        .into_iter()
+        .map(ProcessId::from)
+        .collect())
     }
 
     async fn record(

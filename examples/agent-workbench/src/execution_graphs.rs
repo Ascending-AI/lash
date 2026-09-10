@@ -1,3 +1,5 @@
+use lash::ProcessId;
+use lash::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash::tracing::{TraceLashlangGraph, TraceRuntimeScope, TraceRuntimeSubject};
@@ -32,7 +34,7 @@ pub(crate) struct LashlangGraphSummary {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct LashlangGraphProcessSummary {
-    pub(crate) process_id: String,
+    pub(crate) process_id: ProcessId,
     pub(crate) status_label: String,
     pub(crate) lifecycle: lash::process::ProcessStatus,
     pub(crate) terminal: bool,
@@ -41,7 +43,7 @@ pub(crate) struct LashlangGraphProcessSummary {
     pub(crate) updated_at_ms: u64,
     pub(crate) input: Value,
     pub(crate) error: Option<String>,
-    pub(crate) child_session_id: Option<String>,
+    pub(crate) child_session_id: Option<SessionId>,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,11 +51,11 @@ pub(crate) struct LashlangGraphLineageEdge {
     pub(crate) parent_graph_key: String,
     pub(crate) parent_node_id: String,
     pub(crate) bridge_graph_key: String,
-    pub(crate) bridge_process_id: Option<String>,
+    pub(crate) bridge_process_id: Option<ProcessId>,
     pub(crate) bridge_status: String,
     pub(crate) bridge_title: String,
     pub(crate) child_graph_key: Option<String>,
-    pub(crate) child_session_id: Option<String>,
+    pub(crate) child_session_id: Option<SessionId>,
     pub(crate) pending: bool,
     pub(crate) terminal: bool,
     pub(crate) error: Option<String>,
@@ -61,7 +63,7 @@ pub(crate) struct LashlangGraphLineageEdge {
 
 pub(crate) async fn index_for_session(
     process_observer: &lash::process::ProcessWorkObserver,
-    current_session_id: &str,
+    current_session_id: &SessionId,
     graphs: Vec<TraceLashlangGraph>,
 ) -> Result<LashlangGraphIndex, AppError> {
     let mut projection = GraphProjection::new(process_observer, current_session_id, graphs).await?;
@@ -71,7 +73,7 @@ pub(crate) async fn index_for_session(
 
 pub(crate) async fn visible_graph_by_key(
     process_observer: &lash::process::ProcessWorkObserver,
-    current_session_id: &str,
+    current_session_id: &SessionId,
     graphs: Vec<TraceLashlangGraph>,
     graph_key: &str,
 ) -> Result<TraceLashlangGraph, AppError> {
@@ -87,15 +89,15 @@ struct GraphProjection<'a> {
     process_observer: &'a lash::process::ProcessWorkObserver,
     graphs: Vec<TraceLashlangGraph>,
     graph_by_key: BTreeMap<String, usize>,
-    effect_graphs_by_session: BTreeMap<String, Vec<usize>>,
-    processes: BTreeMap<String, Option<lash::process::ObservedProcess>>,
+    effect_graphs_by_session: BTreeMap<SessionId, Vec<usize>>,
+    processes: BTreeMap<ProcessId, Option<lash::process::ObservedProcess>>,
     visible_keys: BTreeSet<String>,
 }
 
 impl<'a> GraphProjection<'a> {
     async fn new(
         process_observer: &'a lash::process::ProcessWorkObserver,
-        current_session_id: &str,
+        current_session_id: &SessionId,
         graphs: Vec<TraceLashlangGraph>,
     ) -> Result<Self, AppError> {
         let snapshot = process_observer
@@ -118,7 +120,7 @@ impl<'a> GraphProjection<'a> {
             .enumerate()
             .map(|(index, graph)| (graph.graph_key.clone(), index))
             .collect::<BTreeMap<_, _>>();
-        let mut effect_graphs_by_session: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        let mut effect_graphs_by_session: BTreeMap<SessionId, Vec<usize>> = BTreeMap::new();
         for (index, graph) in graphs.iter().enumerate() {
             if matches!(
                 &graph.subject,
@@ -177,14 +179,15 @@ impl<'a> GraphProjection<'a> {
                     let Some(process_id) = process_id_from_graph_key(&child.child_graph_key) else {
                         continue;
                     };
-                    let Some(process) = self.observed_process(process_id).await else {
+                    let Some(process) = self.observed_process(&ProcessId::from(process_id)).await
+                    else {
                         continue;
                     };
                     let Some(child_session_id) = process.child_session_id.as_deref() else {
                         continue;
                     };
                     let child_graph_keys = self
-                        .child_session_effect_graphs(child_session_id)
+                        .child_session_effect_graphs(&SessionId::from(child_session_id))
                         .into_iter()
                         .map(|graph| graph.graph_key.clone())
                         .collect::<Vec<_>>();
@@ -304,7 +307,7 @@ impl<'a> GraphProjection<'a> {
             return;
         };
 
-        let process = self.observed_process(process_id).await;
+        let process = self.observed_process(&ProcessId::from(process_id)).await;
         if let Some(process) = process.as_ref()
             && let Some(child_session_id) = process.child_session_id.clone()
         {
@@ -314,9 +317,13 @@ impl<'a> GraphProjection<'a> {
                     parent_graph_key: child.parent_graph_key.clone(),
                     parent_node_id: child.parent_node_id.clone(),
                     bridge_graph_key: child.child_graph_key.clone(),
-                    bridge_process_id: Some(process_id.to_string()),
+                    bridge_process_id: Some(ProcessId::from(process_id.to_string())),
                     bridge_status: process.status_label.clone(),
-                    bridge_title: lineage_bridge_title(child, Some(process), process_id),
+                    bridge_title: lineage_bridge_title(
+                        child,
+                        Some(process),
+                        &ProcessId::from(process_id),
+                    ),
                     child_graph_key: None,
                     child_session_id: Some(child_session_id),
                     pending: !process.terminal,
@@ -329,9 +336,13 @@ impl<'a> GraphProjection<'a> {
                         parent_graph_key: child.parent_graph_key.clone(),
                         parent_node_id: child.parent_node_id.clone(),
                         bridge_graph_key: child.child_graph_key.clone(),
-                        bridge_process_id: Some(process_id.to_string()),
+                        bridge_process_id: Some(ProcessId::from(process_id.to_string())),
                         bridge_status: process.status_label.clone(),
-                        bridge_title: lineage_bridge_title(child, Some(process), process_id),
+                        bridge_title: lineage_bridge_title(
+                            child,
+                            Some(process),
+                            &ProcessId::from(process_id),
+                        ),
                         child_graph_key: Some(graph.graph_key.clone()),
                         child_session_id: Some(child_session_id.clone()),
                         pending: false,
@@ -352,12 +363,16 @@ impl<'a> GraphProjection<'a> {
             parent_graph_key: child.parent_graph_key.clone(),
             parent_node_id: child.parent_node_id.clone(),
             bridge_graph_key: child.child_graph_key.clone(),
-            bridge_process_id: Some(process_id.to_string()),
+            bridge_process_id: Some(ProcessId::from(process_id.to_string())),
             bridge_status: process
                 .as_ref()
                 .map(|process| process.status_label.clone())
                 .unwrap_or_else(|| self.graph_presence_status(&child.child_graph_key)),
-            bridge_title: lineage_bridge_title(child, process.as_ref(), process_id),
+            bridge_title: lineage_bridge_title(
+                child,
+                process.as_ref(),
+                &ProcessId::from(process_id),
+            ),
             child_graph_key: Some(child.child_graph_key.clone()),
             child_session_id: None,
             pending: !child_graph_observed && !terminal,
@@ -366,7 +381,7 @@ impl<'a> GraphProjection<'a> {
         });
     }
 
-    fn child_session_effect_graphs(&self, session_id: &str) -> Vec<&TraceLashlangGraph> {
+    fn child_session_effect_graphs(&self, session_id: &SessionId) -> Vec<&TraceLashlangGraph> {
         self.effect_graphs_by_session
             .get(session_id)
             .into_iter()
@@ -385,7 +400,7 @@ impl<'a> GraphProjection<'a> {
 
     async fn observed_process(
         &mut self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Option<lash::process::ObservedProcess> {
         if !self.processes.contains_key(process_id) {
             let process = self
@@ -394,7 +409,7 @@ impl<'a> GraphProjection<'a> {
                 .await
                 .ok()
                 .flatten();
-            self.processes.insert(process_id.to_string(), process);
+            self.processes.insert(process_id.clone(), process);
         }
         self.processes.get(process_id).cloned().flatten()
     }
@@ -441,7 +456,7 @@ fn graph_title(graph: &TraceLashlangGraph) -> String {
         TraceRuntimeSubject::Effect { .. } => graph.entry_name.clone(),
         TraceRuntimeSubject::Process { process_id } => {
             if graph.entry_name.trim().is_empty() {
-                process_id.clone()
+                process_id.to_string()
             } else {
                 graph.entry_name.clone()
             }
@@ -458,7 +473,7 @@ fn process_id_from_graph_key(graph_key: &str) -> Option<&str> {
 fn lineage_bridge_title(
     child: &lash::tracing::TraceLashlangGraphChildLink,
     process: Option<&lash::process::ObservedProcess>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> String {
     process
         .map(|process| process.label.clone())
@@ -513,7 +528,7 @@ mod tests {
 
     fn test_graph(
         graph_key: &str,
-        session_id: &str,
+        session_id: &SessionId,
         subject: TraceRuntimeSubject,
         children: Vec<TraceLashlangGraphChildLink>,
     ) -> TraceLashlangGraph {
@@ -536,7 +551,7 @@ mod tests {
     fn foreground_graph_title_is_dialect_neutral() {
         let graph = test_graph(
             "effect:session:turn:exec",
-            "session",
+            &SessionId::from("session"),
             TraceRuntimeSubject::Effect {
                 effect_id: "exec".to_string(),
                 kind: "exec_code".to_string(),
@@ -577,7 +592,7 @@ mod tests {
         let parent_graph = TraceLashlangGraph {
             graph_key: "effect:root:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
@@ -605,7 +620,7 @@ mod tests {
         let child_graph = TraceLashlangGraph {
             graph_key: "effect:child-session:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
-                session_id: child_session_id.to_string(),
+                session_id: SessionId::from(child_session_id.to_string()),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
@@ -625,7 +640,7 @@ mod tests {
         };
         let mut projection = GraphProjection::new(
             &observer,
-            "root",
+            &SessionId::from("root"),
             vec![parent_graph.clone(), child_graph.clone()],
         )
         .await
@@ -653,9 +668,9 @@ mod tests {
         let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default())
             as Arc<dyn lash::process::ProcessRegistry>;
         let observer = test_process_observer(Arc::clone(&registry));
-        let current_session_id = "current-session";
-        let child_session_id = "child-session";
-        let old_session_id = "old-session";
+        let current_session_id = &SessionId::from("current-session");
+        let child_session_id = &SessionId::from("child-session");
+        let old_session_id = &SessionId::from("old-session");
         let create_request = lash::SessionCreateRequest::child_session(
             current_session_id,
             lash::SessionStartPoint::Empty,
@@ -680,8 +695,8 @@ mod tests {
             .expect("register subagent process");
         registry
             .add_observer(
-                current_session_id,
-                "subagent-process",
+                &SessionId::from(current_session_id),
+                &ProcessId::from("subagent-process"),
                 lash::process::ProcessObserverBy::host("workbench-current"),
             )
             .await
@@ -699,8 +714,8 @@ mod tests {
             .expect("register old process");
         registry
             .add_observer(
-                old_session_id,
-                "old-process",
+                &SessionId::from(old_session_id),
+                &ProcessId::from("old-process"),
                 lash::process::ProcessObserverBy::host("workbench-old"),
             )
             .await
@@ -726,7 +741,7 @@ mod tests {
             "process:subagent-process",
             old_session_id,
             TraceRuntimeSubject::Process {
-                process_id: "subagent-process".to_string(),
+                process_id: ProcessId::from("subagent-process"),
             },
             Vec::new(),
         );
@@ -743,7 +758,7 @@ mod tests {
             "process:old-process",
             old_session_id,
             TraceRuntimeSubject::Process {
-                process_id: "old-process".to_string(),
+                process_id: ProcessId::from("old-process"),
             },
             Vec::new(),
         );

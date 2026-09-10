@@ -503,6 +503,7 @@ impl RlmDialect for TypescriptDialect {
 
 #[cfg(test)]
 mod tests {
+    use lash_sansio::SessionId;
     use std::sync::Arc;
 
     use super::*;
@@ -1039,7 +1040,7 @@ mod tests {
             .with_tool_binding(ToolBinding::new(modules.clone(), operation.as_str()));
             let registration = crate::tool_catalog::rlm_tool_catalog(
                 ToolCatalogContext {
-                    session_id: "session".to_string(),
+                    session_id: SessionId::from("session"),
                     tools: vec![tool.manifest()],
                     resolve_contract: None,
                     tool_access: lash_core::SessionToolAccess::default(),

@@ -10,6 +10,7 @@
 //! from the store, one of them from the store's own clock, so they are laws every
 //! durable backend owes rather than in-memory trivia.
 
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use super::runtime_persistence::RuntimePersistenceLeaseTiming;
@@ -77,7 +78,12 @@ async fn waits_out_a_crashed_holder_then_claims(
     let crashed = crate::LeaseOwnerIdentity::opaque("crashed-host", "crashed-host:boot");
     let drain = crate::LeaseOwnerIdentity::opaque("drain-host", "drain-host:boot");
     let holder = store
-        .try_claim_session_execution_lease(session_id, &crashed, "crashed-holder-executor", ttl_ms)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &crashed,
+            "crashed-holder-executor",
+            ttl_ms,
+        )
         .await
         .expect("claim the crashed holder's lane")
         .acquired()
@@ -86,7 +92,12 @@ async fn waits_out_a_crashed_holder_then_claims(
     let mut wait = QueuedLaneWait::default();
     let acquisition = loop {
         match store
-            .try_claim_session_execution_lease(session_id, &drain, "drain-executor", ttl_ms)
+            .try_claim_session_execution_lease(
+                &SessionId::from(session_id),
+                &drain,
+                "drain-executor",
+                ttl_ms,
+            )
             .await
             .expect("durable queued drain claim attempt")
         {
@@ -134,7 +145,12 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
     let live = crate::LeaseOwnerIdentity::opaque("live-host", "live-host:boot");
     let drain = crate::LeaseOwnerIdentity::opaque("drain-host", "drain-host:boot");
     let mut holder = store
-        .try_claim_session_execution_lease(session_id, &live, "live-holder-executor", ttl_ms)
+        .try_claim_session_execution_lease(
+            &SessionId::from(session_id),
+            &live,
+            "live-holder-executor",
+            ttl_ms,
+        )
         .await
         .expect("claim the live holder's lane")
         .acquired()
@@ -153,7 +169,7 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
     }
 
     let mut wait = QueuedLaneWait::default();
-    let first = busy_holder(store, session_id, &drain, ttl_ms).await;
+    let first = busy_holder(store, &SessionId::from(session_id), &drain, ttl_ms).await;
     assert_eq!(first.lease().executor_id, "live-holder-executor");
     let slice_ms = match wait.observe(&first) {
         QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
@@ -174,13 +190,13 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
         renewed.expires_at_epoch_ms
     );
 
-    let second = busy_holder(store, session_id, &drain, ttl_ms).await;
+    let second = busy_holder(store, &SessionId::from(session_id), &drain, ttl_ms).await;
     assert_eq!(
         wait.observe(&second),
         QueuedLaneWaitStep::GiveUp(QueuedLaneGiveUp::HolderIsAlive)
     );
     let after = store
-        .get_session_execution_lease(session_id)
+        .get_session_execution_lease(&SessionId::from(session_id))
         .await
         .expect("read the live holder's row after the drain gave up")
         .lease
@@ -194,7 +210,7 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
 
 async fn busy_holder(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     drain: &crate::LeaseOwnerIdentity,
     ttl_ms: u64,
 ) -> QueuedLaneHolder {

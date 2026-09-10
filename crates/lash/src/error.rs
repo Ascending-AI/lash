@@ -1,4 +1,5 @@
 use crate::support::SessionError;
+use lash_sansio::SessionId;
 
 /// Why a host-selected queued-work drain was refused before executing a turn.
 ///
@@ -107,7 +108,7 @@ pub enum EmbedError {
     /// Store creation failed for the identified session.
     StoreFactory {
         /// Session whose store could not be created.
-        session_id: String,
+        session_id: SessionId,
         /// Store-factory failure detail suitable for diagnostics.
         message: String,
     },
@@ -118,7 +119,7 @@ pub enum EmbedError {
     #[error("failed to delete store for session `{session_id}`: {failure}")]
     SessionDeleteStorage {
         /// Session whose durable storage deletion stopped.
-        session_id: String,
+        session_id: SessionId,
         /// Typed stop reason and the reclaim counters witnessed before it.
         failure: Box<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
     },
@@ -131,15 +132,15 @@ pub enum EmbedError {
     /// A store-less session identifier was reused by this core.
     EphemeralSessionIdReused {
         /// Store-less session identifier that was reused.
-        session_id: String,
+        session_id: SessionId,
     },
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
     /// A loaded store belongs to a different session than requested.
     StoreSessionMismatch {
         /// Session identifier bound to the loaded store.
-        loaded: String,
+        loaded: SessionId,
         /// Session identifier requested by the builder.
-        requested: String,
+        requested: SessionId,
     },
     #[error("durable process worker requires a LashCore store factory")]
     /// Returned when a durable process worker has no store factory.
@@ -172,7 +173,7 @@ pub enum EmbedError {
     /// Process-state deletion failed for the identified session.
     SessionDeleteProcess {
         /// Session whose process state could not be deleted.
-        session_id: String,
+        session_id: SessionId,
         /// Process-state deletion failure detail suitable for diagnostics.
         message: String,
     },
@@ -344,6 +345,7 @@ mod tests {
         PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
         RuntimeErrorCode, SessionError, StoreError,
     };
+    use lash_sansio::SessionId;
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))
@@ -513,12 +515,12 @@ mod tests {
     #[test]
     fn deleted_sessions_are_terminal_in_direct_and_wrapped_store_shapes() {
         let direct = EmbedError::Store(StoreError::SessionDeleted {
-            session_id: "retired-direct".to_string(),
+            session_id: SessionId::from("retired-direct"),
         });
         let wrapped = EmbedError::Session(SessionError::Store {
             context: "failed to bind retired session".to_string(),
             source: StoreError::SessionDeleted {
-                session_id: "retired-wrapped".to_string(),
+                session_id: SessionId::from("retired-wrapped"),
             },
         });
         let controller_owned = EmbedError::Runtime(
@@ -527,12 +529,12 @@ mod tests {
                 "retired controller-owned session",
             )
             .with_cause(RuntimeErrorCause::SessionDeleted {
-                session_id: "retired-controller-owned".to_string(),
+                session_id: SessionId::from("retired-controller-owned"),
             }),
         );
         let nested_controller_owned = EmbedError::Plugin(PluginError::RuntimeEffectController(
             RuntimeEffectControllerError::from(StoreError::SessionDeleted {
-                session_id: "retired-nested-controller-owned".to_string(),
+                session_id: SessionId::from("retired-nested-controller-owned"),
             }),
         ));
 

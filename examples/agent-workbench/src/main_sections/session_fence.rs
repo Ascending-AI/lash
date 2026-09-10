@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 // The workbench's session fence: one admission read that every session-bound
 // surface resolves its id through, and the delete sequence that orders itself
@@ -42,7 +43,8 @@ impl AppState {
         surface: &'static str,
     ) -> Result<String, AppError> {
         let session_id = query.resolve(self)?;
-        self.admit_session_id(&session_id, surface).await?;
+        self.admit_session_id(&SessionId::from(session_id.clone()), surface)
+            .await?;
         Ok(session_id)
     }
 
@@ -51,7 +53,7 @@ impl AppState {
     /// typed refusal rather than a commit against a tombstone.
     pub(crate) async fn admit_session_id(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         surface: &str,
     ) -> Result<(), AppError> {
         self.admit(session_id, surface, SessionAdmission::Use).await
@@ -64,14 +66,18 @@ impl AppState {
         surface: &'static str,
     ) -> Result<String, AppError> {
         let session_id = query.resolve(self)?;
-        self.admit(&session_id, surface, SessionAdmission::Delete)
-            .await?;
+        self.admit(
+            &SessionId::from(session_id.clone()),
+            surface,
+            SessionAdmission::Delete,
+        )
+        .await?;
         Ok(session_id)
     }
 
     async fn admit(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         surface: &str,
         admission: SessionAdmission,
     ) -> Result<(), AppError> {
@@ -95,7 +101,7 @@ impl AppState {
                 session_id,
                 surface,
                 lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
-                    session_id: session_id.to_string(),
+                    session_id: SessionId::from(session_id.to_string()),
                 }),
             )),
             // Audited: a failed tombstone read is an untyped factory/backend error; admission cannot proceed without the fact.
@@ -107,7 +113,7 @@ impl AppState {
 
     pub(crate) fn retirement_fence_refusal(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         surface: &str,
         retirement: SessionRetirement,
     ) -> AppError {
@@ -145,7 +151,7 @@ impl AppState {
     /// so it can be used again.
     pub(crate) async fn settle_retirement_mark(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         outcome: &Result<(), AppError>,
     ) {
         match outcome {
@@ -164,7 +170,7 @@ impl AppState {
     }
 }
 
-pub(crate) fn retiring_session_message(session_id: &str) -> String {
+pub(crate) fn retiring_session_message(session_id: &SessionId) -> String {
     format!("session `{session_id}` is being deleted; session ids cannot be reused in this store")
 }
 
@@ -176,14 +182,17 @@ pub(crate) fn retiring_session_message(session_id: &str) -> String {
 /// session's await gates and a cancel issued after that revoke has no gate to
 /// land on. Only then is the delete submitted, and the mark is settled against
 /// how it ended.
-pub(crate) async fn retire_session(state: &AppState, session_id: &str) -> Result<(), AppError> {
+pub(crate) async fn retire_session(
+    state: &AppState,
+    session_id: &SessionId,
+) -> Result<(), AppError> {
     state.active_turns.begin_retirement(session_id);
     let outcome = retire_session_attempt(state, session_id).await;
     state.settle_retirement_mark(session_id, &outcome).await;
     outcome
 }
 
-async fn retire_session_attempt(state: &AppState, session_id: &str) -> Result<(), AppError> {
+async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Result<(), AppError> {
     restate::cancel_cron_jobs_for_session(state, session_id, "reset").await?;
     let cancellations = state
         .cancel_turns_for_session_with_driver(
@@ -207,7 +216,7 @@ async fn retire_session_attempt(state: &AppState, session_id: &str) -> Result<()
         state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             execution_scope,
         },
     )

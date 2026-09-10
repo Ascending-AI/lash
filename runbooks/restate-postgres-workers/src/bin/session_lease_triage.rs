@@ -39,6 +39,7 @@
 //! line per backend. Session ids carry a per-run suffix, so a shared PostgreSQL
 //! database never collides with an earlier run and no phase truncates tables.
 
+use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -349,7 +350,7 @@ impl Backend {
     }
 
     /// The durable store for one session, opened without creating it.
-    async fn store(&self, session_id: &str) -> Result<Arc<dyn RuntimePersistence>> {
+    async fn store(&self, session_id: &SessionId) -> Result<Arc<dyn RuntimePersistence>> {
         self.factory
             .open_existing_store(&request(session_id))
             .await
@@ -365,7 +366,7 @@ struct TurnCore {
 }
 
 impl TurnCore {
-    async fn open(&self, session_id: &str) -> Result<lash::LashSession> {
+    async fn open(&self, session_id: &SessionId) -> Result<lash::LashSession> {
         self.core
             .session(session_id)
             .plugin_option(
@@ -382,10 +383,10 @@ impl TurnCore {
     }
 }
 
-fn request(session_id: &str) -> SessionStoreCreateRequest {
+fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: session_id.clone(),
         relation: lash::persistence::SessionRelation::default(),
         policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
@@ -396,8 +397,8 @@ fn owner(owner_id: &str, incarnation: &str) -> LeaseOwnerIdentity {
 }
 
 /// Session ids are single-use (ADR 0049), so every run and backend gets its own.
-fn session_id(phase: &str, backend: &Backend, run_id: &str) -> String {
-    format!("lease-triage-{phase}-{}-{run_id}", backend.name)
+fn session_id(phase: &str, backend: &Backend, run_id: &str) -> SessionId {
+    SessionId::from(format!("lease-triage-{phase}-{}-{run_id}", backend.name))
 }
 
 fn scripted_provider() -> lash::provider::ProviderHandle {

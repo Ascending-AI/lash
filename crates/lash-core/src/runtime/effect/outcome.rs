@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::Arc;
 
 use crate::LlmResponse;
@@ -369,7 +370,7 @@ fn emit_direct_llm_trace_failed(
 }
 
 fn direct_trace_context(
-    session_id: &str,
+    session_id: &SessionId,
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
 ) -> lash_trace::TraceContext {
@@ -386,12 +387,13 @@ fn direct_trace_context(
 #[cfg(test)]
 mod tests {
     use crate::RuntimeEffectKind;
+    use crate::SessionId;
     use crate::TurnId;
 
     #[test]
     fn direct_effect_invocation_preserves_runtime_scope() {
         let invocation = crate::runtime::causal::direct_effect_invocation(
-            "s",
+            &SessionId::from("s"),
             "tool",
             "request:k".to_string(),
             None,
@@ -411,7 +413,7 @@ mod tests {
     #[test]
     fn tool_retry_sleep_invocation_preserves_parent_replay_identity() {
         let parent = crate::runtime::causal::direct_effect_invocation(
-            "s",
+            &SessionId::from("s"),
             "tool",
             "request:k".to_string(),
             Some(&TurnId::from("turn")),

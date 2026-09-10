@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::AgentFrameReasonFacadeOps;
 use std::collections::BTreeSet;
@@ -33,7 +34,7 @@ impl ProtocolTerminalOutput {
 }
 
 pub(super) fn agent_frame_switch_materializes(
-    session_id: &str,
+    session_id: &SessionId,
     requested_frame_key: &crate::FrameKey,
     current_frame_node_id: Option<&str>,
 ) -> bool {

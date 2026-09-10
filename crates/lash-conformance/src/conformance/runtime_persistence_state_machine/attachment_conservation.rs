@@ -6,6 +6,7 @@
 //! blanket empty root-set default cannot agree with the model by construction.
 
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 const RECONCILE_SQL_SAFE_MAX: u64 = u64::MAX;
@@ -32,7 +33,7 @@ impl RuntimePersistenceStateMachineHandles {
         let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
         let runtime = session_factory
             .create_store(&super::session_store_request(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 "runtime-persistence-model",
                 crate::SessionRelation::Root,
             ))
@@ -47,7 +48,7 @@ impl RuntimePersistenceStateMachineHandles {
 }
 
 pub(super) struct ModeledAttachmentSession {
-    session_id: String,
+    session_id: SessionId,
     head_revision: u64,
     committed_refs: BTreeSet<crate::AttachmentId>,
     last_commit: RuntimeCommit,
@@ -135,10 +136,10 @@ async fn commit_with_attachment_refs(
     let create = new_session || model.attachment_sessions.is_empty();
     let (session_index, session_id, head_revision, store) = if create {
         model.attachment_session_sequence += 1;
-        let session_id = format!(
+        let session_id = SessionId::from(format!(
             "runtime-persistence-attachment-{seed}-{}",
             model.attachment_session_sequence
-        );
+        ));
         let store = handles
             .session_factory
             .create_store(&session_request(&session_id))
@@ -253,10 +254,10 @@ async fn put_attachment_intent(
     value: u8,
 ) -> Result<(), String> {
     model.attachment_session_sequence += 1;
-    let session_id = format!(
+    let session_id = SessionId::from(format!(
         "runtime-persistence-intent-{seed}-{}",
         model.attachment_session_sequence
-    );
+    ));
     let store = handles
         .session_factory
         .create_store(&session_request(&session_id))
@@ -479,7 +480,7 @@ fn expected_live_refs(model: &ReferenceModel) -> BTreeSet<crate::AttachmentId> {
 
 async fn open_session(
     handles: &RuntimePersistenceStateMachineHandles,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimePersistence>, String> {
     handles
         .session_factory
@@ -502,7 +503,7 @@ async fn backend_ids(
         .collect())
 }
 
-fn session_request(session_id: &str) -> crate::SessionStoreCreateRequest {
+fn session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
     super::session_store_request(
         session_id,
         "attachment-conservation-model",

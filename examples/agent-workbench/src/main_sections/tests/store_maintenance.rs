@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 // Coverage for `/api/admin/store-maintenance`: the two levers that bound
@@ -28,7 +29,7 @@ const TEST_ONLY_INSTANT_ELIGIBILITY_MS: u64 = 0;
 
 struct StoreMaintenanceFixture {
     pub(super) state: AppState,
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }
 
@@ -160,7 +161,7 @@ async fn store_maintenance_fixture(
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
-    let session_id = state.current_session_id();
+    let session_id = SessionId::from(state.current_session_id());
     StoreMaintenanceFixture {
         state,
         session_id,
@@ -168,9 +169,9 @@ async fn store_maintenance_fixture(
     }
 }
 
-fn vacuum_only_request(session_id: &str) -> RunStoreMaintenanceRequest {
+fn vacuum_only_request(session_id: &SessionId) -> RunStoreMaintenanceRequest {
     RunStoreMaintenanceRequest {
-        vacuum_session_ids: vec![session_id.to_string()],
+        vacuum_session_ids: vec![SessionId::from(session_id.to_string())],
         reclaim_attachments: None,
     }
 }
@@ -323,7 +324,9 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
 
     let unknown = run_store_maintenance(
         State(state.clone()),
-        Json(vacuum_only_request("no-such-workbench-session")),
+        Json(vacuum_only_request(&SessionId::from(
+            "no-such-workbench-session",
+        ))),
     )
     .await
     .expect_err("vacuuming an unknown session must not create one");

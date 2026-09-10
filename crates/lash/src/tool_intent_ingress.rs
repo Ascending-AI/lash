@@ -1,6 +1,7 @@
 //! Host front-door admission for durable tool intents.
 
 use lash_core::facade_support::ScopedEffectControllerFacadeOps;
+use lash_sansio::SessionId;
 use tracing::Instrument;
 
 /// Typed idempotency key for one host-submitted tool intent.
@@ -20,17 +21,17 @@ impl ToolIntentIngressKey {
         tool_call_id: impl AsRef<str>,
         intent_index: u32,
     ) -> Self {
-        let session_id = session_id.as_ref();
+        let session_id = SessionId::from(session_id.as_ref());
         let execution_scope_id = execution_scope_id.as_ref();
         let tool_call_id = tool_call_id.as_ref();
         let identity = lash_core::derive_tool_intent_identity(
-            session_id,
+            &session_id,
             execution_scope_id,
             Some(tool_call_id),
             intent_index as usize,
         )
         .unwrap_or_else(|_| lash_core::ToolIntentIdentity {
-            session_id: session_id.to_string(),
+            session_id: session_id.clone(),
             execution_scope_id: execution_scope_id.to_string(),
             tool_call_id: tool_call_id.to_string(),
             intent_index,
@@ -149,7 +150,7 @@ enum RealizedIntent {
 #[derive(Clone)]
 pub struct ToolIntentIngress {
     core: crate::LashCore,
-    session_id: String,
+    session_id: SessionId,
     scope: lash_core::ExecutionScope,
 }
 
@@ -284,7 +285,7 @@ impl crate::LashCore {
     /// and never call this front door.
     pub fn tool_intents(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         scope: lash_core::ExecutionScope,
     ) -> crate::Result<ToolIntentIngress> {
         scope.validate()?;
@@ -314,7 +315,7 @@ impl crate::LashCore {
 impl ToolIntentIngress {
     pub(crate) fn new(
         core: crate::LashCore,
-        session_id: String,
+        session_id: SessionId,
         scope: lash_core::ExecutionScope,
     ) -> Self {
         Self {
@@ -499,7 +500,7 @@ impl ToolIntentIngress {
             .pending_tool_intent_parent_end(&self.session_id, self.scope.id())
             .await?;
         let plan = lash_core::ProcessParentEndPlan {
-            process_id: self.scope.id().to_string(),
+            process_id: lash_core::ProcessId::from(self.scope.id()),
             actions: pending
                 .iter()
                 .filter_map(|submission| match submission.outcome.as_ref() {
@@ -564,8 +565,8 @@ impl ToolIntentIngress {
         }
         if identity.session_id != self.session_id {
             return Some(ToolIntentIngressRefusal::ForeignSession {
-                expected: self.session_id.clone(),
-                recorded: identity.session_id.clone(),
+                expected: self.session_id.to_string(),
+                recorded: identity.session_id.to_string(),
             });
         }
         if identity.execution_scope_id != self.scope.id() {
@@ -576,7 +577,7 @@ impl ToolIntentIngress {
         }
         if intent.session_id() != self.session_id {
             return Some(ToolIntentIngressRefusal::IntentSessionMismatch {
-                expected: self.session_id.clone(),
+                expected: self.session_id.to_string(),
                 recorded: intent.session_id().to_string(),
             });
         }
@@ -850,7 +851,7 @@ impl ToolIntentIngress {
             lash_core::ToolIntent::StartProcess(intent) => {
                 parent_end_policy = Some(intent.on_parent_end);
                 let mut request = intent.request;
-                request.id = identity.replay_key.clone();
+                request.id = lash_core::ProcessId::from(identity.replay_key.clone());
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
                 let registration = self.admit_engine_start(request.into_registration(None))?;

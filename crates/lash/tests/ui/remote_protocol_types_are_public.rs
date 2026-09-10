@@ -1,9 +1,10 @@
 use lash::TurnId;
+use lash::{ProcessId, SessionId};
 
 fn main() {
     let input = lash::remote::turn_input::RemoteTurnInput::text("hello");
     let request = lash::remote::Envelope::new(lash::remote::turn_input::RemoteTurnRequest {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         idempotency_key: Some("session:turn".to_string()),
         input,
@@ -35,7 +36,7 @@ fn main() {
         deliveries: vec![lash::remote::triggers::RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: "process:1".to_string(),
+            process_id: ProcessId::from("process:1"),
             outcome: lash::remote::triggers::RemoteTriggerDeliveryEmitOutcome::Started,
         }],
     };
@@ -62,7 +63,7 @@ fn main() {
         ),
     };
     let observation = lash::remote::observations::RemoteSessionObservation {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
         turn_index: 0,
         usage: lash::remote::usage::RemoteUsage::default(),
@@ -71,7 +72,7 @@ fn main() {
     let _remote_stream_item = lash::observe::RemoteSessionObservationStreamItem::Gap {
         observation,
         gap: lash::remote::observations::RemoteLiveReplayGap {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             requested_cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
             latest_cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
             latest_revision: 0,
@@ -81,11 +82,11 @@ fn main() {
     let _process =
         lash::remote::observations::RemoteSessionObservationEventPayload::ProcessChanged {
             kind: lash::remote::observations::RemoteSessionProcessEventKind::Started,
-            process_ids: vec!["process".to_string()],
+            process_ids: vec![ProcessId::from("process")],
         };
 
     let process_start = lash::remote::processes::RemoteProcessStartRequest {
-        id: "process".to_string(),
+        id: ProcessId::from("process"),
         input: lash::remote::processes::RemoteProcessInput::External {
             metadata: serde_json::json!({}),
         },

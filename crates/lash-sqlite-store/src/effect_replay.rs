@@ -829,11 +829,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     .write(move |tx| {
                         let deleted = tx.execute(
                             "DELETE FROM runtime_effect_replay WHERE session_id = ?1",
-                            params![session_id],
+                            params![session_id.as_str()],
                         )?;
                         tx.execute(
                             "DELETE FROM runtime_effect_group WHERE session_id = ?1",
-                            params![session_id],
+                            params![session_id.as_str()],
                         )?;
                         Ok(deleted)
                     })
@@ -1185,7 +1185,7 @@ fn select_group_record(
             Ok(EffectGroupRecord {
                 group_key: row.get(0)?,
                 scope_id: row.get(1)?,
-                session_id: row.get(2)?,
+                session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
                 wake: group_column_from_sql("wake rule", &row.get::<_, String>(3)?)?,
                 loser_disposition: group_column_from_sql(
                     "loser disposition",

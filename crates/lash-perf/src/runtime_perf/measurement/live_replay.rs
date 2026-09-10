@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
@@ -42,7 +43,7 @@ pub(super) async fn run_once_live_replay_pressure(
         let turn_before_memory = process_memory_sample();
         let turn_started = Instant::now();
         let mut phase_profile = BTreeMap::new();
-        let session_id = format!("runtime-perf-live-replay-{turn_index}");
+        let session_id = SessionId::from(format!("runtime-perf-live-replay-{turn_index}"));
         let revision = SessionRevision::new(turn_index as u64 + 1);
         let turn_id = TurnId::from(format!("turn-{turn_index}"));
         let start_cursor = store.current_cursor(&session_id, revision);
@@ -151,7 +152,8 @@ pub(super) async fn run_once_live_replay_pressure(
                     LIVE_REPLAY_TRIM_CAPACITY,
                     Duration::from_secs(120),
                 );
-                let trim_session_id = format!("runtime-perf-live-replay-trim-{turn_index}");
+                let trim_session_id =
+                    SessionId::from(format!("runtime-perf-live-replay-trim-{turn_index}"));
                 let trim_turn_id = TurnId::from(format!("trim-turn-{turn_index}"));
                 let trim_start = trim_store.current_cursor(&trim_session_id, revision);
                 for event_index in 0..(LIVE_REPLAY_TRIM_CAPACITY * 3) {
@@ -346,7 +348,7 @@ pub(super) async fn run_once_live_replay_pressure(
 
 fn publish_one(
     store: &impl lash_core::LiveReplayStore,
-    session_id: &str,
+    session_id: &SessionId,
     revision: SessionRevision,
     turn_id: Option<&TurnId>,
     payload: SessionObservationEventPayload,

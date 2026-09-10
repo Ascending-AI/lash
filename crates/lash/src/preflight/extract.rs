@@ -398,13 +398,15 @@ fn session_execution_state(payload: Payload<'_>) -> Vec<Extraction> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::ProcessId;
+    use lash_sansio::SessionId;
 
     fn item(surface: DurableSurface, payload: DurablePayload) -> DurableItem {
         DurableItem {
             surface,
             cursor: "c".to_string(),
-            process_id: Some("p-1".to_string()),
-            session_id: Some("s-1".to_string()),
+            process_id: Some(ProcessId::from("p-1")),
+            session_id: Some(SessionId::from("s-1")),
             status: Some("waiting".to_string()),
             owner_record: None,
             payload,

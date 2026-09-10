@@ -6,6 +6,7 @@
 //! path changes.
 
 use super::InMemorySessionStore;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
@@ -13,7 +14,7 @@ impl InMemorySessionStore {
     /// before mutating it, so an armed delete leaves no partially adopted roots.
     pub(super) fn commit_attachment_refs_in_memory(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
         committed_at_epoch_ms: u64,
     ) -> Result<(), crate::StoreError> {
@@ -35,10 +36,10 @@ impl InMemorySessionStore {
         for id in attachment_ids {
             condemnations.remove(id);
             manifest
-                .entry((session_id.to_string(), id.clone()))
+                .entry((session_id.clone(), id.clone()))
                 .or_insert_with(|| crate::AttachmentManifestEntry {
                     attachment_id: id.clone(),
-                    session_id: session_id.to_string(),
+                    session_id: SessionId::from(session_id.to_string()),
                     canonical_uri: format!("lash-attachment://blake3/{id}"),
                     intent_at_epoch_ms: committed_at_epoch_ms,
                     committed_at_epoch_ms: None,
@@ -53,7 +54,7 @@ impl InMemorySessionStore {
 
     pub(super) fn commit_turn_attachment_intents(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         completed: &crate::store::RuntimeTurnCommitStamp,
         committed_at_epoch_ms: u64,
     ) {
@@ -175,7 +176,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), crate::store::StoreError> {
         let committed_at_epoch_ms = self.clock.timestamp_ms();
@@ -231,7 +232,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                     (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
                         .iter()
                         .any(|(session_id, turn_id, committed_at_ms)| {
-                            session_id == &entry.session_id
+                            session_id == entry.session_id
                                 && turn_id != owner_id
                                 && *committed_at_ms > entry.intent_at_epoch_ms
                         }),
@@ -247,7 +248,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
 
     fn forget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
@@ -299,7 +300,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                     (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => !committed_turns
                         .iter()
                         .any(|(session_id, turn_id, committed_at_ms)| {
-                            session_id == &entry.session_id
+                            session_id == entry.session_id
                                 && turn_id != owner_id
                                 && *committed_at_ms > entry.intent_at_epoch_ms
                         }),
@@ -329,11 +330,12 @@ impl crate::AttachmentManifest for InMemorySessionStore {
 mod attachment_reconciliation_tests {
     use super::InMemorySessionStore;
     use crate::AttachmentManifest;
+    use crate::SessionId;
 
     fn intent_at(session: &str, id: &str, at_ms: u64) -> crate::AttachmentIntent {
         crate::AttachmentIntent {
             attachment_id: crate::AttachmentId::parse(id).expect("valid attachment id"),
-            session_id: session.to_string(),
+            session_id: SessionId::from(session.to_string()),
             canonical_uri: format!("lash-attachment://blake3/{id}"),
             intent_at_epoch_ms: at_ms,
             owner_kind: None,
@@ -400,7 +402,7 @@ mod attachment_reconciliation_tests {
             .record_intent(intent_at("s", "committed", 100))
             .unwrap();
         store
-            .commit_refs("s", std::slice::from_ref(&committed))
+            .commit_refs(&SessionId::from("s"), std::slice::from_ref(&committed))
             .unwrap();
         store.record_intent(intent_at("s", "orphan", 100)).unwrap();
 

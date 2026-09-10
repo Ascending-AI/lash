@@ -22,7 +22,7 @@ impl RuntimeScenarioContext {
         let holder = self
             .store()
             .try_claim_session_execution_lease(
-                self.session_id,
+                &self.session_id,
                 &stale_owner,
                 "expire-stale-holder-executor",
                 STALE_HOLDER_TTL_MS,
@@ -36,7 +36,7 @@ impl RuntimeScenarioContext {
         let busy = self
             .store()
             .try_claim_session_execution_lease(
-                self.session_id,
+                &self.session_id,
                 &claimant,
                 "expire-stale-holder-executor-2",
                 60_000,
@@ -52,7 +52,7 @@ impl RuntimeScenarioContext {
         let reclaimed = self
             .store()
             .try_claim_session_execution_lease(
-                self.session_id,
+                &self.session_id,
                 &claimant,
                 "expire-stale-holder-executor-3",
                 60_000,
@@ -70,7 +70,7 @@ impl RuntimeScenarioContext {
             let stale = self
                 .store()
                 .try_claim_session_execution_lease(
-                    self.session_id,
+                    &self.session_id,
                     &local_lease_owner("runtime-scenario-late-claimant", "late-claimant-start"),
                     "expire-stale-holder-executor-4",
                     60_000,

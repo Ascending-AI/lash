@@ -314,6 +314,8 @@ impl InMemorySessionStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::ProcessId;
+    use crate::SessionId;
     use lash_sansio::sync::MutexExt;
 
     use std::sync::Arc;
@@ -332,7 +334,7 @@ mod tests {
         let store = factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
                 policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             })
@@ -347,7 +349,7 @@ mod tests {
         *concrete.session_meta.lock_recover() = None;
 
         let mut state = RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         state.ensure_agent_frame_initialized();
@@ -368,18 +370,18 @@ mod tests {
     #[tokio::test]
     async fn factory_rejects_occupied_global_node_id_without_partial_usage() {
         let factory = super::super::InMemorySessionStoreFactory::new();
-        let request = |session_id: &str| SessionStoreCreateRequest {
+        let request = |session_id: &SessionId| SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
         factory
-            .create_store(&request("first"))
+            .create_store(&request(&SessionId::from("first")))
             .await
             .expect("first store");
         let second = factory
-            .create_store(&request("second"))
+            .create_store(&request(&SessionId::from("second")))
             .await
             .expect("second store");
         let second_concrete = factory
@@ -389,7 +391,7 @@ mod tests {
             .cloned()
             .expect("second concrete store");
         let mut second_state = RuntimeSessionState {
-            session_id: "second".to_string(),
+            session_id: SessionId::from("second"),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         second_state.ensure_agent_frame_initialized();
@@ -413,7 +415,7 @@ mod tests {
         factory
             .global_node_owners
             .lock_recover()
-            .insert(occupied_node_id.clone(), "first".to_string());
+            .insert(occupied_node_id.clone(), SessionId::from("first"));
 
         let error = second
             .commit_runtime_state(commit)
@@ -435,7 +437,7 @@ mod tests {
     async fn budget_rejection_happens_before_backend_transaction_work() {
         let store = super::InMemorySessionStore::new();
         let state = RuntimeSessionState {
-            session_id: "budget-before-backend".to_string(),
+            session_id: SessionId::from("budget-before-backend"),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         let node = crate::SessionNodeRecord {
@@ -495,7 +497,7 @@ mod tests {
             .push(super::super::InMemoryQueuedBatch {
                 batch: QueuedWorkBatch {
                     batch_id: "exhausted-batch".to_string(),
-                    session_id: "session".to_string(),
+                    session_id: SessionId::from("session"),
                     enqueue_seq: 1,
                     source_key: None,
                     delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
@@ -507,7 +509,10 @@ mod tests {
                     items: vec![crate::runtime::QueuedWorkItem {
                         item_id: "exhausted-item".to_string(),
                         payload: crate::runtime::QueuedWorkPayload::agent_frame_task(
-                            crate::facade_support::frame_node_id("session", "frame"),
+                            crate::facade_support::frame_node_id(
+                                &SessionId::from("session"),
+                                "frame",
+                            ),
                             "task",
                             None,
                         ),
@@ -519,7 +524,7 @@ mod tests {
             });
         let owner = crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
         let authority = crate::SessionExecutionLeaseAuthority {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             owner: owner.clone(),
             executor_id: "session-executor".to_string(),
             lease_token: "session-lease".to_string(),
@@ -528,7 +533,7 @@ mod tests {
 
         let error = store
             .claim_ready_queued_work_after_lease_validation(
-                "session",
+                &SessionId::from("session"),
                 &authority,
                 &owner,
                 super::super::InMemoryQueuedWorkClaimKind::TurnWork {
@@ -556,7 +561,7 @@ mod tests {
             .push(super::super::InMemoryQueuedBatch {
                 batch: QueuedWorkBatch {
                     batch_id: "batch".to_string(),
-                    session_id: "session".to_string(),
+                    session_id: SessionId::from("session"),
                     enqueue_seq: 1,
                     source_key: None,
                     delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
@@ -580,7 +585,7 @@ mod tests {
                 },
             });
         let state = RuntimeSessionState {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         store
@@ -589,7 +594,7 @@ mod tests {
             .expect("bind stale-claim session");
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.completed_queue_claims = vec![QueuedWorkCompletion {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             claim_id: "queue-claim".to_string(),
             lease_token: "queue-token".to_string(),
             data: crate::QueuedWorkCompletionData {
@@ -597,7 +602,7 @@ mod tests {
             },
         }];
         commit.completed_turn_input_claims = vec![TurnInputCompletion {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             claim: Some(crate::TurnInputSettlementClaim {
                 claim_id: "stale-input-claim".to_string(),
                 lease_token: "stale-input-token".to_string(),
@@ -637,15 +642,15 @@ mod tests {
         let wake = crate::ProcessWakeDelivery {
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: "rewound-commit-wake".to_string(),
-            target_session_id: session_id.to_string(),
-            process_id: process_id.to_string(),
+            target_session_id: SessionId::from(session_id.to_string()),
+            process_id: ProcessId::from(process_id.to_string()),
             process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence: 7,
             event_type: "producer.wake".to_string(),
             event_invocation: crate::RuntimeInvocation {
                 scope: crate::RuntimeScope::new(session_id),
                 subject: crate::RuntimeSubject::ProcessEvent {
-                    process_id: process_id.to_string(),
+                    process_id: ProcessId::from(process_id.to_string()),
                     sequence: 7,
                     event_type: "producer.wake".to_string(),
                 },
@@ -658,7 +663,7 @@ mod tests {
             created_at_ms: 1,
         };
         let state = RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
@@ -700,7 +705,7 @@ mod tests {
             let factory = Arc::new(super::super::InMemorySessionStoreFactory::new());
             let request = SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: format!("delete-create-race-{round}"),
+                session_id: SessionId::from(format!("delete-create-race-{round}")),
                 relation: crate::SessionRelation::Root,
                 policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             };

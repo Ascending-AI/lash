@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 use crate::TurnId;
 
 impl TurnProtocol for UnitTurnProtocol {
@@ -131,7 +132,7 @@ fn render_message_origin(origin: &MessageOrigin) -> String {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub enum LogEvent {
     LlmDebug {
-        session_id: String,
+        session_id: SessionId,
         protocol_iteration: usize,
         usage: TokenUsage,
         provider_usage: Option<Value>,
@@ -140,7 +141,7 @@ pub enum LogEvent {
         response_parts: Option<Value>,
     },
     LlmError {
-        session_id: String,
+        session_id: SessionId,
         protocol_iteration: usize,
         request_body: Option<String>,
         message: String,
@@ -612,7 +613,7 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub autonomous: bool,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub system_prompt: Arc<str>,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_id: TurnId,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,

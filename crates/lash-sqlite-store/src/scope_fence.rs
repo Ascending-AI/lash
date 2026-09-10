@@ -261,7 +261,7 @@ fn lift_journal_fences_of_registered_processes(
         };
         let registered: bool = tx.query_row(
             &format!("SELECT EXISTS(SELECT 1 FROM {registry}.processes WHERE process_id = ?1)"),
-            params![process_id],
+            params![process_id.as_str()],
             |row| row.get(0),
         )?;
         if registered {

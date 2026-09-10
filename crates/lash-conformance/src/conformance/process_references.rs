@@ -1,3 +1,4 @@
+use lash_sansio::ProcessId;
 use std::collections::BTreeMap;
 
 use super::*;
@@ -121,7 +122,7 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
 
     registry
         .complete_process(
-            "proc-ref-a1",
+            &ProcessId::from("proc-ref-a1"),
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -145,7 +146,7 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
     for process_id in ["proc-ref-a2", "proc-ref-b"] {
         registry
             .complete_process(
-                process_id,
+                &ProcessId::from(process_id),
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),

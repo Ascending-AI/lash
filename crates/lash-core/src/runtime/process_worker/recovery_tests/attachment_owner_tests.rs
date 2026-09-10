@@ -43,13 +43,13 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
 
     // The single bound store is never deleted by this fixture, so there is no
     // tombstone to report.
-    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
@@ -61,7 +61,7 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
     let owner = crate::LeaseOwnerIdentity::opaque("parent-owner", "parent-incarnation");
     let _lease = store
         .try_claim_session_execution_lease(
-            PARENT_SESSION_ID,
+            &SessionId::from(PARENT_SESSION_ID),
             &owner,
             "parent-bound-session-store-executor",
             60_000,
@@ -71,7 +71,7 @@ async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemor
         .acquired()
         .expect("parent session lease acquired");
     let state = crate::RuntimeSessionState {
-        session_id: PARENT_SESSION_ID.to_string(),
+        session_id: SessionId::from(PARENT_SESSION_ID.to_string()),
         policy,
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -149,7 +149,7 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
                 crate::TurnOptions::new(
                     CancellationToken::new(),
                     crate::runtime::tests::helpers::named_turn_scope(
-                        "root",
+                        &SessionId::from("root"),
                         &TurnId::from("nested-engine-turn"),
                     ),
                 ),
@@ -215,7 +215,7 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
     .expect("valid test native substrate config");
 
     let runtime = Box::pin(worker.build_process_runtime(
-        format!("process-env:{PROCESS_ID}"),
+        SessionId::from(format!("process-env:{PROCESS_ID}")),
         policy,
         crate::PluginOptions::default(),
         "parent-bound regression",
@@ -319,11 +319,11 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         .drive_pending_processes()
         .await
         .expect("recover process");
-    await_terminal(&registry, PROCESS_ID).await;
+    await_terminal(&registry, &ProcessId::from(PROCESS_ID)).await;
 
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: format!("process-env:{PROCESS_ID}"),
+        session_id: SessionId::from(format!("process-env:{PROCESS_ID}")),
         relation: crate::SessionRelation::default(),
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };

@@ -105,7 +105,7 @@ impl DurableProcessWorker {
             continuation = Some(next);
         }
         Ok(ProcessDrainReport {
-            abandoned,
+            abandoned: abandoned.into_iter().map(Into::into).collect(),
             deferred,
         })
     }

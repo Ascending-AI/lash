@@ -1,5 +1,6 @@
 //! Cross-backend conformance for the durable process registry.
 
+use lash_sansio::ProcessId;
 mod status_filters;
 use status_filters::list_filters_match_extracted_and_json_fields;
 
@@ -88,10 +89,10 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
     C: FnOnce(ProcessRecord) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let process_id = "leased-completion-replay-repair";
+    let process_id = ProcessId::from("leased-completion-replay-repair");
     let base = registry
         .register_process(ProcessRegistration::new(
-            process_id,
+            process_id.clone(),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -102,7 +103,7 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
         .expect("register leased replay repair process");
     let lease = registry
         .claim_process_lease(
-            process_id,
+            &process_id,
             &crate::LeaseOwnerIdentity::opaque("repair-owner", "repair-incarnation"),
             60_000,
         )
@@ -123,7 +124,7 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
     corrupt_projection(base).await;
     assert!(
         !registry
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("read deliberately stale projection")
             .expect("stale process exists")
@@ -142,7 +143,7 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
     ));
     assert!(
         registry
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("read repaired leased replay projection")
             .expect("repaired process exists")
@@ -157,7 +158,7 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
 pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistry>) {
     async fn register_for(
         registry: &Arc<dyn ProcessRegistry>,
-        process_id: &str,
+        process_id: &ProcessId,
         scope: &SessionScope,
     ) {
         registry
@@ -169,7 +170,7 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
             .expect("register scoped prune process");
     }
 
-    async fn complete(registry: &Arc<dyn ProcessRegistry>, process_id: &str) {
+    async fn complete(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) {
         registry
             .complete_process(
                 process_id,
@@ -180,7 +181,7 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
             .expect("complete scoped prune process");
     }
 
-    async fn retained(registry: &Arc<dyn ProcessRegistry>, process_id: &str) -> bool {
+    async fn retained(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) -> bool {
         match registry.get_process(process_id).await {
             Ok(record) => record.is_some(),
             Err(crate::PluginError::ProcessNoLongerRetained { .. }) => false,
@@ -190,24 +191,49 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
 
     let deleted = SessionScope::for_agent_frame(
         "scoped-prune-deleted",
-        crate::session_graph::frame_node_id("scoped-prune-deleted", "scoped-prune-frame"),
+        crate::session_graph::frame_node_id(
+            &SessionId::from("scoped-prune-deleted"),
+            "scoped-prune-frame",
+        ),
     );
     let surviving = SessionScope::for_agent_frame(
         "scoped-prune-surviving",
-        crate::session_graph::frame_node_id("scoped-prune-surviving", "scoped-prune-frame"),
+        crate::session_graph::frame_node_id(
+            &SessionId::from("scoped-prune-surviving"),
+            "scoped-prune-frame",
+        ),
     );
-    register_for(&registry, "scoped-prune-deleted-terminal", &deleted).await;
-    complete(&registry, "scoped-prune-deleted-terminal").await;
-    register_for(&registry, "scoped-prune-deleted-live", &deleted).await;
-    register_for(&registry, "scoped-prune-surviving-terminal", &surviving).await;
-    complete(&registry, "scoped-prune-surviving-terminal").await;
+    register_for(
+        &registry,
+        &ProcessId::from("scoped-prune-deleted-terminal"),
+        &deleted,
+    )
+    .await;
+    complete(&registry, &ProcessId::from("scoped-prune-deleted-terminal")).await;
+    register_for(
+        &registry,
+        &ProcessId::from("scoped-prune-deleted-live"),
+        &deleted,
+    )
+    .await;
+    register_for(
+        &registry,
+        &ProcessId::from("scoped-prune-surviving-terminal"),
+        &surviving,
+    )
+    .await;
+    complete(
+        &registry,
+        &ProcessId::from("scoped-prune-surviving-terminal"),
+    )
+    .await;
 
     let report = registry
         .prune_terminal_processes(
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(deleted.session_id.clone()),
+                originator_id: Some(deleted.session_id.clone().to_string()),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,
@@ -220,22 +246,26 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
     );
     assert_eq!(report.pruned_events, 1);
     assert!(
-        !retained(&registry, "scoped-prune-deleted-terminal").await,
+        !retained(&registry, &ProcessId::from("scoped-prune-deleted-terminal")).await,
         "the filtered originator's terminal row must be gone"
     );
     assert!(
-        retained(&registry, "scoped-prune-deleted-live").await,
+        retained(&registry, &ProcessId::from("scoped-prune-deleted-live")).await,
         "a live row is never a prune candidate, whatever the filter matches"
     );
     assert!(
-        retained(&registry, "scoped-prune-surviving-terminal").await,
+        retained(
+            &registry,
+            &ProcessId::from("scoped-prune-surviving-terminal")
+        )
+        .await,
         "another originator's terminal row must survive a scoped prune"
     );
     assert_eq!(
         registry
             .filter_tombstoned_process_ids(&[
-                "scoped-prune-deleted-terminal".to_string(),
-                "scoped-prune-surviving-terminal".to_string(),
+                ProcessId::from("scoped-prune-deleted-terminal"),
+                ProcessId::from("scoped-prune-surviving-terminal"),
             ])
             .await
             .expect("classify scoped prune history"),
@@ -250,7 +280,7 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::any_of([ProcessStatus::Failed]),
-                originator_id: Some(surviving.session_id.clone()),
+                originator_id: Some(surviving.session_id.clone().to_string()),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,
@@ -266,8 +296,14 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
         .await
         .expect("prune every terminal process");
     assert_eq!(report.pruned_processes, 1);
-    assert!(!retained(&registry, "scoped-prune-surviving-terminal").await);
-    assert!(retained(&registry, "scoped-prune-deleted-live").await);
+    assert!(
+        !retained(
+            &registry,
+            &ProcessId::from("scoped-prune-surviving-terminal")
+        )
+        .await
+    );
+    assert!(retained(&registry, &ProcessId::from("scoped-prune-deleted-live")).await);
 }
 
 /// Prove that one SQL prune batch allocates complete, process-id-ordered
@@ -301,7 +337,7 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
             .expect("register batch-prune process");
         registry
             .complete_process(
-                process_id,
+                &ProcessId::from(*process_id),
                 output.clone(),
                 ProcessCompletionAuthority::external_owner(),
             )
@@ -422,7 +458,7 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
     refolded_process_record_matches_stored_projection(
         Arc::clone(&registry),
         Arc::clone(&registry),
-        "process-refold-hot",
+        &ProcessId::from("process-refold-hot"),
     )
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
@@ -436,14 +472,14 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
 }
 
 async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "incarnation-reuse-conformance";
+    let process_id = ProcessId::from("incarnation-reuse-conformance");
     let first = registry
-        .register_process(registration(process_id))
+        .register_process(registration(&process_id))
         .await
         .expect("register first process incarnation");
     registry
         .complete_process(
-            process_id,
+            &process_id,
             settled_success(serde_json::json!({"incarnation": "first"})),
             ProcessCompletionAuthority::external_owner(),
         )
@@ -456,7 +492,7 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
         .expect("prune first process incarnation");
 
     let second = registry
-        .register_process(registration(process_id))
+        .register_process(registration(&process_id))
         .await
         .expect("register second process incarnation");
     assert_ne!(first.incarnation, second.incarnation);
@@ -465,7 +501,7 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
         registry.events_after_ref(&first_ref, 0).await.map(|_| ()),
         registry
             .add_observer_ref(
-                "incarnation-stale-observer",
+                &SessionId::from("incarnation-stale-observer"),
                 &first_ref,
                 ProcessObserverBy::host("incarnation-conformance"),
             )
@@ -499,9 +535,9 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
 
 async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessRegistry>) {
     let process_ids = [
-        "lease-batch-leased".to_string(),
-        "lease-batch-unleased".to_string(),
-        "lease-batch-terminal".to_string(),
+        ProcessId::from("lease-batch-leased"),
+        ProcessId::from("lease-batch-unleased"),
+        ProcessId::from("lease-batch-terminal"),
     ];
     for process_id in &process_ids {
         registry
@@ -565,7 +601,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
         .expect("register abandon-refusal process");
     let first = registry
         .request_process_abandon(
-            abandon_id,
+            &ProcessId::from(abandon_id),
             crate::AbandonRequest {
                 requested_by: "first-requester".to_string(),
                 requested_at_ms: 1,
@@ -576,7 +612,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
         .expect("record first abandon request");
     let repeated = registry
         .request_process_abandon(
-            abandon_id,
+            &ProcessId::from(abandon_id),
             crate::AbandonRequest {
                 requested_by: "first-requester".to_string(),
                 requested_at_ms: 2,
@@ -598,7 +634,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
     assert_session_refusal(
         registry
             .request_process_abandon(
-                abandon_id,
+                &ProcessId::from(abandon_id),
                 crate::AbandonRequest {
                     requested_by: "first-requester".to_string(),
                     requested_at_ms: 3,
@@ -611,7 +647,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
     assert_session_refusal(
         registry
             .request_process_abandon(
-                abandon_id,
+                &ProcessId::from(abandon_id),
                 crate::AbandonRequest {
                     requested_by: "second-requester".to_string(),
                     requested_at_ms: 4,
@@ -628,13 +664,13 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
         .await
         .expect("register departed-wait-refusal process");
     registry
-        .record_caller_departure(departed_id)
+        .record_caller_departure(&ProcessId::from(departed_id))
         .await
         .expect("record caller departure before wait refusal");
     assert_session_refusal(
         registry
             .set_process_wait(
-                departed_id,
+                &ProcessId::from(departed_id),
                 WaitState {
                     since_ms: departed.updated_at_ms,
                     kind: WaitKind::Signal {
@@ -650,7 +686,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
     );
     registry
         .complete_process(
-            departed_id,
+            &ProcessId::from(departed_id),
             settled_success(serde_json::Value::Null),
             ProcessCompletionAuthority::external_owner(),
         )
@@ -664,7 +700,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
         .expect("register external-ref-refusal process");
     registry
         .set_external_ref(
-            external_ref_id,
+            &ProcessId::from(external_ref_id),
             crate::ProcessExternalRef {
                 backend: "first-backend".to_string(),
                 id: "first-id".to_string(),
@@ -676,7 +712,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
     assert_session_refusal(
         registry
             .set_external_ref(
-                external_ref_id,
+                &ProcessId::from(external_ref_id),
                 crate::ProcessExternalRef {
                     backend: "second-backend".to_string(),
                     id: "second-id".to_string(),
@@ -709,11 +745,11 @@ async fn process_registry_transition_refusals_are_backend_invariant() {
 async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = "process-parent-end-plan";
+    let process_id = ProcessId::from("process-parent-end-plan");
     let originator = SessionScope::new("parent-end-retention-session");
     registry
         .register_process(ProcessRegistration::new(
-            process_id,
+            process_id.clone(),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -724,7 +760,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
         .expect("register parent-end-plan process");
     let lease = registry
         .claim_process_lease(
-            process_id,
+            &process_id,
             &crate::LeaseOwnerIdentity::opaque("parent-end-owner", "parent-end-owner:i"),
             60_000,
         )
@@ -734,14 +770,14 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
         .expect("parent-end-plan lease acquired");
     let action = crate::ToolIntentParentEndAction {
         identity: crate::derive_tool_intent_identity(
-            "parent-end-session",
-            process_id,
+            &SessionId::from("parent-end-session"),
+            &process_id,
             Some("parent-end-call"),
             0,
         )
         .expect("parent-end identity"),
         parent_end: crate::ToolIntentParentEnd {
-            process_id: "parent-end-child".to_string(),
+            process_id: ProcessId::from("parent-end-child"),
             policy: crate::ProcessParentEndPolicy::Cancel,
         },
     };
@@ -758,7 +794,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
         crate::ProcessCompletionOutcome::Committed(_)
     ));
     let literal_plan = crate::ProcessParentEndPlan {
-        process_id: process_id.to_string(),
+        process_id: process_id.clone(),
         actions: vec![action],
     };
     assert_eq!(
@@ -774,7 +810,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(originator.session_id.clone()),
+                originator_id: Some(originator.session_id.clone().to_string()),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,
@@ -787,7 +823,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
     );
     assert_eq!(
         registry
-            .get_pending_parent_end_plan(process_id)
+            .get_pending_parent_end_plan(&process_id)
             .await
             .expect("read parent-end plan after retention prune"),
         Some(literal_plan),
@@ -795,18 +831,18 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
     );
     assert!(
         registry
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("read parent after retention prune")
             .is_some(),
         "the plan-owning terminal process must survive until the plan settles"
     );
     registry
-        .complete_parent_end_plan(process_id)
+        .complete_parent_end_plan(&process_id)
         .await
         .expect("complete parent-end plan");
     registry
-        .complete_parent_end_plan(process_id)
+        .complete_parent_end_plan(&process_id)
         .await
         .expect("parent-end plan completion is idempotent");
     assert!(
@@ -821,7 +857,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(originator.session_id),
+                originator_id: Some(originator.session_id.to_string()),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,
@@ -901,7 +937,7 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
         );
     }
     assert_eq!(
-        returned_ids.iter().filter(|id| *id == &boundary_id).count(),
+        returned_ids.iter().filter(|id| *id == boundary_id).count(),
         1,
         "a process completed after its page must not be dispatched again"
     );
@@ -910,7 +946,7 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
     worklist_captured_boundary_defers_beyond_bound_insert(registry).await;
 }
 
-async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<String> {
+async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<ProcessId> {
     let limit = std::num::NonZeroUsize::new(128).expect("non-zero test page size");
     let mut continuation = None;
     let mut ids = Vec::new();
@@ -949,7 +985,7 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
     assert_eq!(first.records[0].id, first_id);
     registry
         .complete_process(
-            terminalized_id,
+            &ProcessId::from(terminalized_id),
             settled_success(serde_json::json!({"terminalized_before_page": true})),
             ProcessCompletionAuthority::external_owner(),
         )
@@ -1050,17 +1086,17 @@ pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
 }
 
 async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "canonical-process-event-payload-replay";
+    let process_id = ProcessId::from("canonical-process-event-payload-replay");
     registry
         .register_process(
-            registration(process_id).with_extra_event_types([plain_event_type("signal.zero")]),
+            registration(&process_id).with_extra_event_types([plain_event_type("signal.zero")]),
         )
         .await
         .expect("register canonical-payload process");
     let replay_key = format!("process:{process_id}:signal.zero:1");
     let first = registry
         .append_event(
-            process_id,
+            &process_id,
             ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": -0.0}))
                 .with_replay_key(&replay_key),
         )
@@ -1068,7 +1104,7 @@ async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistr
         .expect("append negative-zero payload");
     let replay = registry
         .append_event(
-            process_id,
+            &process_id,
             ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": 0.0}))
                 .with_replay_key(replay_key),
         )
@@ -1081,21 +1117,21 @@ async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistr
 }
 
 async fn long_cancellation_reason_replay_is_backend_safe(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "long-cancellation-reason-replay";
+    let process_id = ProcessId::from("long-cancellation-reason-replay");
     registry
-        .register_process(registration(process_id))
+        .register_process(registration(&process_id))
         .await
         .expect("register long-cancellation process");
     let reason = (0..800)
         .map(|index| format!("{index:08x}"))
         .collect::<String>();
-    let request = ProcessEventAppendRequest::cancel_requested(process_id, Some(reason));
+    let request = ProcessEventAppendRequest::cancel_requested(&process_id, Some(reason));
     let first = registry
-        .append_event(process_id, request.clone())
+        .append_event(&process_id, request.clone())
         .await
         .expect("append cancellation with long reason");
     let replay = registry
-        .append_event(process_id, request)
+        .append_event(&process_id, request)
         .await
         .expect("replay cancellation with long reason");
     assert_eq!(
@@ -1107,7 +1143,7 @@ async fn long_cancellation_reason_replay_is_backend_safe(registry: Arc<dyn Proce
 async fn refolded_process_record_matches_stored_projection(
     writer: Arc<dyn ProcessRegistry>,
     reader: Arc<dyn ProcessRegistry>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) {
     let base = writer
         .register_process(
@@ -1194,7 +1230,7 @@ async fn refolded_process_record_matches_stored_projection(
     assert_refold_matches_stored_projection(&reader, &base, process_id, "signal replayed").await;
     writer
         .add_observer(
-            "refold-observer",
+            &SessionId::from("refold-observer"),
             process_id,
             crate::ProcessObserverBy::host("refold-add"),
         )
@@ -1203,7 +1239,7 @@ async fn refolded_process_record_matches_stored_projection(
     assert_refold_matches_stored_projection(&reader, &base, process_id, "observer added").await;
     writer
         .remove_observer(
-            "refold-observer",
+            &SessionId::from("refold-observer"),
             process_id,
             crate::ProcessObserverBy::host("refold-remove"),
         )
@@ -1226,7 +1262,7 @@ async fn refolded_process_record_matches_stored_projection(
 async fn assert_refold_matches_stored_projection(
     reader: &Arc<dyn ProcessRegistry>,
     base: &ProcessRecord,
-    process_id: &str,
+    process_id: &ProcessId,
     transition: &str,
 ) {
     let events = reader
@@ -1246,11 +1282,11 @@ async fn assert_refold_matches_stored_projection(
 }
 
 async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "process-attempt-budget";
+    let process_id = ProcessId::from("process-attempt-budget");
     registry
         .register_process(
             ProcessRegistration::new(
-                process_id,
+                process_id.clone(),
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1264,7 +1300,7 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
 
     let first_owner = crate::LeaseOwnerIdentity::opaque("attempt-owner-1", "attempt-owner-1:i");
     let first_lease = registry
-        .claim_process_lease(process_id, &first_owner, 60_000)
+        .claim_process_lease(&process_id, &first_owner, 60_000)
         .await
         .expect("claim first attempt lease")
         .acquired()
@@ -1278,7 +1314,7 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                process_id,
+                &process_id,
                 first_started,
                 &crate::ProcessExecutionWriteAuthority::lease(first_lease.clone()),
             )
@@ -1293,14 +1329,14 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
 
     let next_owner = crate::LeaseOwnerIdentity::opaque("attempt-owner-2", "attempt-owner-2:i");
     let next_lease = registry
-        .claim_process_lease(process_id, &next_owner, 60_000)
+        .claim_process_lease(&process_id, &next_owner, 60_000)
         .await
         .expect("claim next attempt lease")
         .acquired()
         .expect("next attempt lease acquired");
     let outcome = registry
         .record_first_started_with_authority(
-            process_id,
+            &process_id,
             crate::ProcessStarted {
                 owner: next_owner,
                 fencing_token: next_lease.fencing_token,
@@ -1336,10 +1372,10 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
 async fn producer_terminal_status_must_match_materialized_outcome(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = "producer-terminal-outcome-mismatch";
+    let process_id = ProcessId::from("producer-terminal-outcome-mismatch");
     let record = registry
         .register_process(
-            registration(process_id).with_extra_event_types([ProcessEventType {
+            registration(&process_id).with_extra_event_types([ProcessEventType {
                 name: "producer.failed".to_string(),
                 payload_schema: LashSchema::any(),
                 semantics: ProcessEventSemanticsSpec {
@@ -1356,7 +1392,7 @@ async fn producer_terminal_status_must_match_materialized_outcome(
     let before = serde_json::to_vec(&record).expect("serialize producer before rejected append");
     let error = registry
         .append_event(
-            process_id,
+            &process_id,
             ProcessEventAppendRequest::new(
                 "producer.failed",
                 serde_json::json!({
@@ -1378,7 +1414,7 @@ async fn producer_terminal_status_must_match_materialized_outcome(
         }
     ));
     let after = registry
-        .get_process(process_id)
+        .get_process(&process_id)
         .await
         .expect("read producer after rejected append")
         .expect("producer remains");
@@ -1389,7 +1425,7 @@ async fn producer_terminal_status_must_match_materialized_outcome(
     );
     assert!(
         registry
-            .events_after(process_id, 0)
+            .events_after(&process_id, 0)
             .await
             .expect("read events after rejected append")
             .is_empty(),
@@ -1398,22 +1434,22 @@ async fn producer_terminal_status_must_match_materialized_outcome(
 }
 
 async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "reserved-edge-audit";
+    let process_id = ProcessId::from("reserved-edge-audit");
     registry
-        .register_process(registration(process_id))
+        .register_process(registration(&process_id))
         .await
         .expect("register reserved-audit process");
     let by = crate::ProcessObserverBy::host("generic-append");
     let requests = [
-        ProcessEventAppendRequest::observer_added(process_id, "observer", &by),
-        ProcessEventAppendRequest::observer_removed(process_id, "observer", &by),
-        ProcessEventAppendRequest::subscription_retargeted(process_id, Some("target")),
+        ProcessEventAppendRequest::observer_added(&process_id, "observer", &by),
+        ProcessEventAppendRequest::observer_removed(&process_id, "observer", &by),
+        ProcessEventAppendRequest::subscription_retargeted(&process_id, Some("target")),
     ];
     for request in requests {
         let event_type = request.event_type.clone();
         assert!(
             matches!(
-                registry.append_event(process_id, request).await,
+                registry.append_event(&process_id, request).await,
                 Err(crate::PluginError::ReservedProcessEvent {
                     event_type: rejected
                 }) if rejected == event_type
@@ -1423,14 +1459,14 @@ async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn Pro
     }
     assert!(
         !registry
-            .is_observer("observer", process_id)
+            .is_observer(&SessionId::from("observer"), &process_id)
             .await
             .expect("observer query remains available")
     );
 }
 
 async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "waiting-recovery-worklist";
+    let process_id = ProcessId::from("waiting-recovery-worklist");
     let definition = serde_json::json!({"suite": "waiting-recovery-worklist"});
     let env_ref = ProcessExecutionEnvRef::new("process-env:waiting-recovery-worklist");
     let count_before = registry
@@ -1440,7 +1476,7 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
     let record = registry
         .register_process(
             ProcessRegistration::new(
-                process_id,
+                process_id.clone(),
                 ProcessInput::Engine {
                     kind: "waiting-recovery-worklist".to_string(),
                     payload: serde_json::Value::Null,
@@ -1458,7 +1494,7 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
         .expect("register waiting process");
     registry
         .set_process_wait(
-            process_id,
+            &process_id,
             WaitState {
                 since_ms: record.created_at_ms,
                 kind: WaitKind::Signal {
@@ -1512,7 +1548,7 @@ fn process_lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
 
 async fn claim_after_expiry(
     registry: &dyn ProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     owner: &crate::LeaseOwnerIdentity,
 ) -> crate::ProcessLease {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -1545,7 +1581,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     // from the SQL backends.
     match registry
         .claim_process_lease(
-            "lease-never-registered",
+            &ProcessId::from("lease-never-registered"),
             &process_lease_owner("owner-a"),
             60_000,
         )
@@ -1560,25 +1596,26 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     }
     assert!(
         registry
-            .get_process_lease("lease-never-registered")
+            .get_process_lease(&ProcessId::from("lease-never-registered"))
             .await
             .expect("read lease for unregistered process")
             .is_none(),
         "a refused claim must not persist a lease row"
     );
 
+    let lease_active = ProcessId::from("lease-active");
     registry
-        .register_process(registration("lease-active"))
+        .register_process(registration(&lease_active))
         .await
         .expect("register active lease process");
     let first = registry
-        .claim_process_lease("lease-active", &process_lease_owner("owner-a"), 60_000)
+        .claim_process_lease(&lease_active, &process_lease_owner("owner-a"), 60_000)
         .await
         .expect("claim active lease")
         .acquired()
         .expect("active lease acquired");
     let conflict = registry
-        .claim_process_lease("lease-active", &process_lease_owner("owner-b"), 60_000)
+        .claim_process_lease(&lease_active, &process_lease_owner("owner-b"), 60_000)
         .await
         .expect("competing claim");
     assert!(
@@ -1590,7 +1627,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         "a live lease must fence a competing owner"
     );
     let reentered = registry
-        .claim_process_lease("lease-active", &process_lease_owner("owner-a"), 120_000)
+        .claim_process_lease(&lease_active, &process_lease_owner("owner-a"), 120_000)
         .await
         .expect("re-enter lease")
         .acquired()
@@ -1598,12 +1635,13 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     assert_eq!(reentered.lease_token, first.lease_token);
     assert_eq!(reentered.fencing_token, first.fencing_token);
 
+    let lease_renew = ProcessId::from("lease-renew");
     registry
-        .register_process(registration("lease-renew"))
+        .register_process(registration(&lease_renew))
         .await
         .expect("register renewal process");
     let short = registry
-        .claim_process_lease("lease-renew", &process_lease_owner("owner-a"), 60_000)
+        .claim_process_lease(&lease_renew, &process_lease_owner("owner-a"), 60_000)
         .await
         .expect("claim short lease")
         .acquired()
@@ -1617,7 +1655,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         "renewal must extend the persisted lease expiry"
     );
     let persisted_renewed = registry
-        .get_process_lease("lease-renew")
+        .get_process_lease(&lease_renew)
         .await
         .expect("read renewed lease")
         .expect("renewed lease remains persisted");
@@ -1630,12 +1668,13 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         .await
         .expect("extended lease remains renewable");
 
+    let lease_release = ProcessId::from("lease-release");
     registry
-        .register_process(registration("lease-release"))
+        .register_process(registration(&lease_release))
         .await
         .expect("register release process");
     let released = registry
-        .claim_process_lease("lease-release", &process_lease_owner("owner-a"), 60_000)
+        .claim_process_lease(&lease_release, &process_lease_owner("owner-a"), 60_000)
         .await
         .expect("claim releasable lease")
         .acquired()
@@ -1645,26 +1684,27 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         .await
         .expect("release lease");
     let reclaimed = registry
-        .claim_process_lease("lease-release", &process_lease_owner("owner-b"), 60_000)
+        .claim_process_lease(&lease_release, &process_lease_owner("owner-b"), 60_000)
         .await
         .expect("claim released lease")
         .acquired()
         .expect("released lease acquired");
     assert!(reclaimed.fencing_token > released.fencing_token);
 
+    let lease_stale_release = ProcessId::from("lease-stale-release");
     registry
-        .register_process(registration("lease-stale-release"))
+        .register_process(registration(&lease_stale_release))
         .await
         .expect("register stale-release process");
     let stale_release = registry
-        .claim_process_lease("lease-stale-release", &process_lease_owner("owner-a"), 0)
+        .claim_process_lease(&lease_stale_release, &process_lease_owner("owner-a"), 0)
         .await
         .expect("claim immediately expiring lease")
         .acquired()
         .expect("immediately expiring lease acquired");
     let live = registry
         .claim_process_lease(
-            "lease-stale-release",
+            &lease_stale_release,
             &process_lease_owner("owner-b"),
             60_000,
         )
@@ -1678,7 +1718,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         .expect("stale release is idempotently ignored");
     let still_busy = registry
         .claim_process_lease(
-            "lease-stale-release",
+            &lease_stale_release,
             &process_lease_owner("owner-c"),
             60_000,
         )
@@ -1699,7 +1739,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         .expect("register stale-completion process");
     let stale = registry
         .claim_process_lease(
-            "lease-stale-completion",
+            &ProcessId::from("lease-stale-completion"),
             &process_lease_owner("owner-a"),
             SHORT_TTL_MS,
         )
@@ -1709,7 +1749,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         .expect("stale candidate acquired");
     let current = claim_after_expiry(
         registry.as_ref(),
-        "lease-stale-completion",
+        &ProcessId::from("lease-stale-completion"),
         &process_lease_owner("owner-b"),
     )
     .await;
@@ -1724,13 +1764,13 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         "a superseded lease must not complete the process"
     );
     let record = registry
-        .get_process("lease-stale-completion")
+        .get_process(&ProcessId::from("lease-stale-completion"))
         .await
         .expect("read stale-completion process")
         .expect("stale-completion process exists");
     assert!(!record.is_terminal());
     let lease_after_stale_completion = registry
-        .get_process_lease("lease-stale-completion")
+        .get_process_lease(&ProcessId::from("lease-stale-completion"))
         .await
         .expect("read current lease")
         .expect("current lease remains");
@@ -1749,7 +1789,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         .expect("register expired-completion process");
     let expired = registry
         .claim_process_lease(
-            "lease-expired-completion",
+            &ProcessId::from("lease-expired-completion"),
             &process_lease_owner("owner-a"),
             SHORT_TTL_MS,
         )
@@ -1770,7 +1810,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     );
     assert!(
         !registry
-            .get_process("lease-expired-completion")
+            .get_process(&ProcessId::from("lease-expired-completion"))
             .await
             .expect("read expired-completion process")
             .expect("expired-completion process exists")
@@ -1782,7 +1822,7 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
     let record = registry
         .register_process_with_observers(
             registration("observer-registration"),
-            &["observer-a".to_string(), "observer-b".to_string()],
+            &[SessionId::from("observer-a"), SessionId::from("observer-b")],
         )
         .await
         .expect("register process with observers");
@@ -1796,7 +1836,7 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
     );
     assert!(
         registry
-            .is_observer("observer-a", &record.id)
+            .is_observer(&SessionId::from("observer-a"), &record.id)
             .await
             .expect("check observer")
     );
@@ -1804,7 +1844,7 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
     let replay = registry
         .register_process_with_observers(
             registration("observer-registration"),
-            &["observer-b".to_string(), "observer-a".to_string()],
+            &[SessionId::from("observer-b"), SessionId::from("observer-a")],
         )
         .await
         .expect("replay registration");
@@ -1816,7 +1856,7 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
         registry
             .register_process_with_observers(
                 registration("observer-registration"),
-                &["observer-a".to_string()],
+                &[SessionId::from("observer-a")],
             )
             .await
             .is_err(),
@@ -1826,13 +1866,16 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
     registry
         .register_process(
             registration("wake-without-observer")
-                .with_wake_session_id(Some("wake-only-session".to_string())),
+                .with_wake_session_id(Some(SessionId::from("wake-only-session"))),
         )
         .await
         .expect("register wake-only process");
     assert!(
         !registry
-            .is_observer("wake-only-session", "wake-without-observer")
+            .is_observer(
+                &SessionId::from("wake-only-session"),
+                &ProcessId::from("wake-without-observer")
+            )
             .await
             .expect("wake target must not imply observer"),
         "no observer edge may be minted from an embedded wake target"
@@ -1840,32 +1883,35 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
 }
 
 async fn observer_events_are_auditable_and_transfer_is_atomic(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "observer-transfer";
+    let process_id = ProcessId::from("observer-transfer");
     registry
-        .register_process_with_observers(registration(process_id), &["observer-source".to_string()])
+        .register_process_with_observers(
+            registration(&process_id),
+            &[SessionId::from("observer-source")],
+        )
         .await
         .expect("register observer transfer process");
     registry
         .add_observer(
-            "observer-extra",
-            process_id,
+            &SessionId::from("observer-extra"),
+            &process_id,
             crate::ProcessObserverBy::host("add-operation"),
         )
         .await
         .expect("add observer");
     registry
         .remove_observer(
-            "observer-extra",
-            process_id,
+            &SessionId::from("observer-extra"),
+            &process_id,
             crate::ProcessObserverBy::host("remove-operation"),
         )
         .await
         .expect("remove observer");
     registry
         .transfer_observers(
-            "observer-source",
-            "observer-target",
-            &[process_id.to_string()],
+            &SessionId::from("observer-source"),
+            &SessionId::from("observer-target"),
+            std::slice::from_ref(&process_id),
             crate::ProcessObserverBy::host("transfer-operation"),
         )
         .await
@@ -1873,18 +1919,18 @@ async fn observer_events_are_auditable_and_transfer_is_atomic(registry: Arc<dyn 
 
     assert!(
         !registry
-            .is_observer("observer-source", process_id)
+            .is_observer(&SessionId::from("observer-source"), &process_id)
             .await
             .expect("source observer removed")
     );
     assert!(
         registry
-            .is_observer("observer-target", process_id)
+            .is_observer(&SessionId::from("observer-target"), &process_id)
             .await
             .expect("target observer added")
     );
     let event_types = registry
-        .events_after(process_id, 0)
+        .events_after(&process_id, 0)
         .await
         .expect("observer audit log")
         .into_iter()
@@ -1903,18 +1949,18 @@ async fn observer_events_are_auditable_and_transfer_is_atomic(registry: Arc<dyn 
 }
 
 async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "wake-retarget";
+    let process_id = ProcessId::from("wake-retarget");
     registry
         .register_process(
-            registration(process_id)
+            registration(&process_id)
                 .with_extra_event_types([wake_event_type("producer.wake")])
-                .with_wake_session_id(Some("wake-old".to_string())),
+                .with_wake_session_id(Some(SessionId::from("wake-old"))),
         )
         .await
         .expect("register wake process");
     registry
         .append_event(
-            process_id,
+            &process_id,
             ProcessEventAppendRequest::new(
                 "producer.wake",
                 serde_json::json!({"wake_input": "old"}),
@@ -1923,7 +1969,7 @@ async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Process
         .await
         .expect("append old-target wake");
     registry
-        .retarget_subscription(process_id, Some("wake-new"))
+        .retarget_subscription(&process_id, Some("wake-new"))
         .await
         .expect("retarget wake subscription");
 
@@ -1937,7 +1983,7 @@ async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Process
     }));
     assert!(
         registry
-            .events_after(process_id, 0)
+            .events_after(&process_id, 0)
             .await
             .expect("retarget audit log")
             .iter()
@@ -1946,15 +1992,15 @@ async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Process
 }
 
 async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "terminal-outcome";
+    let process_id = ProcessId::from("terminal-outcome");
     registry
-        .register_process(registration(process_id))
+        .register_process(registration(&process_id))
         .await
         .expect("register terminal process");
     let expected = settled_success(serde_json::json!({"done": true}));
     let terminal = registry
         .complete_process(
-            process_id,
+            &process_id,
             expected.clone(),
             ProcessCompletionAuthority::external_owner(),
         )
@@ -1965,17 +2011,18 @@ async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
 }
 
 async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "session-delete-bytes";
+    let process_id = ProcessId::from("session-delete-bytes");
     registry
         .register_process_with_observers(
-            registration(process_id).with_wake_session_id(Some("deleted-session".to_string())),
-            &["deleted-session".to_string()],
+            registration(&process_id)
+                .with_wake_session_id(Some(SessionId::from("deleted-session"))),
+            &[SessionId::from("deleted-session")],
         )
         .await
         .expect("register session-delete process");
     let before = serde_json::to_vec(
         &registry
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("read before delete")
             .expect("process before delete"),
@@ -1983,20 +2030,20 @@ async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistr
     .expect("serialize before delete");
     let events_before = serde_json::to_vec(
         &registry
-            .events_after(process_id, 0)
+            .events_after(&process_id, 0)
             .await
             .expect("read events before delete"),
     )
     .expect("serialize events before delete");
     let report = registry
-        .delete_session_process_state("deleted-session")
+        .delete_session_process_state(&SessionId::from("deleted-session"))
         .await
         .expect("delete session process state");
     assert_eq!(report.removed_observer_count, 1);
     assert_eq!(report.cleared_subscription_count, 1);
     let after = serde_json::to_vec(
         &registry
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("read after delete")
             .expect("process after delete"),
@@ -2008,7 +2055,7 @@ async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistr
     );
     let events_after = serde_json::to_vec(
         &registry
-            .events_after(process_id, 0)
+            .events_after(&process_id, 0)
             .await
             .expect("read events after delete"),
     )
@@ -2020,14 +2067,14 @@ async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistr
 }
 
 async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "pruned-tombstone";
+    let process_id = ProcessId::from("pruned-tombstone");
     registry
-        .register_process(registration(process_id))
+        .register_process(registration(&process_id))
         .await
         .expect("register prunable process");
     let terminal = registry
         .complete_process(
-            process_id,
+            &process_id,
             settled_success(serde_json::Value::Null),
             ProcessCompletionAuthority::external_owner(),
         )
@@ -2054,7 +2101,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         )
         .await
         .expect("prune terminal process");
-    let pruned_at_ms = match registry.get_process(process_id).await {
+    let pruned_at_ms = match registry.get_process(&process_id).await {
         Err(crate::PluginError::ProcessNoLongerRetained { pruned_at_ms, .. }) => pruned_at_ms,
         other => panic!("expected typed tombstone read, got {other:?}"),
     };
@@ -2063,7 +2110,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         "tombstones must be stamped with prune time, not the retention cutoff"
     );
     let await_output = crate::NativeProcessWork::for_registry(Arc::clone(&registry))
-        .await_terminal(process_id)
+        .await_terminal(&process_id)
         .await
         .expect("await must render a retained tombstone as a typed outcome");
     assert!(matches!(
@@ -2077,7 +2124,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
     assert!(matches!(
         crate::NativeRuntimeEffectController::request_process_cancel(
             Arc::clone(&registry),
-            process_id,
+            &process_id,
             Some("cancel after prune".to_string()),
             None,
         )
@@ -2085,21 +2132,21 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(
-        registry.events_after(process_id, 0).await,
+        registry.events_after(&process_id, 0).await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     // A pruned process has no row to hold authority over, so a lease claim must
     // read as the tombstone rather than resurrecting a lease (FIG-953).
     assert!(matches!(
         registry
-            .claim_process_lease(process_id, &process_lease_owner("after-prune"), 60_000)
+            .claim_process_lease(&process_id, &process_lease_owner("after-prune"), 60_000)
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(
         registry
             .append_event(
-                process_id,
+                &process_id,
                 ProcessEventAppendRequest::new("signal.after-prune", serde_json::Value::Null,),
             )
             .await,
@@ -2108,25 +2155,27 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
     assert!(matches!(
         registry
             .add_observer(
-                "late-observer",
-                process_id,
+                &SessionId::from("late-observer"),
+                &process_id,
                 crate::ProcessObserverBy::host("after-prune"),
             )
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(
-        registry.is_observer("late-observer", process_id).await,
+        registry
+            .is_observer(&SessionId::from("late-observer"), &process_id)
+            .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(
-        registry.observers_for_process(process_id).await,
+        registry.observers_for_process(&process_id).await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert!(matches!(
         registry
             .complete_process(
-                process_id,
+                &process_id,
                 settled_success(serde_json::Value::Null),
                 ProcessCompletionAuthority::external_owner(),
             )
@@ -2167,7 +2216,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
     );
     assert!(
         registry
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("compacted tombstone becomes ordinary absence")
             .is_none()
@@ -2180,7 +2229,7 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
     refolded_process_record_matches_stored_projection(
         Arc::clone(&open),
         Arc::clone(&reopen),
-        "process-refold-cold",
+        &ProcessId::from("process-refold-cold"),
     )
     .await;
     let mut conservation = ProcessCountConservation::from_modeled_totals(
@@ -2190,12 +2239,12 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
     assert_process_count_conservation(&open, conservation)
         .await
         .expect("known refold registration conserves before reopen assertion");
-    let process_id = "observer-reopen";
+    let process_id = ProcessId::from("observer-reopen");
     handles
         .open
         .register_process_with_observers(
-            registration(process_id).with_wake_session_id(Some("wake-reopen".to_string())),
-            &["observer-reopen".to_string()],
+            registration(&process_id).with_wake_session_id(Some(SessionId::from("wake-reopen"))),
+            &[SessionId::from("observer-reopen")],
         )
         .await
         .expect("register before reopen");
@@ -2206,14 +2255,14 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
     assert!(
         handles
             .reopen
-            .is_observer("observer-reopen", process_id)
+            .is_observer(&SessionId::from("observer-reopen"), &process_id)
             .await
             .expect("observer survives reopen")
     );
     assert!(
         handles
             .reopen
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("record survives reopen")
             .is_some()
@@ -2231,17 +2280,20 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
 /// idempotent, refused from every other source state and disposition, closable
 /// by external reconciliation, and never retracts a reconciled terminal state.
 async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "caller-departure-machine";
+    let process_id = ProcessId::from("caller-departure-machine");
     let observer_session = "caller-departure-observer";
     let registered = registry
-        .register_process_with_observers(registration(process_id), &[observer_session.to_string()])
+        .register_process_with_observers(
+            registration(&process_id),
+            &[SessionId::from(observer_session)],
+        )
         .await
         .expect("register externally-owned audit row");
     assert_eq!(registered.status, ProcessStatus::Running);
 
     // running -> caller_departed.
     let departed = registry
-        .record_caller_departure(process_id)
+        .record_caller_departure(&process_id)
         .await
         .expect("running externally-owned row records a caller departure");
     assert_eq!(departed.status, ProcessStatus::CallerDeparted);
@@ -2257,7 +2309,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
 
     // The transition is a durable event, so the fold reproduces it.
     let events = registry
-        .events_after(process_id, 0)
+        .events_after(&process_id, 0)
         .await
         .expect("read caller-departure events");
     assert!(
@@ -2266,12 +2318,17 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
             .any(|event| event.event_type == "process.caller_departed"),
         "the transition must be an appended lifecycle event, not a silent column write"
     );
-    assert_refold_matches_stored_projection(&registry, &registered, process_id, "caller departure")
-        .await;
+    assert_refold_matches_stored_projection(
+        &registry,
+        &registered,
+        &process_id,
+        "caller departure",
+    )
+    .await;
 
     // caller_departed -> caller_departed is idempotent.
     let again = registry
-        .record_caller_departure(process_id)
+        .record_caller_departure(&process_id)
         .await
         .expect("repeat departure is idempotent");
     assert_eq!(again.status, ProcessStatus::CallerDeparted);
@@ -2303,7 +2360,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     // row is retired, so every ProcessListMode::Live reader must stop showing
     // it as in flight, while the unfiltered observation view still carries it.
     let live_observed = registry
-        .list_live_observed_by(observer_session)
+        .list_live_observed_by(&SessionId::from(observer_session))
         .await
         .expect("list live observed rows");
     assert!(
@@ -2312,7 +2369,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     );
     let all_observed = registry
         .list_observed_by(
-            observer_session,
+            &SessionId::from(observer_session),
             &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..Default::default()
@@ -2340,7 +2397,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     // Illegal: waiting is an execution state an externally-owned row never has.
     let wait_refusal = registry
         .set_process_wait(
-            process_id,
+            &process_id,
             WaitState {
                 since_ms: departed.updated_at_ms,
                 kind: WaitKind::Signal {
@@ -2365,7 +2422,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
         .await
         .expect("register owner-bound row");
     let disposition_refusal = registry
-        .record_caller_departure("caller-departure-owner-bound")
+        .record_caller_departure(&ProcessId::from("caller-departure-owner-bound"))
         .await;
     assert!(
         disposition_refusal.is_err(),
@@ -2375,7 +2432,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     // Illegal: an unknown row.
     assert!(
         registry
-            .record_caller_departure("caller-departure-missing")
+            .record_caller_departure(&ProcessId::from("caller-departure-missing"))
             .await
             .is_err(),
         "an unknown process cannot record a caller departure"
@@ -2384,14 +2441,14 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     // Legal: external reconciliation closes the row with observed truth.
     registry
         .complete_process(
-            process_id,
+            &process_id,
             settled_success(serde_json::json!({"reconciled": true})),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("external reconciliation closes a caller-departed row");
     let closed = registry
-        .get_process(process_id)
+        .get_process(&process_id)
         .await
         .expect("read reconciled row")
         .expect("reconciled row remains stored");
@@ -2404,7 +2461,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     // Replaying the earlier departure is a no-op once reconciliation appended
     // a later terminal event. The terminal projection must not go back.
     let terminal_replay = registry
-        .record_caller_departure(process_id)
+        .record_caller_departure(&process_id)
         .await
         .expect("the earlier non-tail departure replays without repair");
     assert_eq!(
@@ -2430,7 +2487,7 @@ async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn Proce
         .await
         .expect("register still-running row");
     let departed = registry
-        .record_caller_departure(reclaimed_id)
+        .record_caller_departure(&ProcessId::from(reclaimed_id))
         .await
         .expect("record caller departure");
     let (_, projection_cursor) = changes_after_full_relist_if_required(&registry, 4096).await;
@@ -2445,14 +2502,14 @@ async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn Proce
         .expect("prune retired rows");
     assert!(
         matches!(
-            registry.get_process(reclaimed_id).await,
+            registry.get_process(&ProcessId::from(reclaimed_id)).await,
             Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ),
         "retention must reclaim a row nothing may ever terminalize"
     );
     assert!(
         registry
-            .get_process(retained_id)
+            .get_process(&ProcessId::from(retained_id))
             .await
             .expect("read still-running row")
             .is_some(),

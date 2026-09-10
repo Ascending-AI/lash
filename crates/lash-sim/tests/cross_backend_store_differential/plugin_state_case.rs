@@ -17,7 +17,7 @@ pub(super) async fn compare_plugin_state(
     let mut observations = Vec::new();
     for runner in &mut runners {
         let mut child = runner.create_request();
-        child.session_id.push_str("-child");
+        child.session_id = SessionId::from(format!("{}-child", child.session_id));
         let child_store = runner
             .factory()
             .create_conformance_store(&child)

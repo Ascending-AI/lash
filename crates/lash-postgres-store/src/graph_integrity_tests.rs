@@ -49,7 +49,7 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
             GraphIntegrityCorruption::DanglingLeafId => {
                 sqlx::query("UPDATE lash_sessions SET leaf_node_id = $1 WHERE session_id = $2")
                     .bind(&target.missing_node_id)
-                    .bind(&target.session_id)
+                    .bind(target.session_id.as_str())
                     .execute(self.storage.pool())
                     .await
                     .expect("inject dangling Postgres graph leaf id")
@@ -98,7 +98,7 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
 
     async fn load_whole_graph(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<lash_core::SessionGraph, StoreError> {
         let mut tx = self
             .storage

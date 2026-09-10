@@ -1,3 +1,5 @@
+use lash::ProcessId;
+use lash::SessionId;
 pub mod scripted_provider;
 use anyhow::{Context, Result, anyhow, bail};
 use lash::durability::EffectHost;
@@ -196,7 +198,7 @@ pub enum TurnScenario {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessSignalRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub signal_name: String,
     pub signal_id: String,
     #[serde(default)]
@@ -218,9 +220,9 @@ pub struct TurnRequest {
 pub struct TurnResponse {
     pub workflow_id: String,
     pub worker_id: String,
-    pub process_id: String,
+    pub process_id: ProcessId,
     #[serde(default)]
-    pub process_ids: Vec<String>,
+    pub process_ids: Vec<ProcessId>,
     pub attachment_id: String,
     pub final_text: String,
     #[serde(default)]
@@ -499,7 +501,7 @@ pub async fn record_terminal_result(pool: &PgPool, response: &TurnResponse) -> R
         "#,
     )
     .bind(&response.workflow_id)
-    .bind(&response.process_id)
+    .bind(response.process_id.as_str())
     .bind(&response.worker_id)
     .bind(&response.attachment_id)
     .bind(&response.final_text)
@@ -1081,7 +1083,8 @@ impl E2eTools {
     }
 
     async fn app_lookup(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
+        let workflow_id =
+            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
         let key = call
             .args
             .get("key")
@@ -1106,7 +1109,8 @@ impl E2eTools {
     }
 
     async fn async_lookup(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
+        let workflow_id =
+            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
         let key_arg = call
             .args
             .get("key")
@@ -1171,7 +1175,8 @@ impl E2eTools {
     }
 
     async fn batch_side_effect(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
+        let workflow_id =
+            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
         let key = call
             .args
             .get("key")
@@ -1205,7 +1210,8 @@ impl E2eTools {
     }
 
     async fn make_attachment(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
+        let workflow_id =
+            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
         let filename = call
             .args
             .get("name")
@@ -1267,7 +1273,8 @@ impl E2eTools {
     }
 
     async fn crash_once(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
+        let workflow_id =
+            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
         let result = serde_json::json!({
             "crashed": false,
             "worker_id": self.worker_id,
@@ -1308,7 +1315,8 @@ impl E2eTools {
     }
 
     async fn cancel_gate(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
+        let workflow_id =
+            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
         let started = serde_json::json!({
             "waiting": true,
             "worker_id": self.worker_id,
@@ -1333,7 +1341,8 @@ impl E2eTools {
     }
 
     async fn durable_input_request(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let workflow_id = workflow_id_from_args(call.context.session_id(), call.args);
+        let workflow_id =
+            workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
         let question = call
             .args
             .get("question")
@@ -1491,7 +1500,7 @@ pub fn expected_attachment_bytes(workflow_id: &str) -> Vec<u8> {
     format!("lash-e2e-attachment:{workflow_id}:v1").into_bytes()
 }
 
-fn workflow_id_from_args(session_id: &str, args: &serde_json::Value) -> String {
+fn workflow_id_from_args(session_id: &SessionId, args: &serde_json::Value) -> String {
     args.get("workflow_id")
         .and_then(serde_json::Value::as_str)
         .unwrap_or(session_id)

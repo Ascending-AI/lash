@@ -1,4 +1,5 @@
 use super::*;
+use crate::ProcessId;
 
 impl DurableProcessWorker {
     pub(super) async fn drive_pending_parent_end_actions(&self) -> Result<(), PluginError> {
@@ -18,7 +19,7 @@ impl DurableProcessWorker {
         }
     }
 
-    async fn drive_one_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
+    async fn drive_one_parent_end_plan(&self, process_id: &ProcessId) -> Result<(), PluginError> {
         if let Some(plan) = self
             .config
             .process_registry()
@@ -114,7 +115,7 @@ impl DurableProcessWorker {
     pub(super) async fn finish_terminal_run(
         &self,
         lease: &ProcessLease,
-        process_id: &str,
+        process_id: &ProcessId,
         output: Box<ProcessAwaitOutput>,
         actions: Vec<crate::ToolIntentParentEndAction>,
     ) -> super::recovery::ProcessRecoveryOutcome {

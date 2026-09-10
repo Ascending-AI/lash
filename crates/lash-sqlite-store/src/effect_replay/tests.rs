@@ -54,7 +54,7 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
         .await
         .expect("open the in-memory effect journal");
     let v2_identity = lash_core::derive_tool_intent_identity(
-        "cutover-session",
+        &SessionId::from("cutover-session"),
         "cutover-turn",
         Some("cutover-call"),
         0,
@@ -144,7 +144,7 @@ fn group_record() -> EffectGroupRecord {
     EffectGroupRecord {
         group_key: GROUP.to_string(),
         scope_id: SCOPE.to_string(),
-        session_id: Some("s1".to_string()),
+        session_id: Some(SessionId::from("s1")),
         wake: lash_core::GroupWakePolicy::All,
         loser_disposition: lash_core::LoserPolicy::RunToCompletion,
         children: 2,
@@ -155,7 +155,7 @@ fn group_record() -> EffectGroupRecord {
 fn claim(replay_key: &str, owner: &str) -> EffectClaimRequest {
     EffectClaimRequest {
         scope_id: SCOPE.to_string(),
-        session_id: Some("s1".to_string()),
+        session_id: Some(SessionId::from("s1")),
         replay_key: replay_key.to_string(),
         envelope_hash: format!("hash-{replay_key}"),
         envelope_json: format!(r#"{{"json":"{replay_key}","hash":"hash-{replay_key}"}}"#),
@@ -372,7 +372,7 @@ async fn retirement_removes_a_group_and_its_children_together() {
 
     let removed = store
         .retire_journal(&lash_core::EffectJournalRetirement::Session {
-            session_id: "s1".to_string(),
+            session_id: SessionId::from("s1"),
         })
         .await
         .expect("retire the session journal");

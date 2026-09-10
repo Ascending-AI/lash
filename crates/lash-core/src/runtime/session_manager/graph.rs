@@ -7,7 +7,7 @@ impl CurrentSessionCapability {
         managed: &ManagedSessionCapability,
         usage: &UsageCapability,
         background: &ProcessCapability,
-        session_id: &str,
+        session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
         if request.operation_id.trim().is_empty() {
@@ -211,7 +211,7 @@ mod error_mapping_tests {
         let error = plugin_error_from_session_append(crate::SessionError::Store {
             context: "append receipt".to_string(),
             source: crate::StoreError::AppendReceiptRequestedNodeCountCorrupt {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 operation_key: "append-operation".to_string(),
                 stored: Some(1),
                 attempted: Some(2),

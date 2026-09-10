@@ -10,7 +10,7 @@ use crate::TurnId;
 
 struct SessionExecutionLaneProbe {
     store: Arc<dyn crate::store::RuntimePersistence>,
-    session_id: String,
+    session_id: SessionId,
     owner: crate::LeaseOwnerIdentity,
     executor_id: String,
     timings: crate::LeaseTimings,

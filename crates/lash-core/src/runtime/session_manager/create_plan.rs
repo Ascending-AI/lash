@@ -2,11 +2,11 @@ use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
 
 pub(in crate::runtime::session_manager) struct SessionCreatePlan {
-    pub(in crate::runtime::session_manager) session_id: String,
+    pub(in crate::runtime::session_manager) session_id: SessionId,
     pub(in crate::runtime::session_manager) relation: SessionRelation,
     pub(in crate::runtime::session_manager) pending_observer_intents:
         Vec<crate::SessionObserverIntent>,
-    pub(in crate::runtime::session_manager) parent_session_id: Option<String>,
+    pub(in crate::runtime::session_manager) parent_session_id: Option<SessionId>,
     pub(in crate::runtime::session_manager) policy: SessionPolicy,
     pub(in crate::runtime::session_manager) initial_runtime_state: RuntimeSessionState,
     pub(in crate::runtime::session_manager) plugin_config: crate::plugin::SessionCreationConfig,
@@ -25,7 +25,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         .session_id
         .take()
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .unwrap_or_else(|| SessionId::from(uuid::Uuid::new_v4().to_string()));
     request.session_id = Some(session_id.clone());
     if session_id == current.session_id || managed.registry.lock().await.contains_key(&session_id) {
         return Err(crate::PluginError::Session(format!(
@@ -66,7 +66,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         session_id,
         relation: request.relation.clone(),
         pending_observer_intents,
-        parent_session_id,
+        parent_session_id: parent_session_id.map(Into::into),
         policy,
         initial_runtime_state,
         plugin_config,
@@ -81,11 +81,11 @@ async fn resolve_start_state(
     managed: &ManagedSessionCapability,
     current: &CurrentSessionCapability,
     request: &SessionCreateRequest,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<RuntimeSessionState, crate::PluginError> {
     match &request.start {
         SessionStartPoint::Empty => Ok(RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(current.policy.clone())
         }),
         SessionStartPoint::CurrentSession => Ok(current.snapshot.to_runtime_state()),
@@ -108,7 +108,7 @@ fn resolve_session_policy(
     current: &CurrentSessionCapability,
     request: &SessionCreateRequest,
     start_state: &RuntimeSessionState,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> SessionPolicy {
     let mut policy = request
         .policy
@@ -118,13 +118,13 @@ fn resolve_session_policy(
             _ => start_state.policy.clone(),
         });
     if request.relation.parent_session_id().is_some() {
-        policy.session_id = Some(session_id.to_string());
+        policy.session_id = Some(SessionId::from(session_id.to_string()));
     }
     policy
 }
 
 fn build_runtime_state(
-    session_id: String,
+    session_id: SessionId,
     request: &SessionCreateRequest,
     mut base: RuntimeSessionState,
     policy: &SessionPolicy,

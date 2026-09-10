@@ -1122,7 +1122,7 @@ fn language_execution_attributes(
     ));
     attrs.push(KeyValue::new(
         attr::LASH_LANGUAGE_EXECUTION_SESSION_ID,
-        event.identity.scope.session_id.clone(),
+        event.identity.scope.session_id.to_string(),
     ));
     if let Some(turn_id) = &event.identity.scope.turn_id {
         attrs.push(KeyValue::new(
@@ -1169,7 +1169,7 @@ fn language_execution_attributes(
             ));
             attrs.push(KeyValue::new(
                 attr::LASH_LANGUAGE_EXECUTION_PROCESS_ID,
-                process_id.clone(),
+                process_id.to_string(),
             ));
         }
     }
@@ -1265,7 +1265,7 @@ fn language_execution_attributes(
                     ));
                     attrs.push(KeyValue::new(
                         attr::LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID,
-                        process_id.clone(),
+                        process_id.to_string(),
                     ));
                 }
             }

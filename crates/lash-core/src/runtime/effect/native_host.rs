@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -177,13 +178,19 @@ impl AwaitEventResolver for NativeEffectHost {
             .await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.controller
             .revoke_await_events_for_session(session_id)
             .await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.controller
             .cancel_await_events_for_session(session_id)
             .await
@@ -378,11 +385,17 @@ impl AwaitEventResolver for FencedNativeController {
         self.host.await_await_event(key, cancel, deadline).await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.host.revoke_await_events_for_session(session_id).await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.host.cancel_await_events_for_session(session_id).await
     }
 

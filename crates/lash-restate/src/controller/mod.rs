@@ -6,6 +6,7 @@
 //! scheduling for process commands. The context seam those commands are issued
 //! through lives in [`context`].
 
+use lash_sansio::SessionId;
 pub(crate) mod context;
 pub(crate) mod journal_budget;
 mod journaled_effect;
@@ -214,8 +215,7 @@ fn restate_turn_cancel_wait_request(
     scope
         .validate()
         .map_err(RuntimeEffectControllerError::from)?;
-    if scope.session_id() != Some(invocation.scope.session_id.as_str())
-        || scope.turn_id() != Some(turn_id)
+    if scope.session_id() != Some(&invocation.scope.session_id) || scope.turn_id() != Some(turn_id)
     {
         return Err(RuntimeEffectControllerError::new(
             RuntimeErrorCode::RestateTurnCancelScopeMismatch,
@@ -426,11 +426,14 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
-    async fn require_active_session(&self, session_id: Option<&str>) -> Result<(), RuntimeError> {
+    async fn require_active_session(
+        &self,
+        session_id: Option<&SessionId>,
+    ) -> Result<(), RuntimeError> {
         if let Some(session_id) = session_id
             && self
                 .context
-                .session_is_revoked(session_id.to_string())
+                .session_is_revoked(SessionId::from(session_id.to_string()))
                 .await
                 .map_err(|err| {
                     RuntimeError::new(
@@ -539,9 +542,12 @@ where
             })
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.context
-            .update_session_waits(session_id.to_string(), true)
+            .update_session_waits(SessionId::from(session_id.to_string()), true)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -551,9 +557,12 @@ where
             })
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.context
-            .update_session_waits(session_id.to_string(), false)
+            .update_session_waits(SessionId::from(session_id.to_string()), false)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -1280,7 +1289,7 @@ async fn signal_ordinal_for_event(
 async fn schedule_restate_process<'ctx, C>(
     registry: Arc<dyn ProcessRegistry>,
     registration: lash_core::ProcessRegistration,
-    observers: Vec<String>,
+    observers: Vec<SessionId>,
     execution_context: lash_core::ProcessExecutionContext,
     context: &C,
 ) -> Result<ProcessRecord, PluginError>

@@ -5,6 +5,8 @@
 //! outside any session database.
 
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 pub struct SqliteTriggerStore {
     conn: SqliteConnection,
@@ -84,7 +86,7 @@ impl SqliteTriggerStore {
     fn decode_delivery(
         occurrence_json: String,
         subscription_json: String,
-        process_id: String,
+        process_id: ProcessId,
         created_at_ms: i64,
         reservation_status: lash_core::TriggerDeliveryReservationOutcome,
     ) -> Result<lash_core::TriggerDeliveryReservation, lash_core::PluginError> {
@@ -131,7 +133,7 @@ impl SqliteTriggerStore {
                         deliveries.push(Self::decode_delivery(
                             occurrence_json,
                             subscription_json,
-                            process_id,
+                            ProcessId::from(process_id),
                             created_at_ms,
                             lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?);
@@ -426,9 +428,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn delete_session_subscriptions(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<usize, lash_core::PluginError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -455,7 +457,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                 continue;
                             }
                         };
-                        if record.registrant_session_id() == Some(session_id.as_str())
+                        if record.registrant_session_id()
+                            == Some(&SessionId::from(session_id.as_str()))
                             && !record.tombstoned
                         {
                             subscriptions.push((subscription_id, record));
@@ -669,7 +672,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn list_deliveries_by_process_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
         self.list_deliveries_where("d.process_id = ?1", vec![process_id.to_string().into()])
             .await
@@ -681,7 +684,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.list_deliveries_where("1 = 1", Vec::new()).await
     }
 
-    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, lash_core::PluginError> {
+    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, lash_core::PluginError> {
         self.conn
             .call(|conn| {
                 Ok((|| {
@@ -695,7 +698,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     let rows = stmt
                         .query_map([], |row| row.get::<_, String>(0))
                         .map_err(process_sqlite_error)?;
-                    rows.collect::<Result<Vec<_>, _>>()
+                    rows.collect::<Result<Vec<String>, _>>()
+                        .map(|ids| ids.into_iter().map(ProcessId::from).collect())
                         .map_err(process_sqlite_error)
                 })())
             })
@@ -721,7 +725,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             Ok(lash_core::TriggerDeliveryRetentionCandidate {
                                 occurrence_id: row.get(0)?,
                                 subscription_id: row.get(1)?,
-                                process_id: row.get(2)?,
+                                process_id: ProcessId::from(row.get::<_, String>(2)?),
                             })
                         })
                         .map_err(process_sqlite_error)?;
@@ -735,7 +739,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn list_session_owner_ids_for_retention(
         &self,
-    ) -> Result<Vec<String>, lash_core::PluginError> {
+    ) -> Result<Vec<SessionId>, lash_core::PluginError> {
         self.conn
             .call(|conn| {
                 Ok((|| {
@@ -799,7 +803,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     for row in rows {
                         let owner_scope = row.map_err(process_sqlite_error)?;
                         if let Some(session_id) = owner_scope.strip_prefix("session:") {
-                            session_ids.insert(session_id.to_string());
+                            session_ids.insert(SessionId::from(session_id));
                         }
                     }
                     Ok(session_ids.into_iter().collect())
@@ -812,7 +816,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn reconcile_trigger_retention(
         &self,
         candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[String],
+        deleted_session_ids: &[SessionId],
     ) -> Result<lash_core::TriggerRetentionReconciliationReport, lash_core::PluginError> {
         let candidates_json = serde_json::to_string(candidates).map_err(process_decode_error)?;
         let deleted_owner_scopes = deleted_session_ids
@@ -1302,7 +1306,7 @@ fn sqlite_delivery_snapshots(
         reservations.push(lash_core::TriggerDeliveryReservation {
             occurrence: occurrence.clone(),
             subscription: SqliteTriggerStore::decode_subscription(snapshot_json)?,
-            process_id,
+            process_id: ProcessId::from(process_id),
             created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", created_at_ms)?,
             reservation_status: reservation_status.clone(),
         });

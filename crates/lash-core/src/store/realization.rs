@@ -33,13 +33,14 @@ pub async fn commit_runtime_state_verified(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SessionId;
     use crate::session_graph::RealizedNodeTimestamp;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Default)]
     struct NonValidatingFacadeStore {
         commit_attempts: AtomicUsize,
-        materialized_session: Option<String>,
+        materialized_session: Option<SessionId>,
         replayed: bool,
     }
 
@@ -129,7 +130,7 @@ mod tests {
     async fn verified_commit_rejects_a_store_that_lies_about_materializing_admission() {
         let store = NonValidatingFacadeStore::default();
         let mut state = crate::RuntimeSessionState {
-            session_id: "loose-store-session".to_string(),
+            session_id: SessionId::from("loose-store-session"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -167,7 +168,7 @@ mod tests {
     async fn verified_commit_rejects_node_budget_before_calling_a_non_validating_store() {
         let store = NonValidatingFacadeStore::default();
         let state = crate::RuntimeSessionState {
-            session_id: "boundary-budget".to_string(),
+            session_id: SessionId::from("boundary-budget"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))

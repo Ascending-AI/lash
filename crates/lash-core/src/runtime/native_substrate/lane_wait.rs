@@ -230,6 +230,7 @@ pub(crate) fn trace_busy_gave_up(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SessionId;
 
     fn holder(
         executor_id: &str,
@@ -238,7 +239,7 @@ mod tests {
         expires_at_epoch_ms: u64,
     ) -> QueuedLaneHolder {
         QueuedLaneHolder::new(crate::store::SessionExecutionLease {
-            session_id: "queued-lane-wait".to_string(),
+            session_id: SessionId::from("queued-lane-wait"),
             owner: crate::LeaseOwnerIdentity::opaque("host", "host:boot"),
             executor_id: executor_id.to_string(),
             lease_token: "token".to_string(),

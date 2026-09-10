@@ -1,3 +1,4 @@
+use lash_sansio::ProcessId;
 use std::sync::Arc;
 
 use lash_core::sync::MutexExt as _;
@@ -134,7 +135,7 @@ pub(super) async fn record_lifecycle_started(
 ) -> Result<(), RuntimeBoundaryError> {
     registry
         .record_first_started(
-            id,
+            &ProcessId::from(id),
             lash_core::ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -169,7 +170,7 @@ pub(super) async fn lifecycle_process_fact(
         Some(
             match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
-                awaiter.await_terminal(id),
+                awaiter.await_terminal(&ProcessId::from(id)),
             )
             .await
             {
@@ -177,12 +178,15 @@ pub(super) async fn lifecycle_process_fact(
                     RuntimeBoundaryError::new(format!("await terminal for `{id}` failed: {err}"))
                 })?,
                 Err(_) => {
-                    let record = registry.get_process(id).await;
-                    let lease = registry.get_process_lease(id).await.map_err(|err| {
-                        RuntimeBoundaryError::new(format!(
-                            "read timed-out lifecycle lease for `{id}` failed: {err}"
-                        ))
-                    })?;
+                    let record = registry.get_process(&ProcessId::from(id)).await;
+                    let lease = registry
+                        .get_process_lease(&ProcessId::from(id))
+                        .await
+                        .map_err(|err| {
+                            RuntimeBoundaryError::new(format!(
+                                "read timed-out lifecycle lease for `{id}` failed: {err}"
+                            ))
+                        })?;
                     return Err(RuntimeBoundaryError::new(format!(
                         "timed out awaiting lifecycle terminal for `{id}`: record={record:?}, lease={lease:?}"
                     )));
@@ -191,7 +195,7 @@ pub(super) async fn lifecycle_process_fact(
         )
     };
     let record = registry
-        .get_process(id)
+        .get_process(&ProcessId::from(id))
         .await
         .map_err(|err| RuntimeBoundaryError::new(format!("read process `{id}`: {err}")))?
         .ok_or_else(|| {
@@ -204,7 +208,7 @@ pub(super) async fn lifecycle_process_fact(
             | lash_core::ProcessStatus::Cancelled
     );
     let lease_lapsed = registry
-        .get_process_lease(id)
+        .get_process_lease(&ProcessId::from(id))
         .await
         .map_err(|err| RuntimeBoundaryError::new(format!("read lease for `{id}` failed: {err}")))?
         .is_none();

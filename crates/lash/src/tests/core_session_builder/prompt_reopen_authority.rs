@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 const LEGACY_PROMPTLESS_HEAD_JSON: &str = r#"{
   "schema_version": 3,
@@ -14,9 +15,12 @@ const LEGACY_PROMPTLESS_HEAD_JSON: &str = r#"{
   }
 }"#;
 
-fn prompt_probe_state(session_id: &str, prompt: lash_core::PromptLayer) -> RuntimeSessionState {
+fn prompt_probe_state(
+    session_id: &SessionId,
+    prompt: lash_core::PromptLayer,
+) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         policy: lash_core::SessionPolicy {
             provider_id: "embed-test".to_string(),
             model: mock_model_spec(),
@@ -120,7 +124,7 @@ async fn open_with_state_without_builder_prompt_renders_supplied_snapshot_prompt
 
     core.session("open-with-state-supplied-prompt")
         .open_with_state(prompt_probe_state(
-            "open-with-state-supplied-prompt",
+            &SessionId::from("open-with-state-supplied-prompt"),
             supplied,
         ))
         .await?
@@ -150,7 +154,7 @@ async fn open_with_state_builder_prompt_replaces_supplied_snapshot_prompt() -> R
     core.session("open-with-state-builder-prompt")
         .instructions("OPEN WITH STATE NEW PROMPT")
         .open_with_state(prompt_probe_state(
-            "open-with-state-builder-prompt",
+            &SessionId::from("open-with-state-builder-prompt"),
             supplied,
         ))
         .await?
@@ -229,7 +233,7 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory
         lash_core::PromptContribution::guidance("Committed", "COMMITTED PROMPT"),
     );
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(
-        prompt_probe_state("committed-prompt", committed),
+        prompt_probe_state(&SessionId::from("committed-prompt"), committed),
     ));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -250,7 +254,10 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
 {
     use crate::PromptLayerSink as _;
 
-    let state = prompt_probe_state("explicit-empty-prompt", lash_core::PromptLayer::new());
+    let state = prompt_probe_state(
+        &SessionId::from("explicit-empty-prompt"),
+        lash_core::PromptLayer::new(),
+    );
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -283,7 +290,7 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_in_memory() -> Resul
         lash_core::PromptContribution::guidance("Old", "OLD STORED PROMPT"),
     );
     let store = Arc::new(SnapshotStore::with_state(prompt_probe_state(
-        "host-reprompt",
+        &SessionId::from("host-reprompt"),
         old,
     )));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -329,7 +336,7 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_in_memory() -> Resul
 }
 
 async fn sqlite_prompt_probe_store(
-    session_id: &str,
+    session_id: &SessionId,
     prompt: lash_core::PromptLayer,
 ) -> (
     tempfile::TempDir,
@@ -347,14 +354,14 @@ async fn sqlite_prompt_probe_store(
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             policy: policy.clone(),
         })
         .await
         .expect("create SQLite prompt probe store");
     let state = lash_core::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         policy,
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -372,8 +379,11 @@ async fn sqlite_prompt_probe_store(
 
 async fn sqlite_store_from_literal_legacy_head()
 -> (tempfile::TempDir, Arc<dyn lash_core::RuntimePersistence>) {
-    let (dir, factory, store) =
-        sqlite_prompt_probe_store("legacy-promptless", lash_core::PromptLayer::new()).await;
+    let (dir, factory, store) = sqlite_prompt_probe_store(
+        &SessionId::from("legacy-promptless"),
+        lash_core::PromptLayer::new(),
+    )
+    .await;
     let raw = rusqlite::Connection::open(factory.catalog_path()).expect("open SQLite catalog");
     // The literal keeps the pre-prompt config bytes for the field-defaulting
     // probe, while the real store decoder still requires this binary's exact
@@ -452,7 +462,8 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
     let committed = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Committed", "SQLITE COMMITTED PROMPT"),
     );
-    let (_dir, _factory, store) = sqlite_prompt_probe_store("sqlite-committed", committed).await;
+    let (_dir, _factory, store) =
+        sqlite_prompt_probe_store(&SessionId::from("sqlite-committed"), committed).await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(prompt_capture_provider(Arc::clone(&captures)))
@@ -475,8 +486,11 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_sqlite() 
 async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_sqlite() -> Result<()> {
     use crate::PromptLayerSink as _;
 
-    let (_dir, _factory, store) =
-        sqlite_prompt_probe_store("sqlite-explicit-empty", lash_core::PromptLayer::new()).await;
+    let (_dir, _factory, store) = sqlite_prompt_probe_store(
+        &SessionId::from("sqlite-explicit-empty"),
+        lash_core::PromptLayer::new(),
+    )
+    .await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .instructions("SQLITE INHERITED DEFAULT")
@@ -503,7 +517,8 @@ async fn new_host_prompt_overrides_and_recommits_old_prompt_sqlite() -> Result<(
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "SQLITE OLD PROMPT"),
     );
-    let (_dir, _factory, store) = sqlite_prompt_probe_store("sqlite-host-reprompt", old).await;
+    let (_dir, _factory, store) =
+        sqlite_prompt_probe_store(&SessionId::from("sqlite-host-reprompt"), old).await;
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let trace = tempfile::NamedTempFile::new().expect("SQLite composition trace");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -548,7 +563,8 @@ async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() ->
     let old = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Old", "SQLITE ORIGINAL PROMPT"),
     );
-    let (_dir, _factory, store) = sqlite_prompt_probe_store("sqlite-reseed-twice", old).await;
+    let (_dir, _factory, store) =
+        sqlite_prompt_probe_store(&SessionId::from("sqlite-reseed-twice"), old).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())

@@ -1,3 +1,4 @@
+use lash::SessionId;
 use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::HashMap;
@@ -73,7 +74,7 @@ pub(crate) struct ForkChatRequest {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct CancelTurnResponse {
-    session_id: String,
+    session_id: SessionId,
     turn_id: TurnId,
     outcome: TurnCancelOutcome,
 }
@@ -454,7 +455,7 @@ pub(crate) async fn cancel_turn(
         .await
         .map_err(|err| AppError::internal(err.to_string()))?;
     Ok(Json(CancelTurnResponse {
-        session_id: chat_id,
+        session_id: SessionId::from(chat_id),
         turn_id,
         outcome: receipt.outcome,
     }))
@@ -1059,14 +1060,14 @@ finish "done through route"
         let item = StreamItem::ReplayGap {
             observation: Box::new(Envelope::new(RemoteSessionObservation {
                 // Standalone stream payloads carry one shared protocol envelope.
-                session_id: "session-1".to_string(),
+                session_id: SessionId::from("session-1"),
                 cursor: "cursor-after".to_string(),
                 turn_index: 3,
                 usage: lash_remote_protocol::RemoteUsage::default(),
             })),
             gap: Box::new(Envelope::new(RemoteLiveReplayGap {
                 // Nested DTOs remain bare inside that envelope body.
-                session_id: "session-1".to_string(),
+                session_id: SessionId::from("session-1"),
                 requested_cursor: "cursor-before".to_string(),
                 latest_cursor: "cursor-after".to_string(),
                 latest_revision: 7,

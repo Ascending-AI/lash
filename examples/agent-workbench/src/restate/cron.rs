@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CronSessionDisposition {
@@ -63,7 +64,7 @@ pub(super) fn cron_tick_decision(
 
 pub(super) async fn cron_session_disposition(
     core: &lash::LashCore,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<CronSessionDisposition, HandlerError> {
     if core
         .session_was_deleted(session_id)
@@ -113,7 +114,7 @@ async fn record_cron_tick_outcome(
 
 #[async_trait::async_trait]
 pub(super) trait CronTickCancelSurface: Sync {
-    async fn record_trace(&self, session_id: String, trace: Value) -> HandlerResult<()>;
+    async fn record_trace(&self, session_id: SessionId, trace: Value) -> HandlerResult<()>;
 
     async fn record_outcome(
         &self,
@@ -144,7 +145,7 @@ impl<'run, 'ctx> RestateCronTickCancelSurface<'run, 'ctx> {
 
 #[async_trait::async_trait]
 impl CronTickCancelSurface for RestateCronTickCancelSurface<'_, '_> {
-    async fn record_trace(&self, session_id: String, trace: Value) -> HandlerResult<()> {
+    async fn record_trace(&self, session_id: SessionId, trace: Value) -> HandlerResult<()> {
         journaled_workbench_trace(
             self.controller.context(),
             self.app_state.clone(),

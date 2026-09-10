@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::{ProcessAwaitOutput, TestLocalProcessRegistry};
 use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
+use lash_sansio::ProcessId;
 use serde_json::json;
 
 async fn registry_result(output: ProcessAwaitOutput, prune: bool) -> Result<Value, String> {
@@ -19,7 +20,7 @@ async fn registry_result(output: ProcessAwaitOutput, prune: bool) -> Result<Valu
         .unwrap();
     let terminal = registry
         .complete_process(
-            process_id,
+            &ProcessId::from(process_id),
             output,
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -36,7 +37,7 @@ async fn registry_result(output: ProcessAwaitOutput, prune: bool) -> Result<Valu
             .unwrap();
     }
     let output = lash_core::NativeProcessWork::for_registry(registry)
-        .await_terminal(process_id)
+        .await_terminal(&ProcessId::from(process_id))
         .await
         .unwrap();
     child_task_result(output)
@@ -136,7 +137,7 @@ fn spawn_rejects_child_depth_past_limit() {
     .to_snapshot();
     let result = build_spawn_create_request(SpawnCreateRequestInput {
         registry: &registry,
-        parent_session_id: "parent",
+        parent_session_id: &SessionId::from("parent"),
         current_snapshot: snapshot,
         session_spec: &SessionSpec::inherit(),
         tool_access: &SessionToolAccess::default(),

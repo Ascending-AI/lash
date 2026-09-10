@@ -1,11 +1,12 @@
 use super::*;
+use lash::SessionId;
 
 pub(crate) const SESSION_OPEN_MAX_ATTEMPTS: usize = 6;
 pub(crate) const SESSION_OPEN_RETRY_BUDGET: Duration = Duration::from_millis(75);
 
 pub(crate) async fn open_session_with_bounded_retry(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<lash::LashSession, lash::EmbedError> {
     retry_session_open(
         || state.session_builder(session_id.to_string()).open(),

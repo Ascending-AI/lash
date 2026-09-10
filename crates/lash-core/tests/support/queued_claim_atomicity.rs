@@ -2,6 +2,7 @@ use lash_core::runtime::{
     DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
 };
 use lash_core::{LeaseOwnerIdentity, RuntimePersistence, SessionExecutionLease};
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
@@ -35,7 +36,7 @@ pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) ->
             }
             .into(),
             _ => lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                lash_core::facade_support::frame_node_id("root", "frame"),
+                lash_core::facade_support::frame_node_id(&SessionId::from("root"), "frame"),
                 task,
                 None,
             )
@@ -52,7 +53,12 @@ pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) ->
     }
     let owner = LeaseOwnerIdentity::opaque("claims", "claims-incarnation");
     let lease = store
-        .try_claim_session_execution_lease("root", &owner, "claims-executor", 60_000)
+        .try_claim_session_execution_lease(
+            &SessionId::from("root"),
+            &owner,
+            "claims-executor",
+            60_000,
+        )
         .await
         .expect("claim execution lease")
         .acquired()
@@ -72,13 +78,17 @@ impl Case {
         match self.entry {
             Entry::Leading => self
                 .store
-                .claim_leading_ready_session_command("root", &self.lease.fence(), &self.owner)
+                .claim_leading_ready_session_command(
+                    &SessionId::from("root"),
+                    &self.lease.fence(),
+                    &self.owner,
+                )
                 .await
                 .expect("leading claim"),
             Entry::Automatic => self
                 .store
                 .claim_ready_queued_work(
-                    "root",
+                    &SessionId::from("root"),
                     &self.lease.fence(),
                     &self.owner,
                     QueuedWorkClaimBoundary::Idle,
@@ -90,7 +100,7 @@ impl Case {
             Entry::Exact => {
                 self.store
                     .claim_ready_queued_work_by_batch_ids(
-                        "root",
+                        &SessionId::from("root"),
                         &self.lease.fence(),
                         &self.owner,
                         QueuedWorkClaimBoundary::Idle,
@@ -104,7 +114,7 @@ impl Case {
             Entry::Checkpoint => {
                 self.store
                     .claim_checkpoint_work(
-                        "root",
+                        &SessionId::from("root"),
                         &self.lease.fence(),
                         &self.owner,
                         &lash_core::TurnId::from("turn"),

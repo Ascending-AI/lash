@@ -7,6 +7,8 @@
 //! test. The selected-drain row uses scripted agent-frame work to exercise the
 //! public turn facade without model nondeterminism.
 
+use lash::ProcessId;
+use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -90,13 +92,13 @@ async fn record_started(
 ) -> Result<()> {
     let owner = LeaseOwnerIdentity::opaque(format!("test-fixture:{id}"), "lifecycle-write");
     let lease = registry
-        .claim_process_lease(id, &owner, 60_000)
+        .claim_process_lease(&ProcessId::from(id), &owner, 60_000)
         .await?
         .acquired()
         .with_context(|| format!("claim setup lease for `{id}`"))?;
     let result = registry
         .record_first_started_with_authority(
-            id,
+            &ProcessId::from(id),
             started,
             &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
@@ -348,7 +350,7 @@ impl AwaitEventResolver for JournalController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<(), RuntimeError> {
         self.inline
             .revoke_await_events_for_session(session_id)
@@ -357,7 +359,7 @@ impl AwaitEventResolver for JournalController {
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<(), RuntimeError> {
         self.inline
             .cancel_await_events_for_session(session_id)
@@ -444,7 +446,7 @@ fn core(
 }
 
 fn queued_batch_draft(
-    session_id: &str,
+    session_id: &SessionId,
     source_key: &str,
     merge_key: &str,
 ) -> lash::persistence::QueuedWorkBatchDraft {
@@ -498,7 +500,7 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
     let store = store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             relation: lash::persistence::SessionRelation::Root,
             policy: session.policy_snapshot(),
         })
@@ -506,14 +508,14 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
 
     let selected_a = store
         .enqueue_queued_work(queued_batch_draft(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             "selected-drain:a",
             "selected-drain:a",
         ))
         .await?;
     let unselected_b = store
         .enqueue_queued_work(queued_batch_draft(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             "selected-drain:b",
             "selected-drain:b",
         ))
@@ -566,21 +568,21 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
 
     let refusal_c1 = store
         .enqueue_queued_work(queued_batch_draft(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             "selected-drain:c1",
             "selected-drain:c",
         ))
         .await?;
     let refusal_separator = store
         .enqueue_queued_work(queued_batch_draft(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             "selected-drain:separator",
             "selected-drain:separator",
         ))
         .await?;
     let refusal_c2 = store
         .enqueue_queued_work(queued_batch_draft(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             "selected-drain:c2",
             "selected-drain:c",
         ))
@@ -758,7 +760,12 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
         &fault_sink,
     );
     let waiter_core = core.clone();
-    let waiter = tokio::spawn(async move { waiter_core.processes().await_output(MINE).await });
+    let waiter = tokio::spawn(async move {
+        waiter_core
+            .processes()
+            .await_output(&ProcessId::from(MINE))
+            .await
+    });
     let report = worker.drain_owner_bound_work().await?;
     ensure!(
         report.abandoned == vec![MINE.to_string()],
@@ -872,7 +879,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     registry
         .register_process_with_observers(
             registration(REQUEST_PROCESS_ID, RecoveryContract::OwnerBound),
-            &[OBSERVER_SESSION_ID.to_string()],
+            &[SessionId::from(OBSERVER_SESSION_ID.to_string())],
         )
         .await?;
     record_started(
@@ -887,7 +894,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     )
     .await?;
     let live_lease = registry
-        .claim_process_lease(REQUEST_PROCESS_ID, &silent_owner, 1_000)
+        .claim_process_lease(&ProcessId::from(REQUEST_PROCESS_ID), &silent_owner, 1_000)
         .await?
         .acquired()
         .context("silent owner did not acquire its lease")?;
@@ -902,7 +909,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     let core = core(storage, provider, &attachments)?;
     let seeded = core
         .processes()
-        .get(REQUEST_PROCESS_ID)
+        .get(&ProcessId::from(REQUEST_PROCESS_ID))
         .await?
         .context("seeded process is not observable")?;
     ensure!(
@@ -930,7 +937,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     let returned = core
         .processes()
         .request_abandon(
-            REQUEST_PROCESS_ID,
+            &ProcessId::from(REQUEST_PROCESS_ID),
             "runbook-operator",
             Some("owner retired during operator exercise".to_string()),
         )
@@ -944,7 +951,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "request terminalized the row"
     );
     let lease_after_request = registry
-        .get_process_lease(REQUEST_PROCESS_ID)
+        .get_process_lease(&ProcessId::from(REQUEST_PROCESS_ID))
         .await?
         .context("request removed the live owner lease")?;
     ensure!(
@@ -986,7 +993,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     let lapsed_observation = loop {
         let observed = core
             .processes()
-            .get(REQUEST_PROCESS_ID)
+            .get(&ProcessId::from(REQUEST_PROCESS_ID))
             .await?
             .context("pending process vanished")?;
         if observed
@@ -1012,7 +1019,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     let terminal = loop {
         let observed = core
             .processes()
-            .get(REQUEST_PROCESS_ID)
+            .get(&ProcessId::from(REQUEST_PROCESS_ID))
             .await?
             .context("reconciled process vanished")?;
         if observed.terminal {
@@ -1028,7 +1035,10 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         terminal.lifecycle == ProcessStatus::Abandoned,
         "wrong terminal status"
     );
-    let awaited = core.processes().await_output(REQUEST_PROCESS_ID).await?;
+    let awaited = core
+        .processes()
+        .await_output(&ProcessId::from(REQUEST_PROCESS_ID))
+        .await?;
     let ProcessAwaitOutput::Abandoned { evidence, .. } = awaited else {
         bail!("await_output returned a non-Abandoned terminal: {awaited:?}");
     };
@@ -1042,7 +1052,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
     );
     ensure!(
         registry
-            .get_process_lease(REQUEST_PROCESS_ID)
+            .get_process_lease(&ProcessId::from(REQUEST_PROCESS_ID))
             .await?
             .is_none(),
         "reconciled terminal retained a lease"

@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -76,7 +77,7 @@ fn seeded_ascii(len: usize, seed: u64) -> String {
 }
 
 fn realistic_commit(
-    session_id: &str,
+    session_id: &SessionId,
     row_shape: RowShape,
     logical_bytes: usize,
     sample: usize,
@@ -141,7 +142,7 @@ fn realistic_commit(
         .step_by(2)
         .collect::<Vec<_>>();
     let state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         policy: SessionPolicy {
             model: lash_core::ModelSpec::builder("benchmark-model")
                 .context_window_tokens(200_000)
@@ -245,7 +246,7 @@ fn sqlite_seed_attachment_intents(database_path: &std::path::Path, commit: &Runt
             statement
                 .execute(params![
                     attachment_id.as_str(),
-                    commit.session_id,
+                    commit.session_id.as_str(),
                     format!("lash-attachment://blake3/{attachment_id}"),
                     turn_id.as_str(),
                 ])
@@ -274,7 +275,7 @@ async fn postgres_seed_attachment_intents(pool: &sqlx::PgPool, commit: &RuntimeC
     );
     query.push_values(adopted_attachment_ids(commit), |mut row, attachment_id| {
         row.push_bind(attachment_id.to_string())
-            .push_bind(&commit.session_id)
+            .push_bind(commit.session_id.as_str())
             .push_bind(format!("lash-attachment://blake3/{attachment_id}"))
             .push_bind(1_i64)
             .push_bind(None::<i64>)
@@ -319,7 +320,12 @@ fn assert_reference_admission(commit: &RuntimeCommit) {
 fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
     let row_shape = RowShape::new(8, 3);
     let logical_bytes = RuntimeCommit::MAX_COMMIT_BUDGET_BYTES + 1;
-    let commit = realistic_commit("benchmark-budget-accounting", row_shape, logical_bytes, 0);
+    let commit = realistic_commit(
+        &SessionId::from("benchmark-budget-accounting"),
+        row_shape,
+        logical_bytes,
+        0,
+    );
     let expected = lash_core::testing::measure_runtime_commit_budget(&commit)
         .expect("measure benchmark commit with production accounting");
 
@@ -398,12 +404,12 @@ async fn measured_commit_size_curve() {
             let mut elapsed = Vec::with_capacity(SAMPLES);
             let mut measured = None;
             for sample in 0..(WARMUP_SAMPLES + SAMPLES) {
-                let session_id = format!(
+                let session_id = SessionId::from(format!(
                     "bench-{}-{}-{}-{backend}-{sample}",
                     case.axis,
                     case.target,
                     case.rows.total()
-                );
+                ));
                 let store = match backend {
                     "sqlite" => sqlite_factory
                         .create_store(&SessionStoreCreateRequest {

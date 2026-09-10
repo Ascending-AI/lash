@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,7 +16,7 @@ const DEEP_FORK_CHAIN_DEPTH: usize = 64;
 const SAMPLES: usize = 7;
 const WIDE_SIBLING_COUNT: usize = 64;
 
-fn request(session_id: impl Into<String>) -> SessionStoreCreateRequest {
+fn request(session_id: impl Into<SessionId>) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.into(),
@@ -24,20 +25,20 @@ fn request(session_id: impl Into<String>) -> SessionStoreCreateRequest {
     }
 }
 
-fn operation(session_id: &str, key: &str) -> OperationId {
+fn operation(session_id: &SessionId, key: &str) -> OperationId {
     OperationId::turn(session_id, key, "refcount-benchmark")
 }
 
 async fn create_state(
     factory: &Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (Arc<dyn RuntimePersistence>, RuntimeSessionState) {
     let store = factory
         .create_store(&request(session_id))
         .await
         .expect("create benchmark store");
     let state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -75,11 +76,11 @@ async fn commit_state(
 async fn fork_store(
     factory: &Arc<dyn SessionStoreFactory>,
     node_id: &str,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Arc<dyn RuntimePersistence> {
     let fork_request = ForkSessionRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         node_id: node_id.to_string(),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -114,7 +115,7 @@ async fn append_child(store: &Arc<dyn RuntimePersistence>, key: &str) {
 
 async fn create_chain(
     factory: &Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
     depth: usize,
 ) -> (String, String) {
     let (store, mut state) = create_state(factory, session_id).await;
@@ -133,12 +134,12 @@ async fn create_fork_chain(
     prefix: &str,
 ) -> (String, String, Arc<dyn RuntimePersistence>) {
     let source_id = format!("{prefix}-fork-chain-source");
-    let (source, mut state) = create_state(factory, &source_id).await;
+    let (source, mut state) = create_state(factory, &SessionId::from(source_id)).await;
     state.ensure_agent_frame_initialized();
     let (root_node_id, mut leaf_node_id) = commit_state(&source, &state, "seed-fork-chain").await;
     let mut terminal = source;
     for depth in 0..DEEP_FORK_CHAIN_DEPTH {
-        let session_id = format!("{prefix}-fork-chain-{depth}");
+        let session_id = SessionId::from(format!("{prefix}-fork-chain-{depth}"));
         terminal = fork_store(factory, &leaf_node_id, &session_id).await;
         append_child(&terminal, &format!("fork-chain-{depth}")).await;
         leaf_node_id = terminal
@@ -180,18 +181,20 @@ fn print_samples(
 async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>, run_id: &str) {
     let prefix = format!("refcount-bench-{run_id}-{backend}");
     let wide_source_id = format!("{prefix}-wide-source");
-    let (wide_source, mut wide_state) = create_state(&factory, &wide_source_id).await;
+    let (wide_source, mut wide_state) =
+        create_state(&factory, &SessionId::from(wide_source_id)).await;
     wide_state.ensure_agent_frame_initialized();
     let (wide_root, _) = commit_state(&wide_source, &wide_state, "seed-wide").await;
     factory.pin(&wide_root).await.expect("pin wide root");
     for ordinal in 0..WIDE_SIBLING_COUNT {
         let branch_id = format!("{prefix}-wide-sibling-{ordinal}");
-        let branch = fork_store(&factory, &wide_root, &branch_id).await;
+        let branch = fork_store(&factory, &wide_root, &SessionId::from(branch_id)).await;
         append_child(&branch, &format!("wide-sibling-{ordinal}")).await;
     }
 
     let deep_source_id = format!("{prefix}-deep-source");
-    let (_, deep_leaf) = create_chain(&factory, &deep_source_id, DEEP_CHAIN_DEPTH).await;
+    let (_, deep_leaf) =
+        create_chain(&factory, &SessionId::from(deep_source_id), DEEP_CHAIN_DEPTH).await;
     let (fork_chain_root, fork_chain_leaf, fork_chain_terminal) =
         create_fork_chain(&factory, &prefix).await;
 
@@ -208,11 +211,11 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
     for sample in 0..SAMPLES {
         let fork_id = format!("{prefix}-wide-fork-{sample}");
         let started = Instant::now();
-        fork_store(&factory, &wide_root, &fork_id).await;
+        fork_store(&factory, &wide_root, &SessionId::from(fork_id)).await;
         wide_fork.push(started.elapsed());
 
         let mover_id = format!("{prefix}-wide-mover-{sample}");
-        let mover = fork_store(&factory, &wide_root, &mover_id).await;
+        let mover = fork_store(&factory, &wide_root, &SessionId::from(mover_id.clone())).await;
         let mut mover_state = load_persisted_session_state(mover.as_ref())
             .await
             .expect("load wide mover")
@@ -222,7 +225,7 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
             serde_json::json!({ "sample": sample }),
         );
         let (commit, _) = RuntimeCommit::persisted_state_for_test(&mover_state, &[])
-            .with_operation(operation(&mover_id, "head-move"))
+            .with_operation(operation(&SessionId::from(mover_id), "head-move"))
             .expect("stamp wide head move");
         let started = Instant::now();
         mover
@@ -232,22 +235,27 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
         wide_head_move.push(started.elapsed());
 
         let victim_id = format!("{prefix}-wide-victim-{sample}");
-        let victim = fork_store(&factory, &wide_root, &victim_id).await;
+        let victim = fork_store(&factory, &wide_root, &SessionId::from(victim_id.clone())).await;
         append_child(&victim, "wide-delete-child").await;
         let started = Instant::now();
         factory
-            .delete_session(&victim_id)
+            .delete_session(&SessionId::from(victim_id))
             .await
             .expect("delete wide victim");
         wide_delete.push(started.elapsed());
 
         let deep_fork_id = format!("{prefix}-deep-fork-{sample}");
         let started = Instant::now();
-        fork_store(&factory, &deep_leaf, &deep_fork_id).await;
+        fork_store(&factory, &deep_leaf, &SessionId::from(deep_fork_id)).await;
         deep_fork.push(started.elapsed());
 
         let deep_mover_id = format!("{prefix}-deep-mover-{sample}");
-        let deep_mover = fork_store(&factory, &deep_leaf, &deep_mover_id).await;
+        let deep_mover = fork_store(
+            &factory,
+            &deep_leaf,
+            &SessionId::from(deep_mover_id.clone()),
+        )
+        .await;
         let mut deep_mover_state = load_persisted_session_state(deep_mover.as_ref())
             .await
             .expect("load deep mover")
@@ -257,7 +265,7 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
             serde_json::json!({ "sample": sample }),
         );
         let (commit, _) = RuntimeCommit::persisted_state_for_test(&deep_mover_state, &[])
-            .with_operation(operation(&deep_mover_id, "head-move"))
+            .with_operation(operation(&SessionId::from(deep_mover_id), "head-move"))
             .expect("stamp deep head move");
         let started = Instant::now();
         deep_mover
@@ -267,10 +275,15 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
         deep_head_move.push(started.elapsed());
 
         let deep_victim_id = format!("{prefix}-deep-victim-{sample}");
-        create_chain(&factory, &deep_victim_id, DEEP_CHAIN_DEPTH).await;
+        create_chain(
+            &factory,
+            &SessionId::from(deep_victim_id.clone()),
+            DEEP_CHAIN_DEPTH,
+        )
+        .await;
         let started = Instant::now();
         factory
-            .delete_session(&deep_victim_id)
+            .delete_session(&SessionId::from(deep_victim_id))
             .await
             .expect("delete deep victim");
         deep_delete.push(started.elapsed());
@@ -295,7 +308,7 @@ async fn benchmark_backend(backend: &str, factory: Arc<dyn SessionStoreFactory>,
 
         let fork_id = format!("{prefix}-fork-chain-probe-{sample}");
         let started = Instant::now();
-        fork_store(&factory, &fork_chain_leaf, &fork_id).await;
+        fork_store(&factory, &fork_chain_leaf, &SessionId::from(fork_id)).await;
         fork_chain_fork.push(started.elapsed());
     }
 

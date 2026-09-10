@@ -390,7 +390,7 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
             async move {
                 let store = SessionStoreFactory::open_existing_store_by_id(
                     store_factory.as_ref(),
-                    session_id,
+                    &SessionId::from(session_id),
                 )
                 .await
                 .expect("open settled store")

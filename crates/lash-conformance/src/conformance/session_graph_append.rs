@@ -38,7 +38,7 @@ async fn session_graph_append_tolerates_an_advanced_head(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "append-advanced-head",
+        &SessionId::from("append-advanced-head"),
         "append-fence-model",
         crate::SessionRelation::Root,
     );
@@ -80,7 +80,7 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "service-append-advanced-head",
+        &SessionId::from("service-append-advanced-head"),
         "append-fence-model",
         crate::SessionRelation::Root,
     );
@@ -191,7 +191,7 @@ async fn abandoned_branch_scenario(
     prefix: &str,
 ) -> AbandonedBranchScenario {
     let source_request = session_store_request(
-        &format!("{prefix}-source"),
+        &SessionId::from(format!("{prefix}-source")),
         "append-fence-model",
         crate::SessionRelation::Root,
     );
@@ -212,7 +212,7 @@ async fn abandoned_branch_scenario(
 
     let branch_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
-        session_id: format!("{prefix}-branch"),
+        session_id: SessionId::from(format!("{prefix}-branch")),
         node_id: fork_point.clone(),
         relation: crate::SessionRelation::Root,
         policy: source_request.policy.clone(),
@@ -461,7 +461,7 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
     Fut: std::future::Future<Output = ()>,
 {
     let request = session_store_request(
-        "root",
+        &SessionId::from("root"),
         "old-format-append-receipt-model",
         crate::SessionRelation::Root,
     );

@@ -1,6 +1,7 @@
 //! Effect-boundary invariant tests for scalar vs batched Lashlang tool dispatch.
 
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -84,7 +85,7 @@ impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.delegate
             .revoke_await_events_for_session(session_id)
@@ -93,7 +94,7 @@ impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.delegate
             .cancel_await_events_for_session(session_id)

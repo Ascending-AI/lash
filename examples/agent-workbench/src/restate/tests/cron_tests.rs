@@ -1,8 +1,9 @@
 use super::*;
+use lash::SessionId;
 
 async fn register_cron_test_subscription(
     trigger_store: &lash::triggers::InMemoryTriggerStore,
-    session_id: &str,
+    session_id: &SessionId,
     source_key: &str,
 ) {
     lash::triggers::TriggerStore::execute_command(
@@ -123,7 +124,7 @@ async fn spawn_scripted_cron_object_surface(surface: ScriptedCronObjectSurface) 
 
 async fn register_fig1067_cron_subscription(
     trigger_store: &lash::triggers::InMemoryTriggerStore,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> lash::triggers::TriggerSubscriptionRecord {
     let source_key = "cron-source:fig1067";
     let outcome = lash::triggers::TriggerStore::execute_command(
@@ -168,7 +169,7 @@ async fn register_fig1067_cron_subscription(
 }
 
 fn fig1067_cron_registration(
-    session_id: &str,
+    session_id: &SessionId,
     source_key: &str,
     enabled: bool,
 ) -> lash::triggers::TriggerRegistration {
@@ -212,7 +213,7 @@ fn fig1067_cron_registration(
 
 async fn register_fig1067_button_subscription(
     trigger_store: &lash::triggers::InMemoryTriggerStore,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> lash::triggers::TriggerSubscriptionRecord {
     let source_key = lash::triggers::empty_trigger_source_key(crate::BUTTON_TRIGGER_SOURCE_TYPE)
         .expect("button source key");
@@ -251,7 +252,7 @@ fn assert_fig1067_cron_sync_trace(
     trace_path: &std::path::Path,
     name: &str,
     reason: &str,
-    session_id: &str,
+    session_id: &SessionId,
     job_key: &str,
 ) {
     let trace = std::fs::read_to_string(trace_path).expect("read FIG-1067 cron sync trace");
@@ -276,7 +277,7 @@ fn assert_fig1067_cron_sync_trace(
         record
             .pointer("/payload/job_session_id")
             .and_then(serde_json::Value::as_str),
-        Some(session_id)
+        Some(session_id.as_str())
     );
 }
 
@@ -284,8 +285,8 @@ fn assert_fig1067_cron_sync_trace(
 fn cron_sync_plan_for_one_session_never_cancels_another_sessions_job() {
     let session_a = "fig1067:session:a";
     let session_b = "fig1067:session:a:other";
-    let key_a = crate::restate::cron_job_key(session_a, "cron-source:a");
-    let key_b = crate::restate::cron_job_key(session_b, "cron-source:b");
+    let key_a = crate::restate::cron_job_key(&SessionId::from(session_a), "cron-source:a");
+    let key_b = crate::restate::cron_job_key(&SessionId::from(session_b), "cron-source:b");
     let known_by_session = std::collections::BTreeMap::from([
         (
             session_a.to_string(),
@@ -297,8 +298,12 @@ fn cron_sync_plan_for_one_session_never_cancels_another_sessions_job() {
         ),
     ]);
     let plan = crate::restate::cron_sync_plan(
-        session_a,
-        &[fig1067_cron_registration(session_a, "cron-source:a", true)],
+        &SessionId::from(session_a),
+        &[fig1067_cron_registration(
+            &SessionId::from(session_a),
+            "cron-source:a",
+            true,
+        )],
         known_by_session[session_a].clone(),
     );
     assert_eq!(plan.upserts.keys().collect::<Vec<_>>(), vec![&key_a]);
@@ -313,15 +318,23 @@ fn cron_sync_plan_for_one_session_never_cancels_another_sessions_job() {
 fn undecodable_cron_registration_remains_cancellable() {
     let session_id = "fig1067-invalid-source";
     let source_key = "cron-source:invalid";
-    let mut registration = fig1067_cron_registration(session_id, source_key, true);
+    let mut registration =
+        fig1067_cron_registration(&SessionId::from(session_id), source_key, true);
     registration.source = serde_json::Value::Null;
 
-    let plan = crate::restate::cron_sync_plan(session_id, &[registration], Default::default());
+    let plan = crate::restate::cron_sync_plan(
+        &SessionId::from(session_id),
+        &[registration],
+        Default::default(),
+    );
 
     assert!(plan.upserts.is_empty());
     assert_eq!(
         plan.cancels,
-        std::collections::BTreeSet::from([crate::restate::cron_job_key(session_id, source_key)])
+        std::collections::BTreeSet::from([crate::restate::cron_job_key(
+            &SessionId::from(session_id),
+            source_key
+        )])
     );
 }
 
@@ -343,7 +356,11 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
             .await
             .expect("materialize FIG-1067 cron session"),
     );
-    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    let record = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
     let job_key = format!("{session_id}:{}", record.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
@@ -357,7 +374,7 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -373,7 +390,7 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         &trace_path,
         "agent_workbench.cron.restate.sync_cancelled",
         "trigger_disabled",
-        &session_id,
+        &SessionId::from(session_id),
         &job_key,
     );
 }
@@ -396,7 +413,11 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
             .await
             .expect("materialize FIG-1067 cron session"),
     );
-    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    let record = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
     lash::triggers::TriggerStore::execute_command(
         trigger_store.as_ref(),
         "disable:fig1067-enable-test",
@@ -424,7 +445,7 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: true }),
     )
@@ -447,7 +468,7 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
         &trace_path,
         "agent_workbench.cron.restate.sync_upserted",
         "trigger_enabled",
-        &session_id,
+        &SessionId::from(session_id),
         &job_key,
     );
 }
@@ -470,7 +491,11 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
             .await
             .expect("materialize FIG-1067 cron session"),
     );
-    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    let record = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
     let job_key = format!("{session_id}:{}", record.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
@@ -484,7 +509,7 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
     )
     .await
@@ -501,7 +526,7 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         &trace_path,
         "agent_workbench.cron.restate.sync_cancelled",
         "trigger_deleted",
-        &session_id,
+        &SessionId::from(session_id),
         &job_key,
     );
 }
@@ -518,9 +543,14 @@ async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &session_id).await;
-    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
-    let job_key = crate::restate::cron_job_key(&session_id, &record.source_key);
+    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
+    let record = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
+    let job_key =
+        crate::restate::cron_job_key(&SessionId::from(session_id.clone()), &record.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
@@ -530,7 +560,7 @@ async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
     )
     .await
@@ -567,13 +597,18 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     )
     .await;
     let session_a = state.current_session_id();
-    materialize_cron_test_session(&state, &session_a).await;
-    let record_a = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_a).await;
-    let key_a = crate::restate::cron_job_key(&session_a, &record_a.source_key);
+    materialize_cron_test_session(&state, &SessionId::from(session_a.clone())).await;
+    let record_a = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_a.clone()),
+    )
+    .await;
+    let key_a =
+        crate::restate::cron_job_key(&SessionId::from(session_a.clone()), &record_a.source_key);
     let session_b = "fig1067-session-b";
-    let key_b = crate::restate::cron_job_key(session_b, "cron-source:b");
+    let key_b = crate::restate::cron_job_key(&SessionId::from(session_b), "cron-source:b");
     state.restate_cron_job_keys.lock_recover().insert(
-        session_b.to_string(),
+        SessionId::from(session_b.to_string()),
         std::collections::BTreeSet::from([key_b.clone()]),
     );
     let surface = ScriptedCronObjectSurface::default();
@@ -586,7 +621,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
 
     crate::restate::sync_cron_jobs_after_trigger_mutation(
         &state,
-        &session_a,
+        &SessionId::from(session_a.clone()),
         "two_session_regression",
         &record_a,
     )
@@ -639,7 +674,11 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
     )
     .await;
     let session_id = state.current_session_id();
-    let record = register_fig1067_button_subscription(trigger_store.as_ref(), &session_id).await;
+    let record = register_fig1067_button_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
     let dead_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind dead ingress probe");
@@ -653,7 +692,7 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state.clone()),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id),
+            session_id: Some(SessionId::from(session_id)),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -675,8 +714,12 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &session_id).await;
-    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
+    let record = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
     let disabled = lash::triggers::TriggerStore::execute_command(
         trigger_store.as_ref(),
         "disable:fig1067-reconciliation-pin",
@@ -695,7 +738,10 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = disabled else {
         panic!("disable must return a mutation receipt");
     };
-    let job_key = crate::restate::cron_job_key(&session_id, &receipt.record_snapshot.source_key);
+    let job_key = crate::restate::cron_job_key(
+        &SessionId::from(session_id.clone()),
+        &receipt.record_snapshot.source_key,
+    );
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
@@ -704,7 +750,7 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
         axum::extract::Path(receipt.record_snapshot.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id),
+            session_id: Some(SessionId::from(session_id)),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -729,8 +775,12 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &session_id).await;
-    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
+    let record = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
     let dead_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind dead ingress probe");
@@ -748,7 +798,7 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
         axum::extract::Path(record.subscription_key.clone()),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -779,8 +829,12 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &session_id).await;
-    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
+    let record = register_fig1067_cron_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id.clone()),
+    )
+    .await;
     let dead_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind dead ingress probe");
@@ -798,7 +852,7 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
     )
     .await;
@@ -821,7 +875,7 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
 
 struct MetaLossSessionStoreFactory {
     inner: lash::persistence::InMemorySessionStoreFactory,
-    absent_session_ids: std::sync::Mutex<std::collections::HashSet<String>>,
+    absent_session_ids: std::sync::Mutex<std::collections::HashSet<SessionId>>,
 }
 
 struct ContendedRuntimePersistence {
@@ -838,7 +892,7 @@ impl lash::persistence::RuntimePersistenceDecorator for ContendedRuntimePersiste
 
     async fn try_claim_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &lash::persistence::LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
@@ -926,13 +980,13 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         }))
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         lash::persistence::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
     }
@@ -946,10 +1000,10 @@ impl MetaLossSessionStoreFactory {
         }
     }
 
-    fn remove_session_meta(&self, session_id: &str) {
+    fn remove_session_meta(&self, session_id: &SessionId) {
         self.absent_session_ids
             .lock_recover()
-            .insert(session_id.to_string());
+            .insert(session_id.clone());
     }
 }
 
@@ -1008,19 +1062,19 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         lash::persistence::SessionStoreFactory::open_existing_store(&self.inner, request).await
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         lash::persistence::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
     }
 }
 
-async fn materialize_cron_test_session(state: &crate::AppState, session_id: &str) {
+async fn materialize_cron_test_session(state: &crate::AppState, session_id: &SessionId) {
     drop(
         state
             .core
@@ -1031,7 +1085,7 @@ async fn materialize_cron_test_session(state: &crate::AppState, session_id: &str
     );
 }
 
-async fn retire_cron_test_session(state: &crate::AppState, session_id: &str) {
+async fn retire_cron_test_session(state: &crate::AppState, session_id: &SessionId) {
     let scope = state
         .core
         .session_delete_scope(session_id)
@@ -1048,10 +1102,10 @@ async fn retire_cron_test_session(state: &crate::AppState, session_id: &str) {
         .expect("retire cron test session");
 }
 
-fn cron_tick_test_state(session_id: &str) -> crate::restate::WorkbenchCronState {
+fn cron_tick_test_state(session_id: &SessionId) -> crate::restate::WorkbenchCronState {
     crate::restate::WorkbenchCronState {
         request: WorkbenchCronRequest {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             source_key: "cron-source:fig1018-decision".to_string(),
             expr: "*/10 * * * * *".to_string(),
             tz: Some("UTC".to_string()),
@@ -1091,7 +1145,7 @@ impl RecordingCronTickCancelSurface {
 impl crate::restate::CronTickCancelSurface for RecordingCronTickCancelSurface {
     async fn record_trace(
         &self,
-        _session_id: String,
+        _session_id: SessionId,
         _trace: serde_json::Value,
     ) -> restate_sdk::errors::HandlerResult<()> {
         self.events.lock_recover().push("trace");
@@ -1134,7 +1188,7 @@ impl crate::restate::CronTickCancelSurface for RecordingCronTickCancelSurface {
 
 #[test]
 fn cron_tick_decision_runs_for_a_live_session() {
-    let state = cron_tick_test_state("live-cron-session");
+    let state = cron_tick_test_state(&SessionId::from("live-cron-session"));
 
     assert_eq!(
         crate::restate::cron_tick_decision(CronSessionDisposition::Live, &state, "cron-job-live"),
@@ -1144,7 +1198,7 @@ fn cron_tick_decision_runs_for_a_live_session() {
 
 #[test]
 fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
-    let state = cron_tick_test_state("retired-cron-session");
+    let state = cron_tick_test_state(&SessionId::from("retired-cron-session"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
         CronSessionDisposition::Retired,
@@ -1163,7 +1217,7 @@ fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
 
 #[test]
 fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
-    let state = cron_tick_test_state("absent-cron-session");
+    let state = cron_tick_test_state(&SessionId::from("absent-cron-session"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
         CronSessionDisposition::Unknown,
@@ -1193,8 +1247,13 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
     .await;
     let session_id = "meta-less-cron-session";
     let source_key = "cron-source:fig1018-meta-less";
-    materialize_cron_test_session(&state, session_id).await;
-    register_cron_test_subscription(trigger_store.as_ref(), session_id, source_key).await;
+    materialize_cron_test_session(&state, &SessionId::from(session_id)).await;
+    register_cron_test_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id),
+        source_key,
+    )
+    .await;
 
     assert!(
         state
@@ -1203,7 +1262,7 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
             .await
             .expect("read materialized session metadata")
     );
-    store_factory.remove_session_meta(session_id);
+    store_factory.remove_session_meta(&SessionId::from(session_id));
     assert!(
         !state
             .core
@@ -1219,7 +1278,7 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
             .expect("read absent-session metadata")
     );
     assert_eq!(
-        cron_session_disposition(&state.core, session_id)
+        cron_session_disposition(&state.core, &SessionId::from(session_id))
             .await
             .expect("classify absent cron session"),
         CronSessionDisposition::Unknown
@@ -1238,11 +1297,16 @@ async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
     let session_id = "live-non-current-cron-session";
     let source_key = "cron-source:fig1018-live";
     assert_ne!(session_id, state.current_session_id());
-    materialize_cron_test_session(&state, session_id).await;
-    register_cron_test_subscription(trigger_store.as_ref(), session_id, source_key).await;
+    materialize_cron_test_session(&state, &SessionId::from(session_id)).await;
+    register_cron_test_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id),
+        source_key,
+    )
+    .await;
 
     assert_eq!(
-        cron_session_disposition(&state.core, session_id)
+        cron_session_disposition(&state.core, &SessionId::from(session_id))
             .await
             .expect("read live session tombstone state"),
         CronSessionDisposition::Live
@@ -1256,7 +1320,7 @@ async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
     emit_cron_occurrence_with_effect_controller(
         state,
         WorkbenchCronRequest {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             source_key: source_key.to_string(),
             expr: "*/10 * * * * *".to_string(),
             tz: Some("UTC".to_string()),
@@ -1299,14 +1363,19 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
     .await;
     let session_id = "retired-cron-session";
     let source_key = "cron-source:fig1018-retired";
-    materialize_cron_test_session(&state, session_id).await;
-    register_cron_test_subscription(trigger_store.as_ref(), session_id, source_key).await;
-    retire_cron_test_session(&state, session_id).await;
+    materialize_cron_test_session(&state, &SessionId::from(session_id)).await;
+    register_cron_test_subscription(
+        trigger_store.as_ref(),
+        &SessionId::from(session_id),
+        source_key,
+    )
+    .await;
+    retire_cron_test_session(&state, &SessionId::from(session_id)).await;
 
-    let disposition = cron_session_disposition(&state.core, session_id)
+    let disposition = cron_session_disposition(&state.core, &SessionId::from(session_id))
         .await
         .expect("read retired session tombstone state");
-    let mut cron_state = cron_tick_test_state(session_id);
+    let mut cron_state = cron_tick_test_state(&SessionId::from(session_id));
     cron_state.request.source_key = source_key.to_string();
     let decision = crate::restate::cron_tick_decision(
         disposition,

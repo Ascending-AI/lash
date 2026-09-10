@@ -79,7 +79,7 @@ async fn run(
         .run_turn_assembled(
             TurnInput::text("continue"),
             token,
-            named_turn_scope("root", turn_id),
+            named_turn_scope(&SessionId::from("root"), turn_id),
         )
         .await
         .expect("real runtime driver returns an assembled turn")

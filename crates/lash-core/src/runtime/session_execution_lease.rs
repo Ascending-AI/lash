@@ -47,6 +47,7 @@
 //! takeover order is an ordinary production question; requiring debug logging to
 //! answer it would make the timeline unavailable exactly when it is needed.
 
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -178,7 +179,7 @@ impl SessionExecutionLeaseGuard {
     #[cfg(test)]
     pub(super) async fn try_acquire(
         store: Arc<dyn RuntimePersistence>,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
         executor_id: &str,
         timings: LeaseTimings,
@@ -189,7 +190,7 @@ impl SessionExecutionLeaseGuard {
 
     pub(super) async fn try_acquire_for_executor(
         store: Arc<dyn RuntimePersistence>,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
         executor_id: &str,
         timings: LeaseTimings,
@@ -212,7 +213,7 @@ impl SessionExecutionLeaseGuard {
 
     pub(super) async fn try_acquire_with_busy_holder(
         store: Arc<dyn RuntimePersistence>,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
         executor_id: &str,
         timings: LeaseTimings,
@@ -469,7 +470,7 @@ pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
                     tracing::warn!(
                         error = %release_error,
                         original_error = %error,
-                        session_id,
+                        session_id = session_id.as_str(),
                         "failed to release fresh session execution lease after rejected commit"
                     );
                 }
@@ -764,7 +765,7 @@ mod tests {
         let store = Arc::new(InMemorySessionStore::new());
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "acquire-gated-guard-executor",
             LeaseTimings::default(),
@@ -780,7 +781,7 @@ mod tests {
     async fn lease_is_held(store: &Arc<InMemorySessionStore>) -> bool {
         let outcome = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &crate::LeaseOwnerIdentity::opaque("peer", "peer-incarnation"),
                 "lease-is-held-executor",
                 LeaseTimings::default().ttl_ms(),
@@ -790,10 +791,10 @@ mod tests {
         matches!(outcome, SessionExecutionLeaseClaimOutcome::Busy { .. })
     }
 
-    fn borrowed_commit(session_id: &str) -> RuntimeCommit {
+    fn borrowed_commit(session_id: &SessionId) -> RuntimeCommit {
         RuntimeCommit::persisted_state_for_test(
             &crate::RuntimeSessionState {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                 ))
@@ -813,7 +814,7 @@ mod tests {
             .expect("bind borrowed-commit session");
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&persistence),
-            "borrow-valid",
+            &SessionId::from("borrow-valid"),
             &owner,
             "borrowed-commit-leaves-outer-guard-fence-valid-executor",
             LeaseTimings::default(),
@@ -826,7 +827,7 @@ mod tests {
         commit_runtime_state_with_borrowed_lease(
             &guard.borrowed_authority(),
             persistence,
-            borrowed_commit("borrow-valid"),
+            borrowed_commit(&SessionId::from("borrow-valid")),
             &owner,
         )
         .await
@@ -853,7 +854,7 @@ mod tests {
             .expect("valid short lease timings");
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&persistence),
-            "borrow-lapsed",
+            &SessionId::from("borrow-lapsed"),
             &owner,
             "lapsed-guard-cannot-authorize-borrowed-commit-executor",
             timings,
@@ -868,7 +869,7 @@ mod tests {
         let error = commit_runtime_state_with_borrowed_lease(
             &guard.borrowed_authority(),
             persistence,
-            borrowed_commit("borrow-lapsed"),
+            borrowed_commit(&SessionId::from("borrow-lapsed")),
             &owner,
         )
         .await
@@ -943,7 +944,7 @@ mod tests {
         let successor_nonce = crate::LeaseClaimNonce::for_testing("drop-race-successor-token");
         let successor = store
             .try_claim_session_execution_lease_with_token(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner,
                 &guard.completion().executor_id,
                 &successor_nonce,
@@ -999,7 +1000,7 @@ mod tests {
         let owner = crate::LeaseOwnerIdentity::opaque("owner", "incarnation");
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &owner,
             "stale-in-band-release-refusal-is-terminal-and-benign-executor",
             LeaseTimings::default(),
@@ -1010,7 +1011,7 @@ mod tests {
         .expect("predecessor guard acquired");
         let successor = store
             .try_claim_session_execution_lease_with_token(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner,
                 &guard.completion().executor_id,
                 &crate::LeaseClaimNonce::for_testing("in-band-successor-token"),
@@ -1048,7 +1049,7 @@ mod tests {
         let store = Arc::new(InMemorySessionStore::new());
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "clean-guard-drop-releases-before-ttl-for-immediate-peer-reclaim-executor",
             LeaseTimings::default(),
@@ -1069,7 +1070,7 @@ mod tests {
 
         let peer = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &crate::LeaseOwnerIdentity::opaque("peer", "peer-incarnation"),
                 "clean-guard-drop-releases-before-ttl-for-immediate-peer-reclaim-executor",
                 LeaseTimings::default().ttl_ms(),
@@ -1092,7 +1093,7 @@ mod tests {
         let guard_clock: Arc<dyn crate::Clock> = clock.clone();
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor",
             LeaseTimings::default(),
@@ -1109,7 +1110,7 @@ mod tests {
         assert!(matches!(
             store
                 .try_claim_session_execution_lease(
-                    SESSION_ID,
+                    &SessionId::from(SESSION_ID),
                     &peer_owner,
                     "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor",
                     LeaseTimings::default().ttl_ms(),
@@ -1122,7 +1123,7 @@ mod tests {
         clock.advance(LeaseTimings::default().ttl_ms() + 1);
         let peer = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &peer_owner,
                 "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor-2",
                 LeaseTimings::default().ttl_ms(),
@@ -1144,7 +1145,7 @@ mod tests {
             matches!(
                 store
                     .try_claim_session_execution_lease(
-                        SESSION_ID,
+                        &SessionId::from(SESSION_ID),
                         &crate::LeaseOwnerIdentity::opaque("observer", "observer-incarnation"),
                         "stalled-drop-release-falls-back-to-ttl-without-freeing-the-reclaimer-executor-3",
                         LeaseTimings::default().ttl_ms(),
@@ -1177,7 +1178,7 @@ mod tests {
         store.fail_next_session_execution_lease_renewal_with(StoreError::Contended);
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "transient-renewal-failure-still-requires-a-backend-release-executor",
             timings,
@@ -1226,7 +1227,7 @@ mod tests {
         .expect("test lease timings");
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "renewal-install-refusal-still-requires-a-backend-release-executor",
             timings,
@@ -1272,12 +1273,12 @@ mod tests {
         .expect("test lease timings");
         store.fail_next_session_execution_lease_renewal_with(
             StoreError::SessionExecutionLeaseExpired {
-                session_id: SESSION_ID.to_string(),
+                session_id: SessionId::from(SESSION_ID.to_string()),
             },
         );
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "definitive-renewal-fence-rejection-skips-the-owner-side-release-executor",
             timings,
@@ -1407,7 +1408,7 @@ mod tests {
         let owner = crate::LeaseOwnerIdentity::opaque("current-owner", "current-incarnation");
         let current = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner,
                 "assert-refusal-event-executor",
                 60_000,
@@ -1417,7 +1418,7 @@ mod tests {
             .acquired()
             .expect("current lease acquired");
         let presented = SessionExecutionLeaseAuthority {
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             owner: crate::LeaseOwnerIdentity::opaque("presented-owner", "presented-incarnation"),
             executor_id: "presented-executor".to_string(),
             lease_token: "presented-stale-token".to_string(),
@@ -1446,7 +1447,7 @@ mod tests {
 
         let (_, execution_capture) = crate::runtime::tests::trace_capture::capturing(|| async {
             crate::store_backend_support::require_current_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 Some(
                     crate::store_backend_support::SessionExecutionLeaseFenceFacts {
                         owner: Some(&current.owner),
@@ -1515,7 +1516,7 @@ mod tests {
             .expect("bind session");
         let current = store
             .try_claim_session_execution_lease(
-                session_id,
+                &SessionId::from(session_id),
                 &crate::LeaseOwnerIdentity::opaque("current-owner", "current-incarnation"),
                 "released-row-fence-facts-executor",
                 60_000,
@@ -1525,7 +1526,7 @@ mod tests {
             .acquired()
             .expect("current lease acquired");
         let presented = SessionExecutionLeaseAuthority {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             owner: crate::LeaseOwnerIdentity::opaque("presented-owner", "presented-incarnation"),
             executor_id: "presented-executor".to_string(),
             lease_token: "presented-stale-token".to_string(),
@@ -1573,7 +1574,7 @@ mod tests {
         .expect("test lease timings");
         let guard = SessionExecutionLeaseGuard::try_acquire(
             Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &owner,
             "rotated-token-refusal-marks-the-old-renewal-loop-lost-executor",
             timings,
@@ -1585,7 +1586,7 @@ mod tests {
         let predecessor_token = guard.completion().lease_token;
         let successor = store
             .try_claim_session_execution_lease_with_token(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner,
                 &guard.completion().executor_id,
                 &crate::LeaseClaimNonce::for_testing("renewal-successor-token"),

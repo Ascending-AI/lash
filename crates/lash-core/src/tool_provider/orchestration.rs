@@ -1,4 +1,5 @@
 use super::{ToolContext, ToolOutcome, ToolPrepareCall};
+use crate::ProcessId;
 use crate::plugin::PluginError;
 use crate::{PreparedToolCall, ToolContract, ToolManifest};
 use std::sync::Arc;
@@ -76,14 +77,14 @@ impl<'run> OrchestrationContext<'run> {
 
     pub async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
         self.context.process_admin().await_process(process_id).await
     }
 
     pub async fn cancel_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<crate::ProcessCancelReceipt, PluginError> {
         self.context.process_admin().cancel(process_id).await
     }
@@ -92,7 +93,7 @@ impl<'run> OrchestrationContext<'run> {
     /// Requiring the id keeps replay identity independent of randomness.
     pub async fn signal_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: &str,
         signal_id: impl Into<String>,
         payload: serde_json::Value,
@@ -105,7 +106,7 @@ impl<'run> OrchestrationContext<'run> {
 
     pub fn emit_child_process_started(
         &self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         child_entry_name: Option<String>,
     ) {
         self.context

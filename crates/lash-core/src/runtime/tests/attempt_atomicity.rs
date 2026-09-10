@@ -16,7 +16,9 @@
 //! Intent laws separately pin exactly one attributed command per admitted
 //! declaration and zero commands for refused batches.
 
+use crate::ProcessId;
 use crate::ProcessRegistrar as _;
+use crate::SessionId;
 use crate::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -181,14 +183,14 @@ async fn fixtures() -> Fixtures {
                     crate::ProcessProvenance::host(),
                 )
                 .with_extra_event_types(event_types.clone()),
-                &[SESSION.to_string()],
+                &[SessionId::from(SESSION.to_string())],
             )
             .await
             .expect("register matrix process");
     }
     registry
         .complete_process(
-            TERMINAL_PROCESS,
+            &ProcessId::from(TERMINAL_PROCESS),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
@@ -198,14 +200,14 @@ async fn fixtures() -> Fixtures {
         .expect("complete terminal matrix process");
     let owner = crate::LeaseOwnerIdentity::opaque("attempt-atomicity", "incarnation");
     let lease = registry
-        .claim_process_lease(LIVE_PROCESS, &owner, 60_000)
+        .claim_process_lease(&ProcessId::from(LIVE_PROCESS), &owner, 60_000)
         .await
         .expect("claim live process lease")
         .acquired()
         .expect("live process lease");
     registry
         .record_first_started_with_authority(
-            LIVE_PROCESS,
+            &ProcessId::from(LIVE_PROCESS),
             crate::ProcessStarted {
                 owner,
                 fencing_token: lease.fencing_token,
@@ -303,7 +305,7 @@ fn tool_context_with_provider<'run>(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: SESSION.to_string(),
+        session_id: SessionId::from(SESSION.to_string()),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -685,7 +687,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
 
     let intents = crate::ToolIntents::v1(vec![
         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-            session_id: SESSION.to_string(),
+            session_id: SessionId::from(SESSION.to_string()),
             request: crate::ProcessStartRequest::external(
                 "ignored-by-stable-intent-id",
                 crate::ProcessOriginator::host_scoped("intent-test"),
@@ -694,20 +696,20 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
             on_parent_end: crate::ProcessParentEndPolicy::Abandon,
         })),
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-            session_id: SESSION.to_string(),
-            process_id: LIVE_PROCESS.to_string(),
+            session_id: SessionId::from(SESSION.to_string()),
+            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
             signal_name: "resume".to_string(),
             payload: serde_json::json!({"step": "signal"}),
         }),
         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-            session_id: SESSION.to_string(),
-            process_id: LIVE_PROCESS.to_string(),
+            session_id: SessionId::from(SESSION.to_string()),
+            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
             event_type: "attempt.atomicity.note".to_string(),
             payload: serde_json::json!({"step": "event"}),
         }),
         crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-            session_id: SESSION.to_string(),
-            process_id: LIVE_PROCESS.to_string(),
+            session_id: SessionId::from(SESSION.to_string()),
+            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
             reason: Some("intent test complete".to_string()),
         }),
     ]);
@@ -769,8 +771,8 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
         (0..=crate::TOOL_INTENT_MAX_COUNT)
             .map(|index| {
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-                    session_id: SESSION.to_string(),
-                    process_id: LIVE_PROCESS.to_string(),
+                    session_id: SessionId::from(SESSION.to_string()),
+                    process_id: ProcessId::from(LIVE_PROCESS.to_string()),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"index": index}),
                 })
@@ -818,8 +820,9 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
     let tier = ControllerOwnedTier::key_addressed();
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
-    let identity = crate::derive_tool_intent_identity(SESSION, TURN, Some(CALL_ID), 9)
-        .expect("literal intent identity");
+    let identity =
+        crate::derive_tool_intent_identity(&SessionId::from(SESSION), TURN, Some(CALL_ID), 9)
+            .expect("literal intent identity");
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     registry
         .register_process(
@@ -840,7 +843,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         .await
         .expect("register structural attribution target");
     let command = crate::ProcessCommand::EmitEvent {
-        process_id: "structural-process".to_string(),
+        process_id: ProcessId::from("structural-process"),
         request: crate::ProcessEventAppendRequest::new(
             "structural.note",
             serde_json::json!({"law": "overcount"}),
@@ -922,8 +925,8 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         .expect("runtime dispatch context");
     let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
-            session_id: SESSION.to_string(),
-            process_id: LIVE_PROCESS.to_string(),
+            session_id: SessionId::from(SESSION.to_string()),
+            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
             signal_name: "resume".to_string(),
             payload: serde_json::json!({"recorded": "payload"}),
         },
@@ -950,7 +953,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
     fixtures
         .registry
         .complete_process(
-            LIVE_PROCESS,
+            &ProcessId::from(LIVE_PROCESS),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("terminal after first drain"),
             )),
@@ -1417,7 +1420,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
             .expect("tool context carries runtime dispatch"),
     );
     let execution_context = crate::RuntimeExecutionContext::new(
-        SESSION.to_string(),
+        SessionId::from(SESSION.to_string()),
         dispatch,
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         Arc::new(crate::SessionAttachmentStore::in_memory()),

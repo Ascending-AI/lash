@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect};
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lashlang::{
     ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
@@ -79,7 +80,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         .with_execution_binding(json!({"route": "primary"}));
     let resolution = Resolution::Resolved(Box::new(grant));
     let link_key = DeferredResolutionLinkKey {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: Some(TurnId::from("turn")),
         turn_index: Some(7),
         protocol_iteration: Some(2),
@@ -789,7 +790,7 @@ fn version_17_root_encodes_to_golden_bytes() {
         globals,
         deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord {
             link_key: Some(lash_lashlang_runtime::DeferredResolutionLinkKey {
-                session_id: "session-golden".to_string(),
+                session_id: SessionId::from("session-golden"),
                 turn_id: Some(TurnId::from("turn-7")),
                 turn_index: Some(3),
                 protocol_iteration: Some(2),

@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
@@ -35,7 +36,7 @@ struct WatchedProcessRegistry {
     inner: Arc<dyn ProcessRegistry>,
     hub: ProcessChangeHub,
     sink: Option<Arc<dyn ProcessEventSink>>,
-    event_paths: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
+    event_paths: Mutex<HashMap<ProcessId, Weak<tokio::sync::Mutex<()>>>>,
 }
 
 /// A process registry paired with the change hub published by its decorator.
@@ -115,7 +116,7 @@ impl super::registry::ProcessRegistrar for WatchedProcessRegistry {
 
     async fn set_external_ref(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError> {
         let event_path = self.event_path(process_id);
@@ -137,7 +138,7 @@ delegate_process_observer_registry!(WatchedProcessRegistry, inner);
 impl super::registry::ProcessEventLog for WatchedProcessRegistry {
     async fn append_event(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
         let event_path = self.event_path(process_id);
@@ -151,7 +152,7 @@ impl super::registry::ProcessEventLog for WatchedProcessRegistry {
 
     async fn append_event_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
@@ -169,7 +170,7 @@ impl super::registry::ProcessEventLog for WatchedProcessRegistry {
 
     async fn events_after(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         self.inner.events_after(process_id, after_sequence).await
@@ -177,7 +178,7 @@ impl super::registry::ProcessEventLog for WatchedProcessRegistry {
 
     async fn count_events_through(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         event_type: &str,
         up_to_sequence: u64,
     ) -> Result<u64, PluginError> {
@@ -188,7 +189,7 @@ impl super::registry::ProcessEventLog for WatchedProcessRegistry {
 
     async fn recent_events(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         limit: usize,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         self.inner.recent_events(process_id, limit).await
@@ -199,7 +200,7 @@ impl super::registry::ProcessEventLog for WatchedProcessRegistry {
 impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
     async fn complete_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
@@ -217,7 +218,7 @@ impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
 
     async fn complete_process_with_parent_end(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
         actions: Vec<crate::ToolIntentParentEndAction>,
@@ -278,18 +279,18 @@ impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
 
     async fn get_pending_parent_end_plan(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
         self.inner.get_pending_parent_end_plan(process_id).await
     }
 
-    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
+    async fn complete_parent_end_plan(&self, process_id: &ProcessId) -> Result<(), PluginError> {
         self.inner.complete_parent_end_plan(process_id).await
     }
 
     async fn record_first_started_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         started: ProcessStarted,
         authority: &crate::ProcessExecutionWriteAuthority,
     ) -> Result<crate::ProcessStartOutcome, PluginError> {
@@ -307,7 +308,7 @@ impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
 
     async fn request_process_abandon(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError> {
         let event_path = self.event_path(process_id);
@@ -324,7 +325,7 @@ impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
 
     async fn record_caller_departure(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<ProcessRecord, PluginError> {
         let event_path = self.event_path(process_id);
         let _guard = event_path.lock().await;
@@ -337,7 +338,7 @@ impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
 
     async fn set_process_wait_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         wait: WaitState,
         authority: &crate::ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
@@ -355,7 +356,7 @@ impl super::registry::ProcessLifecycle for WatchedProcessRegistry {
 
     async fn clear_process_wait_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         authority: &crate::ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let event_path = self.event_path(process_id);

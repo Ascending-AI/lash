@@ -6,6 +6,7 @@ use crate::support::{
 };
 use lash_core::facade_support;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
+use lash_sansio::SessionId;
 
 pub(crate) struct NativeQueuedWorkRunConfig {
     pub(super) session_execution_owner: lash_core::LeaseOwnerIdentity,
@@ -166,19 +167,19 @@ impl NativeQueuedWorkRunHandle {
 impl QueuedWorkRunHandle for NativeQueuedWorkRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        session_id: Option<&str>,
+        session_id: Option<&SessionId>,
     ) -> std::result::Result<Option<bool>, facade_support::QueuedWorkRunError> {
         let Some(session_id) = session_id else {
             return Ok(None);
         };
         let mut policy = self.config.policy.clone();
-        policy.session_id = Some(session_id.to_string());
+        policy.session_id = Some(session_id.clone());
         self.config
             .store_factory
             .has_claimable_queued_work(
                 &SessionStoreCreateRequest {
                     pending_observer_intents: Vec::new(),
-                    session_id: session_id.to_string(),
+                    session_id: session_id.clone(),
                     relation: SessionRelation::default(),
                     policy,
                 },
@@ -202,14 +203,14 @@ impl QueuedWorkRunHandle for NativeQueuedWorkRunHandle {
 
     async fn claim_and_run_pending_with_progress(
         &self,
-        session_id: Option<&str>,
+        session_id: Option<&SessionId>,
         reason: &str,
     ) -> std::result::Result<
         facade_support::QueuedWorkRunProgress,
         facade_support::QueuedWorkRunError,
     > {
         self.drive_queued_work(QueuedWorkRunRequest {
-            session_id: session_id.map(str::to_string),
+            session_id: session_id.cloned(),
             reason: reason.to_string(),
             trace_idle: false,
         })

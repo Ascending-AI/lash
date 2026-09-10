@@ -7,7 +7,7 @@
 //! the first-party default tool bundles from `lash-standard-plugins`,
 //! so standard lash sessions pick it up automatically.
 
-use lash_sansio::TurnId;
+use lash_sansio::{SessionId, TurnId};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -227,7 +227,7 @@ fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
 }
 
 async fn summarize_compaction_prefix(
-    session_id: &str,
+    session_id: &SessionId,
     state: &SessionSnapshot,
     prefix_messages: Vec<Message>,
     instructions: Option<&str>,
@@ -248,7 +248,7 @@ async fn summarize_compaction_prefix(
     let previous_summary = extract_previous_summary(&messages);
     snapshot.replace_active_read_state(&messages);
 
-    let compaction_session_id = format!("{session_id}-compaction");
+    let compaction_session_id = SessionId::from(format!("{session_id}-compaction"));
     let mut policy = snapshot.policy.clone();
     policy.turn_budget = lash_core::TurnBudget::bounded(1);
     let request = SessionCreateRequest::child(
@@ -325,7 +325,7 @@ fn compaction_summary_seed(summary: &str) -> lash_core::SessionAppendNode {
 }
 
 async fn compact_messages_core(
-    session_id: &str,
+    session_id: &SessionId,
     state: &SessionSnapshot,
     messages: &[Message],
     instructions: Option<&str>,
@@ -682,7 +682,10 @@ mod tests {
                 json!({"name":"exec_command"}),
                 json!({"name":"read_file"}),
             ])
-            .with_turn(empty_turn("root", "Compacted work summary"))
+            .with_turn(empty_turn(
+                &SessionId::from("root"),
+                "Compacted work summary",
+            ))
     }
 
     #[derive(Default)]
@@ -709,7 +712,7 @@ mod tests {
     }
 
     fn build_turn_ctx(
-        session_id: &str,
+        session_id: &SessionId,
         state: SessionSnapshot,
         prompt_usage: Option<PromptUsage>,
         max_context_tokens: Option<usize>,
@@ -727,7 +730,7 @@ mod tests {
     }
 
     fn build_turn_ctx_with_graph(
-        session_id: &str,
+        session_id: &SessionId,
         state: SessionSnapshot,
         prompt_usage: Option<PromptUsage>,
         max_context_tokens: Option<usize>,
@@ -735,7 +738,7 @@ mod tests {
         session_graph: Arc<dyn SessionGraphService>,
     ) -> TurnTransformContext<'static> {
         TurnTransformContext {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             state: state.read_view(),
             prompt_usage,
             max_context_tokens,
@@ -758,7 +761,7 @@ mod tests {
     }
 
     fn build_compaction_ctx_with_graph(
-        session_id: &str,
+        session_id: &SessionId,
         state: SessionSnapshot,
         instructions: Option<String>,
         manager: Arc<MockSessionManager>,
@@ -776,7 +779,7 @@ mod tests {
     }
 
     fn build_compaction_ctx_with_services(
-        session_id: &str,
+        session_id: &SessionId,
         state: SessionSnapshot,
         instructions: Option<String>,
         sessions: Arc<dyn SessionStateService>,
@@ -784,7 +787,7 @@ mod tests {
         session_graph: Arc<dyn SessionGraphService>,
     ) -> CompactionContext<'static> {
         CompactionContext {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             instructions,
             state: state.read_view(),
             sessions,
@@ -826,7 +829,7 @@ mod tests {
         let manager = Arc::new(mock_manager());
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let ctx = build_turn_ctx(
-            "root",
+            &SessionId::from("root"),
             state,
             Some(PromptUsage {
                 prompt_context_tokens: 130_000,
@@ -859,12 +862,12 @@ mod tests {
         let manager = Arc::new(mock_manager());
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let state = SessionSnapshot {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_turn_ctx(
-            "root",
+            &SessionId::from("root"),
             state,
             Some(PromptUsage {
                 prompt_context_tokens: 90_000,
@@ -916,12 +919,12 @@ mod tests {
         let trace = Arc::new(RecordingSessionGraph::default());
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let state = SessionSnapshot {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_turn_ctx_with_graph(
-            "root",
+            &SessionId::from("root"),
             state,
             Some(PromptUsage {
                 prompt_context_tokens: 30_000,
@@ -981,12 +984,12 @@ mod tests {
         let trace = Arc::new(RecordingSessionGraph::default());
         let transform = RollingTurnTransform::new(RollingHistoryConfig);
         let state = SessionSnapshot {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_turn_ctx_with_graph(
-            "root",
+            &SessionId::from("root"),
             state,
             Some(PromptUsage {
                 prompt_context_tokens: 30_000,
@@ -1036,13 +1039,13 @@ mod tests {
             text_message("u2", MessageRole::User, "latest request"),
         ];
         let state = SessionSnapshot {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             session_graph: SessionGraph::from_active_read_state(&messages),
             ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let ctx = build_compaction_ctx_with_graph(
-            "root",
+            &SessionId::from("root"),
             state,
             Some("focus on latest request".to_string()),
             manager.clone(),
@@ -1115,11 +1118,17 @@ mod tests {
         let manager = Arc::new(mock_manager());
         let trace = Arc::new(RecordingSessionGraph::default());
         let state = SessionSnapshot {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
-        let ctx = build_compaction_ctx_with_graph("root", state, None, manager, trace.clone());
+        let ctx = build_compaction_ctx_with_graph(
+            &SessionId::from("root"),
+            state,
+            None,
+            manager,
+            trace.clone(),
+        );
 
         let compaction = RollingContextCompactor::new(RollingHistoryConfig)
             .compact(&ctx)
@@ -1143,14 +1152,14 @@ mod tests {
             text_message("u2", MessageRole::User, "latest request"),
         ];
         let state = SessionSnapshot {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             session_graph: SessionGraph::from_active_read_state(&messages),
             ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
         let sessions = manager as Arc<dyn SessionStateService>;
         let ctx = build_compaction_ctx_with_services(
-            "root",
+            &SessionId::from("root"),
             state,
             None,
             sessions,

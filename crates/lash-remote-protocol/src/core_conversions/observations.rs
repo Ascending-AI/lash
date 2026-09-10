@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 use lash_sansio::sync::{LockResultExt, MutexExt};
 impl RemoteTurnActivity {
@@ -106,7 +107,7 @@ impl From<lash_core::facade_support::SessionObservation> for RemoteSessionObserv
     fn from(value: lash_core::facade_support::SessionObservation) -> Self {
         let lash_core::facade_support::SessionObservation { read_view, cursor } = value;
         Self {
-            session_id: read_view.session_id().to_string(),
+            session_id: SessionId::from(read_view.session_id().to_string()),
             cursor: cursor.to_string(),
             turn_index: read_view.turn_index() as u64,
             usage: read_view.token_usage().clone().into(),
@@ -217,7 +218,7 @@ impl RemoteSessionObservationEvent {
                 }
             }
         };
-        let session_id = lash_core::SessionObservationEvent::session_id(event.as_ref()).to_string();
+        let session_id = lash_core::SessionObservationEvent::session_id(event.as_ref());
         let replay_incarnation_id =
             lash_core::SessionObservationEvent::replay_incarnation_id(event.as_ref()).to_string();
         let turn_id = turn_id.clone();

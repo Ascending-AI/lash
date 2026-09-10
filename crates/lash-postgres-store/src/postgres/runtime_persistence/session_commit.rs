@@ -52,7 +52,7 @@ impl SessionCommitStore for PostgresSessionStore {
             load_usage_deltas_tx(&mut tx, session_id).await?,
         )?;
         let turn_failure_rows = sqlx::query(LOAD_TURN_FAILURE_SETTLEMENTS_SQL)
-            .bind(session_id)
+            .bind(session_id.as_str())
             .fetch_all(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -65,7 +65,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 Err(error) => {
                     tracing::warn!(
                         target: "lash_postgres_store::runtime_persistence",
-                        session_id,
+                        session_id = session_id.as_str(),
                         turn_id = turn_id.as_str(),
                         error = %error,
                         "skipping corrupt runtime turn receipt while loading failure evidence"
@@ -129,7 +129,7 @@ impl SessionCommitStore for PostgresSessionStore {
                )",
         )
         .bind(node_id)
-        .bind(session_id)
+        .bind(session_id.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -167,7 +167,7 @@ impl SessionCommitStore for PostgresSessionStore {
                   )
                  WHERE session.session_id = $1",
             )
-            .bind(session_id)
+            .bind(session_id.as_str())
             .bind(candidate_generation)
             .fetch_all(&mut *tx)
             .await
@@ -278,7 +278,7 @@ impl SessionCommitStore for PostgresSessionStore {
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
         let existing = load_session_head_meta_tx(&mut tx, &commit.session_id, false).await?;
-        planner.validate_session_binding(existing.as_ref().map(|meta| meta.session_id.as_str()))?;
+        planner.validate_session_binding(existing.as_ref().map(|meta| &meta.session_id))?;
         let direct_meta = SessionMeta {
             session_id: commit.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
@@ -293,7 +293,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  FROM lash_runtime_turn_commits
                  WHERE session_id = $1 AND turn_id = $2",
             )
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(planner.operation_key())
             .fetch_optional(&mut *tx)
             .await
@@ -370,7 +370,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  VALUES ($1, 0, $2, NULL, NULL)
                  ON CONFLICT (session_id) DO NOTHING",
             )
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(encode_json(&placeholder.payload())?)
             .execute(&mut *tx)
             .await
@@ -382,7 +382,7 @@ impl SessionCommitStore for PostgresSessionStore {
              WHERE session_id = $1
              FOR UPDATE",
         )
-        .bind(&commit.session_id)
+        .bind(commit.session_id.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
@@ -437,7 +437,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  )",
             )
             .bind(required)
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(i64::try_from(parent.generation).map_err(|_| {
                 StoreError::Backend("parent generation does not fit PostgreSQL BIGINT".to_string())
             })?)
@@ -482,7 +482,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 WHERE session_id = $1 AND tombstoned = FALSE
             )",
         )
-        .bind(&commit.session_id)
+        .bind(commit.session_id.as_str())
         .fetch_one(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -525,7 +525,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
                  DO NOTHING",
             )
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(&entry.identity.operation_storage_key)
             .bind(entry_ordinal)
             .bind(i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
@@ -555,7 +555,7 @@ impl SessionCommitStore for PostgresSessionStore {
                      (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
                      VALUES ($1, $2, $3, $4, $5, $6)",
             )
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(&node.node_id)
             .bind(&node.parent_node_id)
             .bind(i64::try_from(facts.generation).map_err(|_| {
@@ -584,7 +584,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 leaf_node_id = EXCLUDED.leaf_node_id
              WHERE lash_sessions.head_revision = $6",
         )
-        .bind(&commit.session_id)
+        .bind(commit.session_id.as_str())
         .bind(sql_head_revision)
         .bind(encode_json(&meta.payload())?)
         .bind(checkpoint_ref.as_str())
@@ -611,7 +611,7 @@ impl SessionCommitStore for PostgresSessionStore {
             let actual_now = sqlx::query_scalar::<_, i64>(
                 "SELECT head_revision FROM lash_sessions WHERE session_id = $1",
             )
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
@@ -621,7 +621,7 @@ impl SessionCommitStore for PostgresSessionStore {
             return Err(plan.head_publication_conflict(actual_now));
         }
         sqlx::query("UPDATE lash_session_meta SET last_commit_at_ms = $2 WHERE session_id = $1")
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(i64::try_from(now).unwrap_or(i64::MAX))
             .execute(&mut *tx)
             .await
@@ -646,7 +646,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  ORDER BY enqueue_seq ASC
                  FOR UPDATE"
             ))
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(lash_core::TurnInputState::PendingActive.as_str())
             .fetch_all(&mut *tx)
             .await
@@ -674,7 +674,7 @@ impl SessionCommitStore for PostgresSessionStore {
                          claim_session_lease_generation = 0
                      WHERE session_id = $1 AND input_id = $2",
                 )
-                .bind(&commit.session_id)
+                .bind(commit.session_id.as_str())
                 .bind(&input_id)
                 .bind(match disposition {
                     lash_core::TurnCancelDisposition::Defer => {
@@ -725,7 +725,7 @@ impl SessionCommitStore for PostgresSessionStore {
                        AND committed_at_ms IS NULL",
             )
             .bind(now as i64)
-            .bind(&commit.session_id)
+            .bind(commit.session_id.as_str())
             .bind(turn_id.as_str())
             .bind(AttachmentOwnerKind::Turn.as_str())
             .execute(&mut *tx)
@@ -749,7 +749,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  )
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             )
-            .bind(receipt.session_id)
+            .bind(receipt.session_id.as_str())
             .bind(receipt.operation_key)
             .bind(receipt.turn_commit_hash)
             .bind(&result_json)
@@ -777,7 +777,7 @@ impl SessionCommitStore for PostgresSessionStore {
                             request_identity_hash, requested_node_count, identity_encoding_version
                          ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULL)",
                     )
-                    .bind(&commit.session_id)
+                    .bind(commit.session_id.as_str())
                     .bind(marker)
                     .bind(receipt.turn_commit_hash)
                     .bind(&result_json)
@@ -806,7 +806,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let session_id = &binding.session_id;
         self.bind_session_id(session_id)?;
         let meta = SessionMeta {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: binding.relation.clone(),
             pending_observer_intents: Vec::new(),
         };

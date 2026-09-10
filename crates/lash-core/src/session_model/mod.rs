@@ -1,3 +1,4 @@
+use crate::SessionId;
 pub mod context;
 mod session_policy_serde;
 pub use lash_sansio::session_model::message;
@@ -129,7 +130,7 @@ pub(crate) fn plugin_message_to_message(
 pub struct SessionPolicy {
     pub model: ModelSpec,
     pub provider_id: String,
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     pub autonomous: bool,
     /// Required turn-budget decision. A host must choose either a non-zero
     /// bound or explicit unbounded execution; absence is never interpreted.

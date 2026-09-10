@@ -80,7 +80,7 @@ impl TestLocalProcessRegistry {
             last_sequence,
             replay_lookup,
             now,
-            wake_session_id.as_deref(),
+            wake_session_id.as_ref(),
         )?;
         match prepared {
             super::ProcessEventAppendPlan::Replay {
@@ -108,7 +108,7 @@ impl TestLocalProcessRegistry {
             } => {
                 self.insert_wake_delivery(wake_delivery.as_ref()).await?;
                 self.advance_wake_allocation_floor(
-                    wake_session_id.as_deref(),
+                    wake_session_id.as_ref(),
                     &record.record.id,
                     sequence,
                 )
@@ -147,23 +147,26 @@ impl TestLocalProcessRegistry {
 
     async fn advance_wake_allocation_floor(
         &self,
-        target_session_id: Option<&str>,
-        process_id: &str,
+        target_session_id: Option<&SessionId>,
+        process_id: &ProcessId,
         sequence: u64,
     ) {
         let Some(target_session_id) = target_session_id else {
             return;
         };
-        self.wake_allocation_floors.lock().await.insert(
-            (target_session_id.to_string(), process_id.to_string()),
-            sequence,
-        );
+        self.wake_allocation_floors
+            .lock()
+            .await
+            .insert((target_session_id.clone(), process_id.clone()), sequence);
     }
 }
 
 #[async_trait::async_trait]
 impl super::registry::ProcessQuery for TestLocalProcessRegistry {
-    async fn get_process(&self, process_id: &str) -> Result<Option<ProcessRecord>, PluginError> {
+    async fn get_process(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<ProcessRecord>, PluginError> {
         if let Some(reason) = crate::store::process_key::invalid_process_key_reason(process_id) {
             return Err(PluginError::Session(reason.into()));
         }
@@ -355,7 +358,7 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
 
     async fn set_external_ref(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -380,8 +383,8 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
 impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
     async fn add_observer(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -396,9 +399,9 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
                 .observers
                 .lock()
                 .await
-                .entry(session_id.to_string())
+                .entry(session_id.clone())
                 .or_default()
-                .insert(process_id.to_string());
+                .insert(process_id.clone());
             if inserted {
                 self.append_managed_event(
                     record,
@@ -418,8 +421,8 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
 
     async fn remove_observer(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -455,9 +458,9 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
 
     async fn transfer_observers(
         &self,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: &[String],
+        from_session_id: &SessionId,
+        to_session_id: &SessionId,
+        process_ids: &[ProcessId],
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -479,9 +482,9 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
                     )));
                 }
                 observers
-                    .entry(to_session_id.to_string())
+                    .entry(to_session_id.clone())
                     .or_default()
-                    .insert(process_id.clone());
+                    .insert(ProcessId::from(process_id.clone().to_string()));
                 drop(observers);
                 self.append_managed_event(
                     record,
@@ -506,7 +509,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
 
     async fn list_observed_by(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
         let process_ids = self
@@ -526,7 +529,10 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         Ok(records)
     }
 
-    async fn observers_for_process(&self, process_id: &str) -> Result<Vec<SessionId>, PluginError> {
+    async fn observers_for_process(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Vec<SessionId>, PluginError> {
         if !self.managed.lock().await.contains_key(process_id) {
             return Err(self.process_miss(process_id).await);
         }
@@ -544,7 +550,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
 
     async fn retarget_subscription(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         target: Option<&str>,
     ) -> Result<(), PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -564,7 +570,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         let mut wake_targets = self.wake_targets.lock().await;
         match target {
             Some(target) => {
-                wake_targets.insert(process_id.to_string(), target.to_string());
+                wake_targets.insert(process_id.clone(), SessionId::from(target));
             }
             None => {
                 wake_targets.remove(process_id);
@@ -588,7 +594,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
 
     async fn delete_session_process_state(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<ProcessSessionDeleteReport, PluginError> {
         let _transaction = self.transaction.lock().await;
         let removed_observer_count = self
@@ -625,7 +631,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
             }
         }
         Ok(ProcessSessionDeleteReport {
-            session_id: session_id.to_string(),
+            session_id: session_id.clone(),
             removed_observer_count,
             discarded_wake_delivery_count,
             cleared_subscription_count: cleared_processes.len(),
@@ -637,7 +643,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
 impl super::registry::ProcessEventLog for TestLocalProcessRegistry {
     async fn append_event(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
         super::validate_generic_process_event_append(&request)?;
@@ -671,7 +677,7 @@ impl super::registry::ProcessEventLog for TestLocalProcessRegistry {
 
     async fn append_event_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
@@ -697,7 +703,7 @@ impl super::registry::ProcessEventLog for TestLocalProcessRegistry {
 
     async fn events_after(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         self.process_events_read_count
@@ -723,7 +729,7 @@ impl super::registry::ProcessEventLog for TestLocalProcessRegistry {
 impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
     async fn complete_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
@@ -733,7 +739,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
 
     async fn complete_process_with_parent_end(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
         actions: Vec<crate::ToolIntentParentEndAction>,
@@ -767,7 +773,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
                 .wake_allocation_floors
                 .lock()
                 .await
-                .get(&(target_session_id.clone(), process_id.to_string()))
+                .get(&(target_session_id.clone(), process_id.clone()))
                 .copied(),
             None => None,
         };
@@ -780,7 +786,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
             last_sequence,
             replay_lookup,
             now,
-            wake_session_id.as_deref(),
+            wake_session_id.as_ref(),
         )?;
         let outcome = match prepared {
             super::ProcessEventAppendPlan::Replay {
@@ -804,12 +810,8 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
                 ..
             } => {
                 self.insert_wake_delivery(wake_delivery.as_ref()).await?;
-                self.advance_wake_allocation_floor(
-                    wake_session_id.as_deref(),
-                    process_id,
-                    sequence,
-                )
-                .await;
+                self.advance_wake_allocation_floor(wake_session_id.as_ref(), process_id, sequence)
+                    .await;
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
                 record.parent_end_actions = (!actions.is_empty()).then_some(actions);
@@ -886,7 +888,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
             last_sequence,
             replay_lookup,
             now,
-            wake_session_id.as_deref(),
+            wake_session_id.as_ref(),
         )?;
         if let super::ProcessEventAppendPlan::Replay {
             repair_record,
@@ -925,7 +927,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
             } => {
                 self.insert_wake_delivery(wake_delivery.as_ref()).await?;
                 self.advance_wake_allocation_floor(
-                    wake_session_id.as_deref(),
+                    wake_session_id.as_ref(),
                     &lease.process_id,
                     sequence,
                 )
@@ -955,18 +957,18 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
 
     async fn get_pending_parent_end_plan(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
         parent_end::get(self, process_id).await
     }
 
-    async fn complete_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
+    async fn complete_parent_end_plan(&self, process_id: &ProcessId) -> Result<(), PluginError> {
         parent_end::complete(self, process_id).await
     }
 
     async fn record_first_started_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         started: ProcessStarted,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessStartOutcome, PluginError> {
@@ -1020,7 +1022,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
 
     async fn request_process_abandon(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         request: AbandonRequest,
     ) -> Result<ProcessRecord, PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -1042,7 +1044,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
 
     async fn record_caller_departure(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<ProcessRecord, PluginError> {
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
@@ -1061,7 +1063,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
 
     async fn set_process_wait_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         wait: WaitState,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
@@ -1091,7 +1093,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
 
     async fn clear_process_wait_with_authority(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -1155,7 +1157,7 @@ impl super::registry::ProcessToolIntents for TestLocalProcessRegistry {
 
     async fn pending_tool_intent_parent_end(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         execution_scope_id: &str,
     ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
         let _transaction = self.transaction.lock().await;
@@ -1395,7 +1397,7 @@ impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
     }
 }
 impl TestLocalProcessRegistry {
-    async fn processes_with_pending_deliveries(&self) -> HashSet<String> {
+    async fn processes_with_pending_deliveries(&self) -> HashSet<ProcessId> {
         self.wake_deliveries
             .lock()
             .await
@@ -1413,17 +1415,17 @@ impl TestLocalProcessRegistry {
     /// The prune eligibility predicate, shared by the survey and the prune so
     /// the two can never drift.
     fn prunable_process_ids(
-        managed: &HashMap<String, ManagedProcessRecord>,
+        managed: &HashMap<ProcessId, ManagedProcessRecord>,
         cutoff_epoch_ms: u64,
         filter: Option<&ProcessListFilter>,
         watermark: ProjectionWatermark,
-        processes_with_pending_deliveries: &HashSet<String>,
-    ) -> Vec<String> {
+        processes_with_pending_deliveries: &HashSet<ProcessId>,
+    ) -> Vec<ProcessId> {
         let max_change_seq = match watermark {
             ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
             ProjectionWatermark::NoProjector => None,
         };
-        let mut prunable: Vec<String> = managed
+        let mut prunable: Vec<ProcessId> = managed
             .iter()
             .filter(|(_, record)| {
                 record.record.status.is_retired() && record.record.updated_at_ms < cutoff_epoch_ms
@@ -1458,7 +1460,7 @@ impl super::registry::ProcessRetention for TestLocalProcessRegistry {
         };
         let outstanding_trigger_delivery_process_ids = outstanding_trigger_delivery_process_ids
             .iter()
-            .map(String::as_str)
+            .map(ProcessId::as_str)
             .collect::<std::collections::HashSet<_>>();
         let mut tombstones = self.tombstones.lock().await;
         let before = tombstones.len();
@@ -1489,7 +1491,7 @@ impl super::registry::ProcessRetention for TestLocalProcessRegistry {
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
         watermark: ProjectionWatermark,
-    ) -> Result<Vec<String>, PluginError> {
+    ) -> Result<Vec<ProcessId>, PluginError> {
         let _transaction = self.transaction.lock().await;
         let processes_with_pending_deliveries = self.processes_with_pending_deliveries().await;
         let managed = self.managed.lock().await;
@@ -1511,7 +1513,7 @@ impl super::registry::ProcessRetention for TestLocalProcessRegistry {
         let _transaction = self.transaction.lock().await;
         let processes_with_pending_deliveries = self.processes_with_pending_deliveries().await;
         let mut pruned_events = 0;
-        let prunable: HashSet<String> = {
+        let prunable: HashSet<ProcessId> = {
             let mut managed = self.managed.lock().await;
             let prunable = Self::prunable_process_ids(
                 &managed,
@@ -1526,7 +1528,7 @@ impl super::registry::ProcessRetention for TestLocalProcessRegistry {
                     pruned_events += record.events.len();
                     let pruned_change_seq = self.next_change_seq().await;
                     self.tombstones.lock().await.insert(
-                        (id.clone(), record.record.incarnation),
+                        (id.clone().to_string(), record.record.incarnation),
                         ProcessTombstone {
                             process_id: id.clone(),
                             incarnation: record.record.incarnation,
@@ -1580,14 +1582,14 @@ mod atomic_execution_write_tests;
 impl super::registry::ProcessRegistryTestSupport for TestLocalProcessRegistry {
     async fn wake_allocation_floor_for_testing(
         &self,
-        target_session_id: &str,
-        process_id: &str,
+        target_session_id: &SessionId,
+        process_id: &ProcessId,
     ) -> Result<Option<u64>, PluginError> {
         Ok(self
             .wake_allocation_floors
             .lock()
             .await
-            .get(&(target_session_id.to_string(), process_id.to_string()))
+            .get(&(target_session_id.clone(), process_id.clone()))
             .copied())
     }
 }

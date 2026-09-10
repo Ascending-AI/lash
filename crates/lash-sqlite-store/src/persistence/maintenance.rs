@@ -14,20 +14,20 @@ impl StoreMaintenance for Store {
                 let removed_node_count = tx.execute(
                     "DELETE FROM graph_nodes
                      WHERE session_id = ?1 AND tombstoned = 1",
-                    params![session_id],
+                    params![session_id.as_str()],
                 )?;
                 let removed_pending_turn_input_tombstone_count = tx.execute(
                     "DELETE FROM pending_turn_inputs
                      WHERE session_id = ?1 AND state IN (?2, ?3)",
                     params![
-                        session_id,
+                        session_id.as_str(),
                         lash_core::TurnInputState::Cancelled.as_str(),
                         lash_core::TurnInputState::Completed.as_str()
                     ],
                 )?;
                 tx.execute(
                     "DELETE FROM turn_cancel_requests WHERE session_id = ?1",
-                    params![session_id],
+                    params![session_id.as_str()],
                 )?;
                 Ok((
                     removed_node_count,

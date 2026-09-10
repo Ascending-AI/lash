@@ -24,14 +24,19 @@ where
             .map_err(|error| error.to_string())?;
         let stale_owner = owner(0);
         let stale_lease = store
-            .try_claim_session_execution_lease(SESSION_ID, &stale_owner, "run-executor", 60_000)
+            .try_claim_session_execution_lease(
+                &SessionId::from(SESSION_ID),
+                &stale_owner,
+                "run-executor",
+                60_000,
+            )
             .await
             .map_err(|error| error.to_string())?
             .acquired()
             .ok_or_else(|| "stale-owner lease busy".to_string())?;
         let claim = store
             .claim_ready_queued_work_by_batch_ids(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &stale_lease.fence(),
                 &stale_owner,
                 QueuedWorkClaimBoundary::Idle,
@@ -48,7 +53,7 @@ where
         let successor_owner = owner(1);
         let _successor_lease = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &successor_owner,
                 "run-executor-2",
                 60_000,
@@ -58,7 +63,7 @@ where
             .acquired()
             .ok_or_else(|| "successor lease busy".to_string())?;
         let mut state = RuntimeSessionState {
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         state.set_tool_state_snapshot(Some(
@@ -82,7 +87,7 @@ where
             return Err("accepted pre-reclaim commit did not publish its head".to_string());
         }
         let remaining_after_first = store
-            .list_queued_work(SESSION_ID)
+            .list_queued_work(&SessionId::from(SESSION_ID))
             .await
             .map_err(|error| error.to_string())?;
         if remaining_after_first.is_empty() != carrying_claim {
@@ -96,7 +101,7 @@ where
             return Err("identical pre-reclaim replay advanced the head twice".to_string());
         }
         let remaining_after_replay = store
-            .list_queued_work(SESSION_ID)
+            .list_queued_work(&SessionId::from(SESSION_ID))
             .await
             .map_err(|error| error.to_string())?;
         if remaining_after_replay
@@ -132,7 +137,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
     let predecessor_owner = owner(0);
     let predecessor_lease = store
         .try_claim_session_execution_lease(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &predecessor_owner,
             "law-reclaimed-predecessor-rejection-survives-successor-head-advance-executor",
             60_000,
@@ -143,7 +148,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .ok_or_else(|| TestCaseError::fail("predecessor lease busy"))?;
     let predecessor_claim = store
         .claim_ready_queued_work_by_batch_ids(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &predecessor_lease.fence(),
             &predecessor_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -161,7 +166,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
     let successor_owner = owner(1);
     let successor_lease = store
         .try_claim_session_execution_lease(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &successor_owner,
             "law-reclaimed-predecessor-rejection-survives-successor-head-advance-executor-2",
             60_000,
@@ -172,7 +177,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
     let successor_claim = store
         .claim_ready_queued_work_by_batch_ids(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -183,7 +188,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("successor did not reclaim queued work"))?;
     let mut successor_state = RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     successor_state.set_tool_state_snapshot(Some(
@@ -202,7 +207,7 @@ pub(super) async fn law_reclaimed_predecessor_rejection_survives_successor_head_
         .await
         .map_err(TestCaseError::fail)?;
     let mut predecessor_state = RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     predecessor_state.set_tool_state_snapshot(Some(

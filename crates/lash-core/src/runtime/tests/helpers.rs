@@ -42,7 +42,7 @@ pub(crate) fn native_scope(scope: crate::ExecutionScope) -> crate::ScopedEffectC
 }
 
 pub(crate) fn named_turn_scope(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> crate::ScopedEffectController<'static> {
     native_scope(crate::ExecutionScope::turn(session_id, turn_id))
@@ -416,13 +416,13 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
 
     // Recorded stores are retained, never tombstoned: this fixture drops no
     // session, so no id has a deletion marker.
-    async fn session_was_deleted(&self, _session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
@@ -433,7 +433,7 @@ async fn recording_factory_root_set_keeps_committed_blob() {
     let factory = RecordingSessionStoreFactory::default();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "recording-factory-gc".to_string(),
+        session_id: SessionId::from("recording-factory-gc"),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
@@ -482,7 +482,7 @@ async fn recording_factory_root_set_keeps_committed_blob() {
 }
 
 pub(crate) fn plugin_session_with_orchestrating_tool(
-    session_id: &str,
+    session_id: &SessionId,
     tool: crate::tool_provider::orchestration::OrchestratingToolDef,
 ) -> Arc<crate::PluginSession> {
     let tool_factory = StaticPluginFactory::new(
@@ -497,7 +497,7 @@ pub(crate) fn plugin_session_with_orchestrating_tool(
 }
 
 pub(crate) fn plugin_session_with_tools(
-    session_id: &str,
+    session_id: &SessionId,
     tools: Arc<dyn crate::ToolProvider>,
 ) -> Arc<crate::PluginSession> {
     let tool_factory = StaticPluginFactory::new(
@@ -555,7 +555,7 @@ pub(crate) struct TestRuntime {
     host: EmbeddedRuntimeHost,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
-    session_id: Option<String>,
+    session_id: Option<SessionId>,
 }
 
 impl TestRuntime {
@@ -600,7 +600,7 @@ impl TestRuntime {
         self
     }
 
-    pub(crate) fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+    pub(crate) fn with_session_id(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }

@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::StoreError;
@@ -589,7 +591,7 @@ impl ModelStore {
                     as usize;
                 let runtime_contract = runtime_turn_contract(
                     &RuntimeTurnObservation {
-                        session_id: event.actor_alias.clone(),
+                        session_id: SessionId::from(event.actor_alias.clone()),
                         turn_index,
                         assistant_message: text.clone(),
                         graph_node_count,
@@ -600,7 +602,7 @@ impl ModelStore {
                         agent_frame_invariant: Default::default(),
                         usage_invariant: Default::default(),
                     },
-                    &event.actor_alias,
+                    &SessionId::from(event.actor_alias.clone()),
                     turn_index,
                     &text,
                     provider_exchange_count,
@@ -646,7 +648,7 @@ impl ModelStore {
                 let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
                     .expect("non-empty initial frame material");
                 let frame_node_id = lash_core::facade_support::frame_node_id(
-                    &event.actor_alias,
+                    &SessionId::from(event.actor_alias.clone()),
                     frame_key.as_str(),
                 );
                 json!({
@@ -922,7 +924,7 @@ impl ModelStore {
                     .map_or_else(
                         || {
                             lash_core::facade_support::process_wake_source_key(
-                                &process_id,
+                                &ProcessId::from(process_id.clone()),
                                 sequence,
                             )
                         },
@@ -931,8 +933,8 @@ impl ModelStore {
                     .to_string();
                 let wake = lash_core::facade_support::process_wake_delivery(
                     lash_core::facade_support::ProcessWakeDeliveryRequest {
-                        target_session_id: session.clone(),
-                        process_id: process_id.clone(),
+                        target_session_id: SessionId::from(session.clone()),
+                        process_id: ProcessId::from(process_id.clone()),
                         process_incarnation:
                             lash_core::ProcessIncarnation::from_registration_sequence(
                                 process_incarnation,
@@ -942,7 +944,7 @@ impl ModelStore {
                         event_invocation: lash_core::RuntimeInvocation {
                             scope: lash_core::runtime::RuntimeScope::new(session.clone()),
                             subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
-                                process_id: process_id.clone(),
+                                process_id: ProcessId::from(process_id.clone()),
                                 sequence,
                                 event_type: "process.wake".to_string(),
                             },
@@ -1226,7 +1228,7 @@ impl ModelStore {
         let recorded_intents =
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    session_id: event.actor_alias.clone(),
+                    session_id: SessionId::from(event.actor_alias.clone()),
                     request: lash_core::ProcessStartRequest::external(
                         format!("{effect_id}:intent-child"),
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),

@@ -4,6 +4,7 @@ use super::{
     BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
     SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
 };
+use crate::SessionId;
 use crate::TurnId;
 
 const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
@@ -96,7 +97,7 @@ pub struct RuntimeCommit {
     /// It is operational authority and intentionally excluded from the durable
     /// semantic commit identity projection.
     pub commit_budget: super::CommitBudget,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub expected_head_revision: u64,
     /// Current execution-lane authority required by a borrowed-lane commit.
     ///
@@ -549,7 +550,7 @@ mod usage_payload_identity_tests {
     fn runtime_commit_rejects_a_payload_version_hash_mismatch() {
         let entry = usage_payload_v4_corpus().pop().expect("usage fixture").1;
         let state = crate::RuntimeSessionState {
-            session_id: "usage-payload-version".to_string(),
+            session_id: SessionId::from("usage-payload-version"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))

@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -12,7 +14,7 @@ fn runtime_replay_round_trip_retains_minting_emission_key() {
         key: "tool-intent:derived".to_string(),
         attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
             lash_core::ToolIntentIdentity {
-                session_id: "session".to_string(),
+                session_id: SessionId::from("session"),
                 execution_scope_id: "turn".to_string(),
                 tool_call_id: "call".to_string(),
                 intent_index: 0,
@@ -521,7 +523,7 @@ fn trigger_dtos_round_trip_core_values() {
         deliveries: vec![lash_core::facade_support::TriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: "process:1".to_string(),
+            process_id: ProcessId::from("process:1"),
             outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
         }],
     };
@@ -647,7 +649,7 @@ fn process_start_requests_round_trip_core_values() {
         lash_core::ProcessOriginator::host(),
         serde_json::json!({ "label": "External" }),
     )
-    .with_wake_session_id(Some("session-a".to_string()))
+    .with_wake_session_id(Some(SessionId::from("session-a".to_string())))
     .with_observers(["session-a".to_string()])
     .with_event_types([process_event_type()]);
     assert_process_start_roundtrip(external);
@@ -712,7 +714,7 @@ fn process_start_requests_round_trip_core_values() {
 
 #[test]
 fn process_records_events_snapshots_and_results_round_trip_core_values() {
-    let mut record = process_record("process:record");
+    let mut record = process_record(&ProcessId::from("process:record"));
     record.status = lash_core::ProcessStatus::Completed;
     record.outcome = Some(lash_core::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!({ "done": true })),
@@ -744,7 +746,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.process_id, summary.process_id);
     assert_eq!(core.status, summary.status);
 
-    let event = process_event("process:record");
+    let event = process_event(&ProcessId::from("process:record"));
     let remote = RemoteProcessEvent::try_from(event.clone()).expect("remote process event");
     remote
         .validate("RemoteProcessEvent")
@@ -766,7 +768,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core_observed[0].process_id, observed.process_id);
 
     let snapshot = lash_core::facade_support::ProcessWorkSnapshot {
-        session_id: "session-a".to_string(),
+        session_id: SessionId::from("session-a"),
         visible_processes: vec![lash_core::ProcessRef::new(
             "process:observed",
             lash_core::ProcessIncarnation::from_registration_sequence(1),
@@ -791,13 +793,15 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.session_id, snapshot.session_id);
     assert_eq!(core.items[0].process.process_id, "process:observed");
 
-    let start_result = RemoteProcessStartReceipt::try_from(process_record("process:start-result"))
-        .expect("start result");
+    let start_result = RemoteProcessStartReceipt::try_from(process_record(&ProcessId::from(
+        "process:start-result",
+    )))
+    .expect("start result");
     let core = lash_core::ProcessRecord::try_from(start_result).expect("core start result");
     assert_eq!(core.id, "process:start-result");
 
     let cancel = RemoteProcessCancelReceipt::from(lash_core::ProcessCancelReceipt {
-        process_id: "process:cancel".to_string(),
+        process_id: ProcessId::from("process:cancel"),
         incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         status: lash_core::ProcessStatus::Cancelled,
     });
@@ -906,7 +910,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     assert!(core.definition.is_some());
 
     let cancel = RemoteProcessCancelRequest {
-        process_id: "process:cancel".to_string(),
+        process_id: ProcessId::from("process:cancel"),
         incarnation: 1,
         reason: Some("host requested".to_string()),
     };
@@ -920,7 +924,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     ));
 
     let signal = RemoteProcessSignalRequest {
-        process_id: "process:signal".to_string(),
+        process_id: ProcessId::from("process:signal"),
         incarnation: 1,
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
@@ -941,7 +945,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     ));
 
     let await_request = RemoteProcessAwaitRequest {
-        process_id: "process:await".to_string(),
+        process_id: ProcessId::from("process:await"),
         incarnation: 1,
     };
     await_request.validate().expect("valid await");
@@ -964,8 +968,8 @@ fn observer_audit_and_fork_selector_types_round_trip() {
     assert_eq!(lash_core::ProcessObserverBy::from(remote_by), by);
 
     let selector = lash_core::ObserverInheritance::Only(vec![
-        "process-a".to_string(),
-        "process-b".to_string(),
+        ProcessId::from("process-a".to_string()),
+        ProcessId::from("process-b".to_string()),
     ]);
     let remote_selector = RemoteObserverInheritance::from(selector.clone());
     remote_selector
@@ -1067,7 +1071,7 @@ fn remote_turn_result_maps_core_semantics() {
     .expect("model call recorded activity");
     let intent_outcome = RemoteToolIntentExecutionOutcome::Executed {
         identity: RemoteToolIntentIdentity {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             execution_scope_id: "turn".to_string(),
             tool_call_id: "exec-call".to_string(),
             intent_index: 0,
@@ -1729,7 +1733,7 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
     let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
     let prepared = lash_core::LiveReplayStore::prepare_publication(
         &store,
-        "session",
+        &SessionId::from("session"),
         lash_core::SessionRevision::new(4),
         vec![lash_core::LiveReplayEventDraft::new(
             None::<String>,
@@ -1744,7 +1748,7 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
         .expect("publish observation event")
         .remove(0);
     let snapshot = lash_core::SessionSnapshot {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_index: 12,
         token_usage: lash_core::TokenUsage {
             input_tokens: 10,
@@ -1784,7 +1788,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
         let prepared = lash_core::LiveReplayStore::prepare_publication(
             &store,
-            "session",
+            &SessionId::from("session"),
             lash_core::SessionRevision::new(4),
             vec![lash_core::LiveReplayEventDraft::new(turn_id, payload)],
         )
@@ -1909,7 +1913,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
             None,
             lash_core::SessionObservationEventPayload::ProcessChanged {
                 kind: lash_core::SessionProcessEventKind::Started,
-                process_ids: vec!["process-1".to_string()],
+                process_ids: vec![ProcessId::from("process-1".to_string())],
             },
         ),
     )
@@ -2068,7 +2072,7 @@ fn process_event_type() -> lash_core::ProcessEventType {
     }
 }
 
-fn process_record(process_id: &str) -> lash_core::ProcessRecord {
+fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord {
     let registration = lash_core::ProcessRegistration::new(
         process_id,
         lash_core::ProcessInput::External {
@@ -2085,7 +2089,7 @@ fn process_record(process_id: &str) -> lash_core::ProcessRecord {
         )),
     )
     .with_event_types([process_event_type()])
-    .with_wake_session_id(Some("session-a".to_string()));
+    .with_wake_session_id(Some(SessionId::from("session-a".to_string())));
     let mut record = lash_core::ProcessRecord::from_registration(
         registration,
         lash_core::ProcessIncarnation::from_registration_sequence(1),
@@ -2107,9 +2111,9 @@ fn process_record(process_id: &str) -> lash_core::ProcessRecord {
     record
 }
 
-fn process_event(process_id: &str) -> lash_core::ProcessEvent {
+fn process_event(process_id: &ProcessId) -> lash_core::ProcessEvent {
     lash_core::ProcessEvent {
-        process_id: process_id.to_string(),
+        process_id: ProcessId::from(process_id.to_string()),
         process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.completed".to_string(),
@@ -2121,7 +2125,7 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
             "replay:1",
         )
         .with_caused_by(Some(lash_core::CausalRef::Process {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
         })),
         semantics: lash_core::runtime::ProcessEventSemantics {
             terminal: Some(lash_core::facade_support::ProcessTerminalSemantics {
@@ -2140,7 +2144,7 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
 
 fn observed_process() -> lash_core::facade_support::ObservedProcess {
     lash_core::facade_support::ObservedProcess {
-        process_id: "process:observed".to_string(),
+        process_id: ProcessId::from("process:observed"),
         incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         last_event_sequence: 0,
         graph_key: "process:process:observed:incarnation:1".to_string(),

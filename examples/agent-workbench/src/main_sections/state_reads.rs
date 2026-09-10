@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 pub(crate) struct StateProjectionReads {
     pub(crate) read_view: lash::persistence::SessionReadView,
@@ -11,14 +12,14 @@ pub(crate) struct StateProjectionReads {
 
 pub(crate) fn state_store_request(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> lash::persistence::SessionStoreCreateRequest {
     let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
-    policy.session_id = Some(session_id.to_string());
+    policy.session_id = Some(SessionId::from(session_id.to_string()));
     policy.model = model_spec_from_selection(state.selected_model());
     lash::persistence::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: lash::persistence::SessionRelation::Root,
         policy,
     }
@@ -26,7 +27,7 @@ pub(crate) fn state_store_request(
 
 pub(crate) async fn read_state_projection(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     active_turn: bool,
 ) -> Result<StateProjectionReads, AppError> {
     if !active_turn {
@@ -66,7 +67,7 @@ pub(crate) async fn read_state_projection(
         .map_err(AppError::internal)?
         .unwrap_or_else(|| {
             let mut persisted = lash::persistence::RuntimeSessionState::new(request.policy);
-            persisted.session_id = session_id.to_string();
+            persisted.session_id = SessionId::from(session_id.to_string());
             persisted
         });
     let revision = persisted

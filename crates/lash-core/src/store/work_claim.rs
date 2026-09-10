@@ -1,3 +1,4 @@
+use crate::SessionId;
 /// Shared data-layer authority record for every claimed unit of session work.
 ///
 /// `C` carries the class-specific material while the six ownership and fencing
@@ -5,7 +6,7 @@
 /// serde representation remains identical to the former per-class records.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WorkClaim<C> {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub claim_id: String,
     pub owner: crate::LeaseOwnerIdentity,
     pub lease_token: String,
@@ -40,7 +41,7 @@ impl<C> std::ops::DerefMut for WorkClaim<C> {
 /// completion records.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WorkCompletion<C> {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub claim_id: String,
     pub lease_token: String,
     #[serde(flatten)]
@@ -67,7 +68,7 @@ mod tests {
 
     fn authority_fields<C>(data: C) -> WorkClaim<C> {
         WorkClaim {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             claim_id: "claim".to_string(),
             owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             lease_token: "lease".to_string(),
@@ -128,7 +129,7 @@ mod tests {
     #[test]
     fn queued_completion_json_keeps_the_pre_unification_shape() {
         let completion = crate::QueuedWorkCompletion {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             claim_id: "claim".to_string(),
             lease_token: "lease".to_string(),
             data: crate::QueuedWorkCompletionData {
@@ -144,7 +145,7 @@ mod tests {
     #[test]
     fn turn_input_completion_json_keeps_the_pre_unification_shape() {
         let completion = crate::TurnInputCompletion {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             claim: Some(crate::TurnInputSettlementClaim {
                 claim_id: "claim".to_string(),
                 lease_token: "lease".to_string(),
@@ -176,7 +177,7 @@ mod tests {
     #[test]
     fn unclaimed_turn_input_completion_omits_claim_authority() {
         let completion = crate::TurnInputCompletion {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             claim: None,
             data: crate::TurnInputCompletionData {
                 input_ids: vec!["input".to_string()],

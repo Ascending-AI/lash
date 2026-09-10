@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use crate::plugin::PluginError;
 
 use super::events::{
@@ -8,7 +9,7 @@ use super::events::{
 use super::model::ProcessStatus;
 
 pub fn materialize_process_event_semantics(
-    process_id: &str,
+    process_id: &ProcessId,
     sequence: u64,
     payload: &serde_json::Value,
     spec: &ProcessEventSemanticsSpec,
@@ -17,7 +18,7 @@ pub fn materialize_process_event_semantics(
 }
 
 pub(super) fn materialize_event_semantics(
-    process_id: &str,
+    process_id: &ProcessId,
     sequence: u64,
     payload: &serde_json::Value,
     spec: &ProcessEventSemanticsSpec,
@@ -116,7 +117,7 @@ fn selected_value_to_await_output(
 }
 
 fn materialize_wake(
-    process_id: &str,
+    process_id: &ProcessId,
     sequence: u64,
     payload: &serde_json::Value,
     wake: &ProcessWakeSpec,

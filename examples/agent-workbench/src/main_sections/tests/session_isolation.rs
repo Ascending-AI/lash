@@ -112,9 +112,11 @@ async fn concurrent_sessions_isolate_transcripts_triggers_and_processes_inner() 
     assert_eq!(registrations_b.len(), 1);
     assert_eq!(registrations_a[0].source_key, registrations_b[0].source_key);
 
+    let session_a_scope = SessionId::from(session_a_id);
+    let session_b_scope = SessionId::from(session_b_id);
     let (report_a, report_b) = tokio::join!(
-        emit_test_button_trigger_for_session(&core, ButtonChoice::Blue, session_a_id),
-        emit_test_button_trigger_for_session(&core, ButtonChoice::Blue, session_b_id),
+        emit_test_button_trigger_for_session(&core, ButtonChoice::Blue, &session_a_scope),
+        emit_test_button_trigger_for_session(&core, ButtonChoice::Blue, &session_b_scope),
     );
     assert_eq!(report_a.started_process_ids().len(), 1);
     assert_eq!(report_b.started_process_ids().len(), 1);

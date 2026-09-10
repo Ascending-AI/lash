@@ -1,5 +1,6 @@
 //! Backend-neutral lineage derivation for zero-copy forks.
 
+use crate::SessionId;
 use std::collections::BTreeMap;
 
 use super::StoreError;
@@ -9,14 +10,14 @@ use super::StoreError;
 pub struct ForkNodeFacts {
     pub node_id: String,
     pub parent_node_id: Option<String>,
-    pub owning_session_id: String,
+    pub owning_session_id: SessionId,
     pub generation: u64,
 }
 
 /// One per-ancestor read ceiling inherited by a zero-copy fork.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkLineageAncestor {
-    pub ancestor_session_id: String,
+    pub ancestor_session_id: SessionId,
     pub fork_node_id: String,
     pub fork_generation: u64,
 }
@@ -24,7 +25,7 @@ pub struct ForkLineageAncestor {
 /// Core-owned durable lineage prescription for a zero-copy fork.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkPlan {
-    session_id: String,
+    session_id: SessionId,
     ancestors: Vec<ForkLineageAncestor>,
 }
 
@@ -36,7 +37,7 @@ impl ForkPlan {
     /// path, regardless of whether the owner's head or any descendant lineage
     /// carrier still exists.
     pub fn derive(
-        session_id: &str,
+        session_id: &SessionId,
         edge_path: impl IntoIterator<Item = ForkNodeFacts>,
     ) -> Result<Self, StoreError> {
         let mut ancestors = BTreeMap::new();
@@ -78,7 +79,7 @@ impl ForkPlan {
         }
 
         Ok(Self {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ancestors: ancestors.into_values().collect(),
         })
     }
@@ -91,7 +92,7 @@ impl ForkPlan {
         &self.ancestors
     }
 
-    pub fn includes(&self, owning_session_id: &str, generation: u64) -> bool {
+    pub fn includes(&self, owning_session_id: &SessionId, generation: u64) -> bool {
         self.ancestors.iter().any(|ancestor| {
             ancestor.ancestor_session_id == owning_session_id
                 && generation <= ancestor.fork_generation
@@ -107,7 +108,7 @@ mod tests {
         ForkNodeFacts {
             node_id: format!("{owner}-{generation}"),
             parent_node_id: parent.map(str::to_string),
-            owning_session_id: owner.to_string(),
+            owning_session_id: SessionId::from(owner.to_string()),
             generation,
         }
     }
@@ -115,7 +116,7 @@ mod tests {
     #[test]
     fn fork_plan_derives_maximum_generation_per_owner_from_edges() {
         let plan = ForkPlan::derive(
-            "child",
+            &SessionId::from("child"),
             [
                 node("a", 0, None),
                 node("a", 1, Some("a-0")),
@@ -131,30 +132,33 @@ mod tests {
             plan.ancestors(),
             &[
                 ForkLineageAncestor {
-                    ancestor_session_id: "a".to_string(),
+                    ancestor_session_id: SessionId::from("a"),
                     fork_node_id: "a-1".to_string(),
                     fork_generation: 1,
                 },
                 ForkLineageAncestor {
-                    ancestor_session_id: "b".to_string(),
+                    ancestor_session_id: SessionId::from("b"),
                     fork_node_id: "b-3".to_string(),
                     fork_generation: 3,
                 },
                 ForkLineageAncestor {
-                    ancestor_session_id: "c".to_string(),
+                    ancestor_session_id: SessionId::from("c"),
                     fork_node_id: "c-4".to_string(),
                     fork_generation: 4,
                 },
             ]
         );
-        assert!(plan.includes("a", 0));
-        assert!(!plan.includes("a", 2));
+        assert!(plan.includes(&SessionId::from("a"), 0));
+        assert!(!plan.includes(&SessionId::from("a"), 2));
     }
 
     #[test]
     fn fork_plan_rejects_a_non_edge_path() {
-        let error = ForkPlan::derive("child", [node("a", 0, None), node("b", 2, Some("a-0"))])
-            .expect_err("generation gap must be corruption");
+        let error = ForkPlan::derive(
+            &SessionId::from("child"),
+            [node("a", 0, None), node("b", 2, Some("a-0"))],
+        )
+        .expect_err("generation gap must be corruption");
         assert!(matches!(error, StoreError::StoredDataCorrupt { .. }));
     }
 }

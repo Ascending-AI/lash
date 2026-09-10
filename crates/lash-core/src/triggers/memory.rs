@@ -1,4 +1,6 @@
 use super::*;
+use crate::ProcessId;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 pub struct InMemoryTriggerStore {
@@ -15,7 +17,7 @@ pub struct RawTriggerStateForTesting {
     pub subscriptions: Vec<TriggerSubscriptionRecord>,
     pub mutation_receipts: Vec<(String, String, TriggerEffectResult, u64)>,
     pub occurrences: Vec<TriggerOccurrenceRecord>,
-    pub deliveries: Vec<(String, String, String, u64, TriggerSubscriptionRecord)>,
+    pub deliveries: Vec<(String, String, ProcessId, u64, TriggerSubscriptionRecord)>,
 }
 
 impl InMemoryTriggerStore {
@@ -191,7 +193,7 @@ pub(super) struct InMemoryTriggerEventState {
 pub(super) struct InMemoryTriggerDeliveryRecord {
     pub(super) occurrence_id: String,
     pub(super) subscription_id: String,
-    pub(super) process_id: String,
+    pub(super) process_id: ProcessId,
     pub(super) created_at_ms: u64,
     pub(super) subscription_snapshot: TriggerSubscriptionRecord,
 }
@@ -270,7 +272,10 @@ impl TriggerStore for InMemoryTriggerStore {
         Ok(records)
     }
 
-    async fn delete_session_subscriptions(&self, session_id: &str) -> Result<usize, PluginError> {
+    async fn delete_session_subscriptions(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<usize, PluginError> {
         let mut state = self.state.lock_recover();
         let mut changed = 0usize;
         let now = self.clock.timestamp_ms();
@@ -396,7 +401,7 @@ impl TriggerStore for InMemoryTriggerStore {
 
     async fn list_deliveries_by_process_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
         self.list_deliveries_matching(|delivery| delivery.process_id == process_id)
     }
@@ -405,7 +410,7 @@ impl TriggerStore for InMemoryTriggerStore {
         self.list_deliveries_matching(|_| true)
     }
 
-    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError> {
+    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError> {
         let state = self.state.lock_recover();
         Ok(state
             .deliveries
@@ -431,25 +436,27 @@ impl TriggerStore for InMemoryTriggerStore {
             .collect())
     }
 
-    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<String>, PluginError> {
+    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<SessionId>, PluginError> {
         let state = self.state.lock_recover();
         let mut session_ids = state
             .subscriptions
             .values()
-            .filter_map(|record| record.registrant_session_id().map(str::to_string))
+            .filter_map(|record| record.registrant_session_id().cloned())
             .collect::<std::collections::BTreeSet<_>>();
         session_ids.extend(state.deliveries.values().filter_map(|delivery| {
             delivery
                 .subscription_snapshot
                 .registrant_session_id()
-                .map(str::to_string)
+                .cloned()
         }));
         session_ids.extend(
             state
                 .mutation_receipts
                 .values()
                 .filter_map(|(owner_scope, _, _, _)| owner_scope.as_deref())
-                .filter_map(|owner_scope| owner_scope.strip_prefix("session:").map(str::to_string)),
+                .filter_map(|owner_scope| {
+                    owner_scope.strip_prefix("session:").map(SessionId::from)
+                }),
         );
         Ok(session_ids.into_iter().collect())
     }
@@ -457,7 +464,7 @@ impl TriggerStore for InMemoryTriggerStore {
     async fn reconcile_trigger_retention(
         &self,
         candidates: &[TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[String],
+        deleted_session_ids: &[SessionId],
     ) -> Result<TriggerRetentionReconciliationReport, PluginError> {
         let candidates = candidates
             .iter()
@@ -471,7 +478,6 @@ impl TriggerStore for InMemoryTriggerStore {
             .collect::<std::collections::HashSet<_>>();
         let deleted_session_ids = deleted_session_ids
             .iter()
-            .map(String::as_str)
             .collect::<std::collections::HashSet<_>>();
         let mut state = self.state.lock_recover();
         let mut staged = state.clone();
@@ -528,7 +534,7 @@ impl TriggerStore for InMemoryTriggerStore {
                 delivery
                     .subscription_snapshot
                     .registrant_session_id()
-                    .map(str::to_string)
+                    .cloned()
             })
             .collect::<std::collections::HashSet<_>>();
         let retained_delivery_subscription_ids = staged
@@ -554,8 +560,9 @@ impl TriggerStore for InMemoryTriggerStore {
                 let Some(session_id) = owner_scope.strip_prefix("session:") else {
                     return true;
                 };
-                !deleted_session_ids.contains(session_id)
-                    || retained_delivery_session_ids.contains(session_id)
+                let session_id = SessionId::from(session_id);
+                !deleted_session_ids.contains(&session_id)
+                    || retained_delivery_session_ids.contains(&session_id)
             });
 
         let report = TriggerRetentionReconciliationReport {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 use crate::ToolDefinition;
 use lash_sansio::sync::MutexExt;
 use serde_json::json;
@@ -78,7 +79,7 @@ fn dynamic_definition(name: &str) -> ToolDefinition {
 
 fn test_tool_context() -> crate::ToolContext<'static> {
     crate::ToolContext::builder(
-        "registry-test".to_string(),
+        SessionId::from("registry-test"),
         Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::testing::MockSessionManager::default()),
@@ -996,7 +997,7 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
     );
 
     let prepare_context = crate::ToolPrepareContext::with_execution_binding(
-        "registry-test".to_string(),
+        SessionId::from("registry-test"),
         Arc::new(crate::testing::MockSessionManager::default()),
         crate::TurnContext::default(),
         Some("unknown-call".to_string()),
@@ -1321,7 +1322,7 @@ async fn execution_grant_routes_without_adding_tool_to_state_or_catalog() {
         .with_source_id("exact")
         .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
     let prepare_context = crate::ToolPrepareContext::with_execution_binding(
-        "registry-test".to_string(),
+        SessionId::from("registry-test"),
         Arc::new(crate::testing::MockSessionManager::default()),
         crate::TurnContext::default(),
         Some("grant-call".to_string()),

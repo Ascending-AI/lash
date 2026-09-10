@@ -42,6 +42,8 @@ use lash_core::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreError,
 };
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use sqlx::postgres::PgPool;
 use sqlx::{Postgres, Transaction};
 
@@ -224,13 +226,14 @@ async fn scan_parked_segments(
         .into_iter()
         .map(
             |(process_id, segment_ordinal, handover_json, status, wake_session_id, record_json)| {
+                let process_id = ProcessId::from(process_id);
                 DurableItem {
                     surface: DurableSurface::ParkedSegment,
                     cursor: segment_cursor(&process_id, segment_ordinal),
                     process_id: Some(process_id),
                     // The session the process wakes into, which is the identity
                     // an operator draining a stuck continuation looks for.
-                    session_id: wake_session_id,
+                    session_id: wake_session_id.map(SessionId::from),
                     status: Some(status),
                     // The registry record travels with the item because an
                     // identity-only durable format cannot be checked from the
@@ -268,8 +271,8 @@ async fn scan_pending_wakes(
             |(delivery_id, process_id, target_session_id, state, delivery_json)| DurableItem {
                 surface: DurableSurface::PendingWake,
                 cursor: delivery_id,
-                process_id: Some(process_id),
-                session_id: Some(target_session_id),
+                process_id: Some(ProcessId::from(process_id)),
+                session_id: Some(SessionId::from(target_session_id)),
                 // The delivery's own state word, verbatim: an operator reading
                 // `enqueuing` learns the claim lapsed mid-flight, which a
                 // translation to "pending" would have hidden.
@@ -317,7 +320,7 @@ async fn scan_session_checkpoints(
         .iter()
         .map(|session| DurableItem {
             surface: DurableSurface::SessionCheckpoint,
-            cursor: session.session_id.clone(),
+            cursor: session.session_id.clone().to_string(),
             process_id: None,
             session_id: Some(session.session_id.clone()),
             status: None,
@@ -340,7 +343,9 @@ async fn scan_session_checkpoints(
         .collect();
     let next = page_cursor(
         scan,
-        sessions.last().map(|session| session.session_id.clone()),
+        sessions
+            .last()
+            .map(|session| session.session_id.to_string()),
         sessions.len(),
     );
     finish(snapshot, Ok(scanned(items, next))).await
@@ -394,7 +399,7 @@ async fn scan_session_execution_state(
             continue;
         };
         if let Some(blob_ref) = execution_state_ref(manifest) {
-            resolved.push((session.session_id.clone(), blob_ref));
+            resolved.push((session.session_id.clone().to_string(), blob_ref));
         }
     }
     let component_refs: Vec<String> = resolved
@@ -412,7 +417,7 @@ async fn scan_session_execution_state(
             surface: DurableSurface::SessionExecutionState,
             cursor: session_id.clone(),
             process_id: None,
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
             status: None,
             owner_record: None,
             payload: match components.get(blob_ref.as_str()) {
@@ -432,7 +437,9 @@ async fn scan_session_execution_state(
     // Deliberately the last *session*, not the last item — see the doc comment.
     let next = page_cursor(
         scan,
-        sessions.last().map(|session| session.session_id.clone()),
+        sessions
+            .last()
+            .map(|session| session.session_id.to_string()),
         sessions.len(),
     );
     finish(snapshot, Ok(scanned(items, next))).await
@@ -492,7 +499,7 @@ async fn fetch_sessions(
     Ok(rows
         .into_iter()
         .map(|(session_id, checkpoint_ref)| SessionCheckpointRow {
-            session_id,
+            session_id: SessionId::from(session_id),
             checkpoint_ref,
         })
         .collect())
@@ -617,7 +624,7 @@ fn page_cursor(scan: &DurableScan, last: Option<String>, returned: usize) -> Opt
 /// The ordinal is zero-padded so the cursor reads in the same order the rows
 /// do, which keeps a cursor an operator sees in a report meaningful rather than
 /// arbitrary. Paging itself never relies on that: see [`PARKED_SEGMENT_SQL`].
-fn segment_cursor(process_id: &str, segment_ordinal: i64) -> String {
+fn segment_cursor(process_id: &ProcessId, segment_ordinal: i64) -> String {
     format!("{process_id}:{segment_ordinal:020}")
 }
 
@@ -660,7 +667,7 @@ type PendingWakeRow = (String, String, String, String, String);
 /// A session that has published a checkpoint root, named rather than positional
 /// because both deep surfaces pass it around well away from its query.
 struct SessionCheckpointRow {
-    session_id: String,
+    session_id: SessionId,
     checkpoint_ref: String,
 }
 
@@ -713,7 +720,7 @@ mod tests {
 
     #[test]
     fn a_minted_segment_cursor_round_trips_through_its_split() {
-        let cursor = segment_cursor("proc-7", 42);
+        let cursor = segment_cursor(&ProcessId::from("proc-7"), 42);
         assert_eq!(cursor, "proc-7:00000000000000000042");
         assert_eq!(
             split_segment_cursor(&cursor).expect("a minted cursor parses"),
@@ -725,7 +732,7 @@ mod tests {
     fn a_process_id_containing_the_separator_still_round_trips() {
         // The reason the split is from the right: the ordinal cannot contain a
         // separator, the process id can, so the last one is always ours.
-        let cursor = segment_cursor("tenant:a:proc-1", 3);
+        let cursor = segment_cursor(&ProcessId::from("tenant:a:proc-1"), 3);
         assert_eq!(
             split_segment_cursor(&cursor).expect("a minted cursor parses"),
             ("tenant:a:proc-1".to_string(), 3)

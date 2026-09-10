@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 #[test]
 fn turn_result_total_usage_sums_parent_and_children() {
@@ -12,7 +13,7 @@ fn turn_result_total_usage_sums_parent_and_children() {
         acceptance: None,
         cancel_input_outcome: Default::default(),
         state: SessionSnapshot {
-            session_id: "s".to_string(),
+            session_id: SessionId::from("s"),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,

@@ -41,7 +41,7 @@ impl LogicalTurnClaims {
     pub(super) fn commit_effects(
         &self,
         outcome: &TurnOutcome,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     ) -> LogicalTurnCommitEffects {

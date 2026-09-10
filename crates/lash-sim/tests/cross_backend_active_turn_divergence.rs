@@ -7,6 +7,7 @@
 //! Notify gating — that gating is the harness artifact under test). Compares
 //! committed assistant message + cumulative provider exchange count per turn.
 
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::path::Path;
 use std::sync::Arc;
@@ -128,11 +129,17 @@ impl AwaitEventResolver for YieldBeforeCancelWatchController {
         self.inner.await_await_event(key, cancel, deadline).await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
 }
@@ -238,7 +245,7 @@ struct TurnObs {
 async fn drive_cancel_before_turn(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (Vec<TurnObs>, String) {
     let session = core
         .session(session_id.to_string())
@@ -277,7 +284,7 @@ async fn drive_cancel_before_turn(
 async fn drive_cancel_after_turn(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (Vec<TurnObs>, String) {
     let session = core
         .session(session_id.to_string())
@@ -318,7 +325,7 @@ async fn drive_cancel_after_turn(
 async fn drive_no_cancel_control(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Vec<TurnObs> {
     let session = core
         .session(session_id.to_string())
@@ -351,7 +358,7 @@ async fn drive_no_cancel_control(
 async fn drive_claim_then_cancel(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (Vec<TurnObs>, String) {
     let session = core
         .session(session_id.to_string())
@@ -429,21 +436,25 @@ async fn cross_backend_active_turn_cancel_then_turn_agrees() {
     // Variant B: cancel BEFORE turn 1 runs (closest to the recorded trace
     // timing: cancel precedes turn 1's AfterWork checkpoint).
     let (mem_core, mem_tx) = build_in_memory(8).await;
-    let (b_mem, b_mem_cancel) = drive_cancel_before_turn(&mem_core, &mem_tx, "mem-B").await;
+    let (b_mem, b_mem_cancel) =
+        drive_cancel_before_turn(&mem_core, &mem_tx, &SessionId::from("mem-B")).await;
     let (sq_core, sq_tx) = build_sqlite(&tmp.path().join("sqlite-B"), 8).await;
-    let (b_sq, b_sq_cancel) = drive_cancel_before_turn(&sq_core, &sq_tx, "sql-B").await;
+    let (b_sq, b_sq_cancel) =
+        drive_cancel_before_turn(&sq_core, &sq_tx, &SessionId::from("sql-B")).await;
 
     // Variant A: cancel AFTER turn 1 (task-literal ordering).
     let (mem_core_a, mem_tx_a) = build_in_memory(8).await;
-    let (a_mem, a_mem_cancel) = drive_cancel_after_turn(&mem_core_a, &mem_tx_a, "mem-A").await;
+    let (a_mem, a_mem_cancel) =
+        drive_cancel_after_turn(&mem_core_a, &mem_tx_a, &SessionId::from("mem-A")).await;
     let (sq_core_a, sq_tx_a) = build_sqlite(&tmp.path().join("sqlite-A"), 8).await;
-    let (a_sq, a_sq_cancel) = drive_cancel_after_turn(&sq_core_a, &sq_tx_a, "sql-A").await;
+    let (a_sq, a_sq_cancel) =
+        drive_cancel_after_turn(&sq_core_a, &sq_tx_a, &SessionId::from("sql-A")).await;
 
     // Variant C: no cancel control (active-turn input should be claimed).
     let (mem_core_c, mem_tx_c) = build_in_memory(8).await;
-    let c_mem = drive_no_cancel_control(&mem_core_c, &mem_tx_c, "mem-C").await;
+    let c_mem = drive_no_cancel_control(&mem_core_c, &mem_tx_c, &SessionId::from("mem-C")).await;
     let (sq_core_c, sq_tx_c) = build_sqlite(&tmp.path().join("sqlite-C"), 8).await;
-    let c_sq = drive_no_cancel_control(&sq_core_c, &sq_tx_c, "sql-C").await;
+    let c_sq = drive_no_cancel_control(&sq_core_c, &sq_tx_c, &SessionId::from("sql-C")).await;
 
     // Normalize session-id-derived labels so the per-backend Vecs are
     // comparable (labels are "turn-1/2/3" already, independent of session id).
@@ -465,9 +476,11 @@ async fn cross_backend_active_turn_cancel_then_turn_agrees() {
 
     // Variant D: claim-then-cancel (cancel observes post-claim terminal state).
     let (mem_core_d, mem_tx_d) = build_in_memory(8).await;
-    let (d_mem, d_mem_cancel) = drive_claim_then_cancel(&mem_core_d, &mem_tx_d, "mem-D").await;
+    let (d_mem, d_mem_cancel) =
+        drive_claim_then_cancel(&mem_core_d, &mem_tx_d, &SessionId::from("mem-D")).await;
     let (sq_core_d, sq_tx_d) = build_sqlite(&tmp.path().join("sqlite-D"), 8).await;
-    let (d_sq, d_sq_cancel) = drive_claim_then_cancel(&sq_core_d, &sq_tx_d, "sql-D").await;
+    let (d_sq, d_sq_cancel) =
+        drive_claim_then_cancel(&sq_core_d, &sq_tx_d, &SessionId::from("sql-D")).await;
     println!("=== Variant D (claim then cancel) ===");
     println!("  in-memory cancel: {d_mem_cancel}");
     println!("  sqlite    cancel: {d_sq_cancel}");
@@ -503,7 +516,7 @@ struct FirstPartyCancelObs {
 
 async fn drive_first_party_cancel_before_start(
     core: &LashCore,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> FirstPartyCancelObs {
     let turn_id = "cancelled-turn";
     let session = core.session(session_id).open().await.expect("open session");
@@ -577,9 +590,13 @@ async fn drive_first_party_cancel_before_start(
 async fn cross_backend_first_party_turn_cancel_agrees() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (mem_core, _) = build_in_memory(2).await;
-    let memory = drive_first_party_cancel_before_start(&mem_core, "turn-cancel-memory").await;
+    let memory =
+        drive_first_party_cancel_before_start(&mem_core, &SessionId::from("turn-cancel-memory"))
+            .await;
     let (sqlite_core, _) = build_sqlite(&tmp.path().join("turn-cancel-sqlite"), 2).await;
-    let sqlite = drive_first_party_cancel_before_start(&sqlite_core, "turn-cancel-sqlite").await;
+    let sqlite =
+        drive_first_party_cancel_before_start(&sqlite_core, &SessionId::from("turn-cancel-sqlite"))
+            .await;
 
     assert_eq!(memory, sqlite, "first-party turn cancellation diverged");
     assert_eq!(memory.request_id.as_deref(), Some("cross-backend-cancel"));

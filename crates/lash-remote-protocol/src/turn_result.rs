@@ -2,6 +2,8 @@
 //! output, usage/execution summaries, tool-call summaries, issues, and causal
 //! references.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::HashMap;
 
@@ -16,7 +18,7 @@ use crate::usage_activity::{RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteUs
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnReport {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_id: TurnId,
     pub outcome: RemoteTurnOutcome,
     pub assistant_output: RemoteAssistantOutput,
@@ -128,24 +130,24 @@ impl RemoteTurnReport {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteCausalRef {
     Turn {
-        session_id: String,
+        session_id: SessionId,
         turn_id: TurnId,
     },
     Effect {
-        session_id: String,
+        session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_id: Option<TurnId>,
         effect_id: String,
     },
     ToolCall {
-        session_id: String,
+        session_id: SessionId,
         call_id: String,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
     },
     ProcessEvent {
-        process_id: String,
+        process_id: ProcessId,
         sequence: u64,
     },
     TriggerOccurrence {
@@ -158,7 +160,7 @@ pub enum RemoteCausalRef {
         subscription_revision: Option<u64>,
     },
     SessionNode {
-        session_id: String,
+        session_id: SessionId,
         node_id: String,
     },
 }
@@ -290,7 +292,7 @@ pub struct RemoteToolCallRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteToolIntentIdentity {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub execution_scope_id: String,
     pub tool_call_id: String,
     pub intent_index: u32,
@@ -319,7 +321,7 @@ pub enum RemoteProcessParentEndPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteToolIntentParentEnd {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub policy: RemoteProcessParentEndPolicy,
 }
 

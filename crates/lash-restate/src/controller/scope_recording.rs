@@ -4,6 +4,7 @@
 //! effects and opened groups of a non-session scope in the scope's
 //! `LashDurableWaitIndex` object, so the scope's quiescence proof counts them.
 
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::{
@@ -130,11 +131,17 @@ where
         self.inner.await_await_event(key, cancel, deadline).await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
 

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 fn assert_streamed_envelope_contract<T>(
@@ -61,7 +62,7 @@ fn streamed_turn_input() -> RemoteTurnInput {
 
 fn streamed_turn_request() -> RemoteTurnRequest {
     RemoteTurnRequest {
-        session_id: "session-stream".to_string(),
+        session_id: SessionId::from("session-stream"),
         turn_id: TurnId::from("turn-stream"),
         idempotency_key: None,
         input: streamed_turn_input(),
@@ -83,7 +84,7 @@ fn streamed_activity() -> RemoteTurnActivity {
 
 fn streamed_turn_report() -> RemoteTurnReport {
     RemoteTurnReport {
-        session_id: "session-stream".to_string(),
+        session_id: SessionId::from("session-stream"),
         turn_id: TurnId::from("turn-stream"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
@@ -103,7 +104,7 @@ fn streamed_turn_report() -> RemoteTurnReport {
 
 fn streamed_observation_event() -> RemoteSessionObservationEvent {
     RemoteSessionObservationEvent {
-        session_id: "session-stream".to_string(),
+        session_id: SessionId::from("session-stream"),
         replay_incarnation_id: "incarnation-stream".to_string(),
         turn_id: Some(TurnId::from("turn-stream")),
         revision: 5,

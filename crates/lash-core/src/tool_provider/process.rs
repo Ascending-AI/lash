@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use std::sync::Arc;
 
 use crate::plugin::PluginError;
@@ -98,7 +100,7 @@ pub struct InternalProcessToolCall<'a> {
 /// attempts cannot obtain this value.
 #[derive(Clone)]
 pub struct InternalProcessAdmin<'run> {
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) agent_frame_id: crate::FrameNodeId,
     pub(super) processes: Arc<dyn crate::ProcessService>,
     pub(super) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
@@ -125,11 +127,7 @@ impl InternalProcessAdmin<'_> {
         &self,
         mut request: crate::ProcessStartRequest,
     ) -> Result<crate::ProcessHandleView, PluginError> {
-        if !request
-            .observers
-            .iter()
-            .any(|observer| observer == &self.session_id)
-        {
+        if !request.observers.contains(&self.session_id) {
             request.observers.push(self.session_id.clone());
         }
         if request.env_spec.is_none()
@@ -154,7 +152,7 @@ impl InternalProcessAdmin<'_> {
     /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn complete_external(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         await_output: crate::ProcessAwaitOutput,
     ) -> Result<crate::ProcessCompletionOutcome, PluginError> {
         self.processes
@@ -181,11 +179,11 @@ impl InternalProcessAdmin<'_> {
     /// recorded.
     ///
     /// This is ADR 0051's protocol and process-engine implementor class.
-    pub fn external_launch_audit(&self, process_id: &str) -> ExternalLaunchAudit {
+    pub fn external_launch_audit(&self, process_id: &ProcessId) -> ExternalLaunchAudit {
         ExternalLaunchAudit {
             processes: Arc::clone(&self.processes),
             session_id: self.session_id.clone(),
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             armed: true,
         }
     }
@@ -195,12 +193,12 @@ impl InternalProcessAdmin<'_> {
     /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[process_id.to_string()],
+                &[ProcessId::from(process_id.to_string())],
                 self.process_scope(),
             )
             .await?;
@@ -231,12 +229,12 @@ impl InternalProcessAdmin<'_> {
     /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn cancel(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<crate::ProcessCancelReceipt, PluginError> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[process_id.to_string()],
+                &[ProcessId::from(process_id.to_string())],
                 self.process_scope(),
             )
             .await?;
@@ -251,7 +249,7 @@ impl InternalProcessAdmin<'_> {
     /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn signal(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: &str,
         payload: serde_json::Value,
     ) -> Result<crate::ProcessEvent, PluginError> {
@@ -262,7 +260,7 @@ impl InternalProcessAdmin<'_> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[process_id.to_string()],
+                &[ProcessId::from(process_id.to_string())],
                 self.process_scope(),
             )
             .await?;
@@ -280,7 +278,7 @@ impl InternalProcessAdmin<'_> {
 
     pub(crate) async fn signal_with_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: &str,
         signal_id: String,
         payload: serde_json::Value,
@@ -288,7 +286,7 @@ impl InternalProcessAdmin<'_> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[process_id.to_string()],
+                &[ProcessId::from(process_id.to_string())],
                 self.process_scope(),
             )
             .await?;
@@ -321,8 +319,8 @@ impl InternalProcessAdmin<'_> {
 /// This is ADR 0051's protocol and process-engine implementor class.
 pub struct ExternalLaunchAudit {
     processes: Arc<dyn crate::ProcessService>,
-    session_id: String,
-    process_id: String,
+    session_id: SessionId,
+    process_id: ProcessId,
     armed: bool,
 }
 
@@ -346,8 +344,11 @@ impl Drop for ExternalLaunchAudit {
             return;
         };
         let processes = Arc::clone(&self.processes);
-        let session_id = std::mem::take(&mut self.session_id);
-        let process_id = std::mem::take(&mut self.process_id);
+        // Cloned rather than `mem::take`: an identity newtype has no empty
+        // default to leave behind, and this runs from `Drop`, so the originals
+        // are discarded immediately after.
+        let session_id = self.session_id.clone();
+        let process_id = self.process_id.clone();
         handle.spawn(async move {
             if let Err(error) = processes
                 .report_caller_departure(&session_id, &process_id)
@@ -372,8 +373,11 @@ mod tests {
 
     fn admin(processes: Arc<dyn crate::ProcessService>) -> InternalProcessAdmin<'static> {
         InternalProcessAdmin {
-            session_id: "session".to_string(),
-            agent_frame_id: crate::session_graph::frame_node_id("session", "frame"),
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::session_graph::frame_node_id(
+                &SessionId::from("session"),
+                "frame",
+            ),
             processes,
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::NativeRuntimeEffectController::default(),
@@ -403,7 +407,7 @@ mod tests {
             .expect("register process");
         host.process_registry
             .complete_process(
-                "process",
+                &ProcessId::from("process"),
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::json!("done"),
                 )),
@@ -415,7 +419,7 @@ mod tests {
         let admin = admin(processes);
 
         let hidden = admin
-            .await_process("process")
+            .await_process(&ProcessId::from("process"))
             .await
             .expect_err("unobserved process must be hidden");
         assert_eq!(
@@ -425,12 +429,17 @@ mod tests {
 
         host.process_registry
             .add_observer(
-                "session",
-                "process",
+                &SessionId::from("session"),
+                &ProcessId::from("process"),
                 crate::ProcessObserverBy::host("tool-provider-test"),
             )
             .await
             .expect("observe process");
-        assert!(admin.await_process("process").await.is_ok());
+        assert!(
+            admin
+                .await_process(&ProcessId::from("process"))
+                .await
+                .is_ok()
+        );
     }
 }

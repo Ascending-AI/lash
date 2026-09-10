@@ -713,7 +713,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         let durable_a = state.snapshot_execution_state().expect("durable A capture");
         state.acknowledge_execution_state_capture();
         let mut staged_runtime = lash_core::RuntimeSessionState {
-            session_id: "progress-a-b-a-staged".to_string(),
+            session_id: SessionId::from("progress-a-b-a-staged"),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
@@ -724,7 +724,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         )
         .expect("stage durable A");
         let mut retry_runtime = lash_core::RuntimeSessionState {
-            session_id: "progress-a-b-a-retry".to_string(),
+            session_id: SessionId::from("progress-a-b-a-retry"),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))

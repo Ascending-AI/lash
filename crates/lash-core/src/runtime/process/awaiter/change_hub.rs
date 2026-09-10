@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -6,7 +7,7 @@ use tokio::sync::watch;
 
 #[derive(Clone, Default)]
 pub struct ProcessChangeHub {
-    inner: Arc<Mutex<HashMap<String, watch::Sender<u64>>>>,
+    inner: Arc<Mutex<HashMap<ProcessId, watch::Sender<u64>>>>,
 }
 
 impl ProcessChangeHub {
@@ -16,10 +17,10 @@ impl ProcessChangeHub {
 
     /// Subscribe before reading a process row. The receiver carries only a
     /// version counter; waiters always re-read the registry after a bump.
-    pub fn subscribe(&self, process_id: &str) -> watch::Receiver<u64> {
+    pub fn subscribe(&self, process_id: &ProcessId) -> watch::Receiver<u64> {
         let mut guard = self.inner.lock_recover();
         guard
-            .entry(process_id.to_string())
+            .entry(process_id.clone())
             .or_insert_with(|| {
                 let (tx, _rx) = watch::channel(0);
                 tx
@@ -27,7 +28,7 @@ impl ProcessChangeHub {
             .subscribe()
     }
 
-    pub fn notify(&self, process_id: &str) {
+    pub fn notify(&self, process_id: &ProcessId) {
         let mut guard = self.inner.lock_recover();
         let mut remove = false;
         if let Some(tx) = guard.get(process_id) {

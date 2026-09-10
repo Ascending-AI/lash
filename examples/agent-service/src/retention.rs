@@ -1,3 +1,4 @@
+use lash::SessionId;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,7 +23,7 @@ pub(crate) struct StoreRetentionTargets {
 
 #[derive(Debug)]
 pub(crate) struct SessionVacuumReport {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) report: VacuumReport,
 }
 
@@ -41,7 +42,7 @@ pub(crate) struct StoreRetentionReport {
 /// deterministic example test; none of these levers is a correctness path.
 pub(crate) async fn run_store_retention_pass(
     targets: &StoreRetentionTargets,
-    session_ids: &[String],
+    session_ids: &[SessionId],
     attachment_policy: AttachmentReclamationPolicy,
 ) -> StoreRetentionReport {
     let mut report = StoreRetentionReport {
@@ -131,7 +132,7 @@ pub(crate) fn spawn_retention(
                     Ok(db
                         .list_chats()?
                         .into_iter()
-                        .map(|chat| chat.id)
+                        .map(|chat| SessionId::from(chat.id))
                         .collect::<Vec<_>>())
                 })
                 .await

@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 
 /// Delegating base for [`RuntimePersistence`] decorators.
 ///
@@ -37,7 +38,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), StoreError> {
         self.inner().commit_refs(session_id, attachment_ids)
@@ -69,7 +70,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     fn forget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), StoreError> {
         self.inner().forget(session_id, attachment_id)
@@ -139,21 +140,21 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
         self.inner().list_pending_turn_inputs(session_id).await
     }
 
     async fn list_turn_input_applications(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
         self.inner().list_turn_input_applications(session_id).await
     }
 
     async fn cancel_pending_turn_input(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         input_id: &str,
     ) -> Result<crate::PendingTurnInputCancelOutcome, StoreError> {
         self.inner()
@@ -163,7 +164,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError> {
         self.inner()
@@ -173,7 +174,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError> {
         self.inner()
@@ -183,7 +184,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn claim_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -204,7 +205,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -230,7 +231,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: OrphanedTurnInputScope<'_>,
     ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
@@ -241,7 +242,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn try_claim_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
@@ -253,7 +254,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &LeaseClaimNonce,
@@ -291,7 +292,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<crate::SessionExecutionLeaseObservation, StoreError> {
         self.inner().get_session_execution_lease(session_id).await
     }
@@ -312,7 +313,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError> {
@@ -323,7 +324,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -337,7 +338,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -366,7 +367,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -401,7 +402,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError> {
         self.inner()
@@ -411,7 +412,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn queued_work_batch_completed(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<bool, StoreError> {
         self.inner()
@@ -421,21 +422,21 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
 
     async fn pending_session_work_ordering(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<PendingSessionWorkOrdering, StoreError> {
         self.inner().pending_session_work_ordering(session_id).await
     }
 
     async fn list_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         self.inner().list_queued_work(session_id).await
     }
 
     async fn list_pending_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         self.inner().list_pending_queued_work(session_id).await
     }
@@ -466,7 +467,7 @@ where
 
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), StoreError> {
         RuntimePersistenceDecorator::commit_refs(self, session_id, attachment_ids)
@@ -503,7 +504,7 @@ where
 
     fn forget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), StoreError> {
         RuntimePersistenceDecorator::forget(self, session_id, attachment_id)
@@ -596,21 +597,21 @@ where
 
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
         RuntimePersistenceDecorator::list_pending_turn_inputs(self, session_id).await
     }
 
     async fn list_turn_input_applications(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
         RuntimePersistenceDecorator::list_turn_input_applications(self, session_id).await
     }
 
     async fn cancel_pending_turn_input(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         input_id: &str,
     ) -> Result<crate::PendingTurnInputCancelOutcome, StoreError> {
         RuntimePersistenceDecorator::cancel_pending_turn_input(self, session_id, input_id).await
@@ -618,7 +619,7 @@ where
 
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError> {
         RuntimePersistenceDecorator::cancel_pending_turn_inputs(self, session_id, targets).await
@@ -626,7 +627,7 @@ where
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError> {
         RuntimePersistenceDecorator::cancel_pending_turn_input_suffix(self, session_id, anchor)
@@ -635,7 +636,7 @@ where
 
     async fn claim_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -656,7 +657,7 @@ where
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
@@ -687,7 +688,7 @@ where
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: OrphanedTurnInputScope<'_>,
     ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
@@ -708,7 +709,7 @@ where
 {
     async fn try_claim_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
@@ -725,7 +726,7 @@ where
 
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &LeaseClaimNonce,
@@ -759,7 +760,7 @@ where
 
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<crate::SessionExecutionLeaseObservation, StoreError> {
         RuntimePersistenceDecorator::get_session_execution_lease(self, session_id).await
     }
@@ -786,7 +787,7 @@ where
 
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError> {
@@ -801,7 +802,7 @@ where
 
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -821,7 +822,7 @@ where
     #[allow(clippy::too_many_arguments)]
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &crate::TurnId,
@@ -850,7 +851,7 @@ where
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
@@ -885,7 +886,7 @@ where
 
     async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError> {
         RuntimePersistenceDecorator::cancel_queued_work_batch(self, session_id, batch_id).await
@@ -893,7 +894,7 @@ where
 
     async fn queued_work_batch_completed(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<bool, StoreError> {
         RuntimePersistenceDecorator::queued_work_batch_completed(self, session_id, batch_id).await
@@ -901,21 +902,21 @@ where
 
     async fn pending_session_work_ordering(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<PendingSessionWorkOrdering, StoreError> {
         RuntimePersistenceDecorator::pending_session_work_ordering(self, session_id).await
     }
 
     async fn list_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         RuntimePersistenceDecorator::list_queued_work(self, session_id).await
     }
 
     async fn list_pending_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         RuntimePersistenceDecorator::list_pending_queued_work(self, session_id).await
     }

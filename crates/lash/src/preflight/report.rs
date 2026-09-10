@@ -12,6 +12,8 @@
 //! The version-bump runbook asserts on these fields directly, which is what
 //! makes "the probe is right" a checked claim rather than a described one.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -243,10 +245,10 @@ impl ComponentReadability {
 pub struct DrainBlocker {
     /// The process holding the state, when the state belongs to one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub process_id: Option<String>,
+    pub process_id: Option<ProcessId>,
     /// The session holding the state, when the state belongs to one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     /// The store's own status word for the owner.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -712,8 +714,8 @@ mod tests {
                 FormatEvidence::Direct,
             )],
             drain: vec![DrainBlocker {
-                process_id: Some("p-1".to_string()),
-                session_id: Some("s-1".to_string()),
+                process_id: Some(ProcessId::from("p-1")),
+                session_id: Some(SessionId::from("s-1")),
                 status: Some("waiting".to_string()),
                 format: "Lashlang segment handover".to_string(),
                 expected: "3".to_string(),

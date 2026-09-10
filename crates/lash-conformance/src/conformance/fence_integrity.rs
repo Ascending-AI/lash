@@ -1,5 +1,6 @@
 //! Shared durable-counter corruption and exhaustion conformance.
 
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::Arc;
@@ -8,8 +9,8 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FenceIntegrityTarget {
     QueuedWorkClaimFence { batch_id: String },
-    SessionHeadRevision { session_id: String },
-    SessionLeaseFencingToken { session_id: String },
+    SessionHeadRevision { session_id: SessionId },
+    SessionLeaseFencingToken { session_id: SessionId },
     TriggerRevision { subscription_id: String },
 }
 
@@ -56,7 +57,8 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
     let too_large = (i64::MAX as u64) + 1;
     let available_error = store
         .enqueue_queued_work(
-            queued_draft("signed-write-available", "available").with_available_at_ms(too_large),
+            queued_draft(&SessionId::from("signed-write-available"), "available")
+                .with_available_at_ms(too_large),
         )
         .await
         .expect_err("unrepresentable available_at_ms must refuse before insert");
@@ -69,7 +71,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
     ));
     assert!(
         store
-            .list_queued_work("signed-write-available")
+            .list_queued_work(&SessionId::from("signed-write-available"))
             .await
             .expect("list after refused available_at_ms")
             .is_empty()
@@ -79,7 +81,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
         crate::LeaseOwnerIdentity::opaque("signed-write-lease", "signed-write-lease:incarnation");
     let lease_error = store
         .try_claim_session_execution_lease(
-            "signed-write-lease",
+            &SessionId::from("signed-write-lease"),
             &lease_owner,
             "signed-counter-write-domain-conformance-executor",
             u64::MAX,
@@ -95,7 +97,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
     ));
     assert!(
         store
-            .get_session_execution_lease("signed-write-lease")
+            .get_session_execution_lease(&SessionId::from("signed-write-lease"))
             .await
             .expect("read after refused session lease")
             .lease
@@ -107,7 +109,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
         "signed-write-generation:incarnation",
     );
     let forged = crate::SessionExecutionLeaseAuthority {
-        session_id: "signed-write-generation".to_string(),
+        session_id: SessionId::from("signed-write-generation"),
         owner: generation_owner.clone(),
         executor_id: "signed-write-generation-executor".to_string(),
         lease_token: "forged-generation".to_string(),
@@ -115,7 +117,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
     };
     let generation_error = store
         .claim_checkpoint_work(
-            "signed-write-generation",
+            &SessionId::from("signed-write-generation"),
             &forged,
             &generation_owner,
             &crate::TurnId::from("signed-write-generation-turn"),
@@ -134,7 +136,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
     ));
 }
 
-fn queued_draft(session_id: &str, label: &str) -> crate::QueuedWorkBatchDraft {
+fn queued_draft(session_id: &SessionId, label: &str) -> crate::QueuedWorkBatchDraft {
     crate::QueuedWorkBatchDraft::new(
         session_id,
         crate::DeliveryPolicy::EarliestSafeBoundary,
@@ -149,7 +151,7 @@ fn queued_draft(session_id: &str, label: &str) -> crate::QueuedWorkBatchDraft {
 
 async fn claim_lease(
     store: &Arc<dyn crate::RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (crate::LeaseOwnerIdentity, crate::SessionExecutionLease) {
     let owner = crate::LeaseOwnerIdentity::opaque("fence-owner", "fence-owner:incarnation");
     let lease = store
@@ -196,7 +198,7 @@ async fn negative_claim_fence(handles: FenceIntegrityHandles) {
     let session_id = "fence-negative-claim";
     let batch = handles
         .runtime
-        .enqueue_queued_work(queued_draft(session_id, "negative"))
+        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "negative"))
         .await
         .expect("enqueue negative-fence row");
     let target = FenceIntegrityTarget::QueuedWorkClaimFence {
@@ -206,7 +208,7 @@ async fn negative_claim_fence(handles: FenceIntegrityHandles) {
     let before = handles.injector.observe_raw_value(&target).await;
     let error = handles
         .runtime
-        .list_queued_work(session_id)
+        .list_queued_work(&SessionId::from(session_id))
         .await
         .expect_err("negative queued-work claim fence must refuse");
     assert_corrupt(error, "QueuedWorkBatch", "claim_fencing_token", -1);
@@ -221,7 +223,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .await
         .expect("admit negative-head session");
     let state = crate::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     handles
@@ -230,7 +232,7 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .await
         .expect("materialize negative-head session row");
     let target = FenceIntegrityTarget::SessionHeadRevision {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
     };
     handles.injector.inject_raw_value(&target, -1).await;
     let before = handles.injector.observe_raw_value(&target).await;
@@ -245,15 +247,15 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
 
 async fn negative_session_lease_fence(handles: FenceIntegrityHandles) {
     let session_id = "fence-negative-lease";
-    let _ = claim_lease(&handles.runtime, session_id).await;
+    let _ = claim_lease(&handles.runtime, &SessionId::from(session_id)).await;
     let target = FenceIntegrityTarget::SessionLeaseFencingToken {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
     };
     handles.injector.inject_raw_value(&target, -1).await;
     let before = handles.injector.observe_raw_value(&target).await;
     let error = handles
         .runtime
-        .get_session_execution_lease(session_id)
+        .get_session_execution_lease(&SessionId::from(session_id))
         .await
         .expect_err("negative session-lease fence must refuse");
     assert_corrupt(error, "SessionExecutionLease", "fencing_token", -1);
@@ -264,12 +266,12 @@ async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) 
     let session_id = "fence-divergent-rows";
     let first = handles
         .runtime
-        .enqueue_queued_work(queued_draft(session_id, "first"))
+        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "first"))
         .await
         .expect("enqueue first divergent row");
     let second = handles
         .runtime
-        .enqueue_queued_work(queued_draft(session_id, "second"))
+        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "second"))
         .await
         .expect("enqueue second divergent row");
     let first_target = FenceIntegrityTarget::QueuedWorkClaimFence {
@@ -280,11 +282,11 @@ async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) 
     };
     handles.injector.inject_raw_value(&first_target, 5).await;
     handles.injector.inject_raw_value(&second_target, 41).await;
-    let (owner, lease) = claim_lease(&handles.runtime, session_id).await;
+    let (owner, lease) = claim_lease(&handles.runtime, &SessionId::from(session_id)).await;
     let claim = handles
         .runtime
         .claim_ready_queued_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
@@ -321,12 +323,12 @@ async fn exhausted_claim_fence(handles: FenceIntegrityHandles, exhausted_head: b
     };
     let first = handles
         .runtime
-        .enqueue_queued_work(queued_draft(session_id, "first"))
+        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "first"))
         .await
         .expect("enqueue first exhausted fixture row");
     let second = handles
         .runtime
-        .enqueue_queued_work(queued_draft(session_id, "second"))
+        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "second"))
         .await
         .expect("enqueue second exhausted fixture row");
     let first_target = FenceIntegrityTarget::QueuedWorkClaimFence {
@@ -345,11 +347,11 @@ async fn exhausted_claim_fence(handles: FenceIntegrityHandles, exhausted_head: b
     handles.injector.inject_raw_value(exhausted, i64::MAX).await;
     let first_before = handles.injector.observe_raw_value(&first_target).await;
     let second_before = handles.injector.observe_raw_value(&second_target).await;
-    let (owner, lease) = claim_lease(&handles.runtime, session_id).await;
+    let (owner, lease) = claim_lease(&handles.runtime, &SessionId::from(session_id)).await;
     let error = handles
         .runtime
         .claim_ready_queued_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
@@ -430,7 +432,7 @@ async fn exhausted_trigger_revision(handles: FenceIntegrityHandles) {
 
     let plugin_error = handles
         .triggers
-        .delete_session_subscriptions(session_id)
+        .delete_session_subscriptions(&SessionId::from(session_id))
         .await
         .expect_err("trigger-store deletion must refuse an exhausted revision");
     assert!(matches!(

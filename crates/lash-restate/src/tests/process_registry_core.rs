@@ -112,11 +112,11 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
             .expect("open FIG-1293 session store"),
     );
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
-    let policy = replay_test_policy(session_id);
-    let initial_state = replay_test_state(session_id, &policy);
+    let policy = replay_test_policy(&SessionId::from(session_id));
+    let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     let process_registry = process_registry();
-    fig1293_seed_control_target(&process_registry, session_id).await;
+    fig1293_seed_control_target(&process_registry, &SessionId::from(session_id)).await;
     let plugin_factories = fig1293_migrated_tool_factories();
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     context.install_process_worker(
@@ -134,7 +134,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     );
 
     let mut first = replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy.clone(),
         initial_state.clone(),
         host.clone(),
@@ -149,7 +149,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
         run_restate_replay_turn(
             &mut first,
             first_context,
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id),
         )
         .await
@@ -254,7 +254,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     context.replay_process_workflow_starts_from_journal();
     context.start_replay_allowing_journal_extension();
     let mut replay = replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy,
         initial_state,
         host,
@@ -266,7 +266,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     let turn = run_restate_replay_turn(
         &mut replay,
         Arc::clone(&context),
-        session_id,
+        &SessionId::from(session_id),
         &TurnId::from(turn_id),
     )
     .await;
@@ -400,12 +400,12 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
             .expect("open session store"),
     );
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let policy = replay_test_policy(session_id);
-    let initial_state = replay_test_state(session_id, &policy);
+    let policy = replay_test_policy(&SessionId::from(session_id));
+    let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
 
     let mut first = replay_test_runtime(
-        session_id,
+        &SessionId::from(session_id),
         policy.clone(),
         initial_state.clone(),
         host.clone(),
@@ -415,7 +415,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     let first_turn = run_restate_replay_turn(
         &mut first,
         Arc::clone(&context),
-        session_id,
+        &SessionId::from(session_id),
         &TurnId::from(turn_id),
     )
     .await;
@@ -429,12 +429,18 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     context.start_replay();
     let retry_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
-    let mut replay =
-        replay_test_runtime(session_id, policy, initial_state, host, retry_store).await;
+    let mut replay = replay_test_runtime(
+        &SessionId::from(session_id),
+        policy,
+        initial_state,
+        host,
+        retry_store,
+    )
+    .await;
     let replay_turn = run_restate_replay_turn(
         &mut replay,
         Arc::clone(&context),
-        session_id,
+        &SessionId::from(session_id),
         &TurnId::from(turn_id),
     )
     .await;
@@ -524,8 +530,8 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
             .expect("open parent-end session store"),
     );
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
-    let policy = replay_test_policy(session_id);
-    let initial_state = replay_test_state(session_id, &policy);
+    let policy = replay_test_policy(&SessionId::from(session_id));
+    let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     context.defer_process_workflows();
     let process_registry = process_registry();
@@ -545,7 +551,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
     );
 
     let mut first = replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy.clone(),
         initial_state.clone(),
         host.clone(),
@@ -560,7 +566,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
         run_restate_replay_turn(
             &mut first,
             first_context,
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id),
         )
         .await
@@ -622,7 +628,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
 
     context.start_replay_allowing_journal_extension();
     let mut parent_end_fault_replay = replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy.clone(),
         initial_state.clone(),
         host.clone(),
@@ -642,7 +648,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
             &mut parent_end_fault_replay,
             fault_context,
             task_fault_state,
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id),
         )
         .await
@@ -709,7 +715,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
 
     context.start_replay_allowing_journal_extension();
     let mut between_commands_replay = replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy.clone(),
         initial_state.clone(),
         host.clone(),
@@ -729,7 +735,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
             &mut between_commands_replay,
             between_commands_context,
             task_between_commands_state,
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id),
         )
         .await
@@ -741,7 +747,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
         between_commands_state.outcomes.lock_recover().as_slice(),
         [lash_core::ToolIntentParentEndOutcome::Cancelled {
             identity: lash_core::ToolIntentIdentity {
-                session_id: "restate-parent-end-replay".to_string(),
+                session_id: SessionId::from("restate-parent-end-replay"),
                 execution_scope_id: "restate-parent-end-turn-1".to_string(),
                 tool_call_id: "restate-parent-end-call".to_string(),
                 intent_index: 0,
@@ -750,7 +756,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                     "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
                 ),
             },
-            process_id: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
+            process_id: ProcessId::from("tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"),
         }]
     );
     assert_eq!(
@@ -769,7 +775,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
 
     context.start_replay_allowing_journal_extension();
     let mut replay = replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy,
         initial_state,
         host,
@@ -781,7 +787,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
     let redriven = run_restate_replay_turn(
         &mut replay,
         Arc::clone(&context),
-        session_id,
+        &SessionId::from(session_id),
         &TurnId::from(turn_id),
     )
     .await;
@@ -898,7 +904,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
         vec![
             lash_core::ToolIntentParentEndOutcome::Cancelled {
                 identity: lash_core::ToolIntentIdentity {
-                    session_id: "restate-parent-end-replay".to_string(),
+                    session_id: SessionId::from("restate-parent-end-replay"),
                     execution_scope_id: "restate-parent-end-turn-1".to_string(),
                     tool_call_id: "restate-parent-end-call".to_string(),
                     intent_index: 0,
@@ -907,11 +913,11 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                         "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
                     ),
                 },
-                process_id: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
+                process_id: ProcessId::from("tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"),
             },
             lash_core::ToolIntentParentEndOutcome::Cancelled {
                 identity: lash_core::ToolIntentIdentity {
-                    session_id: "restate-parent-end-replay".to_string(),
+                    session_id: SessionId::from("restate-parent-end-replay"),
                     execution_scope_id: "restate-parent-end-turn-1".to_string(),
                     tool_call_id: "restate-parent-end-call".to_string(),
                     intent_index: 1,
@@ -920,7 +926,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                         "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
                     ),
                 },
-                process_id: "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9".to_string(),
+                process_id: ProcessId::from("tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9"),
             },
         ]
     );
@@ -1019,12 +1025,12 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         lease_claim_count: Arc::clone(&lease_claim_count),
     });
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = probed_store;
-    let policy = replay_test_policy(session_id);
-    let initial_state = replay_test_state(session_id, &policy);
+    let policy = replay_test_policy(&SessionId::from(session_id));
+    let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
 
     let mut suspended = replay_test_runtime(
-        session_id,
+        &SessionId::from(session_id),
         policy.clone(),
         initial_state.clone(),
         host.clone(),
@@ -1036,7 +1042,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         run_restate_replay_turn(
             &mut suspended,
             suspended_context,
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id),
         )
         .await
@@ -1060,8 +1066,14 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
             .is_cancelled()
     );
 
-    let mut fresh_worker =
-        replay_test_runtime(session_id, policy, initial_state, host, runtime_store).await;
+    let mut fresh_worker = replay_test_runtime(
+        &SessionId::from(session_id),
+        policy,
+        initial_state,
+        host,
+        runtime_store,
+    )
+    .await;
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
     let scoped_effect_controller = controller
         .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
@@ -1230,8 +1242,8 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
             lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": "counted" })),
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::SignalProcess(
                 lash_core::SignalProcessIntent {
-                    session_id: call.context.session_id().to_string(),
-                    process_id: "restate-recorded-intent-target".to_string(),
+                    session_id: SessionId::from(call.context.session_id()),
+                    process_id: ProcessId::from("restate-recorded-intent-target"),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"source": "recorded-scalar-attempt"}),
                 },
@@ -1329,8 +1341,8 @@ finish (await handle)?
             .expect("open session store"),
     );
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
-    let policy = replay_test_policy(session_id);
-    let initial_state = replay_test_state(session_id, &policy);
+    let policy = replay_test_policy(&SessionId::from(session_id));
+    let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     let process_registry = process_registry()
         .with_runtime_clock(corpus_clock)
@@ -1350,7 +1362,7 @@ finish (await handle)?
                 payload_schema: lash_core::LashSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[session_id.to_string()],
+            &[SessionId::from(session_id.to_string())],
         )
         .await
         .expect("register the recorded-intent signal target");
@@ -1393,7 +1405,7 @@ finish (await handle)?
     tokio::task::yield_now().await;
 
     let mut first = Box::pin(replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy.clone(),
         initial_state.clone(),
         host.clone(),
@@ -1407,7 +1419,7 @@ finish (await handle)?
         run_restate_replay_turn(
             &mut first,
             first_context,
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id),
         )
         .await
@@ -1497,7 +1509,7 @@ finish (await handle)?
         .stable_hash()
         .expect("signal command envelope hash");
     let first_intent_events = process_registry
-        .events_after("restate-recorded-intent-target", 0)
+        .events_after(&ProcessId::from("restate-recorded-intent-target"), 0)
         .await
         .expect("read the first recorded-intent event set")
         .into_iter()
@@ -1513,7 +1525,7 @@ finish (await handle)?
         serde_json::to_vec(&first_intent_events).expect("serialize first intent events");
     process_registry
         .complete_process(
-            "restate-recorded-intent-target",
+            &ProcessId::from("restate-recorded-intent-target"),
             process_success(serde_json::json!("live state mutated after drain")),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -1530,7 +1542,7 @@ finish (await handle)?
     let retry_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay = Box::pin(replay_test_runtime_with_plugins_and_registry(
-        session_id,
+        &SessionId::from(session_id),
         policy,
         initial_state,
         host,
@@ -1542,7 +1554,7 @@ finish (await handle)?
     let replay_turn = run_restate_replay_turn(
         &mut replay,
         Arc::clone(&context),
-        session_id,
+        &SessionId::from(session_id),
         &TurnId::from(turn_id),
     )
     .await;
@@ -1599,7 +1611,7 @@ finish (await handle)?
         "the redriven process-command frame must be byte-identical"
     );
     let replayed_intent_events = process_registry
-        .events_after("restate-recorded-intent-target", 0)
+        .events_after(&ProcessId::from("restate-recorded-intent-target"), 0)
         .await
         .expect("read redriven recorded-intent events")
         .into_iter()
@@ -1642,7 +1654,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
                 runtime_invocation(RuntimeEffectKind::Process, "background-start"),
                 RuntimeEffectCommand::process(ProcessCommand::Start {
                     registration,
-                    observers: vec!["session".to_string()],
+                    observers: vec![SessionId::from("session")],
                     env_spec: None,
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
@@ -1667,7 +1679,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
     );
     assert_eq!(
         registry
-            .get_process("task-1")
+            .get_process(&ProcessId::from("task-1"))
             .await
             .expect("read process")
             .expect("get")
@@ -1679,7 +1691,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
     assert_eq!(
         registry
             .list_observed_by(
-                "session",
+                &SessionId::from("session"),
                 &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -1740,7 +1752,7 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
         .await
         .expect("first start");
     let process_ref = registry
-        .resolve_process_ref(process_id)
+        .resolve_process_ref(&ProcessId::from(process_id))
         .await
         .expect("resolve started process incarnation");
     let await_terminal = || {
@@ -1753,13 +1765,13 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
     };
     registry
         .complete_process(
-            process_id,
+            &ProcessId::from(process_id),
             terminal.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete child process");
-    context.resolve_process_terminal(process_id, &terminal);
+    context.resolve_process_terminal(&ProcessId::from(process_id), &terminal);
     host.execute_effect(await_terminal(), registry_local_executor(registry.clone()))
         .await
         .expect("first await");
@@ -1801,7 +1813,7 @@ pub(super) async fn restate_controller_start_emits_send_when_external_ref_alread
         .expect("register process");
     registry
         .set_external_ref(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessExternalRef {
                 backend: "restate".to_string(),
                 id: format!("LashProcessWorkflow/{process_id}"),
@@ -1838,7 +1850,7 @@ pub(super) async fn restate_controller_start_emits_send_when_external_ref_alread
 pub(super) async fn run_parent_shaped_start_await_suspend_flow(
     host: &RestateRuntimeEffectController<'_, Arc<RecordingContext>>,
     registry: Arc<dyn ProcessRegistry>,
-    process_id: &str,
+    process_id: &ProcessId,
     suspend_key: AwaitEventKey,
 ) {
     host.execute_effect(

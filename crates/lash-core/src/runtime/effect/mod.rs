@@ -61,6 +61,7 @@ pub(crate) use outcome::{
 mod tests {
     use super::*;
     use crate::LlmRequest as CoreLlmRequest;
+    use crate::SessionId;
     use crate::TurnId;
     use crate::llm::types::{
         AttachmentSource, LlmEventSender, LlmMessage, LlmProviderTraceSender, LlmToolChoice,
@@ -214,7 +215,7 @@ mod tests {
         assert!(live.provider_trace.is_none());
 
         let invocation = crate::runtime::causal::direct_effect_invocation(
-            "session",
+            &SessionId::from("session"),
             "test",
             "request:direct".to_string(),
             Some(&TurnId::from("turn")),
@@ -322,7 +323,7 @@ mod tests {
                 .await
                 .expect_err("default resolver must refuse waits"),
             resolver
-                .revoke_await_events_for_session("unsupported-session")
+                .revoke_await_events_for_session(&SessionId::from("unsupported-session"))
                 .await
                 .expect_err("default resolver must refuse revocation"),
         ] {

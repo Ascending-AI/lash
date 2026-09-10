@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::sync::Arc;
 
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};
@@ -13,7 +14,7 @@ enum PluginSource {
 
 pub struct EmbeddedRuntimeBuilder {
     runtime_lease_owner: crate::LeaseOwnerIdentity,
-    session_id: Option<String>,
+    session_id: Option<SessionId>,
     policy: Option<SessionPolicy>,
     plugin_options: crate::PluginOptions,
     initial_state: Option<RuntimeSessionState>,
@@ -71,7 +72,7 @@ impl EmbeddedRuntimeBuilder {
         }
     }
 
-    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+    pub fn with_session_id(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
@@ -297,7 +298,7 @@ impl EmbeddedRuntimeBuilder {
                 .map(|loaded| loaded.state)
             {
                 if let Some(session_id) = &self.session_id
-                    && &state.session_id != session_id
+                    && state.session_id != session_id
                 {
                     return Err(SessionError::Protocol(format!(
                         "store is bound to session `{}` but builder requested `{session_id}`",

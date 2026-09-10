@@ -1,4 +1,5 @@
 use super::*;
+use crate::SessionId;
 
 fn persisted_session_state_from_read(
     read: &PersistedSessionRead,
@@ -82,7 +83,7 @@ pub async fn load_persisted_session_read_view(
 #[doc(hidden)]
 pub async fn load_persisted_session_admitted(
     store: &(dyn RuntimePersistence + '_),
-    session_id: &str,
+    session_id: &SessionId,
     owner: &crate::LeaseOwnerIdentity,
     executor_id: &str,
     lease_ttl_ms: u64,

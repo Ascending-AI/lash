@@ -57,7 +57,7 @@ impl<const ENGINE: bool> crate::RuntimeEffectController for JournaledCommitContr
 }
 
 async fn assert_commit_placement(
-    session_id: &str,
+    session_id: &SessionId,
     controller: Arc<dyn crate::RuntimeEffectController>,
     expected_entries: usize,
 ) {
@@ -141,7 +141,7 @@ async fn assert_commit_placement(
 #[tokio::test]
 async fn durable_journaled_engine_commits_bypass_local_admission() {
     assert_commit_placement(
-        "engine-commit-placement",
+        &SessionId::from("engine-commit-placement"),
         Arc::new(JournaledCommitController::<true>::default()),
         0,
     )
@@ -151,7 +151,7 @@ async fn durable_journaled_engine_commits_bypass_local_admission() {
 #[tokio::test]
 async fn native_commits_enter_local_admission() {
     assert_commit_placement(
-        "native-commit-placement",
+        &SessionId::from("native-commit-placement"),
         Arc::new(crate::NativeRuntimeEffectController::default()),
         1,
     )
@@ -161,7 +161,7 @@ async fn native_commits_enter_local_admission() {
 #[tokio::test]
 async fn store_journaled_commits_keep_native_admission() {
     assert_commit_placement(
-        "store-journaled-commit-placement",
+        &SessionId::from("store-journaled-commit-placement"),
         Arc::new(JournaledCommitController::<false>::default()),
         1,
     )
@@ -195,12 +195,12 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
     let session_id = "invocation-command-placement";
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
         mock_provider(Vec::new()),
-        session_id,
+        &SessionId::from(session_id),
     )
     .await;
     enqueue_config_patch_command(
         store.as_ref(),
-        session_id,
+        &SessionId::from(session_id),
         crate::runtime::ApplyConfigPatch {
             model: Some(
                 crate::ModelSpec::builder("engine-command-model")
@@ -214,7 +214,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
     .await;
     let lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        session_id,
+        &SessionId::from(session_id),
         &lease_owner(session_id),
         "invocation-command",
         crate::LeaseTimings::default().ttl_ms(),
@@ -233,8 +233,9 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         .await
         .unwrap()
         .expect("engine-owned command committed");
-    let observations =
-        crate::runtime::commit_admission::take_product_commit_admission_observations(session_id);
+    let observations = crate::runtime::commit_admission::take_product_commit_admission_observations(
+        &SessionId::from(session_id),
+    );
     assert!(
         observations.is_empty(),
         "the invocation owns command backpressure: {observations:?}"

@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::path::PathBuf;
 
 use lash_core::runtime::ScenarioContractSpec;
@@ -432,7 +433,7 @@ pub struct RuntimeFacadeProof {
     pub schema: &'static str,
     pub name: &'static str,
     pub provider_kind: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_index: usize,
     pub assistant_message: String,
     pub provider_exchange_count: usize,
@@ -446,7 +447,7 @@ pub struct RuntimeFacadeProof {
 pub struct PendingToolCompletionProof {
     pub schema: &'static str,
     pub name: &'static str,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_index: usize,
     pub assistant_message: String,
     pub tool_name: String,
@@ -468,7 +469,7 @@ pub struct PendingToolCompletionProof {
 pub struct FinalValueSemanticProof {
     pub schema: &'static str,
     pub name: &'static str,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub turn_index: usize,
     pub final_value: Value,
     pub assistant_output_text: String,

@@ -524,7 +524,7 @@ impl RuntimeExecutionContext<'_> {
                 .runtime_execution_context(attempt_context.clone())
                 .prepared_call(&prepared)
                 .cancellation_token(self.cancellation_token.clone())
-                .runtime_process_id(self.process_id().map(String::from))
+                .runtime_process_id(self.process_id().map(String::from).map(Into::into))
                 .parent_invocation(Some(attempt_invocation))
                 .child_execution_trace_hook(child_execution_trace_hook);
         if let Some(process_events) = self.process_event_context() {

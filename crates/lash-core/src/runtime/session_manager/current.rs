@@ -6,7 +6,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn resident_state_by_id(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Option<RuntimeSessionState> {
         if session_id == self.session_id {
             return Some(self.snapshot.to_runtime_state());
@@ -21,7 +21,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn turn_scope_by_id(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, crate::PluginError> {
         if session_id == self.session_id {
@@ -54,7 +54,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn snapshot_by_id(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
         self.resident_state_by_id(managed, session_id)
             .await
@@ -65,7 +65,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn tool_catalog_by_id(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         Ok(self
             .shared_tool_catalog_by_id(managed, session_id)
@@ -77,7 +77,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn shared_tool_catalog_by_id(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         if session_id == self.session_id {
             if let Some(runtime) = managed.registry.lock().await.get(session_id).cloned() {
@@ -114,7 +114,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn snapshot_session(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<SessionSnapshot, crate::PluginError> {
         self.snapshot_by_id(managed, session_id).await
     }
@@ -122,7 +122,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn tool_catalog(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         self.tool_catalog_by_id(managed, session_id).await
     }
@@ -130,7 +130,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn shared_tool_catalog(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         self.shared_tool_catalog_by_id(managed, session_id).await
     }
@@ -138,7 +138,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn tool_state(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<crate::ToolState, crate::PluginError> {
         if session_id == self.session_id {
             if let Some(runtime) = managed.registry.lock().await.get(session_id).cloned() {
@@ -164,7 +164,7 @@ impl CurrentSessionCapability {
     pub(in crate::runtime::session_manager) async fn apply_tool_state(
         &self,
         managed: &ManagedSessionCapability,
-        session_id: &str,
+        session_id: &SessionId,
         snapshot: crate::ToolState,
     ) -> Result<u64, crate::PluginError> {
         if session_id == self.session_id {

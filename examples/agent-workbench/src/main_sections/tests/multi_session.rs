@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 // The multi-session workbench: a roster of sessions, each created with its own
 // dialect, surviving the web process that created them (FIG-1306).
@@ -58,7 +59,7 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
     .await;
     run_turn_through_the_workbench_open_path(
         &state,
-        &ambient_session_id,
+        &SessionId::from(ambient_session_id.clone()),
         &TurnId::from("ambient-session-turn"),
         "say the canonical answer",
     )
@@ -71,7 +72,7 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
         "the created session must have recorded the dialect it was created with"
     );
     assert_eq!(
-        recorded_dialect_payload(&state, &ambient_session_id).await,
+        recorded_dialect_payload(&state, &SessionId::from(ambient_session_id.clone())).await,
         serde_json::json!("lashlang"),
         "creating a TypeScript session must not move the ambient default"
     );
@@ -96,7 +97,7 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
     let Json(ambient_view) = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(ambient_session_id.clone()),
+            session_id: Some(SessionId::from(ambient_session_id.clone())),
         }),
     )
     .await
@@ -202,7 +203,9 @@ async fn selecting_a_session_moves_the_query_less_default() {
     let mut state = queued_send_test_state(data_dir.path(), provider).await;
     state.sessions = WorkbenchSessions::persistent(session_id_path.clone()).expect("roster");
     let boot_session_id = state.current_session_id();
-    state.sessions.ensure(&boot_session_id, state.rlm_dialect);
+    state
+        .sessions
+        .ensure(&SessionId::from(boot_session_id.clone()), state.rlm_dialect);
 
     let Json(created) = create_session(
         State(state.clone()),
@@ -248,7 +251,7 @@ async fn selecting_a_session_moves_the_query_less_default() {
     let error = select_session(
         State(state.clone()),
         Json(SessionSelectRequest {
-            session_id: "workbench-not-on-the-roster".to_string(),
+            session_id: SessionId::from("workbench-not-on-the-roster"),
         }),
     )
     .await
@@ -276,9 +279,10 @@ async fn the_session_roster_survives_the_web_process() {
         let provider = scripted_cells_provider("workbench-roster-restart-first", Vec::new());
         let mut state = queued_send_test_state(data_dir.path(), provider).await;
         state.sessions = WorkbenchSessions::persistent(session_id_path.clone()).expect("roster");
-        state
-            .sessions
-            .ensure(&state.current_session_id(), state.rlm_dialect);
+        state.sessions.ensure(
+            &SessionId::from(state.current_session_id()),
+            state.rlm_dialect,
+        );
         let mut created = Vec::new();
         for (name, dialect) in [("ts room", "typescript"), ("lash room", "lashlang")] {
             let Json(summary) = create_session(
@@ -311,7 +315,7 @@ async fn the_session_roster_survives_the_web_process() {
         let listed = listing
             .sessions
             .iter()
-            .find(|summary| &summary.session_id == session_id)
+            .find(|summary| summary.session_id == session_id)
             .unwrap_or_else(|| panic!("`{session_id}` must survive the restart: {listing:#?}"));
         assert_eq!(&listed.dialect, dialect);
     }
@@ -352,7 +356,7 @@ fn a_reset_carries_the_slot_dialect_to_the_rotated_session() {
     let sessions = WorkbenchSessions::persistent(temp.path().join("session-id")).expect("roster");
     let original = sessions.current();
     sessions.record(
-        original.clone(),
+        SessionId::from(original.clone()),
         "typescript work".to_string(),
         lash::rlm::RlmDialect::Typescript,
     );
@@ -361,15 +365,17 @@ fn a_reset_carries_the_slot_dialect_to_the_rotated_session() {
 
     assert_eq!(old, original);
     assert_eq!(
-        sessions.dialect_for(&new),
+        sessions.dialect_for(&SessionId::from(new.clone())),
         Some(lash::rlm::RlmDialect::Typescript)
     );
     assert_eq!(
-        sessions.entry(&new).map(|entry| entry.name),
+        sessions
+            .entry(&SessionId::from(new))
+            .map(|entry| entry.name),
         Some("typescript work".to_string())
     );
     assert_eq!(
-        sessions.dialect_for(&old),
+        sessions.dialect_for(&SessionId::from(old)),
         None,
         "the retired session leaves the roster with the slot it held"
     );
@@ -398,7 +404,7 @@ fn a_refused_pin_is_typed_and_carries_both_dialects() {
 }
 
 /// What a session recorded, as the store holds it.
-async fn recorded_dialect_payload(state: &AppState, session_id: &str) -> serde_json::Value {
+async fn recorded_dialect_payload(state: &AppState, session_id: &SessionId) -> serde_json::Value {
     let session = state
         .core
         .session(session_id.to_string())

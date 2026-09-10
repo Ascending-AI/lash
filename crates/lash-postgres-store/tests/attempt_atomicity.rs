@@ -14,6 +14,8 @@
 //! terminals byte-for-byte without re-executing either body.
 
 use lash_core::ProcessLifecycle as _;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
@@ -108,13 +110,13 @@ impl lash_core::AwaitEventResolver for CrashingEffectHost {
     }
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
@@ -250,7 +252,7 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
     }
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.0
             .controller()
@@ -259,7 +261,7 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
     }
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.0
             .controller()
@@ -346,14 +348,14 @@ impl lash_core::AwaitEventResolver for CrossingController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
@@ -480,15 +482,15 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
         let intent = match self.kind {
             PublicIntentKind::Signal => {
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                    session_id: call.context.session_id().to_string(),
-                    process_id: "pg-public-intent-target".to_string(),
+                    session_id: lash_core::SessionId::from(call.context.session_id()),
+                    process_id: ProcessId::from("pg-public-intent-target"),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"source": "postgres-public-caller"}),
                 })
             }
             PublicIntentKind::ParentEnd => {
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                    session_id: call.context.session_id().to_string(),
+                    session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         "pg-public-parent-end-child",
                         lash_core::ProcessOriginator::host_scoped("pg-public-caller"),
@@ -521,13 +523,13 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtParentEnd {
 
 fn public_runtime_policy() -> lash_core::SessionPolicy {
     let mut policy = lash_core::testing::mock_session_policy();
-    policy.session_id = Some(SESSION.to_string());
+    policy.session_id = Some(SessionId::from(SESSION.to_string()));
     policy
 }
 
 fn public_runtime_state(policy: &lash_core::SessionPolicy) -> lash_core::RuntimeSessionState {
     lash_core::RuntimeSessionState {
-        session_id: SESSION.to_string(),
+        session_id: SessionId::from(SESSION.to_string()),
         policy: policy.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -722,13 +724,13 @@ fn fig1293_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>>
 
 fn fig1293_policy() -> lash_core::SessionPolicy {
     let mut policy = lash_core::testing::mock_session_policy();
-    policy.session_id = Some("fig1293-restate-migrated-tools".to_string());
+    policy.session_id = Some(SessionId::from("fig1293-restate-migrated-tools"));
     policy
 }
 
 fn fig1293_state(policy: &lash_core::SessionPolicy) -> lash_core::RuntimeSessionState {
     lash_core::RuntimeSessionState {
-        session_id: "fig1293-restate-migrated-tools".to_string(),
+        session_id: SessionId::from("fig1293-restate-migrated-tools"),
         policy: policy.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -900,7 +902,7 @@ async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegist
                 payload_schema: lash_core::LashSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &["fig1293-restate-migrated-tools".to_string()],
+            &[SessionId::from("fig1293-restate-migrated-tools")],
         )
         .await
         .expect("register FIG-1293 control target");
@@ -1034,7 +1036,7 @@ async fn assert_fig1293_literal_outputs(
 ) {
     let tracked_process = registry
         .get_process(
-            "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
+            &ProcessId::from("tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b"),
         )
         .await
         .expect("read FIG-1293 tracked command process")
@@ -1154,7 +1156,7 @@ fn attempt_outcome(call_id: &str, value: &str) -> RuntimeEffectOutcome {
             }),
             intents: lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(
                 Box::new(lash_core::StartProcessIntent {
-                    session_id: SESSION.to_string(),
+                    session_id: SessionId::from(SESSION.to_string()),
                     request: lash_core::ProcessStartRequest::external(
                         format!("{call_id}:recorded-child"),
                         lash_core::ProcessOriginator::host_scoped("pg-attempt-atomicity"),
@@ -2068,9 +2070,13 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         .await
         .expect("connect first PostgreSQL intent host");
     reset(&first_storage).await;
-    let identity =
-        lash_core::derive_tool_intent_identity(SESSION, TURN, Some("pg-journal-first-call"), 0)
-            .expect("literal PostgreSQL intent identity");
+    let identity = lash_core::derive_tool_intent_identity(
+        &SessionId::from(SESSION),
+        TURN,
+        Some("pg-journal-first-call"),
+        0,
+    )
+    .expect("literal PostgreSQL intent identity");
     let mut invocation = RuntimeInvocation::effect(
         RuntimeScope::for_turn(SESSION, TURN, 0, 0),
         "pg-recorded-intent-start",
@@ -2095,7 +2101,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         invocation,
         RuntimeEffectCommand::process(lash_core::ProcessCommand::Start {
             registration,
-            observers: vec![SESSION.to_string()],
+            observers: vec![SessionId::from(SESSION.to_string())],
             env_spec: None,
             execution_context: Box::default(),
         }),
@@ -2113,7 +2119,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         .expect("execute recorded intent command");
     registry
         .complete_process(
-            &identity.replay_key,
+            &ProcessId::from(identity.replay_key),
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("terminal after the recorded drain"),
             )),
@@ -2187,7 +2193,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
                 payload_schema: lash_core::LashSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[SESSION.to_string()],
+            &[SessionId::from(SESSION.to_string())],
         )
         .await
         .expect("register PostgreSQL public signal target");
@@ -2277,7 +2283,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
 
     registry
         .complete_process(
-            "pg-public-intent-target",
+            &ProcessId::from("pg-public-intent-target"),
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("terminal after public intent drain"),
             )),
@@ -2374,7 +2380,7 @@ async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_po
                 payload_schema: lash_core::LashSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[SESSION.to_string()],
+            &[SessionId::from(SESSION.to_string())],
         )
         .await
         .expect("register PostgreSQL parent-end signal target");

@@ -1,3 +1,4 @@
+use crate::SessionId;
 use lash_sansio::core_support::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -280,7 +281,7 @@ impl TurnGraphEditor {
         self.committed_node_ids.clone()
     }
 
-    pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
+    pub(super) fn remap_node_ids(&mut self, session_id: &SessionId, mapping: &[(String, String)]) {
         if mapping.is_empty() {
             return;
         }

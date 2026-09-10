@@ -1,4 +1,6 @@
 use crate::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 #[async_trait::async_trait]
 impl TriggerStore for PostgresTriggerStore {
@@ -247,7 +249,10 @@ impl TriggerStore for PostgresTriggerStore {
         Ok(records)
     }
 
-    async fn delete_session_subscriptions(&self, session_id: &str) -> Result<usize, PluginError> {
+    async fn delete_session_subscriptions(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<usize, PluginError> {
         let owner_scope = lash_core::TriggerOwnerScope::session(session_id).namespace();
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let rows = sqlx::query(
@@ -448,7 +453,7 @@ impl TriggerStore for PostgresTriggerStore {
 
     async fn list_deliveries_by_process_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
         list_deliveries_where(
             &self.pool,
@@ -462,7 +467,7 @@ impl TriggerStore for PostgresTriggerStore {
         list_deliveries_where(&self.pool, "TRUE", None).await
     }
 
-    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, PluginError> {
+    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError> {
         sqlx::query_scalar(
             "SELECT DISTINCT process_id
              FROM lash_trigger_deliveries
@@ -470,6 +475,7 @@ impl TriggerStore for PostgresTriggerStore {
         )
         .fetch_all(&self.pool)
         .await
+        .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
         .map_err(plugin_sqlx_error)
     }
 
@@ -489,12 +495,12 @@ impl TriggerStore for PostgresTriggerStore {
             .map(|row| lash_core::TriggerDeliveryRetentionCandidate {
                 occurrence_id: row.get(0),
                 subscription_id: row.get(1),
-                process_id: row.get(2),
+                process_id: ProcessId::from(row.get::<String, _>(2)),
             })
             .collect())
     }
 
-    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<String>, PluginError> {
+    async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<SessionId>, PluginError> {
         let owner_scopes: Vec<String> = sqlx::query_scalar(
             "SELECT owner_scope
              FROM (
@@ -530,7 +536,7 @@ impl TriggerStore for PostgresTriggerStore {
         let mut session_ids = std::collections::BTreeSet::new();
         for owner_scope in owner_scopes {
             if let Some(session_id) = owner_scope.strip_prefix("session:") {
-                session_ids.insert(session_id.to_string());
+                session_ids.insert(SessionId::from(session_id));
             }
         }
         Ok(session_ids.into_iter().collect())
@@ -539,7 +545,7 @@ impl TriggerStore for PostgresTriggerStore {
     async fn reconcile_trigger_retention(
         &self,
         candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[String],
+        deleted_session_ids: &[SessionId],
     ) -> Result<lash_core::TriggerRetentionReconciliationReport, PluginError> {
         let occurrence_ids = candidates
             .iter()
@@ -572,7 +578,12 @@ impl TriggerStore for PostgresTriggerStore {
             )
             .bind(occurrence_ids)
             .bind(subscription_ids)
-            .bind(process_ids)
+            .bind(
+                process_ids
+                    .iter()
+                    .map(ProcessId::as_str)
+                    .collect::<Vec<_>>(),
+            )
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?
@@ -697,7 +708,12 @@ impl TriggerStore for PostgresTriggerStore {
         )
         .bind(occurrence_ids)
         .bind(subscription_ids)
-        .bind(process_ids)
+        .bind(
+            process_ids
+                .iter()
+                .map(ProcessId::as_str)
+                .collect::<Vec<_>>(),
+        )
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?
@@ -936,7 +952,7 @@ async fn reserve_postgres_deliveries(
         )
         .bind(&occurrence.occurrence_id)
         .bind(&subscription.subscription_id)
-        .bind(&process_id)
+        .bind(process_id.as_str())
         .bind(&subscription.incarnation)
         .bind(sql_revision)
         .bind(serde_json::to_string(&subscription).map_err(process_decode_error)?)
@@ -975,7 +991,7 @@ async fn postgres_delivery_snapshots(
             Ok(TriggerDeliveryReservation {
                 occurrence: occurrence.clone(),
                 subscription: serde_json::from_str(&json).map_err(process_decode_error)?,
-                process_id: row.get(0),
+                process_id: ProcessId::from(row.get::<String, _>(0)),
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
                 reservation_status: lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
             })
@@ -1011,7 +1027,7 @@ async fn list_deliveries_where(
                 occurrence: serde_json::from_str(&occurrence_json).map_err(process_decode_error)?,
                 subscription: serde_json::from_str(&subscription_json)
                     .map_err(process_decode_error)?,
-                process_id: row.get(0),
+                process_id: ProcessId::from(row.get::<String, _>(0)),
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
                 reservation_status: lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
             })

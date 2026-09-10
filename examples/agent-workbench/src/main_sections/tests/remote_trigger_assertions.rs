@@ -1,4 +1,6 @@
 use super::*;
+use lash::ProcessId;
+use lash::SessionId;
 
 // Remote-trigger round-trip assertions, split out of `tests.rs` when that file
 // reached its line budget. Included rather than declared as a module, matching
@@ -6,7 +8,7 @@ use super::*;
 
 pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
     data_dir: &std::path::Path,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Vec<lash::triggers::TriggerSubscriptionRecord> {
     let store = lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
         .await
@@ -80,8 +82,8 @@ pub(crate) fn assert_remote_trigger_emit_report_round_trip(
 pub(crate) async fn assert_remote_started_process_surface(
     core: &LashCore,
     registry: &dyn lash::process::ProcessRegistry,
-    session_id: &str,
-    process_ids: &[String],
+    session_id: &SessionId,
+    process_ids: &[ProcessId],
 ) {
     let filter = lash::process::ProcessListFilter {
         definition: None,
@@ -177,7 +179,10 @@ pub(crate) async fn assert_remote_started_process_surface(
         .collect::<Vec<_>>();
     let mut sorted_listed_ids = listed_ids.clone();
     sorted_listed_ids.sort_unstable();
-    let mut expected_ids = process_ids.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut expected_ids = process_ids
+        .iter()
+        .map(ProcessId::as_str)
+        .collect::<Vec<_>>();
     expected_ids.sort_unstable();
     assert_eq!(sorted_listed_ids, expected_ids);
     let round_trip_ids = round_trip_observed

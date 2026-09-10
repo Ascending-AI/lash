@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lash_core::plugin::{PluginError, PluginFactory, PluginSessionContext};
 use lash_core::{
-    AttemptContext, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
+    AttemptContext, SessionId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
     facade_support::DirectJsonSchema, facade_support::DirectMessage,
     facade_support::DirectOutputSpec, facade_support::DirectPart, facade_support::DirectRequest,
     facade_support::DirectRole, facade_support::PluginSpec, facade_support::PluginSpecFactory,
@@ -139,7 +139,10 @@ impl LlmToolsProvider {
                     output,
                     stream_events: None,
                     generation,
-                    session_id: Some(format!("{}-llm-query", context.session_id())),
+                    session_id: Some(SessionId::from(format!(
+                        "{}-llm-query",
+                        context.session_id()
+                    ))),
                     caused_by: None,
                     replay: None,
                 },
@@ -363,13 +366,13 @@ mod tests {
 
         async fn snapshot_session(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<SessionSnapshot, PluginError> {
             Ok(self.snapshot.to_snapshot())
         }
         async fn tool_catalog(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<Vec<serde_json::Value>, PluginError> {
             Ok(Vec::new())
         }
@@ -384,7 +387,7 @@ mod tests {
             Err(PluginError::Session("not used".to_string()))
         }
 
-        async fn close_session(&self, _session_id: &str) -> Result<(), PluginError> {
+        async fn close_session(&self, _session_id: &SessionId) -> Result<(), PluginError> {
             Ok(())
         }
     }

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 fn event(kind: BoundaryKind, id: &str, payload: Value) -> BoundaryEvent {
     BoundaryEvent::new(id, "session-001", kind, 1, "test", payload)
@@ -21,11 +22,14 @@ async fn worker_failover_continuation_oracle_catches_a_store_that_fails_to_fence
     // facts.
     let mut harness = harness();
     let session = "worker-unfenced-session";
-    let store = harness.store_for_session(session).await.expect("store");
+    let store = harness
+        .store_for_session(&SessionId::from(session))
+        .await
+        .expect("store");
     let blocker = LeaseOwnerIdentity::opaque("blocker-owner", "blocker-owner:001");
     let blocking = match store
         .try_claim_session_execution_lease(
-            session,
+            &SessionId::from(session),
             &blocker,
             "worker-failover-continuation-oracle-catches-a-store-that-fails-to-fence-executor",
             LEASE_TTL_MS,
@@ -497,7 +501,7 @@ fn sqlite_segment_harness(root: &std::path::Path) -> RuntimeBoundaryHarness {
 
 async fn run_seeded_segment_effect(
     harness: &mut RuntimeBoundaryHarness,
-    process_id: &str,
+    process_id: &ProcessId,
     effect_ordinal: u64,
 ) -> Value {
     harness
@@ -529,14 +533,14 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
         let mut baseline_results = Vec::new();
         for effect in 0..effect_count {
             baseline_results.push(
-                run_seeded_segment_effect(&mut baseline, "unsegmented", effect).await
-                    ["result_digest"]
+                run_seeded_segment_effect(&mut baseline, &ProcessId::from("unsegmented"), effect)
+                    .await["result_digest"]
                     .clone(),
             );
         }
 
         let root = temp.path().join("segmented");
-        let process_id = format!("segmented-{crash_point:?}").to_ascii_lowercase();
+        let process_id = ProcessId::from(format!("segmented-{crash_point:?}").to_ascii_lowercase());
         let mut harness = sqlite_segment_harness(&root);
         let registry = harness
             .ensure_worker_process_registry()
@@ -659,7 +663,7 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
             .complete_process(
                 &process_id,
                 terminal.clone(),
-                lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+                lash_core::ProcessCompletionAuthority::workflow_key(process_id.as_str()),
             )
             .await
             .expect("complete real terminal");

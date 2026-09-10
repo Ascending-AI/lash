@@ -140,7 +140,10 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
             TurnInput::text("commit before delivering"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("commit-before-delivery")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("commit-before-delivery"),
+                ),
             )
             .with_events(&sink),
         ),
@@ -164,7 +167,10 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         .run_turn_assembled(
             TurnInput::text("continue after dropped host delivery"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("after-dropped-host-delivery")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("after-dropped-host-delivery"),
+            ),
         )
         .await
         .expect("the adopted resident state remains usable");
@@ -235,7 +241,10 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         .run_turn_assembled(
             TurnInput::text("switch frames"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("post-commit-restore-failure")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("post-commit-restore-failure"),
+            ),
         )
         .await
         .expect("a published commit must not become a whole-turn error");
@@ -335,7 +344,10 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         .run_turn_assembled(
             TurnInput::text("use the reloaded state"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("after-post-commit-restore-failure")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("after-post-commit-restore-failure"),
+            ),
         )
         .await
         .expect("next use reloads durable resident state");
@@ -468,13 +480,13 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     .expect("enqueue an input scoped to the live turn");
 
     store.fail_next_runtime_commit(crate::StoreError::SessionExecutionLeaseExpired {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
     });
     let error = runtime
         .run_turn_assembled(
             crate::TurnInput::text("run the turn that will be fenced at commit"),
             CancellationToken::new(),
-            named_turn_scope(session_id, &TurnId::from(live_turn_id)),
+            named_turn_scope(&SessionId::from(session_id), &TurnId::from(live_turn_id)),
         )
         .await
         .expect_err("a fenced commit must fail the turn");
@@ -483,9 +495,12 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         crate::RuntimeErrorCode::SessionExecutionLeaseLost
     );
 
-    let pending = crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), session_id)
-        .await
-        .expect("list pending turn inputs");
+    let pending = crate::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("list pending turn inputs");
     assert_eq!(
         pending.len(),
         2,
@@ -568,7 +583,10 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .run_turn_assembled(
             TurnInput::text("commit the baseline"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("execution-state-baseline")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("execution-state-baseline"),
+            ),
         )
         .await
         .expect("baseline turn commits its execution state");
@@ -578,7 +596,10 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         .run_turn_assembled(
             TurnInput::text("capture must fail"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("execution-state-capture-failure")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("execution-state-capture-failure"),
+            ),
         )
         .await
         .expect_err("dirty capture failure must abort before the turn commit");
@@ -702,7 +723,10 @@ pub(super) async fn caller_supplied_key_colliding_with_existing_frame_preserves_
         .run_turn_assembled(
             TurnInput::text("redrive an already materialized frame switch"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("already-current-frame-switch")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("already-current-frame-switch"),
+            ),
         )
         .await
         .expect("an already-current frame switch remains an idempotent no-op");
@@ -814,7 +838,10 @@ pub(super) async fn materialized_frame_switch_clears_checkpoint_and_resets_resid
         .run_turn_assembled(
             TurnInput::text("switch to a distinct frame"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("materialized-frame-switch")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("materialized-frame-switch"),
+            ),
         )
         .await
         .expect("materialized frame switch commits");
@@ -879,12 +906,20 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     first.set_turn_phase_probe(Arc::new(FailCaptureAfterEffectLoop {
         executor: Arc::clone(&executor),
     }));
-    enqueue_idle_turn_input(store.as_ref(), "root", "peer must reclaim this input").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "peer must reclaim this input",
+    )
+    .await;
 
     let error = first
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("capture-abort-owner")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("capture-abort-owner"),
+            ),
         ))
         .await
         .expect_err("dirty capture aborts before commit");
@@ -917,7 +952,10 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     let reclaimed = peer
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("capture-abort-peer")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("capture-abort-peer"),
+            ),
         ))
         .await
         .expect("peer reclaim must not wait for the lease TTL")
@@ -995,12 +1033,20 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         executor: Arc::clone(&executor),
         committed_turns: AtomicUsize::new(0),
     }));
-    enqueue_idle_turn_input(store.as_ref(), "root", "switch then fail capture").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "switch then fail capture",
+    )
+    .await;
 
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("follow-on-capture-failure")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("follow-on-capture-failure"),
+            ),
         ))
         .await
         .expect("a follow-on pre-commit failure must not erase the committed frame")
@@ -1025,7 +1071,10 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("retry-safe-committed-handoff")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("retry-safe-committed-handoff"),
+            ),
         ))
         .await
         .expect("retrying the logical queue call is safe")
@@ -1033,7 +1082,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         .expect("the durable handoff is reclaimed");
     assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queue after recovered handoff")
             .is_empty()
@@ -1218,7 +1267,7 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
     let plugins = crate::PluginHost::new(factories)
         .build_session_with_parent(
             "root",
-            Some("parent".to_string()),
+            Some(SessionId::from("parent")),
             crate::plugin::SessionCreationConfig {
                 authority: crate::plugin::SessionAuthorityContext {
                     tool_access: crate::SessionToolAccess {
@@ -1255,7 +1304,10 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
             TurnInput::text("rotate the frame"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("live-surface-frame-rotation")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("live-surface-frame-rotation"),
+                ),
             ),
         )
         .await
@@ -1475,7 +1527,7 @@ impl crate::ToolProvider for ParentEndFailureIntentTool {
             crate::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
             crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
-                    session_id: call.context.session_id().to_string(),
+                    session_id: SessionId::from(call.context.session_id()),
                     request: crate::ProcessStartRequest::external(
                         "cancelled-turn-parent-end-child",
                         crate::ProcessOriginator::host_scoped("parent-end-failure-witness"),
@@ -1518,8 +1570,8 @@ impl crate::ToolProvider for CasSurvivorIntentTools {
             crate::ToolOutcomeDone::ok(serde_json::json!({"intent": "committed"})),
             crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
                 crate::EmitProcessEventIntent {
-                    session_id: call.context.session_id().to_string(),
-                    process_id: "cas-survivor-intent-target".to_string(),
+                    session_id: SessionId::from(call.context.session_id()),
+                    process_id: ProcessId::from("cas-survivor-intent-target"),
                     event_type: "intent.survivor.committed".to_string(),
                     payload: serde_json::json!({"survives": true}),
                 },
@@ -1582,7 +1634,7 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store(
 
 pub(super) async fn standard_runtime_with_transport_and_queue_store_for_session(
     transport: TestProvider,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let store = Arc::new(RecordingStore::default());
     let runtime = TestRuntime::new(transport)
@@ -1665,7 +1717,7 @@ impl crate::AwaitEventResolver for JournalReplayEffectController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.native
             .revoke_await_events_for_session(session_id)
@@ -1674,7 +1726,7 @@ impl crate::AwaitEventResolver for JournalReplayEffectController {
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.native
             .cancel_await_events_for_session(session_id)
@@ -1735,7 +1787,7 @@ impl crate::store::RuntimePersistenceDecorator for JournalRedriveStore {
 
     async fn list_turn_input_applications(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, crate::StoreError> {
         if self.application_history_available {
             let mut applications = crate::store::TurnInputStore::list_turn_input_applications(
@@ -1762,7 +1814,7 @@ impl crate::store::RuntimePersistenceDecorator for JournalRedriveStore {
 pub(super) async fn append_process_wake_to_queue(
     registry: &dyn crate::ProcessRegistry,
     store: &RecordingStore,
-    process_id: &str,
+    process_id: &ProcessId,
     request: crate::ProcessEventAppendRequest,
 ) -> crate::ProcessWakeDelivery {
     let appended = registry
@@ -1804,7 +1856,7 @@ pub(super) fn request_contains_text(request: &crate::llm::types::LlmRequest, nee
 
 pub(super) async fn enqueue_turn_input_for_checkpoint(
     store: &RecordingStore,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     source_key: Option<String>,
     input: TurnInput,
@@ -1825,7 +1877,7 @@ pub(super) async fn enqueue_turn_input_for_checkpoint(
 
 pub(super) async fn enqueue_idle_turn_input(
     store: &RecordingStore,
-    session_id: &str,
+    session_id: &SessionId,
     text: &str,
 ) -> crate::PendingTurnInput {
     crate::store::TurnInputStore::enqueue_pending_turn_input(
@@ -1842,7 +1894,7 @@ pub(super) async fn enqueue_idle_turn_input(
 
 pub(super) async fn enqueue_session_command(
     store: &RecordingStore,
-    session_id: &str,
+    session_id: &SessionId,
     reason: &str,
 ) -> crate::QueuedWorkBatch {
     crate::store::QueuedWorkStore::enqueue_queued_work(
@@ -1861,7 +1913,7 @@ pub(super) async fn enqueue_session_command(
 
 pub(super) async fn enqueue_config_patch_command(
     store: &RecordingStore,
-    session_id: &str,
+    session_id: &SessionId,
     patch: crate::runtime::ApplyConfigPatch,
 ) -> crate::QueuedWorkBatch {
     crate::store::QueuedWorkStore::enqueue_queued_work(

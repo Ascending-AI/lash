@@ -38,7 +38,10 @@ fn test_session_policy() -> crate::SessionPolicy {
     }
 }
 
-fn session_turn_registration(process_id: &str, child_session_id: &str) -> ProcessRegistration {
+fn session_turn_registration(
+    process_id: &ProcessId,
+    child_session_id: &SessionId,
+) -> ProcessRegistration {
     let create_request = crate::SessionCreateRequest::child_session(
         "recovery-test-parent",
         crate::SessionStartPoint::Empty,
@@ -79,16 +82,16 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
     let process_id = "cancelled-before-crash-replay";
     registry
         .register_process(session_turn_registration(
-            process_id,
-            "cancelled-before-crash-child",
+            &ProcessId::from(process_id),
+            &SessionId::from("cancelled-before-crash-child"),
         ))
         .await
         .expect("register replay fixture");
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::cancel_requested(
-                process_id,
+                &ProcessId::from(process_id),
                 Some("cancel before crash".to_string()),
             ),
         )
@@ -118,9 +121,9 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
         .await
         .expect("fresh worker admits cancelled replay");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
-    await_terminal(&registry, process_id).await;
+    await_terminal(&registry, &ProcessId::from(process_id)).await;
     let record = registry
-        .get_process(process_id)
+        .get_process(&ProcessId::from(process_id))
         .await
         .expect("read replayed process")
         .expect("replayed process remains retained");
@@ -189,8 +192,8 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     let process_id = "session-turn-terminal-fence";
     registry
         .register_process(session_turn_registration(
-            process_id,
-            "session-turn-terminal-fence-child",
+            &ProcessId::from(process_id),
+            &SessionId::from("session-turn-terminal-fence-child"),
         ))
         .await
         .expect("register SessionTurn fence fixture");
@@ -207,9 +210,9 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     assert!(raw_registry.process_events_read_count_for_testing() >= 3);
     raw_registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             crate::ProcessEventAppendRequest::cancel_requested(
-                process_id,
+                &ProcessId::from(process_id),
                 Some("commit cancellation behind the parked watcher".to_string()),
             ),
         )
@@ -228,12 +231,12 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
             "fenced recovery attempt releases its lease"
         );
         let record = registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read SessionTurn fence fixture")
             .expect("SessionTurn fence fixture remains retained");
         let lease = registry
-            .get_process_lease(process_id)
+            .get_process_lease(&ProcessId::from(process_id))
             .await
             .expect("read SessionTurn fence lease");
         if record.first_started.is_some() && lease.is_none() {
@@ -242,7 +245,7 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
         tokio::task::yield_now().await;
     }
     let record = registry
-        .get_process(process_id)
+        .get_process(&ProcessId::from(process_id))
         .await
         .expect("read fenced SessionTurn")
         .expect("fenced SessionTurn remains retained");
@@ -356,7 +359,7 @@ fn late_bound_process_work_wiring(
 }
 
 fn engine_registration(
-    id: impl Into<String>,
+    id: impl Into<ProcessId>,
     kind: &str,
     env_ref: ProcessExecutionEnvRef,
     payload: serde_json::Value,
@@ -511,7 +514,7 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
         report
             .admitted
             .iter()
-            .filter(|id| *id == &delivery.process_id)
+            .filter(|id| *id == delivery.process_id)
             .count(),
         1,
         "the reconciled row is this call's admission, exactly once: {report:?}"
@@ -549,7 +552,7 @@ fn registration_with_disposition(
 
 async fn abandoned_evidence(
     registry: &Arc<dyn ProcessRegistry>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> crate::AbandonEvidence {
     let record = registry
         .get_process(process_id)
@@ -566,7 +569,7 @@ async fn abandoned_evidence(
 
 fn assert_recovery_backend_error_event(
     capture: &EventCapture,
-    process_id: &str,
+    process_id: &ProcessId,
     operation: &str,
     error: &str,
 ) {
@@ -657,7 +660,7 @@ fn recovery_test_trigger_draft(source_key: String) -> crate::TriggerSubscription
     .with_payload_schema(crate::LashSchema::any())
 }
 
-async fn process_count(registry: &Arc<dyn ProcessRegistry>, process_id: &str) -> usize {
+async fn process_count(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) -> usize {
     registry
         .list_processes(&ProcessListFilter {
             status: crate::ProcessStatusFilter::Any,
@@ -670,7 +673,7 @@ async fn process_count(registry: &Arc<dyn ProcessRegistry>, process_id: &str) ->
         .count()
 }
 
-async fn await_terminal(registry: &Arc<dyn ProcessRegistry>, process_id: &str) {
+async fn await_terminal(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) {
     let awaiter = crate::NativeProcessWork::for_registry(Arc::clone(registry));
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -918,7 +921,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
                 "failed to start nested process: {err}"
             ));
         }
-        match context.await_process(process_id).await {
+        match context.await_process(&ProcessId::from(process_id)).await {
             Ok(ProcessAwaitOutput::Settled { output }) if output.is_success() => {
                 crate::ToolOutcome::ok(serde_json::json!({ "nested": "done" }))
             }
@@ -939,7 +942,7 @@ impl ProductionChainEngine {
         }
     }
 
-    fn success(process_id: String) -> crate::ProcessRunOutcome {
+    fn success(process_id: ProcessId) -> crate::ProcessRunOutcome {
         crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
             serde_json::json!({ "completed": process_id }),
         ))
@@ -1093,14 +1096,16 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 let processes = processes.clone();
                 let wait_child_id = child_id.clone();
                 crate::task::spawn(inherit_process_execution_permit(async move {
-                    processes.await_terminal(&wait_child_id).await
+                    processes
+                        .await_terminal(&ProcessId::from(wait_child_id))
+                        .await
                 }))
                 .await
                 .expect("nested child-turn task joins")
                 .expect("nested child-turn task observes child terminal");
             } else {
                 processes
-                    .await_terminal(&child_id)
+                    .await_terminal(&ProcessId::from(child_id))
                     .await
                     .expect("parent observes production-started child terminal");
             }
@@ -1334,7 +1339,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     .await
     .expect("production SessionTurn path completes without permit starvation");
     let outer = crate::NativeProcessWork::for_registry(Arc::clone(&registry))
-        .await_terminal(outer_process_id)
+        .await_terminal(&ProcessId::from(outer_process_id))
         .await
         .expect("outer session-turn process is terminal");
     assert!(
@@ -1403,9 +1408,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         .drive_pending_processes()
         .await
         .expect("drive process");
-    await_terminal(&registry, "segmented-process").await;
+    await_terminal(&registry, &ProcessId::from("segmented-process")).await;
     let final_record = registry
-        .get_process("segmented-process")
+        .get_process(&ProcessId::from("segmented-process"))
         .await
         .expect("read process")
         .expect("process exists");
@@ -1814,7 +1819,7 @@ async fn sweep_never_claims_externally_owned_rows() {
     assert_eq!(
         report.deferred,
         vec![ProcessAdmissionDeferred {
-            process_id: "proc-ext".to_string(),
+            process_id: ProcessId::from("proc-ext"),
             disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
         }]
     );
@@ -1828,14 +1833,14 @@ async fn sweep_never_claims_externally_owned_rows() {
     assert_eq!(
         second.deferred,
         vec![ProcessAdmissionDeferred {
-            process_id: "proc-ext".to_string(),
+            process_id: ProcessId::from("proc-ext"),
             disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
         }]
     );
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let record = registry
-        .get_process("proc-ext")
+        .get_process(&ProcessId::from("proc-ext"))
         .await
         .expect("read process")
         .expect("process");
@@ -1845,7 +1850,7 @@ async fn sweep_never_claims_externally_owned_rows() {
     );
     assert!(
         registry
-            .get_process_lease("proc-ext")
+            .get_process_lease(&ProcessId::from("proc-ext"))
             .await
             .expect("lease read")
             .is_none(),
@@ -1868,7 +1873,7 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
     let exhausted_owner = LeaseOwnerIdentity::opaque("exhausted-owner", "exhausted-incarnation");
     registry
         .record_first_started(
-            "proc-attempts-exhausted",
+            &ProcessId::from("proc-attempts-exhausted"),
             ProcessStarted {
                 owner: exhausted_owner.clone(),
                 fencing_token: 0,
@@ -1887,9 +1892,9 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches exhausted process");
-    await_terminal(&registry, "proc-attempts-exhausted").await;
+    await_terminal(&registry, &ProcessId::from("proc-attempts-exhausted")).await;
 
-    let evidence = abandoned_evidence(&registry, "proc-attempts-exhausted").await;
+    let evidence = abandoned_evidence(&registry, &ProcessId::from("proc-attempts-exhausted")).await;
     assert_eq!(evidence.writer, AbandonWriter::EngineGaveUp);
     assert_eq!(
         evidence.owner,
@@ -1912,7 +1917,7 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
         .expect("register");
     registry
         .request_process_abandon(
-            "proc-ext-abandon",
+            &ProcessId::from("proc-ext-abandon"),
             AbandonRequest {
                 requested_by: "operator".to_string(),
                 requested_at_ms: 1,
@@ -1930,9 +1935,9 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
-    await_terminal(&registry, "proc-ext-abandon").await;
+    await_terminal(&registry, &ProcessId::from("proc-ext-abandon")).await;
 
-    let evidence = abandoned_evidence(&registry, "proc-ext-abandon").await;
+    let evidence = abandoned_evidence(&registry, &ProcessId::from("proc-ext-abandon")).await;
     assert_eq!(evidence.writer, AbandonWriter::ReconciledRequest);
     assert!(
         evidence.owner.is_none(),
@@ -1954,7 +1959,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
         .expect("register");
     registry
         .record_first_started(
-            "proc-ob-silent",
+            &ProcessId::from("proc-ob-silent"),
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("started-worker", "started-incarnation"),
                 fencing_token: 0,
@@ -1967,7 +1972,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
     // A live holder keeps the row unavailable until its TTL expires.
     registry
         .claim_process_lease(
-            "proc-ob-silent",
+            &ProcessId::from("proc-ob-silent"),
             &LeaseOwnerIdentity::opaque("other-worker", "other-incarnation"),
             60_000,
         )
@@ -1987,7 +1992,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let record = registry
-        .get_process("proc-ob-silent")
+        .get_process(&ProcessId::from("proc-ob-silent"))
         .await
         .expect("read process")
         .expect("process");
@@ -2012,7 +2017,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         .expect("register");
     registry
         .record_first_started(
-            "proc-ob-lapse",
+            &ProcessId::from("proc-ob-lapse"),
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation"),
                 fencing_token: 0,
@@ -2024,7 +2029,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         .expect("record started");
     registry
         .request_process_abandon(
-            "proc-ob-lapse",
+            &ProcessId::from("proc-ob-lapse"),
             AbandonRequest {
                 requested_by: "operator".to_string(),
                 requested_at_ms: 2,
@@ -2043,9 +2048,9 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
-    await_terminal(&registry, "proc-ob-lapse").await;
+    await_terminal(&registry, &ProcessId::from("proc-ob-lapse")).await;
 
-    let evidence = abandoned_evidence(&registry, "proc-ob-lapse").await;
+    let evidence = abandoned_evidence(&registry, &ProcessId::from("proc-ob-lapse")).await;
     assert_eq!(evidence.writer, AbandonWriter::ReconciledRequest);
     assert_eq!(
         evidence.owner.as_ref().map(|owner| owner.owner_id.as_str()),
@@ -2080,7 +2085,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if registry
-                .get_process("proc-ob-unstarted")
+                .get_process(&ProcessId::from("proc-ob-unstarted"))
                 .await
                 .expect("read process")
                 .expect("process")
@@ -2098,7 +2103,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     let reclaimed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match registry
-                .claim_process_lease("proc-ob-unstarted", &next_owner, 60_000)
+                .claim_process_lease(&ProcessId::from("proc-ob-unstarted"), &next_owner, 60_000)
                 .await
                 .expect("claim after infrastructure failure")
             {
@@ -2110,7 +2115,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     .await
     .expect("infrastructure failure releases its lease");
     let record = registry
-        .get_process("proc-ob-unstarted")
+        .get_process(&ProcessId::from("proc-ob-unstarted"))
         .await
         .expect("read process")
         .expect("process");
@@ -2157,12 +2162,12 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let record = registry
-                .get_process("missing-engine")
+                .get_process(&ProcessId::from("missing-engine"))
                 .await
                 .expect("read process")
                 .expect("missing engine row");
             let lease = registry
-                .get_process_lease("missing-engine")
+                .get_process_lease(&ProcessId::from("missing-engine"))
                 .await
                 .expect("lease read");
             if record.first_started.is_some() && lease.is_none() {
@@ -2177,7 +2182,7 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
 
     let next = registry
         .claim_process_lease(
-            "missing-engine",
+            &ProcessId::from("missing-engine"),
             &local_owner("next-worker", "host-b", "next-start"),
             60_000,
         )
@@ -2221,14 +2226,14 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let record = registry
-                .get_process("artifact-read-retry")
+                .get_process(&ProcessId::from("artifact-read-retry"))
                 .await
                 .expect("read process")
                 .expect("artifact retry row");
             if record.first_started.is_some()
                 && !record.is_terminal()
                 && registry
-                    .get_process_lease("artifact-read-retry")
+                    .get_process_lease(&ProcessId::from("artifact-read-retry"))
                     .await
                     .expect("lease read")
                     .is_none()
@@ -2245,9 +2250,9 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
         .enable_and_drive()
         .await
         .expect("drive retry after artifact recovery");
-    await_terminal(&registry, "artifact-read-retry").await;
+    await_terminal(&registry, &ProcessId::from("artifact-read-retry")).await;
     let record = registry
-        .get_process("artifact-read-retry")
+        .get_process(&ProcessId::from("artifact-read-retry"))
         .await
         .expect("read process")
         .expect("terminal artifact retry row");
@@ -2281,7 +2286,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
         .expect("register mine-started");
     registry
         .record_first_started(
-            "mine-started",
+            &ProcessId::from("mine-started"),
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -2302,7 +2307,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
         .expect("register theirs-started");
     registry
         .record_first_started(
-            "theirs-started",
+            &ProcessId::from("theirs-started"),
             ProcessStarted {
                 owner: local_owner("other-host", "host-b", "start-b"),
                 fencing_token: 0,
@@ -2333,7 +2338,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
         .expect("register rerunnable");
     registry
         .record_first_started(
-            "rerunnable",
+            &ProcessId::from("rerunnable"),
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -2348,14 +2353,14 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     assert_eq!(report.abandoned, vec!["mine-started".to_string()]);
     assert!(report.deferred.is_empty());
 
-    let evidence = abandoned_evidence(&registry, "mine-started").await;
+    let evidence = abandoned_evidence(&registry, &ProcessId::from("mine-started")).await;
     assert_eq!(evidence.writer, AbandonWriter::OwnerDrain);
     assert_eq!(evidence.owner.as_ref(), Some(&owner));
 
     for untouched in ["theirs-started", "mine-unstarted", "rerunnable"] {
         assert!(
             !registry
-                .get_process(untouched)
+                .get_process(&ProcessId::from(untouched))
                 .await
                 .expect("read process")
                 .expect("row exists")
@@ -2399,7 +2404,7 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
         .expect("engine starts");
 
     let record = registry
-        .get_process("real-native-owner-bound")
+        .get_process(&ProcessId::from("real-native-owner-bound"))
         .await
         .expect("read process")
         .expect("started record");
@@ -2412,7 +2417,7 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
     fail.notify_one();
     tokio::time::timeout(Duration::from_secs(1), async {
         while registry
-            .get_process_lease("real-native-owner-bound")
+            .get_process_lease(&ProcessId::from("real-native-owner-bound"))
             .await
             .expect("lease read")
             .is_some()
@@ -2445,7 +2450,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         .expect("register owner-bound row");
     registry
         .record_first_started(
-            process_id,
+            &ProcessId::from(process_id),
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -2472,7 +2477,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::WriteTerminal,
                 error: "plugin session error: injected terminal-write failure".to_string(),
@@ -2481,13 +2486,13 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        process_id,
+        &ProcessId::from(process_id),
         "write_terminal",
         "plugin session error: injected terminal-write failure",
     );
     assert!(
         !registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read process")
             .expect("process exists")

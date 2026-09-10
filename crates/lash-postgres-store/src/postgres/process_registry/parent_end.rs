@@ -1,3 +1,4 @@
+use lash_sansio::ProcessId;
 use std::num::NonZeroUsize;
 
 use lash_core::{PluginError, ProcessParentEndPlan, ToolIntentParentEndAction};
@@ -7,7 +8,7 @@ use crate::{plugin_sqlx_error, process_decode_error};
 
 pub(crate) async fn insert(
     tx: &mut Transaction<'_, Postgres>,
-    process_id: &str,
+    process_id: &ProcessId,
     actions: &[ToolIntentParentEndAction],
 ) -> Result<(), PluginError> {
     if actions.is_empty() {
@@ -17,7 +18,7 @@ pub(crate) async fn insert(
         "INSERT INTO lash_process_parent_end_plans (process_id, actions_json)
          VALUES ($1, $2)",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .bind(serde_json::to_string(actions).map_err(process_decode_error)?)
     .execute(&mut **tx)
     .await
@@ -41,7 +42,7 @@ pub(super) async fn list(
     .map_err(plugin_sqlx_error)?;
     rows.into_iter()
         .map(|row| {
-            let process_id: String = row.get(0);
+            let process_id: ProcessId = ProcessId::from(row.get::<String, _>(0));
             let actions_json: String = row.get(1);
             let actions = serde_json::from_str(&actions_json).map_err(process_decode_error)?;
             Ok(ProcessParentEndPlan {
@@ -54,11 +55,11 @@ pub(super) async fn list(
 
 pub(super) async fn get(
     pool: &PgPool,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<ProcessParentEndPlan>, PluginError> {
     let row =
         sqlx::query("SELECT actions_json FROM lash_process_parent_end_plans WHERE process_id = $1")
-            .bind(process_id)
+            .bind(process_id.as_str())
             .fetch_optional(pool)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -66,16 +67,16 @@ pub(super) async fn get(
         let actions_json: String = row.get(0);
         let actions = serde_json::from_str(&actions_json).map_err(process_decode_error)?;
         Ok(ProcessParentEndPlan {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             actions,
         })
     })
     .transpose()
 }
 
-pub(super) async fn complete(pool: &PgPool, process_id: &str) -> Result<(), PluginError> {
+pub(super) async fn complete(pool: &PgPool, process_id: &ProcessId) -> Result<(), PluginError> {
     sqlx::query("DELETE FROM lash_process_parent_end_plans WHERE process_id = $1")
-        .bind(process_id)
+        .bind(process_id.as_str())
         .execute(pool)
         .await
         .map(drop)

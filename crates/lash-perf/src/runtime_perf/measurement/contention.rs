@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 #[derive(Clone, Copy)]
 enum WriterContentionOperation {
@@ -201,11 +202,13 @@ mod contention_tests {
         let session_id = "commit-admission-bypass";
         let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
         let store = factory
-            .create_store(&runtime_perf_session_create_request(session_id))
+            .create_store(&runtime_perf_session_create_request(&SessionId::from(
+                session_id,
+            )))
             .await
             .expect("create synthetic contention store");
         let mut first_state = RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
@@ -382,7 +385,10 @@ pub(crate) async fn run_once_writer_contention(
     for worker in 0..workers {
         peer_sessions.push(
             runtime
-                .open_child_session(format!("runtime-perf-{}-peer-{worker}", scenario.name()))
+                .open_child_session(SessionId::from(format!(
+                    "runtime-perf-{}-peer-{worker}",
+                    scenario.name()
+                )))
                 .await?,
         );
     }
@@ -799,7 +805,7 @@ async fn wait_for_durable_contention_retry(
 async fn run_durable_contention_worker(
     worker: usize,
     target_completions: u64,
-    session_id: String,
+    session_id: SessionId,
     store: Arc<dyn lash_core::RuntimePersistence>,
     session_fence: lash_core::SessionExecutionLeaseAuthority,
     counters: Arc<DurableContentionCounters>,
@@ -994,7 +1000,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();
-    let session_id = runtime.session().session_id().to_string();
+    let session_id = SessionId::from(runtime.session().session_id());
     let store = runtime.persistence();
     let store_metrics = runtime.store_metrics();
     // The scenario drives the retained persistence handle directly. Close the

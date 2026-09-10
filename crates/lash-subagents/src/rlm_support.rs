@@ -7,6 +7,7 @@ use lash_core::{
     facade_support::TurnStop,
 };
 use lash_lashlang_runtime::ToolDefinitionBindingExt;
+use lash_sansio::SessionId;
 use serde_json::{Value, json};
 
 use crate::capability::{CapabilityRegistry, SubagentSpawnContext};
@@ -27,7 +28,7 @@ pub(crate) fn build_session_policy(
     let tool_access = SessionToolAccess::default();
     let request = build_spawn_create_request(SpawnCreateRequestInput {
         registry,
-        parent_session_id: "root",
+        parent_session_id: &SessionId::from("root"),
         current_snapshot,
         session_spec: &session_spec,
         tool_access: &tool_access,
@@ -45,7 +46,7 @@ pub(crate) fn build_session_policy(
 
 pub(crate) struct SpawnCreateRequestInput<'a> {
     pub(crate) registry: &'a CapabilityRegistry,
-    pub(crate) parent_session_id: &'a str,
+    pub(crate) parent_session_id: &'a SessionId,
     pub(crate) current_snapshot: SessionSnapshot,
     pub(crate) session_spec: &'a SessionSpec,
     pub(crate) tool_access: &'a SessionToolAccess,

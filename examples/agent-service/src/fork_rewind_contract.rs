@@ -1,5 +1,7 @@
 //! Deterministic embedding acceptance for the host-facing fork/rewind API.
 
+use lash::ProcessId;
+use lash::SessionId;
 use std::sync::Arc;
 
 use lash::persistence::{
@@ -54,13 +56,13 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     let source_policy = SessionPolicy {
         provider_id: "agent-service-fork-contract".to_string(),
         model,
-        session_id: Some(SOURCE_SESSION.to_string()),
+        session_id: Some(SessionId::from(SOURCE_SESSION.to_string())),
         ..SessionPolicy::new(TurnBudget::Unbounded)
     };
     let source = stores
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SOURCE_SESSION.to_string(),
+            session_id: SessionId::from(SOURCE_SESSION.to_string()),
             relation: SessionRelation::Root,
             policy: source_policy.clone(),
         })
@@ -69,17 +71,17 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     stores
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: FOREIGN_TARGET.to_string(),
+            session_id: SessionId::from(FOREIGN_TARGET.to_string()),
             relation: SessionRelation::Root,
             policy: SessionPolicy {
-                session_id: Some(FOREIGN_TARGET.to_string()),
+                session_id: Some(SessionId::from(FOREIGN_TARGET.to_string())),
                 ..source_policy.clone()
             },
         })
         .await
         .expect("create unrelated target session");
     let mut source_state = RuntimeSessionState::new(source_policy);
-    source_state.session_id = SOURCE_SESSION.to_string();
+    source_state.session_id = SessionId::from(SOURCE_SESSION.to_string());
     source_state.ensure_agent_frame_initialized();
     source
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&source_state, &[]))
@@ -120,8 +122,8 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .expect("register process observed by the source");
     processes
         .add_observer(
-            SOURCE_SESSION,
-            "fork-contract-observed-process",
+            &SessionId::from(SOURCE_SESSION),
+            &ProcessId::from("fork-contract-observed-process"),
             ProcessObserverBy::host("fork-contract-source-observer"),
         )
         .await
@@ -153,7 +155,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     assert_eq!(explicit_branch.source_session_id, SOURCE_SESSION);
     let inherited = processes
         .list_observed_by(
-            EXPLICIT_BRANCH,
+            &SessionId::from(EXPLICIT_BRANCH),
             &lash::process::ProcessListFilter {
                 status: lash::process::ProcessStatusFilter::Any,
                 ..Default::default()

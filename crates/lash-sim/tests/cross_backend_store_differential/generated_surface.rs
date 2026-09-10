@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -144,7 +146,7 @@ impl SurfaceOperation {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 struct ProcessLeaseObservation {
-    process_id: String,
+    process_id: ProcessId,
     owner: serde_json::Value,
     lease_token_present: bool,
     fencing_token: u64,
@@ -156,10 +158,10 @@ struct ProcessLeaseObservation {
 struct ProcessRows {
     records: Vec<serde_json::Value>,
     events: Vec<serde_json::Value>,
-    observers: Vec<(String, String, u64)>,
+    observers: Vec<(SessionId, ProcessId, u64)>,
     leases: Vec<ProcessLeaseObservation>,
     wake_deliveries: Vec<serde_json::Value>,
-    wake_allocation_floors: Vec<(String, String, u64)>,
+    wake_allocation_floors: Vec<(SessionId, ProcessId, u64)>,
     tombstones: Vec<serde_json::Value>,
 }
 
@@ -250,7 +252,7 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
                     .map(|index| {
                         lash_core::ToolIntent::StartProcess(Box::new(
                             lash_core::StartProcessIntent {
-                                session_id: SURFACE_SESSION.to_string(),
+                                session_id: SessionId::from(SURFACE_SESSION.to_string()),
                                 request: lash_core::ProcessStartRequest::external(
                                     format!("ignored-derived-intent-id-{index}"),
                                     ProcessOriginator::host_scoped("surface-differential"),
@@ -467,7 +469,7 @@ impl SurfaceRunner {
                 };
                 self.process_registry
                     .append_event(
-                        "prop-process-0",
+                        &ProcessId::from("prop-process-0"),
                         lash_core::ProcessEventAppendRequest::new("property.signal", payload)
                             .with_replay_key("surface-zero-replay"),
                     )
@@ -528,7 +530,7 @@ impl SurfaceRunner {
                 let completed = lash_conformance::coordinate_tool_provider_with_services(
                     controller.clone(),
                     Arc::clone(&processes),
-                    SURFACE_SESSION,
+                    &SessionId::from(SURFACE_SESSION),
                     SurfaceIntentProvider::definition(),
                     Arc::new(SurfaceIntentProvider),
                     lash_core::PreparedToolCall::from_parts(
@@ -548,7 +550,7 @@ impl SurfaceRunner {
                 let literal_intent_outcomes = vec![
                     lash_core::ToolIntentExecutionOutcome::Executed {
                         identity: lash_core::ToolIntentIdentity {
-                            session_id: "surface-session".to_string(),
+                            session_id: SessionId::from("surface-session"),
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 0,
@@ -567,13 +569,13 @@ impl SurfaceRunner {
                             "status": "running"
                         }),
                         parent_end: Some(lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f".to_string(),
+                            process_id: ProcessId::from("tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f"),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         }),
                     },
                     lash_core::ToolIntentExecutionOutcome::Executed {
                         identity: lash_core::ToolIntentIdentity {
-                            session_id: "surface-session".to_string(),
+                            session_id: SessionId::from("surface-session"),
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 1,
@@ -592,7 +594,7 @@ impl SurfaceRunner {
                             "status": "running"
                         }),
                         parent_end: Some(lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397".to_string(),
+                            process_id: ProcessId::from("tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397"),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         }),
                     },
@@ -606,7 +608,7 @@ impl SurfaceRunner {
                 let actions = vec![
                     lash_core::ToolIntentParentEndAction {
                         identity: lash_core::ToolIntentIdentity {
-                            session_id: "surface-session".to_string(),
+                            session_id: SessionId::from("surface-session"),
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 0,
@@ -616,13 +618,13 @@ impl SurfaceRunner {
                             ),
                         },
                         parent_end: lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f".to_string(),
+                            process_id: ProcessId::from("tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f"),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         },
                     },
                     lash_core::ToolIntentParentEndAction {
                         identity: lash_core::ToolIntentIdentity {
-                            session_id: "surface-session".to_string(),
+                            session_id: SessionId::from("surface-session"),
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 1,
@@ -632,7 +634,7 @@ impl SurfaceRunner {
                             ),
                         },
                         parent_end: lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397".to_string(),
+                            process_id: ProcessId::from("tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397"),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         },
                     },
@@ -653,7 +655,7 @@ impl SurfaceRunner {
                     .map_err(|error| error.to_string())?;
                 self.process_registry
                     .complete_process_with_parent_end(
-                        "surface-intent-parent",
+                        &ProcessId::from("surface-intent-parent"),
                         lash_core::ProcessAwaitOutput::from_tool_output(
                             lash_core::ToolCallOutput::success(serde_json::json!({"ended": true})),
                         ),
@@ -664,7 +666,7 @@ impl SurfaceRunner {
                     .map_err(|error| error.to_string())?;
                 let retained = self
                     .process_registry
-                    .get_pending_parent_end_plan("surface-intent-parent")
+                    .get_pending_parent_end_plan(&ProcessId::from("surface-intent-parent"))
                     .await
                     .map_err(|error| error.to_string())?
                     .ok_or_else(|| format!("{} lost its post-terminal plan", self.name))?;
@@ -707,7 +709,7 @@ impl SurfaceRunner {
                     });
                     let outcome = processes
                         .finish_recorded_intent_parent(
-                            SURFACE_SESSION,
+                            &SessionId::from(SURFACE_SESSION),
                             action.identity.clone(),
                             action.parent_end.process_id.clone(),
                             action.parent_end.policy,
@@ -723,7 +725,7 @@ impl SurfaceRunner {
                     != vec![
                         lash_core::ToolIntentParentEndOutcome::Cancelled {
                             identity: lash_core::ToolIntentIdentity {
-                                session_id: "surface-session".to_string(),
+                                session_id: SessionId::from("surface-session"),
                                 execution_scope_id: "surface-turn".to_string(),
                                 tool_call_id: "surface-intent-call".to_string(),
                                 intent_index: 0,
@@ -732,11 +734,11 @@ impl SurfaceRunner {
                                     "tool-batch:surface-intent-call:surface-intent-call:attempt:1".to_string(),
                                 ),
                             },
-                            process_id: "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f".to_string(),
+                            process_id: ProcessId::from("tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f"),
                         },
                         lash_core::ToolIntentParentEndOutcome::Cancelled {
                             identity: lash_core::ToolIntentIdentity {
-                                session_id: "surface-session".to_string(),
+                                session_id: SessionId::from("surface-session"),
                                 execution_scope_id: "surface-turn".to_string(),
                                 tool_call_id: "surface-intent-call".to_string(),
                                 intent_index: 0,
@@ -745,11 +747,11 @@ impl SurfaceRunner {
                                     "tool-batch:surface-intent-call:surface-intent-call:attempt:1".to_string(),
                                 ),
                             },
-                            process_id: "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f".to_string(),
+                            process_id: ProcessId::from("tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f"),
                         },
                         lash_core::ToolIntentParentEndOutcome::Cancelled {
                             identity: lash_core::ToolIntentIdentity {
-                                session_id: "surface-session".to_string(),
+                                session_id: SessionId::from("surface-session"),
                                 execution_scope_id: "surface-turn".to_string(),
                                 tool_call_id: "surface-intent-call".to_string(),
                                 intent_index: 1,
@@ -758,7 +760,7 @@ impl SurfaceRunner {
                                     "tool-batch:surface-intent-call:surface-intent-call:attempt:1".to_string(),
                                 ),
                             },
-                            process_id: "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397".to_string(),
+                            process_id: ProcessId::from("tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397"),
                         },
                     ]
                 {
@@ -846,7 +848,7 @@ impl SurfaceRunner {
                     ));
                 }
                 self.process_registry
-                    .complete_parent_end_plan("surface-intent-parent")
+                    .complete_parent_end_plan(&ProcessId::from("surface-intent-parent"))
                     .await
                     .map_err(|error| error.to_string())?;
                 let mut durable_children = Vec::new();
@@ -1043,7 +1045,7 @@ impl SurfaceRunner {
             }
             SurfaceOperation::AwaitRevokeSession => self
                 .effect_host
-                .revoke_await_events_for_session(SURFACE_SESSION)
+                .revoke_await_events_for_session(&SessionId::from(SURFACE_SESSION))
                 .await
                 .map_err(|error| error.to_string()),
             SurfaceOperation::RuntimeOperationRecord { key } => {
@@ -1437,8 +1439,8 @@ fn read_sqlite_surface(
             .unwrap();
         stmt.query_map([], |row| {
             Ok((
-                row.get(0)?,
-                row.get(1)?,
+                SessionId::from(row.get::<_, String>(0)?),
+                ProcessId::from(row.get::<_, String>(1)?),
                 u64::try_from(row.get::<_, i64>(2)?).expect("non-negative process incarnation"),
             ))
         })
@@ -1461,7 +1463,7 @@ fn read_sqlite_surface(
             let claimed: i64 = row.get(5)?;
             let expires: i64 = row.get(6)?;
             Ok(ProcessLeaseObservation {
-                process_id: row.get(0)?,
+                process_id: ProcessId::from(row.get::<_, String>(0)?),
                 lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
                 owner: if row.get::<_, Option<String>>(3)?.is_some() {
                     serde_json::to_value(decode_lease_owner(owner_id, incarnation_id)).unwrap()
@@ -1530,7 +1532,11 @@ fn read_sqlite_surface(
             )
             .unwrap();
         stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? as u64))
+            Ok((
+                SessionId::from(row.get::<_, String>(0)?),
+                ProcessId::from(row.get::<_, String>(1)?),
+                row.get::<_, i64>(2)? as u64,
+            ))
         })
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
@@ -1726,8 +1732,8 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     .into_iter()
     .map(|(session_id, process_id, incarnation): (String, String, i64)| {
         (
-            session_id,
-            process_id,
+            SessionId::from(session_id),
+            ProcessId::from(process_id),
             u64::try_from(incarnation).expect("non-negative process incarnation"),
         )
     })
@@ -1747,7 +1753,7 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         .map(
             |(process_id, owner_id, incarnation, token, fencing, claimed, expires)| {
                 ProcessLeaseObservation {
-                    process_id,
+                    process_id: ProcessId::from(process_id),
                     owner: if token.is_some() {
                         serde_json::to_value(decode_lease_owner(owner_id, incarnation)).unwrap()
                     } else {
@@ -1823,7 +1829,13 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     .unwrap();
     let wake_allocation_floors = allocation_rows
         .into_iter()
-        .map(|(session, process, sequence)| (session, process, sequence as u64))
+        .map(|(session, process, sequence)| {
+            (
+                SessionId::from(session),
+                ProcessId::from(process),
+                sequence as u64,
+            )
+        })
         .collect();
     let tombstone_rows: Vec<(String, i64, String, i64, i64)> = sqlx::query_as("SELECT process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id, incarnation").fetch_all(pool).await.unwrap();
     let tombstones = tombstone_rows.into_iter().map(|(process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "incarnation": incarnation, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();

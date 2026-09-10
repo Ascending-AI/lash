@@ -1,5 +1,5 @@
 use super::*;
-use crate::TurnId;
+use crate::{ProcessId, TurnId};
 use proptest::{
     collection::vec,
     prelude::*,
@@ -120,7 +120,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                         transient: index % 2 == 0,
                     },
                     1 => crate::MessageOrigin::Process {
-                        process_id: format!("process-{index}"),
+                        process_id: ProcessId::from(format!("process-{index}")),
                         event_type: "wake".to_string(),
                         sequence: index as u64,
                         wake_id: Some(format!("wake-{index}")),
@@ -850,13 +850,15 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
         input_texts: Vec::new(),
     };
     let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
-    let lease = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5)
-        .expect("derive lease");
+    let lease =
+        WorkClaimLease::derive_queued_work(&head, &SessionId::from("session"), &owner, 1_000, 5)
+            .expect("derive lease");
     assert_eq!(lease.fencing_token, 3);
     assert_eq!(lease.claim_id, "qwc:7:3");
     assert_eq!(lease.session_lease_generation, 5);
-    let again = WorkClaimLease::derive_queued_work(&head, "session", &owner, 1_000, 5)
-        .expect("derive lease again");
+    let again =
+        WorkClaimLease::derive_queued_work(&head, &SessionId::from("session"), &owner, 1_000, 5)
+            .expect("derive lease again");
     assert_eq!(lease.lease_token, again.lease_token);
     assert_eq!(
         lease.lease_token,
@@ -866,8 +868,8 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
 
 #[test]
 fn batch_id_includes_optional_nonce() {
-    let plain = derive_batch_id("session", Some("key"), 1_000, None);
-    let nonced = derive_batch_id("session", Some("key"), 1_000, Some(1));
+    let plain = derive_batch_id(&SessionId::from("session"), Some("key"), 1_000, None);
+    let nonced = derive_batch_id(&SessionId::from("session"), Some("key"), 1_000, Some(1));
     assert_ne!(plain, nonced);
     assert!(plain.starts_with("qwb:"));
 }

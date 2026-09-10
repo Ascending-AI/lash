@@ -9,6 +9,7 @@
 //! Queue-driver wake dispatch and claim scans do not pass through this
 //! decorator at all and remain owned by the existing `wait.*` phase metrics.
 
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -294,7 +295,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
 
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -314,7 +315,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
     #[allow(clippy::too_many_arguments)]
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
@@ -349,7 +350,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
 
     async fn try_claim_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &lash_core::LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
@@ -364,7 +365,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
 
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &lash_core::LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
@@ -407,8 +408,8 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
 #[derive(Clone)]
 pub(crate) struct RuntimePerfStoreFactory {
     pub(crate) store: Arc<RuntimePerfStore>,
-    root_session_ids: Arc<Mutex<HashSet<String>>>,
-    child_stores: Arc<Mutex<HashMap<String, Arc<RuntimePerfStore>>>>,
+    root_session_ids: Arc<Mutex<HashSet<SessionId>>>,
+    child_stores: Arc<Mutex<HashMap<SessionId, Arc<RuntimePerfStore>>>>,
     inner: Option<Arc<dyn SessionStoreFactory>>,
     metrics: Arc<RuntimePerfStoreMetrics>,
     measure_commit_bytes: bool,
@@ -537,7 +538,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
 
     async fn open_existing_store_by_id(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
         if let Some(inner) = &self.inner {
             let store = inner.open_existing_store_by_id(session_id).await?;
@@ -562,7 +563,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
 
     async fn read_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Option<lash_core::SessionReadView>, StoreError> {
         let Some(inner) = &self.inner else {
             return Err(StoreError::UnsupportedStoreOperation {
@@ -583,7 +584,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         inner.has_claimable_queued_work(request, now_epoch_ms).await
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         if let Some(inner) = &self.inner {
             return inner.session_was_deleted(session_id).await;
         }
@@ -592,7 +593,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         if let Some(inner) = &self.inner {
             return inner.delete_session(session_id).await;

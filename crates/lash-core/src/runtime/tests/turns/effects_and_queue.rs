@@ -79,7 +79,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "stalled-turn-wake",
+        &ProcessId::from("stalled-turn-wake"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -101,7 +101,10 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         runtime.run_turn_assembled(
             TurnInput::text("long running user turn"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("long-turn-queued-work-claim")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("long-turn-queued-work-claim"),
+            ),
         ),
     )
     .await
@@ -110,7 +113,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
 
     assert_eq!(turn.assistant_output.safe_text, "stalled turn response");
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queued work after stalled turn")
             .is_empty(),
@@ -121,7 +124,10 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("after-long-turn-queued-work-claim")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("after-long-turn-queued-work-claim")
+                ),
             ))
             .await
             .expect("post-turn queue check should succeed")
@@ -156,7 +162,12 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
                 requests.lock_recover().push(request);
                 match call_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                     0 => {
-                        enqueue_idle_turn_input(store.as_ref(), "root", "second queued turn").await;
+                        enqueue_idle_turn_input(
+                            store.as_ref(),
+                            &SessionId::from("root"),
+                            "second queued turn",
+                        )
+                        .await;
                         Ok(LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "switch-call".to_string(),
@@ -205,12 +216,20 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
         runtime_store,
     )
     .await;
-    let first = enqueue_idle_turn_input(store.as_ref(), "root", "first queued turn").await;
+    let first = enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "first queued turn",
+    )
+    .await;
 
     let first_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("queued-frame-chain")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("queued-frame-chain"),
+            ),
         ))
         .await
         .expect("queued frame chain succeeds")
@@ -221,10 +240,12 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
         first_result.assistant_output.safe_text,
         "follow-on complete"
     );
-    let pending_after_follow =
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("pending inputs after frame follow");
+    let pending_after_follow = crate::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("pending inputs after frame follow");
     assert_eq!(pending_after_follow.len(), 1);
     assert_ne!(pending_after_follow[0].input_id, first.input_id);
     let requests_after_follow = requests.lock_recover().clone();
@@ -241,7 +262,10 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
     let second_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("second-queued-after-frame-chain")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("second-queued-after-frame-chain"),
+            ),
         ))
         .await
         .expect("second queued turn succeeds")
@@ -253,10 +277,13 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
         "second queued complete"
     );
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("pending inputs after second turn")
-            .is_empty()
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("pending inputs after second turn")
+        .is_empty()
     );
     let requests = requests.lock_recover();
     assert_eq!(requests.len(), 3);
@@ -314,13 +341,17 @@ pub(super) async fn committed_frame_handoff_survives_before_inline_claim_and_pum
         runtime_store,
     )
     .await;
-    let inbound = enqueue_idle_turn_input(store.as_ref(), "root", "start switch").await;
+    let inbound =
+        enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "start switch").await;
     store.fail_next_exact_queue_claim();
 
     let first = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("handoff-crash-window")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("handoff-crash-window"),
+            ),
         ))
         .await
         .expect("the committed frame switch remains a successful public call")
@@ -338,20 +369,26 @@ pub(super) async fn committed_frame_handoff_survives_before_inline_claim_and_pum
         ResidentSessionState::Invalidated { .. }
     ));
 
-    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-        .await
-        .expect("list inbound input after switch commit");
+    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list inbound input after switch commit");
     assert!(
         inputs
             .iter()
             .all(|input| input.input_id != inbound.input_id)
     );
-    let queued = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list committed handoff");
+    let queued = crate::store::QueuedWorkStore::list_pending_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list committed handoff");
     assert_eq!(queued.len(), 1);
     let expected_frame_id = crate::session_graph::frame_node_id(
-        "root",
+        &SessionId::from("root"),
         crate::FrameKey::from_caller_material("recovery-frame")
             .expect("non-empty caller material")
             .as_str(),
@@ -365,7 +402,10 @@ pub(super) async fn committed_frame_handoff_survives_before_inline_claim_and_pum
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("handoff-pump-recovery")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("handoff-pump-recovery"),
+            ),
         ))
         .await
         .expect("pump recovery succeeds")
@@ -373,7 +413,7 @@ pub(super) async fn committed_frame_handoff_survives_before_inline_claim_and_pum
         .expect("pump runs durable handoff");
     assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queue after recovery")
             .is_empty()
@@ -424,12 +464,20 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         .with_session_id(SESSION_ID)
         .build()
         .await;
-    enqueue_idle_turn_input(store.as_ref(), SESSION_ID, "start cancellable switch").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from(SESSION_ID),
+        "start cancellable switch",
+    )
+    .await;
 
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope(SESSION_ID, &TurnId::from("mid-chain-cancel")),
+            named_turn_scope(
+                &SessionId::from(SESSION_ID),
+                &TurnId::from("mid-chain-cancel"),
+            ),
         ))
         .await
         .expect("cancelled chain assembles")
@@ -440,10 +488,13 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), SESSION_ID)
-            .await
-            .expect("queue after cancellation")
-            .is_empty()
+        crate::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from(SESSION_ID)
+        )
+        .await
+        .expect("queue after cancellation")
+        .is_empty()
     );
 }
 
@@ -487,7 +538,10 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("invalid-claimed-input")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("invalid-claimed-input"),
+            ),
         ))
         .await
         .expect("invalid input assembles")
@@ -497,9 +551,12 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::InvalidInput)
     ));
-    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-        .await
-        .expect("list completed invalid input");
+    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list completed invalid input");
     assert!(
         inputs
             .iter()
@@ -539,12 +596,16 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
         runtime_store,
     )
     .await;
-    let inbound = enqueue_idle_turn_input(store.as_ref(), "root", "abort this input").await;
+    let inbound =
+        enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "abort this input").await;
 
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("claimed-plugin-abort")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("claimed-plugin-abort"),
+            ),
         ))
         .await
         .expect("plugin abort assembles")
@@ -554,9 +615,12 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::PluginAbort)
     ));
-    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-        .await
-        .expect("list completed aborted input");
+    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list completed aborted input");
     assert!(
         inputs
             .iter()
@@ -583,7 +647,7 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
             TurnInput::text("store an attachment"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from(TURN_ID)),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from(TURN_ID)),
             ),
         )
         .await
@@ -629,7 +693,7 @@ pub(super) async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            named_turn_scope("root", &TurnId::from(TURN_ID)),
+            named_turn_scope(&SessionId::from("root"), &TurnId::from(TURN_ID)),
             CancellationToken::new(),
             None,
             None,
@@ -711,7 +775,7 @@ pub(super) async fn stream_prepared_turn_follows_agent_frame_switch() {
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            named_turn_scope("root", &TurnId::from("prepared-chain")),
+            named_turn_scope(&SessionId::from("root"), &TurnId::from("prepared-chain")),
             CancellationToken::new(),
             None,
             None,
@@ -796,7 +860,10 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
             TurnInput::text("start finalized borrowed append probe"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("finalized-lapsed-borrow")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("finalized-lapsed-borrow"),
+                ),
             ),
         )
         .await
@@ -859,12 +926,17 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
         runtime_store,
     )
     .await;
-    enqueue_idle_turn_input(store.as_ref(), "root", "stash the graph service").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "stash the graph service",
+    )
+    .await;
 
     let output = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("retained-service")),
+            named_turn_scope(&SessionId::from("root"), &TurnId::from("retained-service")),
         ))
         .await
         .expect("queued switch succeeds")
@@ -883,7 +955,7 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
         loop {
             if crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
                 store.as_ref(),
-                "root",
+                &SessionId::from("root"),
             )
             .await
             .expect("read released lane")
@@ -900,7 +972,7 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
 
     let error = graph
         .append_session_nodes(
-            "root",
+            &SessionId::from("root"),
             crate::AppendSessionNodesRequest {
                 operation_id: "stale-retained-service".to_string(),
                 nodes: vec![crate::SessionAppendNode::plugin(
@@ -989,12 +1061,20 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
         &clock,
     ))));
-    enqueue_idle_turn_input(store.as_ref(), "root", "start lapsed queued handoff").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "start lapsed queued handoff",
+    )
+    .await;
 
     let output = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("queued-lapsed-handoff")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("queued-lapsed-handoff"),
+            ),
         ))
         .await
         .expect("the committed switch is returned with a loud follow-on failure")
@@ -1023,7 +1103,7 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
         *borrowed_append_error.lock_recover(),
         Some(std::mem::discriminant(
             &crate::PluginError::SessionExecutionLeaseLost {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
             }
         )),
         "the plugin must receive the typed borrowed-lane failure"
@@ -1037,9 +1117,10 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
         1,
         "a lapsed retained lane must not be silently reacquired for the follow-on turn"
     );
-    let pending = crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list committed handoff batch");
+    let pending =
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("list committed handoff batch");
     assert!(
         pending
             .iter()
@@ -1051,7 +1132,7 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
     );
     let final_lease = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
     )
     .await
     .expect("read final session lane state")
@@ -1138,7 +1219,10 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
             TurnInput::text("start lapsed in-process handoff"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("inprocess-lapsed-handoff")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("inprocess-lapsed-handoff"),
+                ),
             ),
         )
         .await
@@ -1167,7 +1251,7 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
         *borrowed_append_error.lock_recover(),
         Some(std::mem::discriminant(
             &crate::PluginError::SessionExecutionLeaseLost {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
             }
         )),
         "the plugin must receive the typed borrowed-lane failure"
@@ -1183,7 +1267,7 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
     );
     let final_lease = crate::store::SessionExecutionLeaseStore::get_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
     )
     .await
     .expect("read final session lane state")
@@ -1259,7 +1343,7 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
             TurnInput::text("start retained lease chain"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("resident-chain")),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("resident-chain")),
             ),
         )
         .await
@@ -1303,7 +1387,7 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
             TurnInput::text("turn after lease release"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("reacquired-turn")),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("reacquired-turn")),
             ),
         )
         .await
@@ -1393,7 +1477,10 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
             TurnInput::text("lose the retained lease"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("lost-retained-lease")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("lost-retained-lease"),
+                ),
             ),
         )
         .await
@@ -1428,7 +1515,10 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
             TurnInput::text("turn after lease loss"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("turn-after-lease-loss")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("turn-after-lease-loss"),
+                ),
             ),
         )
         .await
@@ -1489,12 +1579,20 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
         runtime_store,
     )
     .await;
-    let inbound = enqueue_idle_turn_input(store.as_ref(), "root", "start bounded chain").await;
+    let inbound = enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "start bounded chain",
+    )
+    .await;
 
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("bounded-frame-chain")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("bounded-frame-chain"),
+            ),
         ))
         .await
         .expect("bounded chain terminalizes")
@@ -1512,14 +1610,17 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
     );
     assert_eq!(call_index.load(Ordering::SeqCst), switch_count);
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queue after bounded chain")
             .is_empty()
     );
-    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-        .await
-        .expect("inputs after bounded chain");
+    let inputs = crate::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("inputs after bounded chain");
     assert!(
         inputs
             .iter()
@@ -1592,12 +1693,20 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
         committed_turns: AtomicUsize::new(0),
         fail_after: switch_count,
     }));
-    enqueue_idle_turn_input(store.as_ref(), "root", "start capture-abort chain").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "start capture-abort chain",
+    )
+    .await;
 
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("bounded-frame-capture-abort")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("bounded-frame-capture-abort"),
+            ),
         ))
         .await
         .expect("a failed terminal capture preserves the last committed frame")
@@ -1642,16 +1751,24 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
     let (mut runtime, store) =
         standard_runtime_with_transport_and_queue_store_clock(transport, store_clock).await;
-    let command = enqueue_session_command(store.as_ref(), "root", "refresh before turn").await;
+    let command = enqueue_session_command(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "refresh before turn",
+    )
+    .await;
     clock.advance_ms(1);
-    let turn = enqueue_idle_turn_input(store.as_ref(), "root", "user turn").await;
+    let turn = enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "user turn").await;
     let turn_events = RecordingTurnEvents::default();
 
     let drained = runtime
         .stream_next_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("command-before-turn-drain")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("command-before-turn-drain"),
+                ),
             )
             .with_turn_events(&turn_events),
         )
@@ -1662,7 +1779,7 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
 
     assert_eq!(drained.assistant_output.safe_text, "queued answer");
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("list queue after command plus turn")
             .is_empty(),
@@ -1693,19 +1810,24 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
         for index in 0..backlog_depth {
             enqueue_session_command(
                 store.as_ref(),
-                "root",
+                &SessionId::from("root"),
                 &format!("depth-invariance command {index}"),
             )
             .await;
         }
         clock.advance_ms(1);
-        enqueue_idle_turn_input(store.as_ref(), "root", "user turn after commands").await;
+        enqueue_idle_turn_input(
+            store.as_ref(),
+            &SessionId::from("root"),
+            "user turn after commands",
+        )
+        .await;
 
         let drained = runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
                 named_turn_scope(
-                    "root",
+                    &SessionId::from("root"),
                     &TurnId::from(format!("depth-invariance-{backlog_depth}")),
                 ),
             ))
@@ -1743,14 +1865,23 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
     let (mut runtime, store) =
         standard_runtime_with_transport_and_queue_store_clock(transport, store_clock).await;
-    let turn = enqueue_idle_turn_input(store.as_ref(), "root", "first user turn").await;
+    let turn =
+        enqueue_idle_turn_input(store.as_ref(), &SessionId::from("root"), "first user turn").await;
     clock.advance_ms(1);
-    let command = enqueue_session_command(store.as_ref(), "root", "refresh after turn").await;
+    let command = enqueue_session_command(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "refresh after turn",
+    )
+    .await;
 
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("turn-before-command-drain")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("turn-before-command-drain"),
+            ),
         ))
         .await
         .expect("queued turn drain succeeds")
@@ -1759,7 +1890,7 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
 
     assert_eq!(drained.assistant_output.safe_text, "first turn answer");
     assert_eq!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("list queue after first turn")
             .iter()
@@ -1773,14 +1904,17 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let command_only = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("later-command-drain")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("later-command-drain"),
+            ),
         ))
         .await
         .expect("later command drain succeeds")
         .ran();
     assert!(command_only.is_none());
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("list queue after later command")
             .is_empty()
@@ -1821,7 +1955,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     let process_caused_by = crate::CausalRef::SessionNode {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         node_id: "trigger:button".to_string(),
     };
     registry
@@ -1843,7 +1977,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "wake-proc",
+        &ProcessId::from("wake-proc"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -1861,7 +1995,10 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         .stream_next_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("queued-work-started-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("queued-work-started-turn"),
+                ),
             )
             .with_turn_events(&turn_events),
         )
@@ -1962,7 +2099,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         "empty wake turns must not synthesize blank user history"
     );
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queued work after commit")
             .is_empty()

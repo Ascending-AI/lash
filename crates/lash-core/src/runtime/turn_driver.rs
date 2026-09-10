@@ -28,7 +28,7 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) policy: RuntimeSessionPolicy,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ScopedEffectController<'a>,
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) turn_id: crate::TurnId,
     pub(super) turn_index: usize,
     pub(super) turn_pipeline: TurnBoundary,

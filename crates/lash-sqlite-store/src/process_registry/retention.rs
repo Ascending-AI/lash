@@ -1,9 +1,10 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 pub(super) async fn filter_unregistered_process_ids(
     registry: &SqliteProcessRegistry,
-    process_ids: &[String],
-) -> Result<Vec<String>, lash_core::PluginError> {
+    process_ids: &[ProcessId],
+) -> Result<Vec<ProcessId>, lash_core::PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -31,6 +32,7 @@ pub(super) async fn filter_unregistered_process_ids(
                     .query_map(params![process_ids_json], |row| row.get::<_, String>(0))
                     .map_err(process_sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>()
+                    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
                     .map_err(process_sqlite_error)
             })())
         })
@@ -40,8 +42,8 @@ pub(super) async fn filter_unregistered_process_ids(
 
 pub(super) async fn filter_tombstoned_process_ids(
     registry: &SqliteProcessRegistry,
-    process_ids: &[String],
-) -> Result<Vec<String>, lash_core::PluginError> {
+    process_ids: &[ProcessId],
+) -> Result<Vec<ProcessId>, lash_core::PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -69,6 +71,7 @@ pub(super) async fn filter_tombstoned_process_ids(
                     .query_map(params![process_ids_json], |row| row.get::<_, String>(0))
                     .map_err(process_sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>()
+                    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
                     .map_err(process_sqlite_error)
             })())
         })

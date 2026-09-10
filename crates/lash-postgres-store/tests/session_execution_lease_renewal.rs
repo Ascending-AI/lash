@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_conformance::{
@@ -16,7 +17,7 @@ struct PostgresSessionExecutionLeaseRenewalZeroRowInjector {
 impl SessionExecutionLeaseRenewalZeroRowInjector
     for PostgresSessionExecutionLeaseRenewalZeroRowInjector
 {
-    async fn arm(&self, session_id: &str) {
+    async fn arm(&self, session_id: &SessionId) {
         assert_eq!(session_id, "zero-row-session-lease-renewal");
         sqlx::raw_sql(
             "CREATE OR REPLACE FUNCTION lash_test_session_lease_renewal_zero_row()

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "enqueue_seq",
@@ -150,7 +151,7 @@ pub(crate) fn queued_work_batches_from_conn(
 pub(crate) struct QueuedBatchRow {
     pub(crate) enqueue_seq: u64,
     pub(crate) batch_id: String,
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) source_key: Option<String>,
     pub(crate) delivery_policy: String,
     pub(crate) work_kind: String,
@@ -186,7 +187,7 @@ pub(crate) fn queued_batch_row_from_sql(
             row.get(QUEUED_WORK_COLUMNS[0])?,
         )?,
         batch_id: row.get(QUEUED_WORK_COLUMNS[1])?,
-        session_id: row.get(QUEUED_WORK_COLUMNS[2])?,
+        session_id: SessionId::from(row.get::<_, String>(QUEUED_WORK_COLUMNS[2])?),
         source_key: row.get(QUEUED_WORK_COLUMNS[3])?,
         delivery_policy: row.get(QUEUED_WORK_COLUMNS[4])?,
         work_kind: row.get(QUEUED_WORK_COLUMNS[5])?,
@@ -260,7 +261,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         conn.query_row(
             "SELECT allocation_floor FROM wake_redelivery_fences
                  WHERE session_id = ?1 AND process_id = ?2",
-            params![batch.session_id, wake_source.process_id],
+            params![batch.session_id.as_str(), wake_source.process_id.as_str()],
             |row| row.get::<_, i64>(0),
         )
         .optional()
@@ -283,8 +284,8 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (session_id, source_key) DO NOTHING",
             params![
-                batch_id,
-                batch.session_id,
+                batch_id.as_str(),
+                batch.session_id.as_str(),
                 batch.source_key.as_deref(),
                 batch.delivery_policy.as_str(),
                 batch.kind().as_str(),
@@ -303,7 +304,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             .query_row(
                 "SELECT batch_id FROM queued_work_batches
                  WHERE session_id = ?1 AND source_key = ?2",
-                params![batch.session_id, source_key],
+                params![batch.session_id.as_str(), source_key],
                 |row| row.get(0),
             )
             .optional()
@@ -361,7 +362,7 @@ pub(crate) fn ensure_queued_work_completion_conn(
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2",
-                params![completed.session_id, batch_id],
+                params![completed.session_id.as_str(), batch_id.as_str()],
                 |row| {
                     Ok((
                         row.get::<_, Option<String>>(0)?,

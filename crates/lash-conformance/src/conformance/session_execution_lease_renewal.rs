@@ -1,5 +1,6 @@
 //! Backend-neutral laws for the session-execution-lease renewal write.
 
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use crate::{RuntimePersistence, SessionExecutionLease, StoreError};
@@ -13,7 +14,7 @@ use pretty_assertions::assert_eq;
 /// assertion so every backend is held to one typed contract.
 #[async_trait::async_trait]
 pub trait SessionExecutionLeaseRenewalZeroRowInjector: Send + Sync {
-    async fn arm(&self, session_id: &str);
+    async fn arm(&self, session_id: &SessionId);
 
     async fn disarm(&self);
 }
@@ -33,7 +34,7 @@ pub async fn session_execution_lease_zero_row_renewal_is_refused(
     let held = handles
         .store
         .try_claim_session_execution_lease(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &owner,
             "session-execution-lease-zero-row-renewal-is-refused-executor",
             120_000,
@@ -43,7 +44,7 @@ pub async fn session_execution_lease_zero_row_renewal_is_refused(
         .acquired()
         .expect("zero-row renewal lease acquired");
 
-    handles.injector.arm(SESSION_ID).await;
+    handles.injector.arm(&SessionId::from(SESSION_ID)).await;
     let renewal = handles
         .store
         .renew_session_execution_lease(&held.fence(), 120_000)
@@ -60,7 +61,7 @@ pub async fn session_execution_lease_zero_row_renewal_is_refused(
     );
     let durable = handles
         .store
-        .get_session_execution_lease(SESSION_ID)
+        .get_session_execution_lease(&SessionId::from(SESSION_ID))
         .await
         .expect("read lease after refused zero-row renewal")
         .lease

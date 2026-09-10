@@ -414,6 +414,10 @@ lash::PluginStack::push
 lash::PluginStack::remove
 lash::PluginStack::replace
 lash::PluginStack::retain
+lash::ProcessId
+lash::ProcessId::as_str
+lash::ProcessId::into_inner
+lash::ProcessId::new
 lash::PromptLayerSink
 lash::PromptLayerSink::clear_prompt_slot
 lash::PromptLayerSink::instructions
@@ -613,6 +617,10 @@ lash::SessionError::SessionCommandPending::0
 lash::SessionError::Store
 lash::SessionError::Store::context
 lash::SessionError::Store::source
+lash::SessionId
+lash::SessionId::as_str
+lash::SessionId::into_inner
+lash::SessionId::new
 lash::SessionListFilter
 lash::SessionListFilter::deleted
 lash::SessionListFilter::relation
@@ -5084,7 +5092,6 @@ lash::process::ProcessHandleView::new
 lash::process::ProcessHandleView::process_id
 lash::process::ProcessHandleView::status
 lash::process::ProcessHandleView::with_definition
-lash::process::ProcessId
 lash::process::ProcessIdentity
 lash::process::ProcessIdentity::definition
 lash::process::ProcessIdentity::from_process_input
@@ -5517,7 +5524,6 @@ lash::process::RecoveryContract
 lash::process::RecoveryContract::ExternallyOwned
 lash::process::RecoveryContract::OwnerBound
 lash::process::RecoveryContract::Rerunnable
-lash::process::SessionId
 lash::process::SessionProcessAdmin
 lash::process::SessionProcessAdmin::await_output
 lash::process::SessionProcessAdmin::cancel

@@ -1,4 +1,5 @@
 use crate::*;
+use lash_sansio::SessionId;
 
 /// Read the authoritative lease clock from PostgreSQL.
 ///
@@ -51,8 +52,8 @@ pub(crate) fn clamp_epoch_ms(value: u64) -> i64 {
 pub(crate) async fn retained_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
-) -> Result<Option<(String, String)>, StoreError> {
-    sqlx::query_as(
+) -> Result<Option<(SessionId, String)>, StoreError> {
+    sqlx::query_as::<_, (String, String)>(
         "SELECT source_session_id, checkpoint_ref FROM (
              SELECT source_session_id, checkpoint_ref, 0 AS priority
              FROM lash_node_anchors WHERE node_id = $1
@@ -65,13 +66,16 @@ pub(crate) async fn retained_checkpoint_tx(
     .bind(node_id)
     .fetch_optional(&mut **tx)
     .await
+    .map(|row| {
+        row.map(|(session_id, checkpoint_ref)| (SessionId::from(session_id), checkpoint_ref))
+    })
     .map_err(store_sqlx_error)
 }
 
 pub(crate) async fn retention_source_holds_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
-    source_session_id: &str,
+    source_session_id: &SessionId,
     checkpoint_ref: &str,
 ) -> Result<bool, StoreError> {
     sqlx::query_scalar(
@@ -88,7 +92,7 @@ pub(crate) async fn retention_source_holds_checkpoint_tx(
          )",
     )
     .bind(node_id)
-    .bind(source_session_id)
+    .bind(source_session_id.as_str())
     .bind(checkpoint_ref)
     .fetch_one(&mut **tx)
     .await
@@ -148,7 +152,7 @@ pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
 
 pub(crate) fn graph_node_insert_error(
     err: sqlx::Error,
-    session_id: &str,
+    session_id: &SessionId,
     generation: u64,
     node_id: &str,
 ) -> StoreError {
@@ -158,7 +162,7 @@ pub(crate) fn graph_node_insert_error(
         match database.constraint() {
             Some("lash_graph_nodes_session_id_generation_key") => {
                 return StoreError::GraphGenerationCollision {
-                    session_id: session_id.to_string(),
+                    session_id: SessionId::from(session_id.to_string()),
                     generation,
                 };
             }
@@ -634,7 +638,7 @@ pub(crate) async fn count_checkpoint_data_statements<F: std::future::Future>(
 
 pub(crate) async fn load_session_head_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     for_update: bool,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let sql = if for_update {
@@ -645,7 +649,7 @@ pub(crate) async fn load_session_head_meta_tx(
          FROM lash_sessions WHERE session_id = $1"
     };
     let row = sqlx::query(sql)
-        .bind(session_id)
+        .bind(session_id.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -677,13 +681,13 @@ fn decode_session_head_meta_row(
 
 pub(crate) async fn load_usage_deltas_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Vec<TokenLedgerEntry>, StoreError> {
     let rows = sqlx::query(
         "SELECT source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
          FROM lash_usage_deltas WHERE session_id = $1 ORDER BY seq ASC",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -710,7 +714,7 @@ pub(crate) async fn load_usage_deltas_tx(
 
 pub(crate) async fn load_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     leaf_node_id: Option<String>,
 ) -> Result<lash_core::SessionGraph, StoreError> {
     let Some(leaf_node_id) = leaf_node_id else {
@@ -734,7 +738,7 @@ pub(crate) async fn load_graph_tx(
 #[cfg(test)]
 pub(crate) async fn load_whole_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     leaf_node_id: Option<String>,
 ) -> Result<lash_core::SessionGraph, StoreError> {
     load_readable_graph_tx(tx, session_id, None, leaf_node_id).await
@@ -742,7 +746,7 @@ pub(crate) async fn load_whole_graph_tx(
 
 async fn load_readable_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     generation_ceiling: Option<i64>,
     leaf_node_id: Option<String>,
 ) -> Result<lash_core::SessionGraph, StoreError> {
@@ -763,7 +767,7 @@ async fn load_readable_graph_tx(
            )
          ORDER BY node.generation ASC",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(generation_ceiling)
     .fetch_all(&mut **tx)
     .await
@@ -831,7 +835,7 @@ async fn load_readable_graph_tx(
 
 pub(crate) async fn commit_attachment_refs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     attachment_ids: &[AttachmentId],
     now_epoch_ms: u64,
 ) -> Result<(), StoreError> {
@@ -880,7 +884,7 @@ pub(crate) async fn commit_attachment_refs_tx(
         )
         .bind(now_epoch_ms as i64)
         .bind(id.as_str())
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(format!("lash-attachment://blake3/{id}"))
         .execute(&mut **tx)
         .await

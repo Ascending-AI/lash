@@ -18,6 +18,7 @@
 //! a durable tool-catalog refresh so the next opened turn sees the updated
 //! `inbox.<slug>` authority set.
 
+use lash::SessionId;
 use lash::sync::{MutexExt, RwLockExt};
 use std::{
     collections::BTreeMap,
@@ -251,7 +252,7 @@ impl MailWorld {
     pub(crate) fn send_with_trigger(
         &self,
         replay_key: &str,
-        session_id: &str,
+        session_id: &SessionId,
         slug: &str,
         args: &Value,
     ) -> Result<(Value, ToolIntent), String> {
@@ -264,7 +265,7 @@ impl MailWorld {
         // ingests one occurrence however often the declaration is re-executed.
         let idempotency_key = format!("{replay_key}:mail.received:{}", delivered.message.id);
         let intent = ToolIntent::EmitTrigger(EmitTriggerIntent {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             request: TriggerOccurrenceRequest::new(
                 MAIL_RECEIVED_SOURCE_TYPE,
                 source_key,
@@ -511,10 +512,12 @@ impl ToolProvider for MockMailProvider {
         let Some(replay_key) = call.context.replay_key() else {
             return done(ToolOutcome::err_fmt("mail send requires a replay key"));
         };
-        match self
-            .world
-            .send_with_trigger(replay_key, call.context.session_id(), &slug, call.args)
-        {
+        match self.world.send_with_trigger(
+            replay_key,
+            &SessionId::from(call.context.session_id()),
+            &slug,
+            call.args,
+        ) {
             // One attempt outcome carries the committed row and the declared
             // emission. The row can no longer become durable without the
             // `mail.received` occurrence that follows it.
@@ -627,7 +630,12 @@ mod tests {
         let args = json!({ "title": "Contract", "text": "Please review." });
 
         let (receipt, intent) = world
-            .send_with_trigger("turn-1:call-1", "session-1", "work", &args)
+            .send_with_trigger(
+                "turn-1:call-1",
+                &SessionId::from("session-1"),
+                "work",
+                &args,
+            )
             .expect("send declares its emission");
 
         assert_eq!(receipt, json!({ "account": "work", "id": "work-1" }));
@@ -644,7 +652,12 @@ mod tests {
         );
 
         let (replayed_receipt, replayed_intent) = world
-            .send_with_trigger("turn-1:call-1", "session-1", "work", &args)
+            .send_with_trigger(
+                "turn-1:call-1",
+                &SessionId::from("session-1"),
+                "work",
+                &args,
+            )
             .expect("redriving the same call re-declares the same emission");
         let ToolIntent::EmitTrigger(replayed) = replayed_intent else {
             panic!("the redrive must declare a trigger emission")

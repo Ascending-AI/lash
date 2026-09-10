@@ -1,3 +1,4 @@
+use crate::SessionId;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -449,7 +450,7 @@ impl LlmMessage {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LlmRequestScope {
     /// Logical Lash session.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Durable agent frame/branch inside the session. Providers must use this
     /// when caching continuation state so frame switches do not inherit each
     /// other's provider-local response ids.
@@ -460,7 +461,7 @@ pub struct LlmRequestScope {
 
 impl LlmRequestScope {
     pub fn new(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         agent_frame_id: impl Into<String>,
         request_id: impl Into<String>,
     ) -> Self {

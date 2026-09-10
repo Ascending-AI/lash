@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 #[test]
 fn product_event_log_rejects_future_format_with_expected_and_found_versions() {
@@ -230,7 +231,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                 ],
             };
     registry.publish_identified(
-        "session",
+        &SessionId::from("session"),
         "model-call",
         StreamItem::ModelCallRecorded {
             record: expected_record.clone(),
@@ -239,7 +240,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
     drop(registry);
 
     let reopened = SessionEventRegistry::persistent(path, 4).expect("reopen attempt rows");
-    let snapshot = reopened.snapshot("session");
+    let snapshot = reopened.snapshot(&SessionId::from("session"));
     let StreamItem::ModelCallRecorded { record } = &snapshot.events[0].item else {
         panic!("persisted event remains a model-call record");
     };

@@ -17,7 +17,9 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:ok").await;
     registry_a
-        .register_process(snapshot_lashlang_registration("snapshot-ok", env_ref).await)
+        .register_process(
+            snapshot_lashlang_registration(&ProcessId::from("snapshot-ok"), env_ref).await,
+        )
         .await
         .expect("register snapshot-backed process");
     drop(registry_a);
@@ -42,7 +44,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
 
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal("snapshot-ok")
+            .await_terminal(&ProcessId::from("snapshot-ok"))
             .await
             .expect("await recovered snapshot-backed process"),
         process_success(serde_json::json!("snapshot:restored"))
@@ -66,7 +68,9 @@ pub(super) async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:revoked").await;
     registry_a
-        .register_process(snapshot_lashlang_registration("snapshot-revoked", env_ref).await)
+        .register_process(
+            snapshot_lashlang_registration(&ProcessId::from("snapshot-revoked"), env_ref).await,
+        )
         .await
         .expect("register revoked snapshot-backed process");
     drop(registry_a);
@@ -90,7 +94,7 @@ pub(super) async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin
         .expect("recover revoked snapshot-backed process");
 
     let await_output = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-        .await_terminal("snapshot-revoked")
+        .await_terminal(&ProcessId::from("snapshot-revoked"))
         .await
         .expect("await terminal revoked snapshot-backed process");
     let ProcessAwaitOutput::Settled { output } = await_output else {
@@ -119,7 +123,7 @@ pub(super) async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin
 /// route's linked module is published before the process runs; that store
 /// survives the registry/worker reopen within a single test process.
 pub(super) async fn trigger_lashlang_registration(
-    process_id: &str,
+    process_id: &ProcessId,
     resource: &str,
 ) -> ProcessRegistration {
     let module =
@@ -159,7 +163,7 @@ pub(super) async fn trigger_lashlang_registration(
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("root")).with_caused_by(
             Some(lash_core::CausalRef::SessionNode {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 node_id: "trigger:resource.updated".to_string(),
             }),
         ),
@@ -168,7 +172,7 @@ pub(super) async fn trigger_lashlang_registration(
     .with_execution_env_ref(Some(env_ref))
 }
 
-pub(super) async fn typescript_process_registration(process_id: &str) -> ProcessRegistration {
+pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> ProcessRegistration {
     let linked = lash_typescript::link(
         r#"
         const worker = defineProcess({
@@ -224,7 +228,7 @@ pub(super) async fn typescript_process_registration(process_id: &str) -> Process
 }
 
 pub(super) async fn sleeping_process_registration(
-    process_id: &str,
+    process_id: &ProcessId,
     dialect: lashlang::CompilationDialect,
 ) -> ProcessRegistration {
     let environment = lashlang::LashlangHostEnvironment::new(
@@ -290,7 +294,7 @@ pub(super) async fn sleeping_process_registration(
 }
 
 pub(super) async fn sleeping_then_tool_process_registration(
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> ProcessRegistration {
     let module = lashlang::parse(
         r#"
@@ -361,7 +365,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming_e
             lashlang::CompilationDialect::Lashlang => "lashlang",
             lashlang::CompilationDialect::Typescript => "typescript",
         };
-        let process_id = format!("sleep-cancel-{dialect_label}");
+        let process_id = ProcessId::from(format!("sleep-cancel-{dialect_label}"));
         let (registry, continuations) = process_stores();
         let registration = sleeping_process_registration(&process_id, dialect).await;
         registry
@@ -450,8 +454,11 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
     let storage = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let registry = Arc::clone(&storage) as Arc<dyn ProcessRegistry>;
     let continuations = Arc::clone(&storage) as Arc<dyn lash_core::ProcessContinuationStore>;
-    let registration =
-        sleeping_process_registration(process_id, lashlang::CompilationDialect::Lashlang).await;
+    let registration = sleeping_process_registration(
+        &ProcessId::from(process_id),
+        lashlang::CompilationDialect::Lashlang,
+    )
+    .await;
     registry
         .register_process(registration.clone())
         .await
@@ -497,9 +504,9 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
     context.await_sleep_started().await;
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                process_id,
+                &ProcessId::from(process_id),
                 Some("operator stopped sleeping process".to_string()),
             ),
         )
@@ -528,7 +535,7 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
     );
     assert_eq!(
         registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read process after retryable failure")
             .expect("sleeping process remains registered")
@@ -566,7 +573,7 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
     );
     assert_eq!(
         registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read retried process")
             .expect("retried process remains registered")
@@ -579,7 +586,7 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
 pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_effect() {
     let process_id = "sleep-cancel-post-wake-effect";
     let (registry, continuations) = process_stores();
-    let registration = sleeping_then_tool_process_registration(process_id).await;
+    let registration = sleeping_then_tool_process_registration(&ProcessId::from(process_id)).await;
     registry
         .register_process(registration.clone())
         .await
@@ -654,7 +661,7 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
 
     assert_eq!(
         registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read process after worker crash")
             .expect("crashed process remains registered")
@@ -665,9 +672,9 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
 
     registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                process_id,
+                &ProcessId::from(process_id),
                 Some("operator cancelled during the redelivery gap".to_string()),
             ),
         )
@@ -712,7 +719,7 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
     );
     assert_eq!(
         registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read redelivered process")
             .expect("redelivered process remains registered")
@@ -725,7 +732,9 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
 pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal() {
     let registry = process_registry();
     registry
-        .register_process(typescript_process_registration("typescript-worker").await)
+        .register_process(
+            typescript_process_registration(&ProcessId::from("typescript-worker")).await,
+        )
         .await
         .expect("register TypeScript process");
 
@@ -739,7 +748,7 @@ pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal(
         .expect("run stored TypeScript artifact");
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
-            .await_terminal("typescript-worker")
+            .await_terminal(&ProcessId::from("typescript-worker"))
             .await
             .expect("await TypeScript process"),
         process_success(serde_json::json!({ "ok": true }))
@@ -796,11 +805,13 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     registry_a
-        .register_process(trigger_lashlang_registration("trigger-notify", "issue-42").await)
+        .register_process(
+            trigger_lashlang_registration(&ProcessId::from("trigger-notify"), "issue-42").await,
+        )
         .await
         .expect("register trigger-started process");
     let persisted_before_rebuild = registry_a
-        .get_process("trigger-notify")
+        .get_process(&ProcessId::from("trigger-notify"))
         .await
         .expect("read process")
         .expect("persisted trigger-started process before recovery");
@@ -823,7 +834,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
     let reopened_record = registry_b
-        .get_process("trigger-notify")
+        .get_process(&ProcessId::from("trigger-notify"))
         .await
         .expect("read process")
         .expect("trigger-started process survives registry reopen");
@@ -856,7 +867,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
 
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal("trigger-notify")
+            .await_terminal(&ProcessId::from("trigger-notify"))
             .await
             .expect("await recovered trigger-started process"),
         process_success(serde_json::json!({ "triggered": "issue-42" })),
@@ -883,7 +894,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .expect("second recovery sweep is idempotent");
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal("trigger-notify")
+            .await_terminal(&ProcessId::from("trigger-notify"))
             .await
             .expect("await after idempotent re-sweep"),
         process_success(serde_json::json!({ "triggered": "issue-42" }))
@@ -1222,7 +1233,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
     // POST an ExternallyOwned row, and the registry rejects a workflow-key
     // completion of one (ADR 0027) — so the fixture is Rerunnable.
     let registration = rerunnable_registration("task-workflow")
-        .with_wake_session_id(Some("wake-session".to_string()));
+        .with_wake_session_id(Some(SessionId::from("wake-session")));
     registry
         .register_process(registration.clone())
         .await
@@ -1248,7 +1259,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
         .expect("workflow run");
     workflow
         .cancel_registration(RestateProcessCancelRequest {
-            process_id: "task-workflow".to_string(),
+            process_id: ProcessId::from("task-workflow"),
             reason: Some("stop".to_string()),
         })
         .await
@@ -1262,8 +1273,8 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
     assert_eq!(
         runner.ran.lock_recover().as_slice(),
         &[RecordedProcessRun {
-            process_id: "task-workflow".to_string(),
-            wake_target_session_id: Some("wake-session".to_string()),
+            process_id: ProcessId::from("task-workflow"),
+            wake_target_session_id: Some(SessionId::from("wake-session")),
             tool_effect_id: Some("tool-effect".to_string()),
             execution_scope_id: "task-workflow".to_string(),
             turn_control_participation: lash_core::TurnControlParticipation::Local,
@@ -1272,7 +1283,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
     assert_eq!(
         runner.cancelled.lock_recover().as_slice(),
         &[RestateProcessCancelRequest {
-            process_id: "task-workflow".to_string(),
+            process_id: ProcessId::from("task-workflow"),
             reason: Some("stop".to_string()),
         }]
     );
@@ -1291,7 +1302,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
     let stored = process_success(serde_json::json!({"winner": "stored"}));
     registry
         .complete_process(
-            "terminal-retry",
+            &ProcessId::from("terminal-retry"),
             stored.clone(),
             lash_core::ProcessCompletionAuthority::workflow_key("terminal-retry"),
         )
@@ -1300,7 +1311,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
 
     let replayed = workflow
         .complete_with_stored_outcome(
-            "terminal-retry",
+            &ProcessId::from("terminal-retry"),
             process_failure(
                 lash_core::ToolFailureClass::Execution,
                 "divergent",
@@ -1314,7 +1325,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
     assert_eq!(replayed, stored);
     assert_eq!(
         registry
-            .events_after("terminal-retry", 0)
+            .events_after(&ProcessId::from("terminal-retry"), 0)
             .await
             .expect("terminal events")
             .into_iter()
@@ -1325,7 +1336,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
 }
 
 pub(super) fn invocation_started(
-    process_id: &str,
+    process_id: &ProcessId,
     execution_id: &str,
     attempt: u32,
 ) -> (
@@ -1350,11 +1361,11 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
         .expect("register rerunnable");
 
     let (first_authority, first_started) =
-        invocation_started("invocation-rerun", "invocation-1", 1);
+        invocation_started(&ProcessId::from("invocation-rerun"), "invocation-1", 1);
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "invocation-rerun",
+                &ProcessId::from("invocation-rerun"),
                 first_started.clone(),
                 &first_authority,
             )
@@ -1365,7 +1376,7 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "invocation-rerun",
+                &ProcessId::from("invocation-rerun"),
                 first_started,
                 &first_authority,
             )
@@ -1375,11 +1386,11 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
     ));
 
     let (second_authority, second_started) =
-        invocation_started("invocation-rerun", "invocation-2", 2);
+        invocation_started(&ProcessId::from("invocation-rerun"), "invocation-2", 2);
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "invocation-rerun",
+                &ProcessId::from("invocation-rerun"),
                 second_started,
                 &second_authority,
             )
@@ -1388,11 +1399,11 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
         lash_core::ProcessStartOutcome::Started(_)
     ));
     let (third_authority, third_started) =
-        invocation_started("invocation-rerun", "invocation-3", 3);
+        invocation_started(&ProcessId::from("invocation-rerun"), "invocation-3", 3);
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "invocation-rerun",
+                &ProcessId::from("invocation-rerun"),
                 third_started,
                 &third_authority,
             )
@@ -1414,10 +1425,10 @@ pub(super) async fn segment_zero_ignores_stale_carried_execution_identity() {
         .await
         .expect("register rerunnable");
     let (first_authority, first_started) =
-        invocation_started("root-stale-id", "stale-invocation", 1);
+        invocation_started(&ProcessId::from("root-stale-id"), "stale-invocation", 1);
     registry
         .record_first_started_with_authority(
-            "root-stale-id",
+            &ProcessId::from("root-stale-id"),
             first_started.clone(),
             &first_authority,
         )
@@ -1425,7 +1436,7 @@ pub(super) async fn segment_zero_ignores_stale_carried_execution_identity() {
         .expect("record old attempt");
 
     let (execution_id, authority) = segment_execution_authority(
-        "root-stale-id",
+        &ProcessId::from("root-stale-id"),
         0,
         Some("stale-invocation"),
         "fresh-invocation",
@@ -1440,7 +1451,11 @@ pub(super) async fn segment_zero_ignores_stale_carried_execution_identity() {
     started.started_at_ms = 2;
     assert!(matches!(
         registry
-            .record_first_started_with_authority("root-stale-id", started, &authority)
+            .record_first_started_with_authority(
+                &ProcessId::from("root-stale-id"),
+                started,
+                &authority
+            )
             .await
             .expect("fresh root attempt"),
         lash_core::ProcessStartOutcome::Started(_)
@@ -1456,11 +1471,14 @@ pub(super) async fn redriven_mid_chain_segment_consumes_attempt_and_respects_bud
         )
         .await
         .expect("register owner-bound");
-    let (root_authority, root_started) =
-        invocation_started("owner-bound-redrive", "root-invocation", 1);
+    let (root_authority, root_started) = invocation_started(
+        &ProcessId::from("owner-bound-redrive"),
+        "root-invocation",
+        1,
+    );
     registry
         .record_first_started_with_authority(
-            "owner-bound-redrive",
+            &ProcessId::from("owner-bound-redrive"),
             root_started.clone(),
             &root_authority,
         )
@@ -1468,7 +1486,7 @@ pub(super) async fn redriven_mid_chain_segment_consumes_attempt_and_respects_bud
         .expect("record root");
 
     let (_, redrive_authority) = segment_execution_authority(
-        "owner-bound-redrive",
+        &ProcessId::from("owner-bound-redrive"),
         1,
         None,
         "redrive-invocation-1",
@@ -1482,7 +1500,7 @@ pub(super) async fn redriven_mid_chain_segment_consumes_attempt_and_respects_bud
     redrive_started.started_at_ms = 2;
     let redrive_record = match registry
         .record_first_started_with_authority(
-            "owner-bound-redrive",
+            &ProcessId::from("owner-bound-redrive"),
             redrive_started,
             &redrive_authority,
         )
@@ -1505,7 +1523,7 @@ pub(super) async fn redriven_mid_chain_segment_consumes_attempt_and_respects_bud
         .as_deref()
         .expect("retained redrive start");
     let (_, exhausted_authority) = segment_execution_authority(
-        "owner-bound-redrive",
+        &ProcessId::from("owner-bound-redrive"),
         1,
         None,
         "redrive-invocation-2",
@@ -1519,7 +1537,7 @@ pub(super) async fn redriven_mid_chain_segment_consumes_attempt_and_respects_bud
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "owner-bound-redrive",
+                &ProcessId::from("owner-bound-redrive"),
                 exhausted_started,
                 &exhausted_authority,
             )
@@ -1541,10 +1559,10 @@ pub(super) async fn rerunnable_mid_chain_redrive_continues_from_validated_handov
         .await
         .expect("register rerunnable");
     let (root_authority, root_started) =
-        invocation_started("rerunnable-redrive", "root-invocation", 1);
+        invocation_started(&ProcessId::from("rerunnable-redrive"), "root-invocation", 1);
     registry
         .record_first_started_with_authority(
-            "rerunnable-redrive",
+            &ProcessId::from("rerunnable-redrive"),
             root_started.clone(),
             &root_authority,
         )
@@ -1552,7 +1570,7 @@ pub(super) async fn rerunnable_mid_chain_redrive_continues_from_validated_handov
         .expect("record root");
 
     let (_, redrive_authority) = segment_execution_authority(
-        "rerunnable-redrive",
+        &ProcessId::from("rerunnable-redrive"),
         1,
         None,
         "redrive-invocation",
@@ -1566,7 +1584,7 @@ pub(super) async fn rerunnable_mid_chain_redrive_continues_from_validated_handov
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "rerunnable-redrive",
+                &ProcessId::from("rerunnable-redrive"),
                 redrive_started,
                 &redrive_authority,
             )
@@ -1583,11 +1601,14 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
         .register_process(owner_bound_registration("owner-bound-segment"))
         .await
         .expect("register owner-bound");
-    let (root_authority, root_started) =
-        invocation_started("owner-bound-segment", "root-invocation", 1);
+    let (root_authority, root_started) = invocation_started(
+        &ProcessId::from("owner-bound-segment"),
+        "root-invocation",
+        1,
+    );
     registry
         .record_first_started_with_authority(
-            "owner-bound-segment",
+            &ProcessId::from("owner-bound-segment"),
             root_started.clone(),
             &root_authority,
         )
@@ -1595,7 +1616,7 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
         .expect("start root segment");
 
     let (execution_id, successor_authority) = segment_execution_authority(
-        "owner-bound-segment",
+        &ProcessId::from("owner-bound-segment"),
         1,
         Some("root-invocation"),
         "successor-handler-invocation",
@@ -1611,7 +1632,7 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "owner-bound-segment",
+                &ProcessId::from("owner-bound-segment"),
                 successor_started,
                 &successor_authority,
             )
@@ -1619,12 +1640,15 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
             .expect("mid-chain continuation"),
         lash_core::ProcessStartOutcome::AlreadyApplied(_)
     ));
-    let (fresh_authority, fresh_started) =
-        invocation_started("owner-bound-segment", "fresh-invocation", 2);
+    let (fresh_authority, fresh_started) = invocation_started(
+        &ProcessId::from("owner-bound-segment"),
+        "fresh-invocation",
+        2,
+    );
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                "owner-bound-segment",
+                &ProcessId::from("owner-bound-segment"),
                 fresh_started,
                 &fresh_authority,
             )
@@ -1659,7 +1683,7 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
     // Simulate the prior incarnation that began executing but never completed.
     registry
         .record_first_started(
-            "ob-restart",
+            &ProcessId::from("ob-restart"),
             lash_core::ProcessStarted {
                 owner: started_owner.clone(),
                 fencing_token: 0,
@@ -1698,7 +1722,7 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
     assert_eq!(evidence.writer, AbandonWriter::Sweep);
     assert_eq!(evidence.owner.as_ref(), Some(&started_owner));
     let record = registry
-        .get_process("ob-restart")
+        .get_process(&ProcessId::from("ob-restart"))
         .await
         .expect("read process")
         .expect("get abandoned row");
@@ -1838,7 +1862,7 @@ pub(super) async fn ingress_runner_submits_non_terminal_process_by_workflow_key(
     // The durable backend reference is recorded so the process is observably
     // owned by Restate.
     let record = registry
-        .get_process("task-1")
+        .get_process(&ProcessId::from("task-1"))
         .await
         .expect("read process")
         .expect("get process");

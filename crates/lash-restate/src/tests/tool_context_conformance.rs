@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 use lash_core::{ToolCall, ToolProvider};
@@ -59,7 +60,7 @@ finish result
 
 struct ProductionToolCell {
     _dir: tempfile::TempDir,
-    session_id: String,
+    session_id: SessionId,
     turn_id: TurnId,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
@@ -82,7 +83,7 @@ impl ProductionToolCell {
             ControllerMode::Local => "local",
             ControllerMode::Durable => "restate-durable",
         };
-        let session_id = format!("tool-context-{context_name}-{tool_name}");
+        let session_id = SessionId::from(format!("tool-context-{context_name}-{tool_name}"));
         let turn_id = TurnId::from(format!("{session_id}-turn"));
         let dir = tempfile::tempdir().expect("tool-context tempdir");
         let first_party: Arc<dyn ToolProvider> =

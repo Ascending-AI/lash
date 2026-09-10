@@ -11,8 +11,8 @@ const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
 /// process id, then event sequence. Retired tags remain burned when variants
 /// are introduced in a later family version.
 fn process_wake_identity_preimage(
-    target_session_id: &str,
-    process_id: &str,
+    target_session_id: &SessionId,
+    process_id: &ProcessId,
     sequence: u64,
 ) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
@@ -25,7 +25,7 @@ fn process_wake_identity_preimage(
     identity.finish()
 }
 
-fn process_wake_id(target_session_id: &str, process_id: &str, sequence: u64) -> String {
+fn process_wake_id(target_session_id: &SessionId, process_id: &ProcessId, sequence: u64) -> String {
     crate::stable_identity::rendered_hash(
         "wake",
         PROCESS_WAKE_FAMILY_VERSION,
@@ -110,7 +110,7 @@ pub fn process_wake_delivery(
         wake,
         occurred_at_ms,
     } = request;
-    let wake_id = process_wake_id(target_session_id.as_str(), process_id.as_str(), sequence);
+    let wake_id = process_wake_id(&target_session_id, &process_id, sequence);
     Ok(ProcessWakeDelivery {
         version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id,
@@ -144,13 +144,21 @@ mod identity_tests {
 
     #[test]
     fn process_wake_v1_identity_golden() {
-        let preimage = process_wake_identity_preimage("session\0x", "process:λ", 42);
+        let preimage = process_wake_identity_preimage(
+            &SessionId::from("session\0x"),
+            &ProcessId::from("process:λ"),
+            42,
+        );
         assert_eq!(
             hex(&preimage),
             "6c6173682d737461626c652d6964656e74697479020100000000000000116c6173682e70726f636573732d77616b65000000000000000973657373696f6e0078000000000000000a70726f636573733acebb000000000000002a"
         );
         assert_eq!(
-            process_wake_id("session\0x", "process:λ", 42),
+            process_wake_id(
+                &SessionId::from("session\0x"),
+                &ProcessId::from("process:λ"),
+                42
+            ),
             "wake:v1:blake3:81131142482e7a7371fbfa4ca163e15ad0f4e0b1eae3436b475176426ec223d1"
         );
     }

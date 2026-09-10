@@ -21,7 +21,7 @@ struct BurstRunHandle {
 impl QueuedWorkRunHandle for BurstRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         Ok(Some(!self.pending.lock_recover().is_empty()))
     }
@@ -44,7 +44,7 @@ impl QueuedWorkRunHandle for BurstRunHandle {
 
     async fn claim_and_run_pending_with_progress(
         &self,
-        session_id: Option<&str>,
+        session_id: Option<&SessionId>,
         reason: &str,
     ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
         self.claim_and_run_pending(session_id, reason).await?;
@@ -69,7 +69,7 @@ async fn burst_for_one_session_drains_ordered_batches_with_coalesced_hydrations(
         } else {
             "process_wake"
         };
-        driver.notify_pending_work(Some("session-burst"), reason);
+        driver.notify_pending_work(Some(&SessionId::from("session-burst")), reason);
     }
 
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -144,7 +144,10 @@ async fn default_slot_supplier_releases_permits_and_preserves_admission_bound() 
     let driver = NativeQueuedWork::with_execution_concurrency(handle.clone(), CONCURRENCY)
         .expect("valid concurrency");
     for index in 0..SIGNALS {
-        driver.notify_pending_work(Some(&format!("session-{index}")), "queued_turn_input");
+        driver.notify_pending_work(
+            Some(&SessionId::from(format!("session-{index}"))),
+            "queued_turn_input",
+        );
     }
 
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -192,7 +195,10 @@ async fn external_engine_submitters_do_not_inherit_the_native_admission_bound() 
     });
     let driver = NativeQueuedWork::new(handle.clone());
     for index in 0..SIGNALS {
-        driver.notify_pending_work(Some(&format!("engine-session-{index}")), "engine_submit");
+        driver.notify_pending_work(
+            Some(&SessionId::from(format!("engine-session-{index}"))),
+            "engine_submit",
+        );
     }
 
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -253,10 +259,16 @@ async fn native_admission_slot_is_released_while_a_turn_is_parked() {
     });
     let driver =
         NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
-    driver.notify_pending_work(Some("session-parked"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-parked")),
+        "queued_turn_input",
+    );
     handle.first_parked.notified().await;
 
-    driver.notify_pending_work(Some("session-runnable"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-runnable")),
+        "queued_turn_input",
+    );
     tokio::time::timeout(Duration::from_secs(1), handle.second_entered.notified())
         .await
         .expect("a parked native turn releases its queued-work slot");
@@ -284,7 +296,7 @@ struct RerunRunHandle {
 impl QueuedWorkRunHandle for RerunRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         Ok(Some(!self.pending.lock_recover().is_empty()))
     }
@@ -322,12 +334,12 @@ async fn signal_during_an_inflight_run_schedules_exactly_one_rerun() {
         completed: tokio::sync::Notify::new(),
     });
     let driver = NativeQueuedWork::new(handle.clone());
-    driver.notify_pending_work(Some("session-rerun"), "first");
+    driver.notify_pending_work(Some(&SessionId::from("session-rerun")), "first");
     handle.first_entered.notified().await;
 
     handle.pending.lock_recover().push_back(1);
-    driver.notify_pending_work(Some("session-rerun"), "second");
-    driver.notify_pending_work(Some("session-rerun"), "second");
+    driver.notify_pending_work(Some(&SessionId::from("session-rerun")), "second");
+    driver.notify_pending_work(Some(&SessionId::from("session-rerun")), "second");
     handle.release_first.add_permits(1);
     tokio::time::timeout(Duration::from_secs(1), async {
         while handle.runs.load(Ordering::SeqCst) < 2 {
@@ -359,7 +371,7 @@ struct EmptyPeekRunHandle {
 impl QueuedWorkRunHandle for EmptyPeekRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         self.peeks.fetch_add(1, Ordering::SeqCst);
         self.peeked.notify_one();
@@ -383,7 +395,7 @@ async fn empty_claimable_peek_skips_hydration() {
         peeked: tokio::sync::Notify::new(),
     });
     let driver = NativeQueuedWork::new(handle.clone());
-    driver.notify_pending_work(Some("session-empty"), "queued_turn_input");
+    driver.notify_pending_work(Some(&SessionId::from("session-empty")), "queued_turn_input");
     handle.peeked.notified().await;
     for _ in 0..10 {
         tokio::task::yield_now().await;
@@ -424,13 +436,13 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
         self.inner.create_store(request).await
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         crate::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
@@ -443,7 +455,7 @@ async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
     };
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "create-only-factory".to_string(),
+        session_id: SessionId::from("create-only-factory"),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
@@ -467,7 +479,7 @@ struct PublicProbeRunHandle {
 impl QueuedWorkRunHandle for PublicProbeRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         self.peeks.fetch_add(1, Ordering::SeqCst);
         Ok(Some(true))
@@ -499,7 +511,10 @@ async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
     let hydrated = handle.hydrated.notified();
     let driver = NativeQueuedWork::new(handle.clone());
 
-    driver.notify_pending_work(Some("session-public-probe"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-public-probe")),
+        "queued_turn_input",
+    );
     tokio::time::timeout(Duration::from_secs(5), hydrated)
         .await
         .expect("the positive peek admits one hydration");
@@ -541,7 +556,7 @@ struct ContendedRunHandle {
 impl QueuedWorkRunHandle for ContendedRunHandle {
     async fn peek_claimable_queued_work(
         &self,
-        _session_id: Option<&str>,
+        _session_id: Option<&SessionId>,
     ) -> Result<Option<bool>, QueuedWorkRunError> {
         self.peeks.fetch_add(1, Ordering::SeqCst);
         Ok(Some(true))
@@ -557,7 +572,7 @@ impl QueuedWorkRunHandle for ContendedRunHandle {
 
     async fn claim_and_run_pending_with_progress(
         &self,
-        session_id: Option<&str>,
+        session_id: Option<&SessionId>,
         reason: &str,
     ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
         self.claim_and_run_pending(session_id, reason).await?;
@@ -585,7 +600,10 @@ async fn one_notification_during_live_lease_contention_has_bounded_hydrations() 
     let cadence = driver.inner.work_cadence.clone();
     let mut blocked = handle.blocked.notified();
 
-    driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-contended")),
+        "queued_turn_input",
+    );
 
     let mut previous = None;
     let mut backoff = cadence.retry_initial;
@@ -657,7 +675,7 @@ async fn best_effort_wake_reenters_pending_claim_without_an_external_event() {
     let accepted = handle.accepted.notified();
     let driver = NativeQueuedWork::new(handle.clone());
 
-    driver.notify_pending_work(Some("session-1"), "queued_turn_input");
+    driver.notify_pending_work(Some(&SessionId::from("session-1")), "queued_turn_input");
 
     tokio::time::timeout(Duration::from_secs(1), accepted)
         .await
@@ -719,7 +737,10 @@ async fn terminal_wake_error_stops_after_one_attempt() {
         class: QueuedWorkRunErrorClass::Terminal,
     }));
 
-    driver.notify_pending_work(Some("session-terminal"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-terminal")),
+        "queued_turn_input",
+    );
     tokio::time::timeout(Duration::from_secs(1), async {
         while attempts.load(Ordering::SeqCst) < 1 {
             tokio::task::yield_now().await;
@@ -740,7 +761,10 @@ async fn transient_wake_error_stops_at_the_attempt_limit() {
         class: QueuedWorkRunErrorClass::Transient,
     }));
 
-    driver.notify_pending_work(Some("session-exhausted"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-exhausted")),
+        "queued_turn_input",
+    );
     tokio::time::timeout(Duration::from_secs(5), async {
         while attempts.load(Ordering::SeqCst) < max_attempts {
             tokio::task::yield_now().await;
@@ -770,7 +794,10 @@ async fn work_cadence_policy_limits_transient_wake_attempts() {
     )
     .expect("configured work cadence is valid");
 
-    driver.notify_pending_work(Some("session-configured-limit"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-configured-limit")),
+        "queued_turn_input",
+    );
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let dispatcher_running = driver.inner.scheduler.lock_state().dispatcher_running;
@@ -822,7 +849,10 @@ async fn dropping_the_driver_cancels_an_inflight_wake() {
     });
     let entered = handle.entered.notified();
     let driver = NativeQueuedWork::new(handle.clone());
-    driver.notify_pending_work(Some("session-shutdown"), "queued_turn_input");
+    driver.notify_pending_work(
+        Some(&SessionId::from("session-shutdown")),
+        "queued_turn_input",
+    );
     entered.await;
 
     drop(driver);

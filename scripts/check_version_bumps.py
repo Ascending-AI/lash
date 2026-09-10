@@ -120,7 +120,7 @@ IDENTIFIER_RENAME_BASELINES = {
     # attributes, field and variant names, and constant values are unchanged;
     # an independent reviewer confirmed the serialized bytes are identical, so
     # PRODUCT_EVENT_LOG_FORMAT_VERSION stays 2.
-    'examples/agent-workbench/src/main_sections/state.rs:PRODUCT_EVENT_LOG_FORMAT_VERSION': 'sha256:4d2bfda0c032ed809c90c4230180f035f1a9f457bf64e4963c74af5c0780bb76',
+    'examples/agent-workbench/src/main_sections/state.rs:PRODUCT_EVENT_LOG_FORMAT_VERSION': 'sha256:3280d5d3d9cbaf4094f41b0fa908fd5056d44130763f156d67282e9e15f95b03',
     # FIG-1036, one time only: the outcome-suffix vocabulary rename retyped
     # Rust identifiers across these three surfaces while leaving every serde
     # field name, variant name, and emitted fingerprint tag byte-identical, so
@@ -140,7 +140,7 @@ IDENTIFIER_RENAME_BASELINES = {
     # changed the guarded Rust shape while leaving serde bytes identical;
     # REMOTE_PROTOCOL_VERSION remains 51. Reviewer-confirmed one-time baseline.
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
-        "sha256:9800a35297aae7854c75c11275754cf87d186a49033ace1bb6e885cb5bda0f43"
+        "sha256:4f0da66cfa71819ff33a6ca872b6825e3d403c9f4f1c99918ee3de03efea09bc"
     ),
     # FIG-2144: ChargeSafetyPolicy is live host configuration deliberately
     # omitted from SessionPolicyWire, and RetryDecision.charge_safety is
@@ -157,7 +157,7 @@ IDENTIFIER_RENAME_BASELINES = {
     # (SESSION_HEAD_META_SCHEMA_VERSION 5 -> 6, now guarded on this struct
     # directly). SESSION_NODE_BODY_SCHEMA_VERSION stays 10.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "sha256:3a5bb3675c2dcc20921413fc394ac404419ce62960583eb759cf3216531b414b"
+        "sha256:9e1a721520f9c423cf5bbe3e67bdc666bd13b80032e8c7567e15f5f1d4eb602b"
     ),
     "crates/lash-core/src/runtime/process/validation.rs:"
     "PROCESS_REGISTRATION_FAMILY_VERSION": (
@@ -175,7 +175,7 @@ IDENTIFIER_RENAME_BASELINES = {
     # this state -- any further guarded-shape drift in lash-trace re-fails the
     # gate.
     "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
-        "sha256:4916d7457c6f8e4f4c712ee4a898a057c27526ca74cf71bb79b237bde36a4284"
+        "sha256:235086a4420f7aacaa41b9305ae58b02d325d8b80d1e1024af914b2e8e5c0d3e"
     ),
     # FIG-1792, one time only: the protocol turn options schema version became
     # wire-only. The in-memory field was deleted and a hand-written serializer
@@ -240,12 +240,54 @@ IDENTIFIER_RENAME_BASELINES = {
     # takes a concrete `&str`, so a `&TurnId` deref-coerces and the encoder
     # cannot see the newtype. Every hex preimage literal in the tests is
     # unchanged and the golden corpus passes on both sides.
-    'crates/lash-core/src/runtime/causal.rs:DIRECT_EFFECT_FAMILY_VERSION': 'sha256:93ca1bc374280fc8bd03bc780923354955c9efeef7e46e1dc70f20b4c2a0a6fb',
+    'crates/lash-core/src/runtime/causal.rs:DIRECT_EFFECT_FAMILY_VERSION': 'sha256:779f164af1b1046c3311d82c9ea1f1694f697dc0d345a301f164cd282f93217e',
     # The native envelope is encoded by `serde_json::to_value`; only
     # `Repair::turn_id` retypes, the `#[serde(tag)]` discriminants and field
     # order are untouched, and none of the 20 insta snapshots under
     # native/snapshots/ moved.
     'crates/lash-protocol-rlm/src/native/transport.rs:NATIVE_TRANSPORT_VERSION': 'sha256:47a1605ada731d8c6882cafb7afd09a9997165872537a0f952e9ee9f66779113',
+    # FIG-2791: session and process identities became transparent newtypes,
+    # following the turn identity of FIG-2790. Every guarded surface below
+    # changed Rust shape only: the newtypes are #[repr(transparent)] and
+    # #[serde(transparent)] over String, IdentityEncoder::string takes &str and
+    # is reached by Deref, and derived Ord over a single String field is
+    # String's Ord, so BTreeMap/BTreeSet durable ordering is preserved. Two
+    # independent reviewers answered per surface by name, each with an executed
+    # byte comparison rather than an argument: extracted definitions compiled on
+    # both revisions emit identical output, and the workbench product-event log
+    # round-trips byte-identically through its real decoder. Five keys above
+    # were updated in place rather than appended -- a duplicate key in a Python
+    # dict literal silently keeps the last one, which would leave a dead but
+    # authoritative-looking baseline behind. As with every entry here, these pin
+    # a STATE and not a transition: restoring exactly these bytes later would
+    # re-match and be excused again.
+    "crates/lash-core/src/runtime/process/events.rs:PROCESS_WAKE_DELIVERY_FORMAT_VERSION": (
+        "sha256:d918335cb663799309bcc9e97f4997719ec782481526c417bf09c012c1bc2316"
+    ),
+    "crates/lash-core/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:d3a77b92196da92208db28436247f96f29491dcc6e4012511649cfbb38e8c993"
+    ),
+    "crates/lash-core/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:d3a77b92196da92208db28436247f96f29491dcc6e4012511649cfbb38e8c993"
+    ),
+    "crates/lash-core/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:d3a77b92196da92208db28436247f96f29491dcc6e4012511649cfbb38e8c993"
+    ),
+    "crates/lash-core/src/runtime/effect/envelope.rs:PROCESS_TRANSFER_FAMILY_VERSION": (
+        "sha256:9895021a91c5fc12b52d2dc9baf215e33078b50d3a5ad3032c8cad5e237fad4e"
+    ),
+    "crates/lash-core/src/runtime/process/events.rs:PROCESS_CANCELLATION_FAMILY_VERSION": (
+        "sha256:55328d292629d8021ac81b8998697dcff2a998b9d9bc7842a0333ee31db2d7e8"
+    ),
+    "crates/lash-core/src/runtime/process/wake.rs:PROCESS_WAKE_FAMILY_VERSION": (
+        "sha256:7f5f17a1dc9a67fba9be15a916ea5c1cddf7b6e2c497fb255a87973cba0e4db9"
+    ),
+    "crates/lash-core/src/store/mod.rs:SESSION_HEAD_META_SCHEMA_VERSION": (
+        "sha256:816c0af2f5f70cdeeb31d3fad2b954bd4309f687e7dec72ce084a4e514a30c73"
+    ),
+    "crates/lash-lashlang-runtime/src/process.rs:LASHLANG_SEGMENT_STATE_VERSION": (
+        "sha256:69b5d38f6c363f2cde541aa4500f5f31618b888826b44a4aa35cfe23a946bd1d"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

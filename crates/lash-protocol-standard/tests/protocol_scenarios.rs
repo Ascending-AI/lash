@@ -1,4 +1,5 @@
 use lash_core::ProcessRegistrar as _;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -532,7 +533,7 @@ fn standard_config() -> TurnMachineConfig {
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
-        session_id: "standard-protocol-scenario".to_string(),
+        session_id: lash_core::SessionId::from("standard-protocol-scenario"),
         turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),
@@ -749,7 +750,7 @@ impl lash_core::ToolProvider for StandardIntentProvider {
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
             lash_core::ToolIntents::v1(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                    session_id: session_id.clone(),
+                    session_id: lash_core::SessionId::from(session_id.clone()),
                     request: lash_core::ProcessStartRequest::external(
                         "standard-intent-child",
                         lash_core::ProcessOriginator::host_scoped("standard-scenario"),
@@ -758,20 +759,20 @@ impl lash_core::ToolProvider for StandardIntentProvider {
                     on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                    session_id: session_id.clone(),
-                    process_id: "standard-intent-target".to_string(),
+                    session_id: lash_core::SessionId::from(session_id.clone()),
+                    process_id: lash_core::ProcessId::from("standard-intent-target"),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"kind": "signal"}),
                 }),
                 lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-                    session_id: session_id.clone(),
-                    process_id: "standard-intent-target".to_string(),
+                    session_id: lash_core::SessionId::from(session_id.clone()),
+                    process_id: lash_core::ProcessId::from("standard-intent-target"),
                     event_type: "standard.intent.note".to_string(),
                     payload: serde_json::json!({"kind": "emit"}),
                 }),
                 lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-                    session_id,
-                    process_id: "standard-intent-target".to_string(),
+                    session_id: lash_core::SessionId::from(session_id),
+                    process_id: lash_core::ProcessId::from("standard-intent-target"),
                     reason: Some("standard scenario complete".to_string()),
                 }),
             ]),
@@ -804,7 +805,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 },
             ]),
-            &["standard-protocol-scenario".to_string()],
+            &[SessionId::from("standard-protocol-scenario")],
         )
         .await
         .expect("register Standard intent target");

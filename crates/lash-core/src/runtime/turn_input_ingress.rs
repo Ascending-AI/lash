@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::TurnId;
 use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
 
@@ -11,7 +12,7 @@ use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
 #[doc(hidden)]
 #[must_use]
 pub fn derive_pending_turn_input_id(
-    session_id: &str,
+    session_id: &SessionId,
     source_key: Option<&str>,
     now_epoch_ms: u64,
     nonce: u64,
@@ -191,7 +192,7 @@ turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingTurnInputDraft {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -203,7 +204,11 @@ pub struct PendingTurnInputDraft {
 impl PendingTurnInputDraft {
     /// Constructs a `PendingTurnInputDraft` for store and durable-substrate implementors while
     /// claiming and settling durable turn inputs.
-    pub fn new(session_id: impl Into<String>, ingress: TurnInputIngress, input: TurnInput) -> Self {
+    pub fn new(
+        session_id: impl Into<SessionId>,
+        ingress: TurnInputIngress,
+        input: TurnInput,
+    ) -> Self {
         Self {
             session_id: session_id.into(),
             input_id: None,
@@ -242,7 +247,7 @@ impl PendingTurnInputDraft {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingTurnInput {
     pub input_id: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub enqueue_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
@@ -260,7 +265,7 @@ pub struct PendingTurnInput {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputAcceptanceReceipt {
     pub input_id: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     pub ingress: TurnInputIngress,
@@ -445,7 +450,7 @@ pub struct TurnInputSettlementClaim {
 /// success.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputCompletion {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, flatten)]
     pub claim: Option<TurnInputSettlementClaim>,
     #[serde(flatten)]
@@ -497,7 +502,7 @@ impl std::ops::DerefMut for TurnInputCompletion {
 /// ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct UnclaimedTurnInputs {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub inputs: Vec<PendingTurnInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applications: Vec<TurnInputApplication>,
@@ -991,12 +996,12 @@ mod tests {
     #[test]
     fn pending_turn_input_id_mint_preserves_the_fig_886_format() {
         assert_eq!(
-            derive_pending_turn_input_id("session", Some("source"), 123, 7),
+            derive_pending_turn_input_id(&SessionId::from("session"), Some("source"), 123, 7),
             "ti:f876d5a24aeb836217de2df548afda96b5194380cfb630d3a4ececf306ec20eb"
         );
         assert_ne!(
-            derive_pending_turn_input_id("session", Some("source"), 123, 7),
-            derive_pending_turn_input_id("session", Some("source"), 123, 8)
+            derive_pending_turn_input_id(&SessionId::from("session"), Some("source"), 123, 7),
+            derive_pending_turn_input_id(&SessionId::from("session"), Some("source"), 123, 8)
         );
     }
 }

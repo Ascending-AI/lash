@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
@@ -10,7 +12,7 @@ use crate::{TurnActivity, TurnActivityId, TurnEvent};
 
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
@@ -46,7 +48,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// the run itself created is sufficient capability to await/cancel it —
     /// run-local children do not require session observer edges (the ephemeral
     /// execution scope must never appear in durable grant state).
-    started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<ProcessId>>>,
     /// Nested durable-controller failure captured while a language runtime
     /// owns the stack. Its fixed host-reply API must unwind before the
     /// enclosing code-execution effect can abort.
@@ -55,10 +57,10 @@ pub struct RuntimeExecutionContext<'run> {
 
 #[derive(Clone)]
 pub(crate) struct RuntimeProcessExecution {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub originator: crate::ProcessOriginator,
     pub env_ref: Option<crate::ProcessExecutionEnvRef>,
-    pub wake_session_id: Option<String>,
+    pub wake_session_id: Option<SessionId>,
     pub event_context: Option<RuntimeExecutionProcessEventContext>,
 }
 
@@ -145,14 +147,14 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// Restore run-local child possession for a resumed process-engine segment.
-    pub fn restore_started_process_ids(&self, process_ids: &[String]) {
+    pub fn restore_started_process_ids(&self, process_ids: &[ProcessId]) {
         self.started_process_ids
             .lock_recover()
             .extend(process_ids.iter().cloned());
     }
 
     /// Snapshot run-local child possession before a process-engine segment handover.
-    pub fn started_process_ids(&self) -> Vec<String> {
+    pub fn started_process_ids(&self) -> Vec<ProcessId> {
         let mut process_ids = self
             .started_process_ids
             .lock_recover()
@@ -210,10 +212,10 @@ impl<'run> RuntimeExecutionContext<'run> {
             .with_agent_frame_id(Some(self.dispatch.agent_frame_id.clone()))
     }
 
-    pub(super) fn record_started_process(&self, process_id: &str) {
+    pub(super) fn record_started_process(&self, process_id: &ProcessId) {
         self.started_process_ids
             .lock_recover()
-            .insert(process_id.to_string());
+            .insert(ProcessId::from(process_id.to_string()));
     }
 
     pub(crate) fn session_graph_service(&self) -> &dyn crate::plugin::SessionGraphService {
@@ -233,7 +235,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         reason = "code execution bridge carries explicit per-turn runtime dependencies"
     )]
     pub(crate) fn new(
-        session_id: String,
+        session_id: SessionId,
         dispatch: Arc<ToolDispatchContext<'run>>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
         attachment_store: Arc<crate::SessionAttachmentStore>,
@@ -544,7 +546,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .and_then(|exec| exec.event_context.as_ref())
     }
 
-    pub(crate) fn is_run_local_process(&self, process_id: &str) -> bool {
+    pub(crate) fn is_run_local_process(&self, process_id: &ProcessId) -> bool {
         self.started_process_ids.lock_recover().contains(process_id)
     }
 
@@ -690,7 +692,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// await-event seam rather than polling the registry.
     pub async fn await_process_signal_event(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: &str,
         event_ordinal: u64,
     ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
@@ -758,7 +760,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// Appends one named, replay-scoped signal to a process for code-executor implementors.
     pub async fn signal_process_by_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: &str,
         signal_id: String,
         payload: serde_json::Value,
@@ -1040,7 +1042,7 @@ fn missing_process_execution_error() -> crate::RuntimeEffectControllerError {
 }
 
 fn resolve_trigger_owner_scope(
-    root_session_id: &str,
+    root_session_id: &SessionId,
     originator: Option<&crate::ProcessOriginator>,
 ) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
     match originator {
@@ -1069,33 +1071,36 @@ mod tests {
     #[test]
     fn trigger_owner_scope_uses_root_session_or_explicit_host_binding() {
         assert_eq!(
-            resolve_trigger_owner_scope("root-session", None).unwrap(),
+            resolve_trigger_owner_scope(&SessionId::from("root-session"), None).unwrap(),
             crate::TriggerOwnerScope::session("root-session")
         );
         let root = crate::ProcessOriginator::session(crate::SessionScope::new("root-session"));
         assert_eq!(
-            resolve_trigger_owner_scope("ignored", Some(&root)).unwrap(),
+            resolve_trigger_owner_scope(&SessionId::from("ignored"), Some(&root)).unwrap(),
             crate::TriggerOwnerScope::session("root-session")
         );
         let frame = crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
             "root-session",
-            crate::facade_support::frame_node_id("root-session", "agent-frame"),
+            crate::facade_support::frame_node_id(&SessionId::from("root-session"), "agent-frame"),
         ));
         assert_eq!(
-            resolve_trigger_owner_scope("ignored", Some(&frame)).unwrap(),
+            resolve_trigger_owner_scope(&SessionId::from("ignored"), Some(&frame)).unwrap(),
             crate::TriggerOwnerScope::session("root-session"),
             "agent frames inherit the root session namespace"
         );
         let named_host = crate::ProcessOriginator::host_scoped("automation-a");
         assert_eq!(
-            resolve_trigger_owner_scope("ignored", Some(&named_host)).unwrap(),
+            resolve_trigger_owner_scope(&SessionId::from("ignored"), Some(&named_host)).unwrap(),
             crate::TriggerOwnerScope::host("automation-a").unwrap()
         );
         assert!(
-            resolve_trigger_owner_scope("ignored", Some(&crate::ProcessOriginator::host()))
-                .unwrap_err()
-                .to_string()
-                .contains("bare host authority")
+            resolve_trigger_owner_scope(
+                &SessionId::from("ignored"),
+                Some(&crate::ProcessOriginator::host())
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("bare host authority")
         );
     }
 
@@ -1154,7 +1159,7 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::default(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1167,7 +1172,7 @@ mod tests {
             clock: std::sync::Arc::new(crate::SystemClock),
         });
         let ctx = RuntimeExecutionContext::new(
-            "session".to_string(),
+            SessionId::from("session"),
             dispatch,
             Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
             Arc::new(crate::SessionAttachmentStore::in_memory()),
@@ -1215,7 +1220,7 @@ mod tests {
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::default(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1228,7 +1233,7 @@ mod tests {
             clock: std::sync::Arc::new(crate::SystemClock),
         });
         RuntimeExecutionContext::new(
-            "session".to_string(),
+            SessionId::from("session"),
             dispatch,
             Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
             Arc::new(crate::SessionAttachmentStore::in_memory()),
@@ -1265,7 +1270,7 @@ mod tests {
 
         let signal_err = ctx
             .signal_process_by_id(
-                "proc-1",
+                &ProcessId::from("proc-1"),
                 "sig-1",
                 "sig-id-1".to_string(),
                 serde_json::json!({}),

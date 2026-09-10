@@ -659,7 +659,7 @@ mod claim_authority_tests {
     fn coalesced_batch(batch_id: &str, enqueue_seq: u64) -> crate::QueuedWorkBatch {
         crate::QueuedWorkBatch {
             batch_id: batch_id.to_string(),
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             enqueue_seq,
             source_key: Some(format!("fig905:{batch_id}")),
             delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
@@ -679,7 +679,7 @@ mod claim_authority_tests {
         batches: &[(&str, u64)],
     ) -> crate::QueuedWorkClaim {
         crate::QueuedWorkClaim {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim_id: claim_id.to_string(),
             owner: crate::LeaseOwnerIdentity::opaque("fig905", claim_id),
             lease_token: format!("token:{claim_id}"),
@@ -713,7 +713,7 @@ mod claim_authority_tests {
     fn pending_turn_input(input_id: &str) -> crate::PendingTurnInput {
         crate::PendingTurnInput {
             input_id: input_id.to_string(),
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             enqueue_seq: 1,
             source_key: None,
             ingress: crate::TurnInputIngress::active_turn(
@@ -733,7 +733,7 @@ mod claim_authority_tests {
         input_ids: &[&str],
     ) -> crate::TurnInputClaim {
         crate::TurnInputClaim {
-            session_id: "fig905".to_string(),
+            session_id: SessionId::from("fig905"),
             claim_id: claim_id.to_string(),
             owner: crate::LeaseOwnerIdentity::opaque("fig905", claim_id),
             lease_token: format!("token:{claim_id}"),

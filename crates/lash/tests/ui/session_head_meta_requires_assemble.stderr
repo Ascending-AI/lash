@@ -1,12 +1,12 @@
 error[E0639]: cannot create non-exhaustive struct using struct expression
-  --> tests/ui/session_head_meta_requires_assemble.rs:4:13
+  --> tests/ui/session_head_meta_requires_assemble.rs:5:13
    |
- 4 |       let _ = SessionHeadMeta {
+ 5 |       let _ = SessionHeadMeta {
    |  _____________^
- 5 | |         schema_version: 1,
- 6 | |         session_id: "session".to_string(),
- 7 | |         head_revision: 1,
+ 6 | |         schema_version: 1,
+ 7 | |         session_id: SessionId::from("session"),
+ 8 | |         head_revision: 1,
 ...  |
-11 | |         leaf_node_id: None,
-12 | |     };
+12 | |         leaf_node_id: None,
+13 | |     };
    | |_____^

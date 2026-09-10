@@ -1,6 +1,8 @@
 //! Live behavioral checks for the PostgreSQL/server-clock boundary.
 
 use lash_core::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
@@ -359,7 +361,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     let store = factory
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -368,7 +370,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     let owner = LeaseOwnerIdentity::opaque("clock-contract-owner", "clock-contract-owner:i");
     let lease = store
         .try_claim_session_execution_lease(
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &owner,
             "queued-work-and-pending-input-lease-decisions-follow-the-postgres-clock-executor",
             60_000,
@@ -398,7 +400,10 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
             lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                lash_core::facade_support::frame_node_id(&session_id, "clock-contract-frame"),
+                lash_core::facade_support::frame_node_id(
+                    &SessionId::from(session_id.clone()),
+                    "clock-contract-frame",
+                ),
                 "clock-contract queued work",
                 None,
             ),
@@ -425,14 +430,18 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .await
         .expect("enqueue pending input under skewed client clock");
     let command_claim = store
-        .claim_leading_ready_session_command(&session_id, &lease.fence(), &owner)
+        .claim_leading_ready_session_command(
+            &SessionId::from(session_id.clone()),
+            &lease.fence(),
+            &owner,
+        )
         .await
         .expect("command claim must validate against PostgreSQL time")
         .expect("session command remains claimable despite future-skewed client clock");
     assert_eq!(command_claim.batches[0].batch_id, command.batch_id);
     assert_eq!(
         store
-            .list_pending_queued_work(&session_id)
+            .list_pending_queued_work(&SessionId::from(session_id.clone()))
             .await
             .expect("list pending queue against PostgreSQL time")
             .iter()
@@ -443,7 +452,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     );
     assert!(
         store
-            .cancel_queued_work_batch(&session_id, &command.batch_id)
+            .cancel_queued_work_batch(&SessionId::from(session_id.clone()), &command.batch_id)
             .await
             .expect("cancel claimed command against PostgreSQL time")
             .is_none(),
@@ -455,7 +464,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .expect("release command claim for the turn-work probe");
     assert_eq!(
         store
-            .cancel_queued_work_batch(&session_id, &command.batch_id)
+            .cancel_queued_work_batch(&SessionId::from(session_id.clone()), &command.batch_id)
             .await
             .expect("cancel released command")
             .expect("released command is cancellable")
@@ -464,7 +473,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     );
     let queue_claim = store
         .claim_ready_queued_work(
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
@@ -478,7 +487,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
 
     let active_claim = store
         .claim_active_turn_inputs(
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &lease.fence(),
             &owner,
             &lash_core::TurnId::from("clock-contract-turn"),
@@ -491,7 +500,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     assert_eq!(active_claim.inputs[0].input_id, active_input.input_id);
     assert_eq!(
         store
-            .list_pending_turn_inputs(&session_id)
+            .list_pending_turn_inputs(&SessionId::from(session_id.clone()))
             .await
             .expect("list pending inputs against PostgreSQL time")
             .iter()
@@ -502,7 +511,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     );
     let cancel = store
         .cancel_pending_turn_inputs(
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &[PendingTurnInputCancelTarget::input_id(
                 &active_input.input_id,
             )],
@@ -516,7 +525,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
     ));
     let suffix = store
         .cancel_pending_turn_input_suffix(
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &PendingTurnInputCancelTarget::input_id(&active_input.input_id),
         )
         .await
@@ -542,7 +551,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .await
         .expect("enqueue final pending input under skewed client clock");
     let input_claim = store
-        .claim_next_turn_inputs(&session_id, &lease.fence(), &owner, 1)
+        .claim_next_turn_inputs(&SessionId::from(session_id), &lease.fence(), &owner, 1)
         .await
         .expect("input claim must validate against PostgreSQL time")
         .expect("pending input remains claimable despite future-skewed client clock");
@@ -575,7 +584,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
         .expect("register process for clock contract");
     let owner_a = LeaseOwnerIdentity::opaque("clock-process-a", "clock-process-a:i");
     let lease = registry
-        .claim_process_lease(&process_id, &owner_a, 60_000)
+        .claim_process_lease(&ProcessId::from(process_id.clone()), &owner_a, 60_000)
         .await
         .expect("claim process lease")
         .acquired()
@@ -595,7 +604,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     );
     assert!(matches!(
         registry
-            .reclaim_process_lease(&process_id, &owner_b, &renewed, 60_000)
+            .reclaim_process_lease(&ProcessId::from(process_id.clone()), &owner_b, &renewed, 60_000)
             .await
             .expect("competing process lease reclaim decision"),
         ProcessLeaseClaimOutcome::Busy { holder }
@@ -604,7 +613,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     ));
     assert!(matches!(
         registry
-            .claim_process_lease(&process_id, &owner_b, 60_000)
+            .claim_process_lease(&ProcessId::from(process_id), &owner_b, 60_000)
             .await
             .expect("competing process lease decision"),
         ProcessLeaseClaimOutcome::Busy { holder }
@@ -638,14 +647,14 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     let store = factory
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await
         .expect("create final-commit session store");
     let state = RuntimeSessionState {
-        session_id: session_id.clone(),
+        session_id: SessionId::from(session_id.clone()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -694,7 +703,7 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
     let store = factory
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -703,7 +712,7 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
     let owner = LeaseOwnerIdentity::opaque("diagnostic-read-holder", "boot-1");
     let held = store
         .try_claim_session_execution_lease(
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &owner,
             "diagnostic-lease-read-neither-locks-the-row-nor-waits-for-a-holder-executor",
             60_000,
@@ -758,7 +767,7 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
     let server_before_read = db_now_ms(&storage).await;
     let observation = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        store.get_session_execution_lease(&session_id),
+        store.get_session_execution_lease(&SessionId::from(session_id.clone())),
     )
     .await
     .expect("the diagnostic read must not wait for the row lock")

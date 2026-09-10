@@ -6,6 +6,7 @@
 
 use super::*;
 use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
+use lash_sansio::SessionId;
 
 #[async_trait::async_trait]
 impl StoreTestSupport for Store {
@@ -18,11 +19,11 @@ impl StoreTestSupport for Store {
             .write(move |tx| {
                 tx.execute(
                     "UPDATE session_meta SET session_state_version = ?2 WHERE session_id = ?1",
-                    params![session_id, i64::from(version)],
+                    params![session_id.as_str(), i64::from(version)],
                 )?;
                 tx.execute(
                     "UPDATE session_head SET head_json = '{not-current-json' WHERE session_id = ?1",
-                    params![session_id],
+                    params![session_id.as_str()],
                 )?;
                 Ok(())
             })
@@ -32,7 +33,7 @@ impl StoreTestSupport for Store {
 
     async fn seed_session_trigger_manifest_ref_for_testing(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<bool, StoreError> {
         let artifact_ref = lash_core::TriggerOwnerScope::session(session_id).namespace();
         let blob_ref = format!("testing-trigger-manifest:{session_id}");
@@ -60,7 +61,7 @@ impl StoreTestSupport for Store {
 
     async fn raw_session_owned_artifact_refs_for_testing(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<(String, String)>, StoreError> {
         let artifact_ref = lash_core::TriggerOwnerScope::session(session_id).namespace();
         self.conn

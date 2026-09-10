@@ -7,6 +7,7 @@
 //! requests (store-as-continuation doctrine).
 
 use super::*;
+use crate::SessionId;
 
 const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
@@ -71,7 +72,7 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
 #[derive(serde::Serialize)]
 struct SemanticBoundaryRequestIntent<'a> {
     operation_key: &'a str,
-    session_id: &'a str,
+    session_id: &'a SessionId,
     config: &'a crate::PersistedSessionConfig,
     /// Appended payload content only. Graph placement (node ids, parent
     /// linkage, the committed leaf) is derived position — it moves when other
@@ -158,7 +159,7 @@ mod semantic_boundary_request_identity_tests {
 
     fn boundary_commit(boundary: &str, key: &str) -> RuntimeCommit {
         let state = crate::RuntimeSessionState {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -353,7 +354,7 @@ mod semantic_boundary_request_identity_tests {
         commit
             .completed_queue_claims
             .push(crate::QueuedWorkCompletion {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 claim_id: "claim".to_string(),
                 lease_token: "token".to_string(),
                 data: crate::QueuedWorkCompletionData {

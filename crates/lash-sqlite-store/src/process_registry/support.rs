@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 /// Which arm of the prepared append plan the store actually applied.
 ///
@@ -36,10 +38,10 @@ pub(crate) enum ProcessEventWriteAuthorization<'a> {
 
 pub(super) async fn recent_events(
     registry: &SqliteProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     limit: usize,
 ) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
-    let process_id = process_id.to_string();
+    let process_id = ProcessId::from(process_id.to_string());
     registry
         .conn
         .call(move |conn| {
@@ -52,7 +54,7 @@ pub(super) async fn recent_events(
                     )
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
-                    .query_map(params![process_id, limit as i64], |row| {
+                    .query_map(params![process_id.as_str(), limit as i64], |row| {
                         row.get::<_, String>(0)
                     })
                     .map_err(process_sqlite_error)?;
@@ -77,11 +79,11 @@ pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
 #[cfg(any(test, feature = "testing"))]
 pub(super) async fn wake_allocation_floor_for_testing(
     registry: &SqliteProcessRegistry,
-    target_session_id: &str,
-    process_id: &str,
+    target_session_id: &SessionId,
+    process_id: &ProcessId,
 ) -> Result<Option<u64>, lash_core::PluginError> {
-    let target_session_id = target_session_id.to_string();
-    let process_id = process_id.to_string();
+    let target_session_id = SessionId::from(target_session_id.to_string());
+    let process_id = ProcessId::from(process_id.to_string());
     registry
         .conn
         .call(move |conn| {
@@ -89,7 +91,7 @@ pub(super) async fn wake_allocation_floor_for_testing(
                 .query_row(
                     "SELECT allocation_floor FROM wake_allocation_floors
                      WHERE target_session_id = ?1 AND process_id = ?2",
-                    params![target_session_id, process_id],
+                    params![target_session_id.as_str(), process_id.as_str()],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()
@@ -108,11 +110,11 @@ pub(super) async fn wake_allocation_floor_for_testing(
 impl SqliteProcessRegistry {
     pub(crate) fn retained_process_lease_fencing_token_conn(
         conn: &Connection,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<u64, lash_core::PluginError> {
         conn.query_row(
             "SELECT lease_fencing_token FROM process_leases WHERE process_id = ?1",
-            params![process_id],
+            params![process_id.as_str()],
             |row| row.get::<_, i64>(0),
         )
         .optional()
@@ -124,7 +126,7 @@ impl SqliteProcessRegistry {
 
     pub(crate) fn require_process_conn(
         conn: &rusqlite::Connection,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<ProcessRecord, lash_core::PluginError> {
         if let Some(record) = Self::load_process_conn(conn, process_id)? {
             return Ok(record);
@@ -134,7 +136,7 @@ impl SqliteProcessRegistry {
                 "SELECT terminal_label, pruned_at_ms
                  FROM process_tombstones WHERE process_id = ?1
                  ORDER BY incarnation DESC LIMIT 1",
-                params![process_id],
+                params![process_id.as_str()],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
             .optional()
@@ -175,7 +177,7 @@ impl SqliteProcessRegistry {
                  FROM process_tombstones
                  WHERE process_id = ?1 AND incarnation = ?2",
                 params![
-                    process_ref.process_id,
+                    process_ref.process_id.as_str(),
                     process_ref.incarnation.registration_sequence() as i64,
                 ],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
@@ -198,7 +200,7 @@ impl SqliteProcessRegistry {
             .query_row(
                 "SELECT incarnation FROM process_tombstones
                  WHERE process_id = ?1 ORDER BY incarnation DESC LIMIT 1",
-                params![process_ref.process_id],
+                params![process_ref.process_id.as_str()],
                 |row| row.get::<_, i64>(0),
             )
             .optional()
@@ -220,14 +222,14 @@ impl SqliteProcessRegistry {
 
     pub(crate) async fn set_observer(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         by: ProcessObserverBy,
         add: bool,
         expected_incarnation: Option<ProcessIncarnation>,
     ) -> Result<(), lash_core::PluginError> {
-        let session_id = session_id.to_string();
-        let process_id = process_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
+        let process_id = ProcessId::from(process_id.to_string());
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
         self.conn
@@ -244,13 +246,13 @@ impl SqliteProcessRegistry {
                         tx.execute(
                             "INSERT OR IGNORE INTO process_observers (session_id, process_id, process_incarnation)
                              VALUES (?1, ?2, ?3)",
-                            params![session_id, process_id, record.incarnation.registration_sequence() as i64],
+                            params![session_id.as_str(), process_id.as_str(), record.incarnation.registration_sequence() as i64],
                         )
                     } else {
                         tx.execute(
                             "DELETE FROM process_observers
                              WHERE session_id = ?1 AND process_id = ?2 AND process_incarnation = ?3",
-                            params![session_id, process_id, record.incarnation.registration_sequence() as i64],
+                            params![session_id.as_str(), process_id.as_str(), record.incarnation.registration_sequence() as i64],
                         )
                     }
                     .map_err(process_sqlite_error)?;
@@ -275,10 +277,10 @@ impl SqliteProcessRegistry {
 
     pub(crate) async fn retarget_subscription_impl(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         target: Option<&str>,
     ) -> Result<(), lash_core::PluginError> {
-        let process_id = process_id.to_string();
+        let process_id = ProcessId::from(process_id.to_string());
         let target = target.map(ToOwned::to_owned);
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
@@ -289,7 +291,7 @@ impl SqliteProcessRegistry {
                     let previous: Option<String> = tx
                         .query_row(
                             "SELECT wake_session_id FROM processes WHERE process_id = ?1",
-                            params![process_id],
+                            params![process_id.as_str()],
                             |row| row.get(0),
                         )
                         .map_err(process_sqlite_error)?;
@@ -308,7 +310,7 @@ impl SqliteProcessRegistry {
                     )?;
                     tx.execute(
                         "UPDATE processes SET wake_session_id = ?2 WHERE process_id = ?1",
-                        params![process_id, target],
+                        params![process_id.as_str(), target],
                     )
                     .map_err(process_sqlite_error)?;
                     if let Some(previous) = previous {
@@ -316,7 +318,7 @@ impl SqliteProcessRegistry {
                             "UPDATE process_wake_deliveries
                              SET state = 'discarded', discard_reason = 'retargeted'
                              WHERE process_id = ?1 AND target_session_id = ?2 AND state = 'pending'",
-                            params![process_id, previous],
+                            params![process_id.as_str(), previous],
                         )
                         .map_err(process_sqlite_error)?;
                     }
@@ -396,7 +398,7 @@ impl SqliteProcessRegistry {
 
     pub(crate) fn load_process_conn(
         conn: &Connection,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
         if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
             return Err(lash_core::PluginError::Session(reason.into()));
@@ -404,7 +406,7 @@ impl SqliteProcessRegistry {
         let json: Option<String> = conn
             .query_row(
                 "SELECT record_json FROM processes WHERE process_id = ?1",
-                params![process_id],
+                params![process_id.as_str()],
                 |row| row.get(0),
             )
             .optional()
@@ -454,19 +456,20 @@ impl SqliteProcessRegistry {
 
     pub(crate) fn wake_session_id_conn(
         conn: &Connection,
-        process_id: &str,
-    ) -> Result<Option<String>, lash_core::PluginError> {
+        process_id: &ProcessId,
+    ) -> Result<Option<SessionId>, lash_core::PluginError> {
         conn.query_row(
             "SELECT wake_session_id FROM processes WHERE process_id = ?1",
-            params![process_id],
-            |row| row.get(0),
+            params![process_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
         )
+        .map(|session_id| session_id.map(SessionId::from))
         .map_err(process_sqlite_error)
     }
 
     pub(crate) fn load_event_by_key_conn(
         conn: &Connection,
-        process_id: &str,
+        process_id: &ProcessId,
         replay_key: &str,
     ) -> Result<Option<ProcessEvent>, lash_core::PluginError> {
         let row: Option<String> = conn
@@ -474,7 +477,7 @@ impl SqliteProcessRegistry {
                 "SELECT event_json
                  FROM process_events
                  WHERE process_id = ?1 AND idempotency_key = ?2",
-                params![process_id, replay_key],
+                params![process_id.as_str(), replay_key],
                 |row| row.get(0),
             )
             .optional()
@@ -514,7 +517,7 @@ impl SqliteProcessRegistry {
             };
         let wake_session_id = Self::wake_session_id_conn(conn, &process_id)?;
         let (last_sequence, sequence) =
-            Self::next_event_sequence_conn(conn, &process_id, wake_session_id.as_deref())?;
+            Self::next_event_sequence_conn(conn, &process_id, wake_session_id.as_ref())?;
         let prepared = prepare_process_event_append(
             record,
             request,
@@ -522,7 +525,7 @@ impl SqliteProcessRegistry {
             last_sequence,
             replay_lookup,
             occurred_at_ms,
-            wake_session_id.as_deref(),
+            wake_session_id.as_ref(),
         )?;
         match prepared {
             lash_core::facade_support::ProcessEventAppendPlan::Replay {
@@ -575,7 +578,7 @@ impl SqliteProcessRegistry {
                      )
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
-                        process_id,
+                        process_id.as_str(),
                         event.process_incarnation.registration_sequence() as i64,
                         sequence as i64,
                         event.event_type.as_str(),
@@ -590,7 +593,10 @@ impl SqliteProcessRegistry {
                     conn.execute(
                         "INSERT INTO process_parent_end_plans (process_id, actions_json)
                          VALUES (?1, ?2)",
-                        params![process_id, process_encode_json(&parent_end_actions)?],
+                        params![
+                            process_id.as_str(),
+                            process_encode_json(&parent_end_actions)?
+                        ],
                     )
                     .map_err(process_sqlite_error)?;
                 }
@@ -601,7 +607,7 @@ impl SqliteProcessRegistry {
                 )?;
                 Self::advance_wake_allocation_floor_conn(
                     conn,
-                    wake_session_id.as_deref(),
+                    wake_session_id.as_ref(),
                     &process_id,
                     sequence,
                 )?;
@@ -652,10 +658,10 @@ impl SqliteProcessRegistry {
                 discard_reason, delivery_json
              ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', NULL, 0, NULL, ?6, ?7, NULL, ?8)",
             params![
-                delivery.delivery_id,
-                delivery.wake.process_id,
+                delivery.delivery_id.as_str(),
+                delivery.wake.process_id.as_str(),
                 delivery.wake.process_incarnation.registration_sequence() as i64,
-                delivery.wake.target_session_id,
+                delivery.wake.target_session_id.as_str(),
                 delivery.wake.sequence as i64,
                 delivery.next_attempt_at_ms as i64,
                 delivery.expires_at_ms as i64,
@@ -668,13 +674,13 @@ impl SqliteProcessRegistry {
 
     pub(crate) fn next_event_sequence_conn(
         conn: &Connection,
-        process_id: &str,
-        target_session_id: Option<&str>,
+        process_id: &ProcessId,
+        target_session_id: Option<&SessionId>,
     ) -> Result<(Option<u64>, u64), lash_core::PluginError> {
         let last_sequence = conn
             .query_row(
                 "SELECT MAX(sequence) FROM process_events WHERE process_id = ?1",
-                params![process_id],
+                params![process_id.as_str()],
                 |row| row.get::<_, Option<i64>>(0),
             )
             .map_err(process_sqlite_error)?;
@@ -686,7 +692,7 @@ impl SqliteProcessRegistry {
                 conn.query_row(
                     "SELECT allocation_floor FROM wake_allocation_floors
                      WHERE target_session_id = ?1 AND process_id = ?2",
-                    params![target_session_id, process_id],
+                    params![target_session_id.as_str(), process_id.as_str()],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()
@@ -703,8 +709,8 @@ impl SqliteProcessRegistry {
 
     pub(crate) fn advance_wake_allocation_floor_conn(
         conn: &Connection,
-        target_session_id: Option<&str>,
-        process_id: &str,
+        target_session_id: Option<&SessionId>,
+        process_id: &ProcessId,
         sequence: u64,
     ) -> Result<(), lash_core::PluginError> {
         let Some(target_session_id) = target_session_id else {
@@ -719,7 +725,11 @@ impl SqliteProcessRegistry {
                     wake_allocation_floors.allocation_floor,
                     excluded.allocation_floor
                 )",
-            params![target_session_id, process_id, sequence as i64],
+            params![
+                target_session_id.as_str(),
+                process_id.as_str(),
+                sequence as i64
+            ],
         )
         .map_err(process_sqlite_error)?;
         Ok(())
@@ -727,7 +737,7 @@ impl SqliteProcessRegistry {
 
     pub(crate) fn load_process_lease_conn(
         conn: &Connection,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
         conn.query_row(
             "SELECT lease_owner_id, lease_token, lease_fencing_token,
@@ -735,7 +745,7 @@ impl SqliteProcessRegistry {
                     lease_owner_incarnation_id
              FROM process_leases
              WHERE process_id = ?1",
-            params![process_id],
+            params![process_id.as_str()],
             |row| {
                 Ok(registry_transitions::ProcessLeaseRow {
                     owner_id: row.get(0)?,
@@ -757,7 +767,7 @@ impl SqliteProcessRegistry {
     /// lease owned by `owner` at `fencing_token`.
     pub(super) fn acquire_process_lease_conn(
         conn: &Connection,
-        process_id: &str,
+        process_id: &ProcessId,
         owner: &LeaseOwnerIdentity,
         fencing_token: u64,
         now: u64,
@@ -818,7 +828,9 @@ pub(crate) fn tx_outcome<T>(
 }
 
 /// The journal key of a process scope, as the fence table stores it.
-pub(super) fn process_scope_fence_key(process_id: &str) -> Result<String, lash_core::PluginError> {
+pub(super) fn process_scope_fence_key(
+    process_id: &ProcessId,
+) -> Result<String, lash_core::PluginError> {
     lash_core::ExecutionScope::process(process_id)
         .journal_identity()
         .map(|identity| identity.key().to_string())
@@ -834,14 +846,14 @@ pub(super) struct SqliteRegistrationProbe {
 impl lash_core::ProcessRegistrationProbe for SqliteRegistrationProbe {
     async fn process_is_registered(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<bool, lash_core::PluginError> {
-        let process_id = process_id.to_string();
+        let process_id = ProcessId::from(process_id.to_string());
         self.conn
             .call(move |connection| {
                 connection.query_row(
                     "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)",
-                    params![process_id],
+                    params![process_id.as_str()],
                     |row| row.get(0),
                 )
             })

@@ -2,7 +2,7 @@ use super::*;
 
 fn store() -> PluginStateStore {
     PluginStateStore::bind(
-        "session",
+        &SessionId::from("session"),
         "mock",
         Arc::new(Mutex::new(PluginStateRegistry::default())),
     )
@@ -282,7 +282,11 @@ fn readiness_runs_after_hydration_and_its_writes_survive() {
 async fn checkpoint_component_changes_iff_mediated_generation_moves() {
     let host = crate::PluginHost::empty();
     let plugins = host.build_session("generation-gate").unwrap();
-    let handle = PluginStateStore::bind("generation-gate", "mock", plugins.state.clone());
+    let handle = PluginStateStore::bind(
+        &SessionId::from("generation-gate"),
+        "mock",
+        plugins.state.clone(),
+    );
     let store: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
     let mut state = crate::RuntimeSessionState {
         session_id: "generation-gate".into(),
@@ -322,7 +326,11 @@ async fn write_after_capture_survives_commit_receipt_adoption() {
     let plugins = crate::PluginHost::empty()
         .build_session("capture-race")
         .unwrap();
-    let handle = PluginStateStore::bind("capture-race", "mock", plugins.state.clone());
+    let handle = PluginStateStore::bind(
+        &SessionId::from("capture-race"),
+        "mock",
+        plugins.state.clone(),
+    );
     let store: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
     let mut state = crate::RuntimeSessionState {
         session_id: "capture-race".into(),
@@ -391,8 +399,8 @@ fn live_hydration_refuses_generation_rewind_and_preserves_bound_namespaces() {
 #[test]
 fn state_handle_debug_does_not_expose_other_namespaces() {
     let registry = Arc::new(Mutex::new(PluginStateRegistry::default()));
-    let first = PluginStateStore::bind("session", "first", registry.clone());
-    let second = PluginStateStore::bind("session", "private-neighbor", registry);
+    let first = PluginStateStore::bind(&SessionId::from("session"), "first", registry.clone());
+    let second = PluginStateStore::bind(&SessionId::from("session"), "private-neighbor", registry);
     second
         .set("secret", serde_json::json!("neighbor-value"))
         .unwrap();
@@ -416,7 +424,7 @@ fn register_remove_rebuilt_generation_five() {
     let registry = Arc::new(Mutex::new(PluginStateRegistry::registering(Some(
         &snapshot,
     ))));
-    let state = PluginStateStore::bind("rebuilt", "mock", registry.clone());
+    let state = PluginStateStore::bind(&SessionId::from("rebuilt"), "mock", registry.clone());
     state.remove("seed").unwrap();
     registry.lock_recover().initialize(Some(&snapshot)).unwrap();
     assert_eq!(
@@ -432,7 +440,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     #[derive(Clone)]
     struct Fixture {
         id: &'static str,
-        hosts: Arc<Mutex<Vec<(String, crate::PluginHost)>>>,
+        hosts: Arc<Mutex<Vec<(SessionId, crate::PluginHost)>>>,
     }
     impl crate::plugin::PluginFactory for Fixture {
         fn id(&self) -> &'static str {
@@ -462,7 +470,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                 Box::pin(async move {
                     assert_eq!(state.keys(), vec![state.plugin_id().to_string()]);
                     for (id, host) in hosts.lock_recover().iter() {
-                        let session = host.session(id).unwrap();
+                        let session = host.session(&SessionId::from(id)).unwrap();
                         assert!(session.export_state().plugins.is_empty());
                         let mut exported =
                             crate::RuntimeSessionState::new(crate::testing::mock_session_policy());
@@ -546,13 +554,16 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             .values
             .contains_key("neighbor-secret-key")
     );
-    let restricted = hosts.lock_recover()[0].1.session("private-parent").unwrap();
+    let restricted = hosts.lock_recover()[0]
+        .1
+        .session(&SessionId::from("private-parent"))
+        .unwrap();
     let child = restricted
         .fork_for_session("private-child", Default::default())
         .unwrap();
     assert!(child.export_state().plugins.is_empty());
     assert!(
-        host.session("private-child")
+        host.session(&SessionId::from("private-child"))
             .unwrap()
             .export_state()
             .plugins
@@ -561,7 +572,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     assert!(
         child
             .host()
-            .session("private-parent")
+            .session(&SessionId::from("private-parent"))
             .unwrap()
             .export_state()
             .plugins
@@ -600,7 +611,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         )),
-        crate::RuntimeServices::new(host.session("private-child").unwrap()),
+        crate::RuntimeServices::new(host.session(&SessionId::from("private-child")).unwrap()),
         runtime_state.clone(),
         crate::testing::runtime_lease_owner(),
     )

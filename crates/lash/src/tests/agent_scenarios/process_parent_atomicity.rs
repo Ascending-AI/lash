@@ -1,4 +1,6 @@
 use super::super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -377,7 +379,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         let intents = if emit {
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    session_id: call.context.session_id().to_string(),
+                    session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         "ignored-derived-child-id",
                         lash_core::ProcessOriginator::host_scoped("postgres-process-parent-law"),
@@ -628,7 +630,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .await
         .expect("drive PostgreSQL segmented parent through public worker path");
     let terminal = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
-        .await_terminal(SEGMENTED_PARENT)
+        .await_terminal(&ProcessId::from(SEGMENTED_PARENT))
         .await
         .expect("await PostgreSQL segmented parent terminal");
     assert_eq!(
@@ -648,16 +650,16 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         "the public PostgreSQL worker must cross real Lashlang segment boundaries"
     );
     let pending = registry
-        .get_pending_parent_end_plan(SEGMENTED_PARENT)
+        .get_pending_parent_end_plan(&ProcessId::from(SEGMENTED_PARENT))
         .await
         .expect("read PostgreSQL segmented parent-end plan")
         .expect("crash retains PostgreSQL segmented parent-end plan");
     let literal_segmented_plan = lash_core::ProcessParentEndPlan {
-        process_id: "pg-segmented-process-parent".to_string(),
+        process_id: ProcessId::from("pg-segmented-process-parent"),
         actions: vec![
             lash_core::ToolIntentParentEndAction {
                 identity: lash_core::ToolIntentIdentity {
-                    session_id: "process-env:pg-segmented-process-parent".to_string(),
+                    session_id: SessionId::from("process-env:pg-segmented-process-parent"),
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
                     tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:aa7450b4501b61201ac41436:1".to_string(),
                     intent_index: 0,
@@ -668,13 +670,13 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                     ),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v2:blake3:22f2e01f7ab49b3eaee5d5024d8eaf42bd0e86aa08ac4a0af63608153a0f043a".to_string(),
+                    process_id: ProcessId::from("tool-intent:v2:blake3:22f2e01f7ab49b3eaee5d5024d8eaf42bd0e86aa08ac4a0af63608153a0f043a"),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
             lash_core::ToolIntentParentEndAction {
                 identity: lash_core::ToolIntentIdentity {
-                    session_id: "process-env:pg-segmented-process-parent".to_string(),
+                    session_id: SessionId::from("process-env:pg-segmented-process-parent"),
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
                     tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:869fb68a13361a3a42d2e1a5:1".to_string(),
                     intent_index: 0,
@@ -685,7 +687,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                     ),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v2:blake3:5ffec651dc9666f4cf6405f4462c619c76c1f92d11b789805f163fd8adf892fd".to_string(),
+                    process_id: ProcessId::from("tool-intent:v2:blake3:5ffec651dc9666f4cf6405f4462c619c76c1f92d11b789805f163fd8adf892fd"),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
@@ -824,7 +826,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
     );
     assert_eq!(
         registry
-            .get_pending_parent_end_plan(SEGMENTED_PARENT)
+            .get_pending_parent_end_plan(&ProcessId::from(SEGMENTED_PARENT))
             .await
             .expect("read pre-clear PostgreSQL plan")
             .expect("pre-clear crash retains the plan"),
@@ -870,7 +872,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
     let _ = scan_b.expect("second concurrent PostgreSQL startup scan");
     assert!(
         registry
-            .get_pending_parent_end_plan(SEGMENTED_PARENT)
+            .get_pending_parent_end_plan(&ProcessId::from(SEGMENTED_PARENT))
             .await
             .expect("read cleared PostgreSQL plan")
             .is_none(),
@@ -982,7 +984,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .expect("drive PostgreSQL ToolCall parent through public worker path");
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
-            .await_terminal(TOOL_PARENT)
+            .await_terminal(&ProcessId::from(TOOL_PARENT))
             .await
             .expect("await PostgreSQL ToolCall parent"),
         lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
@@ -994,7 +996,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .await
         .expect("settle PostgreSQL ToolCall parent teardown");
     let literal_tool_identity = lash_core::ToolIntentIdentity {
-        session_id: "process-env:pg-tool-call-parent".to_string(),
+        session_id: SessionId::from("process-env:pg-tool-call-parent"),
         execution_scope_id: "pg-tool-call-parent".to_string(),
         tool_call_id: "pg-tool-call-parent-call".to_string(),
         intent_index: 0,
@@ -1007,7 +1009,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
     };
     assert_eq!(
         registry
-            .events_after(&literal_tool_identity.replay_key, 0)
+            .events_after(&ProcessId::from(&literal_tool_identity.replay_key), 0)
             .await
             .expect("read PostgreSQL ToolCall child cancellation")
             .iter()
@@ -1038,7 +1040,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         *outcome,
         lash_core::ToolIntentParentEndOutcome::Cancelled {
             identity: literal_tool_identity.clone(),
-            process_id: literal_tool_identity.replay_key,
+            process_id: ProcessId::from(literal_tool_identity.replay_key),
         }
     );
     assert_eq!(

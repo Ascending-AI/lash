@@ -301,7 +301,7 @@ async fn after_step_during_a_parked_process_await_lets_the_process_finish() {
     );
 
     let terminal = process_success(serde_json::json!({ "finished": true }));
-    context.resolve_process_terminal(process_id, &terminal);
+    context.resolve_process_terminal(&ProcessId::from(process_id), &terminal);
     let outcome = tokio::time::timeout(Duration::from_secs(2), wait)
         .await
         .expect("the process terminal resolves the wait")
@@ -431,8 +431,8 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tool_provider),
         )),
     ];
-    let policy = replay_test_policy(session_id);
-    let state = replay_test_state(session_id, &policy);
+    let policy = replay_test_policy(&SessionId::from(session_id));
+    let state = replay_test_state(&SessionId::from(session_id), &policy);
     let dir = tempfile::tempdir().expect("fixture dir");
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
@@ -440,7 +440,13 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
             .expect("open sqlite store"),
     );
     let mut runtime = replay_test_runtime_with_plugins_and_registry(
-        session_id, policy, state, host, store, plugins, None,
+        &SessionId::from(session_id),
+        policy,
+        state,
+        host,
+        store,
+        plugins,
+        None,
     )
     .await;
 
@@ -628,8 +634,8 @@ async fn deferred_wake_during_a_parked_sleep_reparks_on_the_escalation_promise()
 #[tokio::test]
 async fn deferred_wake_during_a_parked_process_await_never_cancels_the_process() {
     let process_id = "fig635-process-await-deferred";
-    let pre_pr_call = fig790_pre_pr_suspended_process_call(process_id).await;
-    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let pre_pr_call = fig790_pre_pr_suspended_process_call(&ProcessId::from(process_id)).await;
+    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{PluginError, ProcessAdmissionReport, WatchedRegistry};
 
 #[cfg(any(test, feature = "testing"))]
-use crate::{ProcessAwaitOutput, ProcessEvent, ProcessRegistry};
+use crate::{ProcessAwaitOutput, ProcessEvent, ProcessId, ProcessRegistry};
 
 use super::{NativeProcessAwaiter, ProcessTerminalWait, ProcessWorkSubstrate};
 use crate::runtime::DurableProcessWorker;
@@ -49,7 +49,7 @@ impl NativeProcessWork {
     #[cfg(any(test, feature = "testing"))]
     pub async fn await_terminal(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<ProcessAwaitOutput, PluginError> {
         self.terminal_awaiter.await_terminal(process_id).await
     }
@@ -66,7 +66,7 @@ impl NativeProcessWork {
     #[cfg(any(test, feature = "testing"))]
     pub async fn await_event(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         event_type: &str,
         after_sequence: u64,
     ) -> Result<ProcessEvent, PluginError> {

@@ -55,6 +55,8 @@ pub mod triggers;
 
 #[doc(hidden)]
 pub mod store_backend_support {
+    use lash_sansio::SessionId;
+
     mod append_identity;
     mod session_meta;
 
@@ -68,7 +70,7 @@ pub mod store_backend_support {
     /// every batch in a coalesced command claim in the same transaction as the
     /// head commit and queue deletion.
     pub fn session_command_batch_completion_key(
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<String, crate::StoreError> {
         crate::OperationId::new(

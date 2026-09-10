@@ -18,6 +18,8 @@ use lash_core::{
 use lash_postgres_store::{
     PostgresStorage, PostgresStoreConfig, PostgresStorePreflight, SchemaProvisioning,
 };
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 #[allow(dead_code)]
 mod support;
@@ -147,10 +149,34 @@ async fn a_parked_segment_is_enumerated_with_its_identity_and_terminal_ones_are_
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    seed_process(&scratch, "proc-live", "waiting", Some("session-1")).await;
-    seed_process(&scratch, "proc-done", "completed", Some("session-2")).await;
-    seed_segment(&scratch, "proc-live", 0, r#"{"segment":"live"}"#).await;
-    seed_segment(&scratch, "proc-done", 0, r#"{"segment":"residue"}"#).await;
+    seed_process(
+        &scratch,
+        &ProcessId::from("proc-live"),
+        "waiting",
+        Some("session-1"),
+    )
+    .await;
+    seed_process(
+        &scratch,
+        &ProcessId::from("proc-done"),
+        "completed",
+        Some("session-2"),
+    )
+    .await;
+    seed_segment(
+        &scratch,
+        &ProcessId::from("proc-live"),
+        0,
+        r#"{"segment":"live"}"#,
+    )
+    .await;
+    seed_segment(
+        &scratch,
+        &ProcessId::from("proc-done"),
+        0,
+        r#"{"segment":"residue"}"#,
+    )
+    .await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let page = preflight
@@ -195,10 +221,34 @@ async fn only_undelivered_wakes_are_enumerated() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    seed_process(&scratch, "proc-1", "running", Some("session-1")).await;
-    seed_wake(&scratch, "delivery-a", "proc-1", "pending").await;
-    seed_wake(&scratch, "delivery-b", "proc-1", "enqueuing").await;
-    seed_wake(&scratch, "delivery-c", "proc-1", "enqueued").await;
+    seed_process(
+        &scratch,
+        &ProcessId::from("proc-1"),
+        "running",
+        Some("session-1"),
+    )
+    .await;
+    seed_wake(
+        &scratch,
+        "delivery-a",
+        &ProcessId::from("proc-1"),
+        "pending",
+    )
+    .await;
+    seed_wake(
+        &scratch,
+        "delivery-b",
+        &ProcessId::from("proc-1"),
+        "enqueuing",
+    )
+    .await;
+    seed_wake(
+        &scratch,
+        "delivery-c",
+        &ProcessId::from("proc-1"),
+        "enqueued",
+    )
+    .await;
 
     let page = PostgresStorePreflight::from_pool(scratch.pool.clone())
         .scan_durable(&DurableScan::first(DurableSurface::PendingWake, 10))
@@ -223,11 +273,17 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    seed_process(&scratch, "proc-a", "waiting", Some("session-a")).await;
-    seed_process(&scratch, "proc-b", "running", None).await;
-    seed_segment(&scratch, "proc-a", 0, r#"{"n":0}"#).await;
-    seed_segment(&scratch, "proc-a", 1, r#"{"n":1}"#).await;
-    seed_segment(&scratch, "proc-b", 0, r#"{"n":2}"#).await;
+    seed_process(
+        &scratch,
+        &ProcessId::from("proc-a"),
+        "waiting",
+        Some("session-a"),
+    )
+    .await;
+    seed_process(&scratch, &ProcessId::from("proc-b"), "running", None).await;
+    seed_segment(&scratch, &ProcessId::from("proc-a"), 0, r#"{"n":0}"#).await;
+    seed_segment(&scratch, &ProcessId::from("proc-a"), 1, r#"{"n":1}"#).await;
+    seed_segment(&scratch, &ProcessId::from("proc-b"), 0, r#"{"n":2}"#).await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let mut walked: Vec<String> = Vec::new();
@@ -284,8 +340,13 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     let manifest_ref = "hash-manifest";
     seed_blob(&scratch, component_ref, &component).await;
     seed_blob(&scratch, manifest_ref, &manifest).await;
-    seed_session(&scratch, "session-healthy", manifest_ref).await;
-    seed_session(&scratch, "session-dangling", "hash-that-was-collected").await;
+    seed_session(&scratch, &SessionId::from("session-healthy"), manifest_ref).await;
+    seed_session(
+        &scratch,
+        &SessionId::from("session-dangling"),
+        "hash-that-was-collected",
+    )
+    .await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let page = preflight
@@ -353,9 +414,9 @@ async fn a_deep_page_resumes_after_the_last_session_scanned_not_the_last_item() 
         &encoded_manifest_without_components(),
     )
     .await;
-    seed_session(&scratch, "session-1", "hash-with").await;
+    seed_session(&scratch, &SessionId::from("session-1"), "hash-with").await;
     // Scanned second, emits nothing: it has no execution-state component at all.
-    seed_session(&scratch, "session-2", "hash-without").await;
+    seed_session(&scratch, &SessionId::from("session-2"), "hash-without").await;
 
     let page = PostgresStorePreflight::from_pool(scratch.pool.clone())
         .scan_durable(&DurableScan::first(
@@ -408,7 +469,12 @@ fn encode_manifest(
     bytes
 }
 
-async fn seed_process(scratch: &ScratchSchema, process_id: &str, status: &str, wake: Option<&str>) {
+async fn seed_process(
+    scratch: &ScratchSchema,
+    process_id: &ProcessId,
+    status: &str,
+    wake: Option<&str>,
+) {
     let wake = match wake {
         Some(session_id) => format!("'{session_id}'"),
         None => "NULL".to_string(),
@@ -428,7 +494,12 @@ async fn seed_process(scratch: &ScratchSchema, process_id: &str, status: &str, w
         .await;
 }
 
-async fn seed_segment(scratch: &ScratchSchema, process_id: &str, ordinal: i64, handover: &str) {
+async fn seed_segment(
+    scratch: &ScratchSchema,
+    process_id: &ProcessId,
+    ordinal: i64,
+    handover: &str,
+) {
     scratch
         .apply(&format!(
             "INSERT INTO lash_process_segment_handovers
@@ -438,7 +509,12 @@ async fn seed_segment(scratch: &ScratchSchema, process_id: &str, ordinal: i64, h
         .await;
 }
 
-async fn seed_wake(scratch: &ScratchSchema, delivery_id: &str, process_id: &str, state: &str) {
+async fn seed_wake(
+    scratch: &ScratchSchema,
+    delivery_id: &str,
+    process_id: &ProcessId,
+    state: &str,
+) {
     scratch
         .apply(&format!(
             "INSERT INTO lash_process_wake_deliveries (
@@ -452,7 +528,7 @@ async fn seed_wake(scratch: &ScratchSchema, delivery_id: &str, process_id: &str,
         .await;
 }
 
-async fn seed_session(scratch: &ScratchSchema, session_id: &str, checkpoint_ref: &str) {
+async fn seed_session(scratch: &ScratchSchema, session_id: &SessionId, checkpoint_ref: &str) {
     scratch
         .apply(&format!(
             "INSERT INTO lash_sessions (session_id, head_revision, head_json, checkpoint_ref)

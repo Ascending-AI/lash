@@ -62,7 +62,8 @@ pub(crate) async fn call_session_delete(
     match state.core.session_was_deleted(&session_id).await {
         Ok(true) => {
             eprintln!(
-                "agent-workbench reconciled a failed Restate delete call to durable deletion: session_id={session_id:?} call_error={call_error}"
+                "agent-workbench reconciled a failed Restate delete call to durable deletion: session_id={:?} call_error={call_error}",
+                session_id.as_str()
             );
             Ok(())
         }

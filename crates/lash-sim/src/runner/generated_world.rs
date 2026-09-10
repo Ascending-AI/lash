@@ -1,5 +1,6 @@
 use super::*;
 use crate::backend_fault::GeneratedBackendFaultHarness;
+use lash_sansio::SessionId;
 
 pub(super) struct GeneratedRuntimeWorld {
     clock: Arc<SimClock>,
@@ -1159,7 +1160,7 @@ async fn run_provider_turn_task(
         .unwrap_or(expected_turn_index as u64) as usize;
     let runtime_contract = runtime_turn_contract(
         &observation,
-        &event.actor_alias,
+        &SessionId::from(event.actor_alias.clone()),
         expected_turn_index,
         expected_text,
         expected_exchange_count,

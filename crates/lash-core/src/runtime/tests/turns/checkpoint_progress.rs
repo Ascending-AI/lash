@@ -8,7 +8,7 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
     for model in models {
         enqueue_config_patch_command(
             store.as_ref(),
-            "root",
+            &SessionId::from("root"),
             crate::runtime::ApplyConfigPatch {
                 model: Some(
                     crate::ModelSpec::builder(model)
@@ -25,7 +25,7 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
     let owner = lease_owner("config-patch-coalescing");
     let lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &owner,
         "config-patch-coalescing-executor",
         crate::LeaseTimings::default().ttl_ms(),
@@ -47,7 +47,7 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
         "N config commands must share exactly one head commit"
     );
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("list settled config commands")
             .is_empty(),
@@ -367,7 +367,10 @@ pub(super) async fn turn_provider_override_does_not_persist_into_session_policy_
                 turn_context,
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("provider-override-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("provider-override-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -432,7 +435,10 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("plugin-extension-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("plugin-extension-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -482,7 +488,10 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("skill-command-visibility-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("skill-command-visibility-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -571,7 +580,10 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("retryable-error-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("retryable-error-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -620,7 +632,10 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("typed-provider-failure-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("typed-provider-failure-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -672,7 +687,7 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("turn-timing-turn")),
+            named_turn_scope(&SessionId::from("root"), &TurnId::from("turn-timing-turn")),
         )
         .await
         .expect("turn");
@@ -712,7 +727,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &TurnId::from("queued-checkpoint-turn"),
         None,
         TurnInput::text("one more thing"),
@@ -731,7 +746,10 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("queued-checkpoint-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("queued-checkpoint-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -809,7 +827,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
         .await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &TurnId::from("image-attachment-turn"),
         None,
         TurnInput::text("see image").with_attachment(crate::AttachmentSource::inline(
@@ -831,7 +849,10 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("image-attachment-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("image-attachment-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -917,7 +938,10 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("plugin-action-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("plugin-action-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -981,7 +1005,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
     .await;
     let admitted = enqueue_turn_input_for_checkpoint(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &TurnId::from("checkpoint-plugin-abort-turn"),
         Some("host:checkpoint-plugin-abort".to_string()),
         TurnInput::text("must remain pending"),
@@ -994,7 +1018,10 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("checkpoint-plugin-abort-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("checkpoint-plugin-abort-turn"),
+                ),
             )
             .with_turn_events(&turn_events),
         )
@@ -1022,19 +1049,25 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         "a rejected checkpoint must not emit live application evidence"
     );
     assert!(
-        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
-            .await
-            .expect("list rejected checkpoint applications")
-            .iter()
-            .all(|application| application.input_id != admitted.input_id),
+        crate::store::TurnInputStore::list_turn_input_applications(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list rejected checkpoint applications")
+        .iter()
+        .all(|application| application.input_id != admitted.input_id),
         "a rejected checkpoint must not persist application evidence"
     );
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("list pending input after rejected checkpoint")
-            .iter()
-            .any(|input| input.input_id == admitted.input_id),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list pending input after rejected checkpoint")
+        .iter()
+        .any(|input| input.input_id == admitted.input_id),
         "a rejected checkpoint input must remain claimable"
     );
     assert!(
@@ -1122,7 +1155,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
     runtime.host.core.attachment_source_policy = Arc::new(DenyHostCheckpointAttachments);
     let admitted = enqueue_turn_input_for_checkpoint(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &TurnId::from("checkpoint-attachment-failure-turn"),
         Some("host:checkpoint-attachment-failure".to_string()),
         TurnInput::text("must remain pending after attachment failure"),
@@ -1135,7 +1168,10 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("checkpoint-attachment-failure-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("checkpoint-attachment-failure-turn"),
+                ),
             )
             .with_turn_events(&turn_events),
         )
@@ -1163,19 +1199,25 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         "a failed checkpoint attachment must not emit live application evidence"
     );
     assert!(
-        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
-            .await
-            .expect("list attachment-failed checkpoint applications")
-            .iter()
-            .all(|application| application.input_id != admitted.input_id),
+        crate::store::TurnInputStore::list_turn_input_applications(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list attachment-failed checkpoint applications")
+        .iter()
+        .all(|application| application.input_id != admitted.input_id),
         "a failed checkpoint attachment must not persist application evidence"
     );
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("list pending input after attachment failure")
-            .iter()
-            .any(|input| input.input_id == admitted.input_id),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list pending input after attachment failure")
+        .iter()
+        .any(|input| input.input_id == admitted.input_id),
         "an attachment-failed checkpoint input must remain claimable"
     );
     assert!(
@@ -1218,7 +1260,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &TurnId::from("injection-accepted-turn"),
         Some("host:follow-up-id".to_string()),
         TurnInput::text("follow up"),
@@ -1238,7 +1280,10 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("injection-accepted-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("injection-accepted-turn"),
+                ),
             )
             .with_events(&sink),
         )
@@ -1362,10 +1407,15 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         runtime_store,
     ))
     .await;
-    enqueue_idle_turn_input(store.as_ref(), "root", "queued before opening").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued before opening",
+    )
+    .await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         turn_id,
         Some(format!("host:{turn_id}:injection")),
         TurnInput::text("mid-turn injection"),
@@ -1426,10 +1476,12 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         turn_id,
     )
     .await;
-    let first_applications =
-        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
-            .await
-            .expect("read first turn applications");
+    let first_applications = crate::store::TurnInputStore::list_turn_input_applications(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("read first turn applications");
     assert_eq!(first_applications.len(), 3);
     assert_eq!(
         first_applications
@@ -1460,9 +1512,12 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         "redrive must retain the journaled acceptance identity"
     );
     assert_eq!(
-        crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
-            .await
-            .expect("read applications after redrive"),
+        crate::store::TurnInputStore::list_turn_input_applications(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("read applications after redrive"),
         first_applications,
         "redrive must preserve the original initial/checkpoint application split"
     );
@@ -1591,7 +1646,10 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
             .run_turn_assembled(
                 TurnInput::text("first turn input"),
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("after-last-call-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("after-last-call-turn"),
+                ),
             )
             .await
             .expect("first turn");
@@ -1606,7 +1664,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     .expect("turn reaches finalization after its last call");
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
-        "root",
+        &SessionId::from("root"),
         &TurnId::from("after-last-call-turn"),
         Some("host:late-active".to_string()),
         TurnInput::text("late active input"),
@@ -1615,9 +1673,12 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     release.store(true, Ordering::SeqCst);
     let mut runtime = first_turn.await.expect("first turn task");
 
-    let pending = crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-        .await
-        .expect("deferred late input");
+    let pending = crate::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("deferred late input");
     assert_eq!(pending.len(), 1);
     assert!(matches!(
         pending[0].ingress,
@@ -1628,7 +1689,10 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("late-active-next-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("late-active-next-turn"),
+            ),
         ))
         .await
         .expect("drain deferred input")
@@ -1650,12 +1714,16 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
 pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
     let (mut runtime, store) =
         standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
-    let command = enqueue_session_command(store.as_ref(), "root", "test refresh").await;
+    let command =
+        enqueue_session_command(store.as_ref(), &SessionId::from("root"), "test refresh").await;
 
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("command-only-queue-drain")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("command-only-queue-drain"),
+            ),
         ))
         .await
         .expect("command-only drain succeeds")
@@ -1663,7 +1731,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
 
     assert!(drained.is_none());
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("list queue after command-only drain")
             .is_empty(),
@@ -1691,9 +1759,10 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
 
     assert_eq!(store.load_session_count(), full_loads_before);
     assert_eq!(store.load_session_head_meta_count(), head_reads_before);
-    let pending = crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
-        .await
-        .expect("inspect deferred durable command");
+    let pending =
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("inspect deferred durable command");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].batch_id, receipt.batch_id);
 }
@@ -1739,7 +1808,12 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         })
         .build();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
-    let queued_input = enqueue_idle_turn_input(store.as_ref(), "root", "queued user input").await;
+    let queued_input = enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "queued user input",
+    )
+    .await;
     let registry = runtime
         .host
         .process_registry()
@@ -1764,7 +1838,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "wake-after-user-input",
+        &ProcessId::from("wake-after-user-input"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -1780,7 +1854,10 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("next-input-before-wake-drain")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("next-input-before-wake-drain"),
+            ),
         ))
         .await
         .expect("queued drain succeeds")
@@ -1792,15 +1869,18 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         "wake checkpoint response"
     );
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("pending inputs after drain")
-            .is_empty(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("pending inputs after drain")
+        .is_empty(),
         "turn input `{}` should be completed",
         queued_input.input_id
     );
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queued work after pending input drain")
             .is_empty(),
@@ -1830,7 +1910,12 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         }),
     }]);
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
-    let queued_input = enqueue_idle_turn_input(store.as_ref(), "root", "still pending user").await;
+    let queued_input = enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "still pending user",
+    )
+    .await;
     let registry = runtime
         .host
         .process_registry()
@@ -1855,7 +1940,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "selected-wake",
+        &ProcessId::from("selected-wake"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -1867,26 +1952,30 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         ),
     )
     .await;
-    let wake_batch = crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
-        .await
-        .expect("queued work before selected drain")
-        .into_iter()
-        .find(|batch| {
-            batch.items.iter().any(|item| {
-                matches!(
-                    &item.payload,
-                    crate::QueuedWorkPayload::ProcessWake { wake: queued_wake }
-                        if queued_wake.wake_id == wake.wake_id
-                )
+    let wake_batch =
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("queued work before selected drain")
+            .into_iter()
+            .find(|batch| {
+                batch.items.iter().any(|item| {
+                    matches!(
+                        &item.payload,
+                        crate::QueuedWorkPayload::ProcessWake { wake: queued_wake }
+                            if queued_wake.wake_id == wake.wake_id
+                    )
+                })
             })
-        })
-        .expect("wake batch");
+            .expect("wake batch");
 
     let drained = runtime
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("selected-wake-drain")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("selected-wake-drain"),
+                ),
             ),
             std::slice::from_ref(&wake_batch.batch_id),
         )
@@ -1895,10 +1984,12 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         .expect("selected wake produces a turn");
 
     assert_eq!(drained.assistant_output.safe_text, "selected wake response");
-    let pending_inputs =
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
-            .await
-            .expect("pending inputs after selected wake drain");
+    let pending_inputs = crate::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("pending inputs after selected wake drain");
     assert_eq!(
         pending_inputs
             .iter()
@@ -1908,7 +1999,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         "selected queued-work drains must not also claim pending user input"
     );
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queued work after selected wake drain")
             .is_empty(),
@@ -1957,10 +2048,17 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
             }
         })
         .build();
-    let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store_for_session(transport, SESSION_ID).await;
-    let queued_input =
-        enqueue_idle_turn_input(store.as_ref(), SESSION_ID, "cancel with wake pending").await;
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
+        transport,
+        &SessionId::from(SESSION_ID),
+    )
+    .await;
+    let queued_input = enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from(SESSION_ID),
+        "cancel with wake pending",
+    )
+    .await;
     let registry = runtime
         .host
         .process_registry()
@@ -1985,7 +2083,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "cancel-claimed-wake",
+        &ProcessId::from("cancel-claimed-wake"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -2010,7 +2108,10 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         std::time::Duration::from_secs(5),
         runtime.stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope(SESSION_ID, &TurnId::from("cancel-claimed-wake-drain")),
+            named_turn_scope(
+                &SessionId::from(SESSION_ID),
+                &TurnId::from("cancel-claimed-wake-drain"),
+            ),
         )),
     )
     .await
@@ -2025,18 +2126,24 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), SESSION_ID)
-            .await
-            .expect("pending inputs after cancellation")
-            .is_empty(),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from(SESSION_ID)
+        )
+        .await
+        .expect("pending inputs after cancellation")
+        .is_empty(),
         "queued input `{}` should be completed by the cancelled turn",
         queued_input.input_id
     );
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), SESSION_ID)
-            .await
-            .expect("queued work after cancellation")
-            .is_empty(),
+        crate::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from(SESSION_ID)
+        )
+        .await
+        .expect("queued work after cancellation")
+        .is_empty(),
         "claimed wake `{}` should be completed by the cancelled turn",
         wake.wake_id
     );
@@ -2044,7 +2151,10 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(SESSION_ID, &TurnId::from("after-cancel-claimed-wake-drain")),
+                named_turn_scope(
+                    &SessionId::from(SESSION_ID),
+                    &TurnId::from("after-cancel-claimed-wake-drain")
+                ),
             ))
             .await
             .expect("post-cancel drain should succeed")

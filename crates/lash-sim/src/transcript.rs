@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::testing::behavior_transcript::{
@@ -28,7 +29,7 @@ impl SimulationTrace {
     /// Render one raw simulator session with the same stable aliases used by the
     /// whole-run transcript. The provider-wire and process-worker exclusions
     /// documented on [`SimulationTrace::render_transcript`] also apply.
-    pub fn render_session_transcript(&self, session_id: &str) -> String {
+    pub fn render_session_transcript(&self, session_id: &SessionId) -> String {
         build(self, Some(session_id)).render()
     }
 }
@@ -316,10 +317,10 @@ fn test_boundary(
 }
 
 #[cfg(test)]
-fn test_write(session_id: &str, turn_index: usize) -> CheckpointWriteEvent {
+fn test_write(session_id: &SessionId, turn_index: usize) -> CheckpointWriteEvent {
     CheckpointWriteEvent {
         schema: crate::store::CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         attributed_session_id: None,
         cause_boundary_id: None,
         commit_index: turn_index,
@@ -368,7 +369,10 @@ mod attribution_tests {
                 test_boundary(3, "alpha", BoundaryKind::Provider, 1),
                 test_boundary(4, "beta", BoundaryKind::Provider, 1),
             ],
-            vec![test_write("alpha", 1), test_write("beta", 1)],
+            vec![
+                test_write(&SessionId::from("alpha"), 1),
+                test_write(&SessionId::from("beta"), 1),
+            ],
         );
 
         let transcript = trace.render_transcript();
@@ -397,8 +401,8 @@ mod attribution_tests {
 
     #[test]
     fn contract_checkpoint_renders_after_its_causal_trigger() {
-        let mut write = test_write("contract-store-session", 1);
-        write.attributed_session_id = Some("alpha".to_string());
+        let mut write = test_write(&SessionId::from("contract-store-session"), 1);
+        write.attributed_session_id = Some(SessionId::from("alpha"));
         write.cause_boundary_id = Some("alpha:2".to_string());
         let trace = trace_with_events(
             vec![
@@ -426,6 +430,7 @@ mod tests {
         ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
         ProcessRegistrar as _, ProcessRetention as _, ProcessWakeOutbox as _,
     };
+    use lash_sansio::ProcessId;
     use std::sync::Arc;
 
     use lash_core::store::RuntimeCommit;
@@ -501,13 +506,13 @@ mod tests {
                         ..ProcessEventSemanticsSpec::default()
                     },
                 }])
-                .with_wake_session_id(Some("source-session".to_string())),
+                .with_wake_session_id(Some(SessionId::from("source-session"))),
             )
             .await
             .expect("register transcript process");
         registry
             .append_event(
-                process_id,
+                &ProcessId::from(process_id),
                 ProcessEventAppendRequest::new(
                     "producer.wake",
                     serde_json::json!({"wake_input": "resume"}),
@@ -516,7 +521,7 @@ mod tests {
             .await
             .expect("append wake event");
         registry
-            .retarget_subscription(process_id, Some("branch-session"))
+            .retarget_subscription(&ProcessId::from(process_id), Some("branch-session"))
             .await
             .expect("retarget subscription");
         let retargeted = registry
@@ -539,7 +544,7 @@ mod tests {
             "a retarget must settle its stale wake delivery as retargeted"
         );
         let retarget_event = registry
-            .events_after(process_id, 0)
+            .events_after(&ProcessId::from(process_id), 0)
             .await
             .expect("read process audit events")
             .into_iter()
@@ -549,7 +554,7 @@ mod tests {
 
         let terminal = registry
             .complete_process(
-                process_id,
+                &ProcessId::from(process_id),
                 ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                     serde_json::json!({"done": true}),
                 )),
@@ -568,7 +573,7 @@ mod tests {
         let output = lash_core::NativeProcessWork::for_registry(
             registry as Arc<dyn lash_core::ProcessRegistry>,
         )
-        .await_terminal(process_id)
+        .await_terminal(&ProcessId::from(process_id))
         .await
         .expect("await pruned process");
         assert!(matches!(
@@ -604,14 +609,14 @@ mod tests {
         let store = factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: "mutation-session".to_string(),
+                session_id: SessionId::from("mutation-session"),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
             .await
             .expect("create observed store");
         let mut state = RuntimeSessionState {
-            session_id: "mutation-session".to_string(),
+            session_id: SessionId::from("mutation-session"),
             turn_index: 1,
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,

@@ -14,6 +14,7 @@
 //! runtime-only field by construction.
 
 use super::{ModelSpec, NoProgressBudget, SessionPolicy, TurnBudget};
+use crate::SessionId;
 
 impl serde::Serialize for SessionPolicy {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -64,7 +65,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             #[serde(default)]
             provider_id: String,
             #[serde(default)]
-            session_id: Option<String>,
+            session_id: Option<SessionId>,
             #[serde(default)]
             autonomous: bool,
             turn_budget: TurnBudget,

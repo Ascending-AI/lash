@@ -195,7 +195,7 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
     };
     for key in &recorded_wait_keys {
         if let ExecutionScope::Process { process_id } = &key.scope {
-            process_ids.push(process_id.clone());
+            process_ids.push(process_id.to_string());
         }
     }
     process_ids.sort();
@@ -499,7 +499,7 @@ pub(super) async fn drive_frame_switch_crash_process(
     let response = TurnResponse {
         workflow_id: "e2e-frame-switch-crash".to_string(),
         worker_id: "frame-crash-subprocess".to_string(),
-        process_id: String::new(),
+        process_id: ProcessId::from(String::new()),
         process_ids: Vec::new(),
         attachment_id: String::new(),
         final_text: EXPECTED_FRAME_SWITCH_TEXT.to_string(),
@@ -639,7 +639,7 @@ pub(super) async fn submit_signal_workflow(
     ingress_url: &str,
     pool: &sqlx::PgPool,
     workflow_id: &str,
-    process_id: &str,
+    process_id: &ProcessId,
     signal_name: &str,
     signal_id: &str,
     payload: serde_json::Value,
@@ -649,7 +649,7 @@ pub(super) async fn submit_signal_workflow(
         fail_once: false,
         scenario: TurnScenario::SignalProcess,
         signal: Some(ProcessSignalRequest {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             signal_name: signal_name.to_string(),
             signal_id: signal_id.to_string(),
             payload,
@@ -837,7 +837,7 @@ pub(super) fn response_from_row(
     Ok(TurnResponse {
         workflow_id,
         worker_id,
-        process_id,
+        process_id: ProcessId::from(process_id),
         process_ids: Vec::new(),
         attachment_id,
         final_text,

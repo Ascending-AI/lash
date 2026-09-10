@@ -7,6 +7,7 @@
 //! are preserved by re-export.
 
 use super::StoreError;
+use crate::SessionId;
 
 /// Durable owner class for an attachment intent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -78,7 +79,7 @@ mod attachment_owner_kind_tests {
 #[derive(Clone, Debug)]
 pub struct AttachmentIntent {
     pub attachment_id: crate::AttachmentId,
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Canonical, stable identity for the session-owned physical object.
     /// Backends may map this identity onto their own path/key representation.
     pub canonical_uri: String,
@@ -182,7 +183,7 @@ pub enum AttachmentDeleteArming {
 #[derive(Clone, Debug)]
 pub struct AttachmentManifestEntry {
     pub attachment_id: crate::AttachmentId,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub canonical_uri: String,
     pub intent_at_epoch_ms: u64,
     pub committed_at_epoch_ms: Option<u64>,
@@ -261,7 +262,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// the durable `Reclaimed` transition recorded after a successful delete.
     fn commit_refs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), StoreError>;
 
@@ -334,7 +335,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// retained prefix disappears. Bytes die only after all roots disappear.
     fn forget(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), StoreError>;
 
@@ -375,7 +376,7 @@ macro_rules! impl_noop_attachment_manifest {
 
             fn commit_refs(
                 &self,
-                _session_id: &str,
+                _session_id: &$crate::SessionId,
                 _attachment_ids: &[$crate::AttachmentId],
             ) -> ::std::result::Result<(), $crate::StoreError> {
                 Ok(())
@@ -391,7 +392,7 @@ macro_rules! impl_noop_attachment_manifest {
 
             fn forget(
                 &self,
-                _session_id: &str,
+                _session_id: &$crate::SessionId,
                 _attachment_id: &$crate::AttachmentId,
             ) -> ::std::result::Result<(), $crate::StoreError> {
                 Ok(())

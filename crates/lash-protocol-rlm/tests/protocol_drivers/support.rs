@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 pub(crate) use std::sync::Arc;
 
@@ -68,7 +69,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
-        session_id: "test".to_string(),
+        session_id: SessionId::from("test"),
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination,
@@ -1020,7 +1021,10 @@ fn drive_plugin_stream(
             let mut abort_requested = false;
             for chunk in chunks {
                 let transforms = plugins
-                    .transform_assistant_stream("rlm-protocol-scenario-hooks", chunk.clone())
+                    .transform_assistant_stream(
+                        &SessionId::from("rlm-protocol-scenario-hooks"),
+                        chunk.clone(),
+                    )
                     .await
                     .expect("protocol-scenario stream hook succeeds");
                 let transformed = transforms
@@ -1040,7 +1044,10 @@ fn drive_plugin_stream(
             }
 
             let transforms = plugins
-                .transform_assistant_response("rlm-protocol-scenario-hooks", response.clone())
+                .transform_assistant_response(
+                    &SessionId::from("rlm-protocol-scenario-hooks"),
+                    response.clone(),
+                )
                 .await
                 .expect("protocol-scenario response hook succeeds");
             let response = transforms
@@ -1049,7 +1056,7 @@ fn drive_plugin_stream(
                 .unwrap_or(response);
             plugins
                 .finish_assistant_stream(
-                    "rlm-protocol-scenario-hooks",
+                    &SessionId::from("rlm-protocol-scenario-hooks"),
                     if abort_requested {
                         AssistantStreamFinishReason::Aborted
                     } else {

@@ -5,6 +5,7 @@
 //! [`SessionStoreFactory`](crate::SessionStoreFactory) for each case.
 
 use crate::facade_support::SessionGraphFacadeOps;
+use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -80,7 +81,7 @@ struct GeneratedCase {
 #[derive(Clone, Debug)]
 struct ModelNode {
     parent_node_id: Option<String>,
-    owner_session_id: String,
+    owner_session_id: SessionId,
 }
 
 #[derive(Clone, Debug)]
@@ -451,7 +452,7 @@ impl SessionGraphScenario {
         }
         let physical_id = self.next_session_id(slot);
         let request = session_store_request(
-            &physical_id,
+            &SessionId::from(physical_id.clone()),
             "session-graph-property-model",
             crate::SessionRelation::Root,
         );
@@ -650,12 +651,12 @@ impl SessionGraphScenario {
             .physical_id
             .clone();
         let relation = crate::SessionRelation::Fork {
-            source_session_id,
+            source_session_id: SessionId::from(source_session_id),
             source_node_id: node_id.clone(),
             observer_inheritance: crate::ObserverInheritance::default(),
         };
         let request = session_store_request(
-            &physical_id,
+            &SessionId::from(physical_id.clone()),
             "session-graph-property-model",
             relation.clone(),
         );
@@ -663,7 +664,7 @@ impl SessionGraphScenario {
             .factory
             .fork_at(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: physical_id.clone(),
+                session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
                 relation,
                 policy: request.policy.clone(),
@@ -742,19 +743,19 @@ impl SessionGraphScenario {
         let old_model = self.model.sessions.remove(&slot).expect("selected model");
         let physical_id = self.next_session_id(slot);
         let relation = crate::SessionRelation::Fork {
-            source_session_id: old_model.physical_id.clone(),
+            source_session_id: SessionId::from(old_model.physical_id.clone()),
             source_node_id: node_id.clone(),
             observer_inheritance: crate::ObserverInheritance::default(),
         };
         let request = session_store_request(
-            &physical_id,
+            &SessionId::from(physical_id.clone()),
             "session-graph-property-model",
             relation.clone(),
         );
         self.factory
             .fork_at(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: physical_id.clone(),
+                session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
                 relation,
                 policy: request.policy.clone(),
@@ -858,8 +859,10 @@ impl SessionGraphScenario {
         if before != after {
             return Err("cold-reload projection equality: reopened state differs".to_string());
         }
-        self.handles_by_physical_id
-            .insert(live.request.session_id.clone(), Arc::clone(&reopened));
+        self.handles_by_physical_id.insert(
+            live.request.session_id.clone().to_string(),
+            Arc::clone(&reopened),
+        );
         self.live.get_mut(&slot).expect("live slot").store = reopened;
         self.shape.cold_reloads += 1;
         Ok(())
@@ -1243,14 +1246,14 @@ impl SessionGraphScenario {
     ) -> Result<(), String> {
         let probe_id = self.next_operation_id("retention-probe");
         let request = session_store_request(
-            &probe_id,
+            &SessionId::from(probe_id.clone()),
             "session-graph-property-retention-probe",
             crate::SessionRelation::Root,
         );
         self.factory
             .fork_at(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-                session_id: probe_id.clone(),
+                session_id: SessionId::from(probe_id.clone()),
                 node_id: pinned_node_id.to_string(),
                 relation: request.relation.clone(),
                 policy: request.policy.clone(),
@@ -1292,7 +1295,7 @@ impl SessionGraphScenario {
             ));
         }
         self.factory
-            .delete_session(&probe_id)
+            .delete_session(&SessionId::from(probe_id))
             .await
             .map_err(|error| error.to_string())?;
         Ok(())

@@ -2,6 +2,7 @@ use super::*;
 use crate::ProcessRegistrar as _;
 use crate::plugin::{PluginHost, PluginSession, StaticPluginFactory};
 use crate::runtime::RuntimeEffectControllerHandle;
+use crate::{ProcessId, SessionId};
 use crate::{
     ToolCall, ToolCallOutcome, ToolContext, ToolOutcome, ToolProvider, ToolRetryPolicy,
     ToolRetryStatus,
@@ -173,8 +174,8 @@ impl ToolProvider for OrderedBatchIntentTools {
                     .map(|intent_index| {
                         let event_type = format!("{call_id}.intent.{intent_index}");
                         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                            session_id: "session".to_string(),
-                            process_id: "intent-law-target".to_string(),
+                            session_id: SessionId::from("session"),
+                            process_id: ProcessId::from("intent-law-target"),
                             event_type,
                             payload: json!({"call_id": call_id, "intent_index": intent_index}),
                         })
@@ -386,7 +387,7 @@ impl crate::AwaitEventResolver for IntentReplayController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.native
             .revoke_await_events_for_session(session_id)
@@ -395,7 +396,7 @@ impl crate::AwaitEventResolver for IntentReplayController {
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.native
             .cancel_await_events_for_session(session_id)
@@ -485,8 +486,8 @@ impl ToolProvider for RetryingIntentTools {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
-                session_id: "session".to_string(),
-                process_id: "retry-intent-target".to_string(),
+                session_id: SessionId::from("session"),
+                process_id: ProcessId::from("retry-intent-target"),
                 event_type: "attempt.retry.final".to_string(),
                 payload: json!({"attempt": call.context.attempt_number()}),
             },
@@ -600,7 +601,7 @@ impl ToolProvider for AttemptIntentTools {
             crate::ToolOutcomeDone::ok(json!({"provider": "done"})),
             crate::ToolIntents::v1(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                    session_id: "session".to_string(),
+                    session_id: SessionId::from("session"),
                     request: crate::ProcessStartRequest::external(
                         "provider-supplied-id-is-replaced",
                         crate::ProcessOriginator::host_scoped("attempt-intents-test"),
@@ -609,19 +610,19 @@ impl ToolProvider for AttemptIntentTools {
                     on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
-                    session_id: "session".to_string(),
-                    process_id: "attempt-intents-target".to_string(),
+                    session_id: SessionId::from("session"),
+                    process_id: ProcessId::from("attempt-intents-target"),
                     signal_name: "resume".to_string(),
                     payload: json!({"ordinal": 1}),
                 }),
                 crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                    session_id: "session".to_string(),
-                    process_id: "attempt-intents-target".to_string(),
+                    session_id: SessionId::from("session"),
+                    process_id: ProcessId::from("attempt-intents-target"),
                     event_type: "attempt.intent.note".to_string(),
                     payload: json!({"ordinal": 2}),
                 }),
                 crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
-                    session_id: "session".to_string(),
+                    session_id: SessionId::from("session"),
                     request: crate::TriggerOccurrenceRequest::new(
                         "attempt.intent.trigger",
                         "attempt-intents-source",
@@ -630,8 +631,8 @@ impl ToolProvider for AttemptIntentTools {
                     ),
                 }),
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-                    session_id: "session".to_string(),
-                    process_id: "attempt-intents-target".to_string(),
+                    session_id: SessionId::from("session"),
+                    process_id: ProcessId::from("attempt-intents-target"),
                     reason: Some("literal final intent".to_string()),
                 }),
             ]),
@@ -836,7 +837,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
     let plugins = test_plugins(Arc::new(StrictMcpTools { executed }));
     let tools = plugins.tools();
     let tool_catalog = plugins
-        .resolved_tool_catalog("session")
+        .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
         plugins,
@@ -860,7 +861,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -921,7 +922,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
     let plugins = test_plugins(Arc::new(MockTools));
     let tools = plugins.tools();
     let tool_catalog = plugins
-        .resolved_tool_catalog("session")
+        .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
         plugins,
@@ -945,7 +946,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -981,7 +982,7 @@ fn projection_policy_dispatch_context(
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins
-        .resolved_tool_catalog("session")
+        .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
         plugins,
@@ -1005,7 +1006,7 @@ fn projection_policy_dispatch_context(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1199,7 +1200,7 @@ fn lazy_contract_dispatch_context(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1248,7 +1249,7 @@ fn authority_hidden_dispatch_context(
     );
     let tools = plugins.tools();
     let tool_catalog = plugins
-        .resolved_tool_catalog("session")
+        .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
         plugins,
@@ -1272,7 +1273,7 @@ fn authority_hidden_dispatch_context(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1295,7 +1296,7 @@ fn exact_dispatch_context_with_plugins(
     let (event_tx, _event_rx) = mpsc::channel(8);
     let tools = plugins.tools();
     let tool_catalog = plugins
-        .resolved_tool_catalog("session")
+        .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
         plugins,
@@ -1319,7 +1320,7 @@ fn exact_dispatch_context_with_plugins(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1423,7 +1424,7 @@ fn pending_dispatch_context(
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins
-        .resolved_tool_catalog("session")
+        .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
         plugins,
@@ -1447,7 +1448,7 @@ fn pending_dispatch_context(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1479,7 +1480,7 @@ fn parallel_dispatch_context(
     let plugins = test_plugins(Arc::new(ParallelProbeTools { barrier, started }));
     let tools = plugins.tools();
     let tool_catalog = plugins
-        .resolved_tool_catalog("session")
+        .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
     ToolDispatchContext {
         plugins,
@@ -1503,7 +1504,7 @@ fn parallel_dispatch_context(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
@@ -1637,7 +1638,7 @@ async fn retry_ladder_survives_a_later_pending_completion() {
 
     let attachment_store = Arc::clone(&context.attachment_store);
     let execution = crate::RuntimeExecutionContext::new(
-        "session".to_string(),
+        SessionId::from("session"),
         Arc::new(context),
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         attachment_store,
@@ -2410,7 +2411,7 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
                 crate::ProcessProvenance::host(),
             )
             .with_extra_event_types(event_types),
-            &["session".to_string()],
+            &[SessionId::from("session")],
         )
         .await
         .expect("register intent target");

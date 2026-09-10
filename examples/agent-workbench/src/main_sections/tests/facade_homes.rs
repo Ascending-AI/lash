@@ -1,4 +1,6 @@
 use super::*;
+use lash::ProcessId;
+use lash::SessionId;
 
 // Facade-home coverage for the surface FIG-863 waves B and C added: each item below is
 // exercised through this host example and asserted on an outcome the runtime
@@ -36,7 +38,7 @@ fn closure_companions_are_usable_through_their_facade_domains() {
     let catalog = lash::plugins::ToolCatalog::default();
     assert!(catalog.tools.is_empty());
     let cause = lash::process::CausalRef::Process {
-        process_id: "workbench-process".to_string(),
+        process_id: ProcessId::from("workbench-process"),
     };
     assert!(matches!(
         cause,
@@ -246,7 +248,7 @@ fn workbench_plugin_observes_session_config_policy_transition() {
         assert_eq!(
             config_changes.latest(),
             Some(WorkbenchConfigChange {
-                session_id: "workbench-config-change-session".to_string(),
+                session_id: SessionId::from("workbench-config-change-session"),
                 previous_model_id: "workbench-model-before".to_string(),
                 current_model_id: "workbench-model-after".to_string(),
                 service_model_id: "workbench-model-after".to_string(),
@@ -427,7 +429,7 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
             ..lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded)
         };
         let state = lash::runtime::SessionSnapshot {
-            session_id: "workbench-rolling-history-session".to_string(),
+            session_id: SessionId::from("workbench-rolling-history-session"),
             policy,
             session_graph: lash::persistence::SessionGraph::from_active_read_state(&messages),
             ..lash::runtime::SessionSnapshot::new(lash::runtime::SessionPolicy::new(

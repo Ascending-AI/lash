@@ -15,7 +15,7 @@ macro_rules! delegate_process_query {
         impl $crate::runtime::process::registry_concerns::ProcessQuery for $wrapper {
             async fn resolve_process_ref(
                 &self,
-                process_id: &str,
+                process_id: &ProcessId,
             ) -> Result<$crate::ProcessRef, $crate::PluginError> {
                 self.$inner.resolve_process_ref(process_id).await
             }
@@ -29,7 +29,7 @@ macro_rules! delegate_process_query {
 
             async fn get_process(
                 &self,
-                process_id: &str,
+                process_id: &ProcessId,
             ) -> Result<Option<$crate::ProcessRecord>, $crate::PluginError> {
                 self.$inner.get_process(process_id).await
             }
@@ -64,8 +64,8 @@ macro_rules! delegate_process_query {
 
             async fn filter_unregistered_process_ids(
                 &self,
-                process_ids: &[String],
-            ) -> Result<Vec<String>, $crate::PluginError> {
+                process_ids: &[ProcessId],
+            ) -> Result<Vec<ProcessId>, $crate::PluginError> {
                 self.$inner
                     .filter_unregistered_process_ids(process_ids)
                     .await
@@ -73,8 +73,8 @@ macro_rules! delegate_process_query {
 
             async fn filter_tombstoned_process_ids(
                 &self,
-                process_ids: &[String],
-            ) -> Result<Vec<String>, $crate::PluginError> {
+                process_ids: &[ProcessId],
+            ) -> Result<Vec<ProcessId>, $crate::PluginError> {
                 self.$inner.filter_tombstoned_process_ids(process_ids).await
             }
 
@@ -100,8 +100,8 @@ macro_rules! delegate_process_observer_registry {
         impl $crate::runtime::process::registry_concerns::ProcessObserverRegistry for $wrapper {
             async fn add_observer(
                 &self,
-                session_id: &str,
-                process_id: &str,
+                session_id: &SessionId,
+                process_id: &ProcessId,
                 by: $crate::ProcessObserverBy,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner.add_observer(session_id, process_id, by).await
@@ -109,7 +109,7 @@ macro_rules! delegate_process_observer_registry {
 
             async fn add_observer_ref(
                 &self,
-                session_id: &str,
+                session_id: &SessionId,
                 process_ref: &$crate::ProcessRef,
                 by: $crate::ProcessObserverBy,
             ) -> Result<(), $crate::PluginError> {
@@ -120,8 +120,8 @@ macro_rules! delegate_process_observer_registry {
 
             async fn remove_observer(
                 &self,
-                session_id: &str,
-                process_id: &str,
+                session_id: &SessionId,
+                process_id: &ProcessId,
                 by: $crate::ProcessObserverBy,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner
@@ -131,9 +131,9 @@ macro_rules! delegate_process_observer_registry {
 
             async fn transfer_observers(
                 &self,
-                from_session_id: &str,
-                to_session_id: &str,
-                process_ids: &[String],
+                from_session_id: &SessionId,
+                to_session_id: &SessionId,
+                process_ids: &[ProcessId],
                 by: $crate::ProcessObserverBy,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner
@@ -143,7 +143,7 @@ macro_rules! delegate_process_observer_registry {
 
             async fn list_observed_by(
                 &self,
-                session_id: &str,
+                session_id: &SessionId,
                 filter: &$crate::ProcessListFilter,
             ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
                 self.$inner.list_observed_by(session_id, filter).await
@@ -151,29 +151,29 @@ macro_rules! delegate_process_observer_registry {
 
             async fn list_live_observed_by(
                 &self,
-                session_id: &str,
+                session_id: &SessionId,
             ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
                 self.$inner.list_live_observed_by(session_id).await
             }
 
             async fn is_observer(
                 &self,
-                session_id: &str,
-                process_id: &str,
+                session_id: &SessionId,
+                process_id: &ProcessId,
             ) -> Result<bool, $crate::PluginError> {
                 self.$inner.is_observer(session_id, process_id).await
             }
 
             async fn observers_for_process(
                 &self,
-                process_id: &str,
+                process_id: &ProcessId,
             ) -> Result<Vec<$crate::SessionId>, $crate::PluginError> {
                 self.$inner.observers_for_process(process_id).await
             }
 
             async fn retarget_subscription(
                 &self,
-                process_id: &str,
+                process_id: &ProcessId,
                 target: Option<&str>,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner.retarget_subscription(process_id, target).await
@@ -181,7 +181,7 @@ macro_rules! delegate_process_observer_registry {
 
             async fn delete_session_process_state(
                 &self,
-                session_id: &str,
+                session_id: &SessionId,
             ) -> Result<$crate::ProcessSessionDeleteReport, $crate::PluginError> {
                 self.$inner.delete_session_process_state(session_id).await
             }
@@ -215,7 +215,7 @@ macro_rules! delegate_process_tool_intents {
 
             async fn pending_tool_intent_parent_end(
                 &self,
-                session_id: &str,
+                session_id: &SessionId,
                 execution_scope_id: &str,
             ) -> Result<Vec<$crate::ToolIntentSubmissionRecord>, $crate::PluginError> {
                 self.$inner
@@ -317,7 +317,7 @@ macro_rules! delegate_process_leases {
         impl $crate::runtime::process::registry_concerns::ProcessLeases for $wrapper {
             async fn claim_process_lease(
                 &self,
-                process_id: &str,
+                process_id: &ProcessId,
                 owner: &$crate::LeaseOwnerIdentity,
                 lease_ttl_ms: u64,
             ) -> Result<$crate::ProcessLeaseClaimOutcome, $crate::PluginError> {
@@ -328,7 +328,7 @@ macro_rules! delegate_process_leases {
 
             async fn reclaim_process_lease(
                 &self,
-                process_id: &str,
+                process_id: &ProcessId,
                 owner: &$crate::LeaseOwnerIdentity,
                 observed_holder: &$crate::ProcessLease,
                 lease_ttl_ms: u64,
@@ -348,7 +348,7 @@ macro_rules! delegate_process_leases {
 
             async fn get_process_lease(
                 &self,
-                process_id: &str,
+                process_id: &ProcessId,
             ) -> Result<Option<$crate::ProcessLease>, $crate::PluginError> {
                 self.$inner.get_process_lease(process_id).await
             }
@@ -404,7 +404,7 @@ macro_rules! delegate_process_retention {
                 cutoff_epoch_ms: u64,
                 filter: Option<$crate::ProcessListFilter>,
                 watermark: $crate::ProjectionWatermark,
-            ) -> Result<Vec<String>, $crate::PluginError> {
+            ) -> Result<Vec<ProcessId>, $crate::PluginError> {
                 self.$inner
                     .prunable_terminal_processes(cutoff_epoch_ms, filter, watermark)
                     .await

@@ -9,6 +9,8 @@ mod facade_support {
     pub use lash_core::facade_support::*;
 }
 
+use lash_sansio::SessionId;
+
 type SessionNodeRecord = lash_core::SessionNodeRecord;
 
 fn type_witness<T>() {}
@@ -152,7 +154,10 @@ pub(crate) fn store_area_test_support_witnesses() {
         value: &T,
     ) {
         std::mem::drop(
-            lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector::arm(value, "session"),
+            lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector::arm(
+                value,
+                &SessionId::from("session"),
+            ),
         );
     }
     // FIG-2105-TEST-WITNESS-0026: lash_conformance::SessionExecutionLeaseRenewalZeroRowInjector::disarm [function]
@@ -277,7 +282,8 @@ pub(crate) fn store_area_test_support_witnesses() {
     // FIG-2105-TEST-WITNESS-0048: lash_conformance::GraphIntegrityInjector::load_whole_graph [function]
     fn method_witness_0048<T: lash_conformance::GraphIntegrityInjector>(value: &T) {
         std::mem::drop(lash_conformance::GraphIntegrityInjector::load_whole_graph(
-            value, "session",
+            value,
+            &SessionId::from("session"),
         ));
     }
     // FIG-2105-TEST-WITNESS-0049: lash_conformance::GraphIntegrityRead [enum]
@@ -361,19 +367,25 @@ pub(crate) fn store_area_test_support_witnesses() {
     // FIG-2105-TEST-WITNESS-0071: lash_conformance::LineageConformanceInjector::edge_path [function]
     fn method_witness_0071<T: lash_conformance::LineageConformanceInjector>(value: &T) {
         std::mem::drop(lash_conformance::LineageConformanceInjector::edge_path(
-            value, "session",
+            value,
+            &SessionId::from("session"),
         ));
     }
     // FIG-2105-TEST-WITNESS-0072: lash_conformance::LineageConformanceInjector::force_lineage [function]
     fn method_witness_0072<T: lash_conformance::LineageConformanceInjector>(value: &T) {
         std::mem::drop(lash_conformance::LineageConformanceInjector::force_lineage(
-            value, "session", "node",
+            value,
+            &SessionId::from("session"),
+            "node",
         ));
     }
     // FIG-2105-TEST-WITNESS-0073: lash_conformance::LineageConformanceInjector::lineage_ancestors [function]
     fn method_witness_0073<T: lash_conformance::LineageConformanceInjector>(value: &T) {
         std::mem::drop(
-            lash_conformance::LineageConformanceInjector::lineage_ancestors(value, "session"),
+            lash_conformance::LineageConformanceInjector::lineage_ancestors(
+                value,
+                &SessionId::from("session"),
+            ),
         );
     }
     // FIG-2105-TEST-WITNESS-0074: lash_conformance::LineageConformanceInjector::tombstone_node [function]

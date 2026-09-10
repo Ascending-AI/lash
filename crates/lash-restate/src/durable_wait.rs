@@ -25,6 +25,7 @@
 //! recreate both durable-wait services before upgrading; there is no tolerant
 //! decoder, address migration, or overlap window for pre-epoch-4 state.
 
+use lash_sansio::SessionId;
 use std::time::Duration;
 
 use lash_core::{
@@ -329,7 +330,7 @@ pub enum RestateTurnCancelRaceOutcome<T> {
     /// The turn was cancelled while the wait was parked.
     TurnCancelled,
     /// The session was revoked, so the turn has no ground left to stand on.
-    SessionRevoked { session_id: String },
+    SessionRevoked { session_id: SessionId },
 }
 
 /// The verdict [`register_turn_cancel_gate`] returns for one gate entry.
@@ -351,7 +352,7 @@ pub(crate) enum RestateTurnCancelGate {
 /// the `register_awakeable` call and its revocation verdict.
 pub(crate) async fn register_turn_cancel_gate<'ctx, C>(
     context: &C,
-    session_id: &str,
+    session_id: &SessionId,
     key: AwaitEventKey,
     awakeable_id: String,
 ) -> Result<RestateTurnCancelGate, TerminalError>
@@ -376,7 +377,7 @@ where
 /// it owes a wake to, so every winning branch must retire its gate.
 pub(crate) async fn retire_turn_cancel_gate<'ctx, C>(
     context: &C,
-    session_id: &str,
+    session_id: &SessionId,
     entry: RestateDurableWaitAwakeableRequest,
 ) -> Result<(), TerminalError>
 where

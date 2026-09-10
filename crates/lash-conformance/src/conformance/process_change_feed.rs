@@ -1,5 +1,6 @@
 //! [`ProcessRegistry`] process change-feed conformance.
 
+use lash_sansio::ProcessId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,7 +60,9 @@ pub(super) async fn process_change_feed_never_misses_concurrent_terminal_writers
                     continue;
                 };
                 if reader_expected_ids.contains(record.id.as_str()) && record.is_terminal() {
-                    *terminal_observations.entry(record.id.clone()).or_default() += 1;
+                    *terminal_observations
+                        .entry(record.id.clone().to_string())
+                        .or_default() += 1;
                 }
             }
         }
@@ -69,7 +72,7 @@ pub(super) async fn process_change_feed_never_misses_concurrent_terminal_writers
     for writer_index in 0..WRITER_COUNT {
         let writer_registry = Arc::clone(&registry);
         let writer_start = Arc::clone(&start_barrier);
-        let process_id = format!("proc-change-concurrent-{writer_index:02}");
+        let process_id = ProcessId::from(format!("proc-change-concurrent-{writer_index:02}"));
         writer_handles.push(crate::task::spawn(async move {
             writer_start.wait().await;
             writer_registry

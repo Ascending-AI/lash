@@ -1,3 +1,4 @@
+use lash::SessionId;
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -36,7 +37,7 @@ struct Args {
     #[arg(long)]
     artifact_dir: PathBuf,
     #[arg(long)]
-    session_id: String,
+    session_id: SessionId,
     #[arg(long)]
     port: u16,
     #[arg(long)]
@@ -53,7 +54,7 @@ struct HostEvidence {
     dialect: String,
     requested_model: String,
     served_models: Vec<String>,
-    session_id: String,
+    session_id: SessionId,
     port: u16,
     trace_offset: u64,
     tool_call_count: usize,

@@ -32,6 +32,8 @@
 //!   re-read, never re-raced, so a caller that awaits rank `n` twice — either
 //!   side of a park — observes the same child both times.
 
+use crate::ProcessId;
+use crate::SessionId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -145,11 +147,17 @@ impl AwaitEventResolver for NativeRuntimeEffectController {
             .await
     }
 
-    async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.await_events.revoke_session(session_id)
     }
 
-    async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), RuntimeError> {
         self.await_events.cancel_session(session_id)
     }
 
@@ -326,7 +334,7 @@ impl NativeRuntimeEffectController {
     pub(crate) async fn start_process(
         registry: Arc<dyn crate::ProcessRegistry>,
         registration: crate::ProcessRegistration,
-        observers: Vec<String>,
+        observers: Vec<SessionId>,
     ) -> Result<ProcessRecord, PluginError> {
         registry
             .register_process_with_observers(registration, &observers)
@@ -335,7 +343,7 @@ impl NativeRuntimeEffectController {
 
     pub async fn request_process_cancel(
         registry: Arc<dyn crate::ProcessRegistry>,
-        process_id: &str,
+        process_id: &ProcessId,
         reason: Option<String>,
         replay: Option<crate::RuntimeReplay>,
     ) -> Result<ProcessRecord, PluginError> {

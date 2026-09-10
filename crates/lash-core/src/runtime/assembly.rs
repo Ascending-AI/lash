@@ -648,7 +648,11 @@ impl TurnAssembler {
                 ..
             } => {
                 self.child_cumulatives.insert(
-                    (session_id.clone(), source.clone(), model.clone()),
+                    (
+                        session_id.clone().to_string(),
+                        source.clone(),
+                        model.clone(),
+                    ),
                     cumulative.clone(),
                 );
             }

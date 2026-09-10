@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use super::session_store_request;
@@ -9,7 +10,7 @@ pub(super) async fn session_state_version_admission_contract(
     factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "session-state-version-admission",
+        &SessionId::from("session-state-version-admission"),
         "session-state-version-model",
         crate::SessionRelation::Root,
     );

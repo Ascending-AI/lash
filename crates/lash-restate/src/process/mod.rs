@@ -7,6 +7,7 @@
 //! workflow and the ingress side must agree on. The workflow handler itself
 //! lives in [`workflow`].
 
+use lash_sansio::ProcessId;
 mod workflow;
 
 use std::sync::Arc;
@@ -52,13 +53,13 @@ fn restate_now_ms() -> u64 {
 /// Completion authority for a row the Restate workflow ran itself. Restate's
 /// single-writer discipline is per-`process_id` workflow-key coalescing, not a
 /// Lash lease (ADR 0027); the workflow key is that `process_id`.
-pub(crate) fn workflow_key_authority(process_id: &str) -> ProcessCompletionAuthority {
+pub(crate) fn workflow_key_authority(process_id: &ProcessId) -> ProcessCompletionAuthority {
     ProcessCompletionAuthority::WorkflowKey {
         workflow_key: process_id.to_string(),
     }
 }
 
-pub(crate) fn process_segment_workflow_key(process_id: &str, segment_ordinal: u64) -> String {
+pub(crate) fn process_segment_workflow_key(process_id: &ProcessId, segment_ordinal: u64) -> String {
     if segment_ordinal == 0 {
         process_id.to_string()
     } else {
@@ -67,7 +68,7 @@ pub(crate) fn process_segment_workflow_key(process_id: &str, segment_ordinal: u6
 }
 
 pub(crate) fn terminal_completion_workflow_key(
-    process_id: &str,
+    process_id: &ProcessId,
     segment_ordinal: u64,
 ) -> Option<String> {
     (segment_ordinal > 0).then(|| process_id.to_string())
@@ -111,7 +112,7 @@ fn terminal_process_output(error: PluginError) -> ProcessAwaitOutput {
 /// terminal by construction, because retrying cannot make an unbound service
 /// appear (FIG-1579). Every other failure stays in the retryable ingress class.
 pub(crate) fn process_ingress_submit_error(
-    process_id: &str,
+    process_id: &ProcessId,
     err: crate::RestateHttpError,
 ) -> PluginError {
     if err.is_service_unregistered() {
@@ -139,7 +140,7 @@ pub(crate) fn missing_segment_is_superseded(
 }
 
 pub(crate) fn restate_process_terminal_await_key(
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<AwaitEventKey, RuntimeError> {
     restate_await_event_key(
         &ExecutionScope::process(process_id.to_string()),
@@ -163,7 +164,7 @@ pub(crate) fn restate_process_terminal_resolution(
 }
 
 pub(crate) fn restate_process_terminal_output(
-    process_id: &str,
+    process_id: &ProcessId,
     resolution: Resolution,
 ) -> Result<ProcessAwaitOutput, PluginError> {
     match resolution {
@@ -198,7 +199,7 @@ pub(crate) fn restate_process_terminal_output(
 
 fn resolve_process_terminal_promise<'ctx, C>(
     context: &C,
-    process_id: &str,
+    process_id: &ProcessId,
     output: &ProcessAwaitOutput,
 ) -> HandlerResult<()>
 where
@@ -228,7 +229,7 @@ where
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct RestateProcessCancelRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -380,12 +381,12 @@ impl RestateProcessIngressRunner {
     /// handle has none — the same floor the native worker keeps.
     async fn emit_worker_fault(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         operation: ProcessRecoveryOperation,
         error: &PluginError,
     ) {
         let fault = ProcessWorkerFault::RecoveryBackendError {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             operation,
             error: error.to_string(),
         };
@@ -493,7 +494,7 @@ impl RestateProcessIngressRunner {
     /// registry emits the resulting terminal append through the event sink.
     async fn reconcile_externally_owned_abandon(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<(), PluginError> {
         if self
             .registry
@@ -825,7 +826,7 @@ pub struct RestateProcessWorkflowInput {
 }
 
 pub(crate) fn segment_execution_authority(
-    process_id: &str,
+    process_id: &ProcessId,
     segment_ordinal: u64,
     carried_execution_id: Option<&str>,
     invocation_id: &str,
@@ -885,13 +886,13 @@ pub enum RestateProcessWorkflowOutput {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateProcessCompleteRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub output: ProcessAwaitOutput,
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateProcessAwaitRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
 }
 
 /// Terminal value for one process segment's durable cancellation observer.

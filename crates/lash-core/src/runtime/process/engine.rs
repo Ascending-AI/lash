@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -181,7 +183,7 @@ type RuntimeContextBuilder<'run> = Box<
 /// outside the engine extension boundary.
 #[derive(Clone)]
 pub struct ProcessEngineProcessContext {
-    process_id: String,
+    process_id: ProcessId,
     process_work: crate::ProcessWorkWiring,
     execution_write_authority: super::model::ProcessExecutionWriteAuthority,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -194,7 +196,7 @@ pub struct ProcessEngineProcessContext {
 impl ProcessEngineProcessContext {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        process_id: String,
+        process_id: ProcessId,
         process_work: crate::ProcessWorkWiring,
         execution_write_authority: super::model::ProcessExecutionWriteAuthority,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -278,7 +280,7 @@ impl ProcessEngineProcessContext {
 
     pub async fn await_terminal(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<ProcessAwaitOutput, crate::PluginError> {
         let process_ref = self
             .process_work
@@ -303,7 +305,7 @@ pub struct ProcessEngineRunContext<'run> {
     registration: ProcessRegistration,
     execution_context: ProcessExecutionContext,
     processes: ProcessEngineProcessContext,
-    session_id: String,
+    session_id: SessionId,
     plugins: Arc<crate::PluginSession>,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
@@ -322,7 +324,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         process_work: crate::ProcessWorkWiring,
-        session_id: String,
+        session_id: SessionId,
         plugins: Arc<crate::PluginSession>,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,

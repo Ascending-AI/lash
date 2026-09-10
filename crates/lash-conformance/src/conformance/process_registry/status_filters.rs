@@ -32,7 +32,7 @@ pub(super) async fn list_filters_match_extracted_and_json_fields(
         .expect("register filter target");
     registry
         .set_process_wait(
-            process_id,
+            &ProcessId::from(process_id),
             WaitState {
                 since_ms: record.created_at_ms,
                 kind: WaitKind::Signal {

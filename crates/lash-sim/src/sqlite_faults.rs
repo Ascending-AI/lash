@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -212,7 +213,7 @@ async fn run_seed(
         lash_sqlite_store::SqliteSessionStoreFactory::new(seed_root.join("sqlite-store"))
             .with_fault_injector(injector.clone()),
     );
-    let session_id = format!("lash-sim-sqlite-fault-{seed:016x}");
+    let session_id = SessionId::from(format!("lash-sim-sqlite-fault-{seed:016x}"));
     let mut store = create_store(Arc::clone(&factory), &session_id).await?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
@@ -434,10 +435,10 @@ fn stamped_commit(
         .map_err(|err| ScenarioFailure::harness(format!("stamp runtime commit: {err}")))
 }
 
-fn request(session_id: &str) -> SessionStoreCreateRequest {
+fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
@@ -445,7 +446,7 @@ fn request(session_id: &str) -> SessionStoreCreateRequest {
 
 async fn create_store(
     factory: Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimePersistence>, ScenarioFailure> {
     factory
         .create_store(&request(session_id))
@@ -455,7 +456,7 @@ async fn create_store(
 
 async fn open_store(
     factory: Arc<dyn SessionStoreFactory>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimePersistence>, ScenarioFailure> {
     factory
         .open_existing_store(&request(session_id))

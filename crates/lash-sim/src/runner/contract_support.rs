@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 
@@ -45,7 +46,7 @@ async fn contract_execution_boundaries(
     for execution in agent_contract_executions().await? {
         let boundary = agent_contract_execution_boundary(events, next_at, execution.payload)?;
         for mut write in execution.checkpoint_writes {
-            write.attributed_session_id = Some(boundary.actor_alias.clone());
+            write.attributed_session_id = Some(SessionId::from(boundary.actor_alias.clone()));
             write.cause_boundary_id = Some(boundary.boundary_id.clone());
             // Contract proofs execute in isolated facade worlds whose opaque
             // execution-state identities are intentionally not seed-canonical.
@@ -571,7 +572,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
-        session_id: "standard-max-turn-contract".to_string(),
+        session_id: SessionId::from("standard-max-turn-contract"),
         turn_id: TurnId::from("standard-max-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),

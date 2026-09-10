@@ -79,7 +79,7 @@ pub(super) async fn pin_in_catalog(
                 return Ok(lash_core::ForkPoint {
                     node_id,
                     checkpoint_ref: checkpoint_ref.into(),
-                    source_session_id,
+                    source_session_id: SessionId::from(source_session_id),
                     config,
                     pinned: true,
                 });
@@ -90,7 +90,12 @@ pub(super) async fn pin_in_catalog(
                      WHERE leaf_node_id = ?1 AND checkpoint_ref IS NOT NULL
                      ORDER BY session_id LIMIT 1",
                     params![node_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    |row| {
+                        Ok((
+                            SessionId::from(row.get::<_, String>(0)?),
+                            row.get::<_, String>(1)?,
+                        ))
+                    },
                 )
                 .optional()
                 .map_err(sqlite_error)?;
@@ -116,7 +121,7 @@ pub(super) async fn pin_in_catalog(
             tx.execute(
                 "INSERT INTO node_anchors
                  (node_id, checkpoint_ref, source_session_id) VALUES (?1, ?2, ?3)",
-                params![node_id, checkpoint_ref, source_session_id],
+                params![node_id, checkpoint_ref, source_session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             let config = retained_fork_config_conn(tx, &node_id)?;
@@ -215,7 +220,7 @@ pub(super) async fn fork_points_in_catalog(
                         config: retained_fork_config_conn(&tx, &node_id)?,
                         node_id,
                         checkpoint_ref: lash_core::BlobRef(checkpoint_ref),
-                        source_session_id,
+                        source_session_id: SessionId::from(source_session_id),
                         pinned,
                     })
                 })
@@ -251,7 +256,7 @@ pub(super) async fn fork_at_in_catalog(
                      UNION ALL
                      SELECT 1 FROM session_head WHERE session_id = ?1
                      LIMIT 1",
-                    params![request.session_id],
+                    params![request.session_id.as_str()],
                     |_| Ok(()),
                 )
                 .optional()
@@ -265,7 +270,7 @@ pub(super) async fn fork_at_in_catalog(
             let deleted = tx
                 .query_row(
                     "SELECT 1 FROM deleted_sessions WHERE session_id = ?1",
-                    params![request.session_id],
+                    params![request.session_id.as_str()],
                     |_| Ok(()),
                 )
                 .optional()
@@ -288,7 +293,7 @@ pub(super) async fn fork_at_in_catalog(
                      )
                      ORDER BY priority, source_session_id LIMIT 1",
                     params![request.node_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    |row| Ok((SessionId::from(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
                 )
                 .optional()
                 .map_err(sqlite_error)?;
@@ -389,7 +394,7 @@ pub(super) async fn fork_at_in_catalog(
                 edge_path.push(lash_core::store::ForkNodeFacts {
                     node_id: facts.0,
                     parent_node_id: facts.1,
-                    owning_session_id: facts.2,
+                    owning_session_id: SessionId::from(facts.2),
                     generation,
                 });
                 if expected_generation == 0 {
@@ -426,9 +431,9 @@ pub(super) async fn fork_at_in_catalog(
                  (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
                  VALUES (?1, ?2, 0, ?3, ?4)",
                 params![
-                    request.session_id,
+                    request.session_id.as_str(),
                     encode_json(&meta.payload())?,
-                    request.node_id,
+                    request.node_id.as_str(),
                     checkpoint_ref
                 ],
             )
@@ -444,8 +449,8 @@ pub(super) async fn fork_at_in_catalog(
                 for ancestor in fork_plan.ancestors() {
                     stmt.execute(params![
                         fork_plan.session_id(),
-                        ancestor.ancestor_session_id,
-                        ancestor.fork_node_id,
+                        ancestor.ancestor_session_id.as_str(),
+                        ancestor.fork_node_id.as_str(),
                         i64::try_from(ancestor.fork_generation).map_err(|_| {
                             lash_core::StoreError::Backend(
                                 "fork generation does not fit SQLite INTEGER".to_string(),

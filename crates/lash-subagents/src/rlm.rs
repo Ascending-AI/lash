@@ -3,6 +3,8 @@
 //! Examples are written in Lashlang module syntax. Prompt prose is tuned for
 //! schema-first results and binding subagent output.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -103,11 +105,12 @@ impl RlmSubagentToolsProvider {
             .session_snapshot()
             .await
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
-        let child_session_id = format!("session:subagent:{}", call.call_id);
+        let child_session_id = SessionId::from(format!("session:subagent:{}", call.call_id));
+        let parent_session_id = SessionId::from(context.session_id());
         let create_request = Box::new(
             build_spawn_create_request(SpawnCreateRequestInput {
                 registry: &self.registry,
-                parent_session_id: context.session_id(),
+                parent_session_id: &parent_session_id,
                 current_snapshot,
                 session_spec: &self.session_spec,
                 tool_access: &self.tool_access,
@@ -119,7 +122,7 @@ impl RlmSubagentToolsProvider {
                 caused_by: context
                     .tool_call_id()
                     .map(|call_id| lash_core::CausalRef::ToolCall {
-                        session_id: context.session_id().to_string(),
+                        session_id: parent_session_id.clone(),
                         call_id: call_id.to_string(),
                     }),
             })
@@ -131,7 +134,7 @@ impl RlmSubagentToolsProvider {
         // payload, so it is stable across replay — the durable layer keys the
         // child session turn by this persisted `process_id` end-to-end. The
         // parent tool-call id is unique per call and always non-empty.
-        let process_id = format!("process:subagent:{}", call.call_id);
+        let process_id = ProcessId::from(format!("process:subagent:{}", call.call_id));
         let payload = serde_json::to_value(PreparedSpawnAgent {
             process_id,
             create_request,
@@ -202,7 +205,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOr
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PreparedSpawnAgent {
-    process_id: String,
+    process_id: ProcessId,
     create_request: Box<lash_core::SessionCreateRequest>,
     turn_input: lash_core::TurnInput,
 }

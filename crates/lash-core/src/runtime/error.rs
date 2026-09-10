@@ -1,4 +1,5 @@
 use crate::SessionError;
+use crate::SessionId;
 
 /// Stable runtime error code.
 ///
@@ -1112,7 +1113,7 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
-    SessionDeleted { session_id: String },
+    SessionDeleted { session_id: SessionId },
 }
 
 /// Runtime error for unexpected failures.
@@ -1189,6 +1190,7 @@ impl std::error::Error for RuntimeError {}
 #[cfg(test)]
 mod tests {
     use super::{RuntimeError, RuntimeErrorCode};
+    use crate::SessionId;
 
     #[test]
     fn missing_process_execution_id_round_trips() {
@@ -1684,7 +1686,7 @@ mod tests {
     fn terminal_cause_overrides_retryable_runtime_store_code() {
         let error = RuntimeError::new(RuntimeErrorCode::RuntimeStore, "session deleted")
             .with_cause(super::RuntimeErrorCause::SessionDeleted {
-                session_id: "retired".to_string(),
+                session_id: SessionId::from("retired"),
             });
 
         assert!(!error.is_retryable());

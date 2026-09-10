@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use super::BenchmarkRuntime;
@@ -50,7 +52,12 @@ impl BenchmarkRuntime {
         self.tool_catalog_observer
             .as_ref()
             .expect("tool-catalog observer")
-            .arm(variant, session_id, phase_probe, observation_stage);
+            .arm(
+                variant,
+                SessionId::from(session_id),
+                phase_probe,
+                observation_stage,
+            );
     }
 
     pub(crate) fn finish_tool_catalog_observation(&self) -> BenchmarkToolCatalogObservation {
@@ -103,13 +110,13 @@ impl BenchmarkRuntime {
             session
                 .admin()
                 .processes()
-                .await_output(delivery.process_id.as_str())
+                .await_output(&ProcessId::from(delivery.process_id.as_str()))
                 .await?;
         }
         let terminal_processes = [session
             .admin()
             .processes()
-            .get(delivery.process_id.as_str())
+            .get(&ProcessId::from(delivery.process_id.as_str()))
             .await?
             .ok_or_else(|| anyhow::anyhow!("trigger delivery process disappeared"))?];
         let observation = TriggerDeliveryTerminalObservation {

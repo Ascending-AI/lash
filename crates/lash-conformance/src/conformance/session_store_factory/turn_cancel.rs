@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
@@ -44,7 +45,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
     ) {
         let suffix = format!("{:?}-{:?}-{:?}", mode, disposition, path).to_ascii_lowercase();
         let request = session_store_request(
-            &format!("turn-cancel-{suffix}"),
+            &SessionId::from(format!("turn-cancel-{suffix}")),
             "turn-cancel-drop-model",
             crate::SessionRelation::Root,
         );
@@ -191,7 +192,7 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "turn-cancel-escalation",
+        &SessionId::from("turn-cancel-escalation"),
         "turn-cancel-escalation-model",
         crate::SessionRelation::Root,
     );

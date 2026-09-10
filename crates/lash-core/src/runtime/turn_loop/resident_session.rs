@@ -194,7 +194,7 @@ impl ResidentSessionContinuity {
     /// The incident decision identity is minted once and retained across
     /// repeated invalidations, so the reload that finally clears it names the
     /// incident that opened it.
-    pub(in crate::runtime) fn invalidate(&mut self, session_id: &str) {
+    pub(in crate::runtime) fn invalidate(&mut self, session_id: &SessionId) {
         if matches!(self.validity, ResidentSessionState::Valid) {
             self.validity = ResidentSessionState::Invalidated {
                 decision_id: format!(

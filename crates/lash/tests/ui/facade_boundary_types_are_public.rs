@@ -8,6 +8,7 @@ use lash::direct::{
 };
 use lash::durability::RuntimeHostConfig;
 use lash::TurnId;
+use lash::SessionId;
 use lash::messages::MessageRole;
 use lash::persistence::{
     CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity,
@@ -114,7 +115,7 @@ impl SessionCommitStore for FacadeStore {
 impl SessionExecutionLeaseStore for FacadeStore {
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &LeaseClaimNonce,
@@ -122,7 +123,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
             SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
-                session_id: session_id.to_string(),
+                session_id: session_id.clone(),
                 owner: owner.clone(),
                 executor_id: executor_id.to_string(),
                 lease_token: claim_nonce.as_str().to_string(),
@@ -160,7 +161,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
 
     async fn get_session_execution_lease(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<lash::persistence::SessionExecutionLeaseObservation, StoreError> {
         Ok(lash::persistence::SessionExecutionLeaseObservation {
             observed_at_epoch_ms: 0,
@@ -182,14 +183,14 @@ impl TurnInputStore for FacadeStore {
 
     async fn list_pending_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<Vec<lash::PendingTurnInput>, StoreError> {
         Ok(Vec::new())
     }
 
     async fn cancel_pending_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _targets: &[lash::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash::PendingTurnInputCancelReceipt>, StoreError> {
         unreachable!("compile-only facade store")
@@ -197,7 +198,7 @@ impl TurnInputStore for FacadeStore {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _anchor: &lash::PendingTurnInputCancelTarget,
     ) -> Result<lash::PendingTurnInputSuffixCancelOutcome, StoreError> {
         unreachable!("compile-only facade store")
@@ -205,7 +206,7 @@ impl TurnInputStore for FacadeStore {
 
     async fn claim_active_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _turn_id: &TurnId,
@@ -217,7 +218,7 @@ impl TurnInputStore for FacadeStore {
 
     async fn claim_next_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _max_inputs: usize,
@@ -231,7 +232,7 @@ impl TurnInputStore for FacadeStore {
 
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _scope: OrphanedTurnInputScope<'_>,
     ) -> Result<lash::TurnCancelInputOutcome, StoreError> {
@@ -250,7 +251,7 @@ impl QueuedWorkStore for FacadeStore {
 
     async fn claim_leading_ready_session_command(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
@@ -259,7 +260,7 @@ impl QueuedWorkStore for FacadeStore {
 
     async fn claim_ready_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
@@ -272,7 +273,7 @@ impl QueuedWorkStore for FacadeStore {
 
     async fn claim_checkpoint_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _turn_id: &TurnId,
@@ -285,7 +286,7 @@ impl QueuedWorkStore for FacadeStore {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
@@ -301,7 +302,7 @@ impl QueuedWorkStore for FacadeStore {
 
     async fn cancel_queued_work_batch(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         Ok(None)
@@ -309,7 +310,7 @@ impl QueuedWorkStore for FacadeStore {
 
     async fn queued_work_batch_completed(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _batch_id: &str,
     ) -> Result<bool, StoreError> {
         Ok(false)
@@ -317,7 +318,7 @@ impl QueuedWorkStore for FacadeStore {
 
     async fn pending_session_work_ordering(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
         Ok(lash_core::store::PendingSessionWorkOrdering {
             session_command: None,
@@ -325,13 +326,13 @@ impl QueuedWorkStore for FacadeStore {
         })
     }
 
-    async fn list_queued_work(&self, _session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+    async fn list_queued_work(&self, _session_id: &SessionId) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         Ok(Vec::new())
     }
 
     async fn list_pending_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         Ok(Vec::new())
     }
@@ -360,7 +361,7 @@ fn persistence_types_are_nameable(
     let operation = OperationId::turn("facade", "turn", "final");
     let operation_storage_key = operation.storage_key().expect("operation storage key");
     RuntimeCommit {
-        session_id: "facade".to_string(),
+        session_id: SessionId::from("facade"),
         expected_head_revision: 0,
         session_execution_lease_fence: None,
         release_session_execution_lease: None,
@@ -630,7 +631,7 @@ fn main() {
     let _ = SessionHeadMeta::assemble(
         SessionHeadPayload {
             schema_version: 1,
-            session_id: "facade".to_string(),
+            session_id: SessionId::from("facade"),
             config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
             current_frame_node_id: None,
         },

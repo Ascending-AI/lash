@@ -6,6 +6,7 @@
 //! check, the identity comparison, and the write they guard cannot interleave
 //! under `READ COMMITTED`.
 
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::facade_support::await_event_coordinator::{
@@ -63,7 +64,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         VOCABULARY.clone()
     }
 
-    async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError> {
+    async fn session_is_revoked(&self, session_id: &SessionId) -> Result<bool, RuntimeError> {
         session_is_revoked(&self.pool, session_id).await
     }
 
@@ -94,7 +95,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         .bind(key_id)
         .bind(&identity.scope_json)
         .bind(&identity.wait_json)
-        .bind(&identity.session_id)
+        .bind(identity.session_id.as_deref())
         .bind(identity.turn_control)
         .bind(now)
         .execute(&mut *tx)
@@ -133,7 +134,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         .bind(key_id)
         .bind(&identity.scope_json)
         .bind(&identity.wait_json)
-        .bind(&identity.session_id)
+        .bind(identity.session_id.as_deref())
         .bind(identity.turn_control)
         .bind(terminal_json)
         .bind(now)
@@ -157,7 +158,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
             .bind(key_id)
             .bind(&identity.scope_json)
             .bind(&identity.wait_json)
-            .bind(&identity.session_id)
+            .bind(identity.session_id.as_deref())
             .bind(identity.turn_control)
             .bind(terminal_json)
             .bind(now)
@@ -211,7 +212,11 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
             }))
     }
 
-    async fn revoke_session(&self, session_id: &str, now_ms: u64) -> Result<(), RuntimeError> {
+    async fn revoke_session(
+        &self,
+        session_id: &SessionId,
+        now_ms: u64,
+    ) -> Result<(), RuntimeError> {
         let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
         lock_session(&mut tx, Some(session_id)).await?;
@@ -220,13 +225,13 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
              VALUES ($1, $2)
              ON CONFLICT (session_id) DO NOTHING",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(now)
         .execute(&mut *tx)
         .await
         .map_err(store_error)?;
         sqlx::query("DELETE FROM lash_await_event_waits WHERE session_id = $1")
-            .bind(session_id)
+            .bind(session_id.as_str())
             .execute(&mut *tx)
             .await
             .map_err(store_error)?;
@@ -235,7 +240,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
 
     async fn cancel_session_promises(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         terminal_json: &str,
         now_ms: u64,
     ) -> Result<(), RuntimeError> {
@@ -249,7 +254,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
                AND terminal_json IS NULL
                AND turn_control = FALSE",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(terminal_json)
         .bind(now)
         .execute(&mut *tx)
@@ -262,7 +267,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
 struct WaitRow {
     scope_json: String,
     wait_json: String,
-    session_id: Option<String>,
+    session_id: Option<SessionId>,
     turn_control: bool,
     terminal_json: Option<String>,
 }
@@ -296,13 +301,18 @@ fn wait_row(row: PgRow) -> WaitRow {
     WaitRow {
         scope_json: row.get("scope_json"),
         wait_json: row.get("wait_json"),
-        session_id: row.get("session_id"),
+        session_id: row
+            .get::<Option<String>, _>("session_id")
+            .map(SessionId::from),
         turn_control: row.get("turn_control"),
         terminal_json: row.get("terminal_json"),
     }
 }
 
-async fn session_is_revoked<'e, E>(executor: E, session_id: &str) -> Result<bool, RuntimeError>
+async fn session_is_revoked<'e, E>(
+    executor: E,
+    session_id: &SessionId,
+) -> Result<bool, RuntimeError>
 where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
@@ -311,7 +321,7 @@ where
             SELECT 1 FROM lash_await_event_revoked_sessions WHERE session_id = $1
          )",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_one(executor)
     .await
     .map_err(store_error)
@@ -325,7 +335,7 @@ async fn identity_is_fenced(
     identity: &AwaitEventRowIdentity,
 ) -> Result<bool, RuntimeError> {
     if let Some(session_id) = identity.session_id.as_deref()
-        && session_is_revoked(&mut **tx, session_id).await?
+        && session_is_revoked(&mut **tx, &SessionId::from(session_id)).await?
     {
         return Ok(true);
     }
@@ -359,7 +369,7 @@ async fn lock_identity(
     identity: &AwaitEventRowIdentity,
 ) -> Result<(), RuntimeError> {
     match identity.session_id.as_deref() {
-        Some(_) => lock_session(tx, identity.session_id.as_deref()).await,
+        Some(_) => lock_session(tx, identity.session_id.as_ref()).await,
         None => lock_scope(tx, &identity.scope_id)
             .await
             .map_err(|err| store_error_message(err.to_string())),
@@ -390,13 +400,13 @@ pub(crate) async fn lock_scope(
 /// scopes take the scope lock instead (see [`lock_identity`]).
 async fn lock_session(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: Option<&str>,
+    session_id: Option<&SessionId>,
 ) -> Result<(), RuntimeError> {
     let Some(session_id) = session_id else {
         return Ok(());
     };
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(SESSION_LOCK_NAMESPACE)
         .execute(&mut **tx)
         .await

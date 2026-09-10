@@ -1,5 +1,6 @@
 //! Live Restate registration of the shared durable effect-group laws.
 
+use lash_sansio::ProcessId;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -470,7 +471,7 @@ async fn cold_reopen_admits_the_registered_process<F, Fut>(
     Fut: std::future::Future<Output = Arc<dyn lash_core::ProcessRegistry>>,
 {
     let nonce = nonce();
-    let process_id = format!("cold-reopen-{label}-{nonce}");
+    let process_id = ProcessId::from(format!("cold-reopen-{label}-{nonce}"));
     let scope = ExecutionScope::process(process_id.clone());
     let registration = || {
         lash_core::ProcessRegistration::new(

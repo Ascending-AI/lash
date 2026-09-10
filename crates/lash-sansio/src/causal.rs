@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::TurnId;
 use serde::{Deserialize, Serialize};
 
@@ -6,24 +8,24 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CausalRef {
     Turn {
-        session_id: String,
+        session_id: SessionId,
         turn_id: TurnId,
     },
     Effect {
-        session_id: String,
+        session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_id: Option<TurnId>,
         effect_id: String,
     },
     ToolCall {
-        session_id: String,
+        session_id: SessionId,
         call_id: String,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
     },
     ProcessEvent {
-        process_id: String,
+        process_id: ProcessId,
         sequence: u64,
     },
     TriggerOccurrence {
@@ -36,7 +38,7 @@ pub enum CausalRef {
         subscription_revision: Option<u64>,
     },
     SessionNode {
-        session_id: String,
+        session_id: SessionId,
         node_id: String,
     },
 }

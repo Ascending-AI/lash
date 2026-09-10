@@ -6,6 +6,7 @@
 //! transaction, so the tombstone check, the identity comparison, and the write
 //! they guard cannot interleave with a competing writer.
 
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::facade_support::await_event_coordinator::{
@@ -68,8 +69,8 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         VOCABULARY.clone()
     }
 
-    async fn session_is_revoked(&self, session_id: &str) -> Result<bool, RuntimeError> {
-        let session_id = session_id.to_string();
+    async fn session_is_revoked(&self, session_id: &SessionId) -> Result<bool, RuntimeError> {
+        let session_id = SessionId::from(session_id.to_string());
         self.conn
             .call(move |connection| session_is_revoked(connection, &session_id))
             .await
@@ -110,10 +111,10 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                              )
                              VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL)",
                             params![
-                                key_id,
+                                key_id.as_str(),
                                 identity.scope_json,
                                 identity.wait_json,
-                                identity.session_id,
+                                identity.session_id.as_deref(),
                                 identity.turn_control,
                                 now,
                             ],
@@ -152,10 +153,10 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                              )
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                             params![
-                                key_id,
+                                key_id.as_str(),
                                 identity.scope_json,
                                 identity.wait_json,
-                                identity.session_id,
+                                identity.session_id.as_deref(),
                                 identity.turn_control,
                                 proposed_json,
                                 now,
@@ -222,8 +223,12 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
             .map_err(store_error)
     }
 
-    async fn revoke_session(&self, session_id: &str, now_ms: u64) -> Result<(), RuntimeError> {
-        let session_id = session_id.to_string();
+    async fn revoke_session(
+        &self,
+        session_id: &SessionId,
+        now_ms: u64,
+    ) -> Result<(), RuntimeError> {
+        let session_id = SessionId::from(session_id.to_string());
         let now = now_ms as i64;
         self.conn
             .write(move |tx| {
@@ -231,11 +236,11 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                     "INSERT INTO await_event_revoked_sessions (session_id, revoked_at_ms)
                      VALUES (?1, ?2)
                      ON CONFLICT(session_id) DO NOTHING",
-                    params![session_id, now],
+                    params![session_id.as_str(), now],
                 )?;
                 tx.execute(
                     "DELETE FROM await_event_waits WHERE session_id = ?1",
-                    params![session_id],
+                    params![session_id.as_str()],
                 )?;
                 Ok(())
             })
@@ -245,11 +250,11 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
 
     async fn cancel_session_promises(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         terminal_json: &str,
         now_ms: u64,
     ) -> Result<(), RuntimeError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let terminal_json = terminal_json.to_string();
         let now = now_ms as i64;
         self.conn
@@ -260,7 +265,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                      WHERE session_id = ?1
                        AND terminal_json IS NULL
                        AND turn_control = 0",
-                    params![session_id, terminal_json, now],
+                    params![session_id.as_str(), terminal_json, now],
                 )?;
                 Ok(())
             })
@@ -272,7 +277,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
 struct WaitRow {
     scope_json: String,
     wait_json: String,
-    session_id: Option<String>,
+    session_id: Option<SessionId>,
     turn_control: bool,
     terminal_json: Option<String>,
 }
@@ -300,7 +305,7 @@ fn select_wait_row(
                 Ok(WaitRow {
                     scope_json: row.get(0)?,
                     wait_json: row.get(1)?,
-                    session_id: row.get(2)?,
+                    session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
                     turn_control: row.get(3)?,
                     terminal_json: row.get(4)?,
                 })
@@ -319,7 +324,7 @@ fn identity_is_fenced(
     identity: &AwaitEventRowIdentity,
 ) -> rusqlite::Result<bool> {
     if let Some(session_id) = identity.session_id.as_deref()
-        && session_is_revoked(connection, session_id)?
+        && session_is_revoked(connection, &SessionId::from(session_id))?
     {
         return Ok(true);
     }
@@ -328,13 +333,13 @@ fn identity_is_fenced(
 
 fn session_is_revoked(
     connection: &rusqlite::Connection,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> rusqlite::Result<bool> {
     connection.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM await_event_revoked_sessions WHERE session_id = ?1
          )",
-        params![session_id],
+        params![session_id.as_str()],
         |row| row.get(0),
     )
 }

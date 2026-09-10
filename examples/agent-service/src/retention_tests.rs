@@ -1,3 +1,4 @@
+use lash::SessionId;
 use std::fs::{FileTimes, OpenOptions};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -29,7 +30,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
     ));
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "retention-session".to_string(),
+        session_id: SessionId::from("retention-session"),
         relation: SessionRelation::Root,
         policy: SessionPolicy::new(TurnBudget::Unbounded),
     };

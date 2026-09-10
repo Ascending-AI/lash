@@ -1,4 +1,5 @@
 use super::StoreError;
+use crate::SessionId;
 
 /// Oldest session-state generation this runtime can admit.
 pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;
@@ -10,7 +11,7 @@ pub const CURRENT_SESSION_STATE_VERSION: u32 = 1;
 /// Successful lease-fenced admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionStateAdmission {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub version: u32,
     pub lease_fencing_token: u64,
 }

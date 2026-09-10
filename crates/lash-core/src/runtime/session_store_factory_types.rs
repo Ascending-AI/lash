@@ -1,8 +1,9 @@
+use crate::SessionId;
 use crate::{SessionPolicy, SessionRelation};
 
 #[derive(Clone)]
 pub struct SessionStoreCreateRequest {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     pub policy: SessionPolicy,
@@ -27,7 +28,7 @@ pub struct ForkPoint {
     pub checkpoint_ref: crate::BlobRef,
     /// Provenance of the node, which may name a session that has since been
     /// deleted and is not required to remain readable for a fork.
-    pub source_session_id: String,
+    pub source_session_id: SessionId,
     /// Provider and model captured by the nearest retained frame boundary.
     pub config: crate::PersistedSessionConfig,
     pub pinned: bool,
@@ -36,7 +37,7 @@ pub struct ForkPoint {
 /// Create a new session head at retained history without writing graph nodes.
 #[derive(Clone, Debug)]
 pub struct ForkSessionRequest {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub node_id: String,
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
@@ -46,11 +47,11 @@ pub struct ForkSessionRequest {
 /// Durable identity returned after a zero-node fork.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkSessionReceipt {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub node_id: String,
     /// Session that originally wrote `node_id`. This is process-observer
     /// provenance, not a required source-session argument to the fork.
-    pub source_session_id: String,
+    pub source_session_id: SessionId,
     /// Uniform settlement receipts for every fork-inherited observer intent.
     pub observed_processes: Vec<crate::plugin::SessionObservedProcessReceipt>,
 }

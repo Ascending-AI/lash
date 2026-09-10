@@ -23,7 +23,7 @@ pub(super) async fn usage_ordinal_reuse_with_different_payload_survives_receipt_
         serde_json::json!({"append": "A"}),
     )];
     let mut initial_state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
 
@@ -168,7 +168,7 @@ pub(super) async fn seed_append_receipt_state(
     store: &Arc<dyn RuntimePersistence>,
 ) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -659,7 +659,7 @@ pub(super) async fn concurrent_same_append_operation_applies_exactly_once(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -915,7 +915,7 @@ pub(super) async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_se
 
 pub(super) async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -930,13 +930,20 @@ pub(super) async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn Ru
             "different-session",
             DeliveryPolicy::AfterCurrentTurnCommit,
             crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id("different-session", "atomic-frame"),
+                crate::session_graph::frame_node_id(
+                    &SessionId::from("different-session"),
+                    "atomic-frame",
+                ),
                 "must roll back",
                 None,
             ),
         ));
-    let failing_lease =
-        claim_session_execution_lease_for_test(&store, "root", "atomic-append-failing").await;
+    let failing_lease = claim_session_execution_lease_for_test(
+        &store,
+        &SessionId::from("root"),
+        "atomic-append-failing",
+    )
+    .await;
     let error = store
         .commit_runtime_state(failing.releasing_session_execution_lease(failing_lease.completion()))
         .await

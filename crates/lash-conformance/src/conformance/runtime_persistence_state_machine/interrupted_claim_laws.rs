@@ -15,7 +15,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     let stale_owner = owner(0);
     let stale_lease = store
         .try_claim_session_execution_lease(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &stale_owner,
             "law-stale-settlement-cannot-damage-successor-executor",
             60_000,
@@ -26,7 +26,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .ok_or_else(|| TestCaseError::fail("stale-owner lease busy"))?;
     let stale_claim = store
         .claim_ready_queued_work(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -43,7 +43,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     let successor_owner = owner(1);
     let successor_lease = store
         .try_claim_session_execution_lease(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &successor_owner,
             "law-stale-settlement-cannot-damage-successor-executor-2",
             60_000,
@@ -57,7 +57,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .map_err(TestCaseError::fail)?;
     let partial_selection = store
         .claim_ready_queued_work_by_batch_ids(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -83,7 +83,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     .map_err(TestCaseError::fail)?;
     let successor_claim = store
         .claim_ready_queued_work_by_batch_ids(
-            SESSION_ID,
+            &SessionId::from(SESSION_ID),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -97,7 +97,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     let mut stale_completion = stale_claim.completion();
     stale_completion.batch_ids = vec![second.batch_id.clone()];
     let mut state = RuntimeSessionState {
-        session_id: SESSION_ID.to_string(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.set_tool_state_snapshot(Some(
@@ -128,13 +128,13 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
     .await
     .map_err(TestCaseError::fail)?;
     let remaining = store
-        .list_queued_work(SESSION_ID)
+        .list_queued_work(&SessionId::from(SESSION_ID))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert_eq!(remaining.len(), 2);
     prop_assert!(
         store
-            .list_pending_queued_work(SESSION_ID)
+            .list_pending_queued_work(&SessionId::from(SESSION_ID))
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .is_empty(),
@@ -145,7 +145,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         matches!(
             store
                 .try_claim_session_execution_lease(
-                    SESSION_ID,
+                    &SessionId::from(SESSION_ID),
                     &third_owner,
                     "law-stale-settlement-cannot-damage-successor-executor-3",
                     60_000,
@@ -166,7 +166,7 @@ pub(super) async fn stale_settlement_cannot_damage_successor(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
         store
-            .list_queued_work(SESSION_ID)
+            .list_queued_work(&SessionId::from(SESSION_ID))
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .is_empty(),

@@ -7,6 +7,8 @@ use crate::support::{
 };
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 // `PluginQuery` / `PluginCommand` / `PluginTask` bound the operation runners
 // below, but their home is `crate::plugins`: authoring surface a plugin
@@ -351,7 +353,7 @@ impl SessionAdmin {
 
     async fn signal_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -359,11 +361,11 @@ impl SessionAdmin {
     ) -> Result<lash_core::ProcessEvent> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
-        let session_id = runtime.session_id().to_string();
+        let session_id = SessionId::from(runtime.session_id());
         let processes = runtime.process_service()?;
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
-            .validate_visible(&session_id, &[process_id.to_string()], scope.clone())
+            .validate_visible(&session_id, std::slice::from_ref(process_id), scope.clone())
             .await
             .map_err(EmbedError::Plugin)?;
         processes
@@ -381,13 +383,13 @@ impl SessionAdmin {
 
     async fn transfer_process_handles(
         &self,
-        to_session_id: &str,
-        process_ids: Vec<String>,
+        to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<()> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
-        let session_id = runtime.session_id().to_string();
+        let session_id = SessionId::from(runtime.session_id());
         let processes = runtime.process_service()?;
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
@@ -398,7 +400,7 @@ impl SessionAdmin {
 
     async fn await_process_output(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<lash_core::ProcessAwaitOutput> {
         let process_work = self.process_work.as_ref().ok_or_else(|| {
             EmbedError::Plugin(lash_core::PluginError::Session(
@@ -419,10 +421,10 @@ impl SessionAdmin {
 
     async fn request_process_abandon(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         reason: Option<String>,
     ) -> Result<lash_core::facade_support::ObservedProcess> {
-        let session_id = self.runtime.observe().session_id().to_string();
+        let session_id = SessionId::from(self.runtime.observe().session_id());
         let request = lash_core::AbandonRequest {
             requested_by: format!("session:{session_id}"),
             requested_at_ms: crate::process_admin::now_epoch_ms(),
@@ -498,7 +500,7 @@ impl SessionAdmin {
         args: serde_json::Value,
     ) -> Result<(String, serde_json::Value)> {
         let observation = self.runtime.observe();
-        let session_id = observation.session_id().to_string();
+        let session_id = SessionId::from(observation.session_id());
         observation
             .query_plugin(name, args, Some(session_id))
             .await
@@ -510,7 +512,7 @@ impl SessionAdmin {
         name: &str,
         args: serde_json::Value,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
-        let session_id = self.runtime.observe().session_id().to_string();
+        let session_id = SessionId::from(self.runtime.observe().session_id());
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
         let operation_scope = lash_core::ExecutionScope::runtime_operation(
@@ -545,7 +547,7 @@ impl SessionAdmin {
         args: serde_json::Value,
         cancellation_token: CancellationToken,
     ) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {
-        let session_id = self.runtime.observe().session_id().to_string();
+        let session_id = SessionId::from(self.runtime.observe().session_id());
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
         let scope_id = lash_core::store::mint_facade_operation_id(
@@ -673,7 +675,7 @@ impl SessionAdmin {
     ) -> Result<lash_core::ProcessHandleView> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
-        let session_id = runtime.session_id().to_string();
+        let session_id = SessionId::from(runtime.session_id());
         let processes = runtime.process_service()?;
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         let summary = processes
@@ -698,16 +700,16 @@ impl SessionAdmin {
 
     async fn cancel_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
-        let session_id = runtime.session_id().to_string();
+        let session_id = SessionId::from(runtime.session_id());
         let processes = runtime.process_service()?;
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
-            .validate_visible(&session_id, &[process_id.to_string()], scope.clone())
+            .validate_visible(&session_id, std::slice::from_ref(process_id), scope.clone())
             .await
             .map_err(EmbedError::Plugin)?;
         let summary = processes
@@ -728,7 +730,7 @@ impl SessionAdmin {
     ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
-        let session_id = runtime.session_id().to_string();
+        let session_id = SessionId::from(runtime.session_id());
         let processes = runtime.process_service()?;
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         let summaries = processes
@@ -838,7 +840,7 @@ impl SessionAdmin {
         lifecycle.create_session(request).await.map_err(Into::into)
     }
 
-    async fn close_child_session(&self, session_id: &str) -> Result<()> {
+    async fn close_child_session(&self, session_id: &SessionId) -> Result<()> {
         let writer = self.runtime.writer();
         let runtime = writer.lock().await;
         let lifecycle = runtime.session_lifecycle_service()?;
@@ -848,7 +850,7 @@ impl SessionAdmin {
             .map_err(Into::into)
     }
 
-    async fn activate_managed_session(&self, session_id: &str) -> Result<()> {
+    async fn activate_managed_session(&self, session_id: &SessionId) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime
                 .activate_managed_session(session_id)
@@ -1228,7 +1230,7 @@ impl SessionProcessAdmin {
     /// One process this session may address, if present.
     pub async fn get(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<lash_core::facade_support::ObservedProcess>> {
         Ok(self
             .list_all()
@@ -1240,7 +1242,7 @@ impl SessionProcessAdmin {
     /// Returns the process event stream from the requested offset.
     pub async fn events(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<lash_core::facade_support::ObservedProcessEvent>> {
         let Some(observer) = self.control.process_observer_opt() else {
@@ -1253,14 +1255,17 @@ impl SessionProcessAdmin {
     }
 
     /// Waits for a process to produce its terminal output.
-    pub async fn await_output(&self, process_id: &str) -> Result<lash_core::ProcessAwaitOutput> {
+    pub async fn await_output(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<lash_core::ProcessAwaitOutput> {
         self.control.await_process_output(process_id).await
     }
 
     /// Delivers a signal to a process.
     pub async fn signal(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: impl Into<String>,
         signal_id: impl Into<String>,
         payload: serde_json::Value,
@@ -1280,7 +1285,7 @@ impl SessionProcessAdmin {
     /// Requests cancellation of a process.
     pub async fn cancel(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
         self.control
@@ -1302,8 +1307,8 @@ impl SessionProcessAdmin {
     /// Re-homes addressability only; the process itself is global.
     pub async fn transfer(
         &self,
-        to_session_id: &str,
-        process_ids: Vec<String>,
+        to_session_id: &SessionId,
+        process_ids: Vec<ProcessId>,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<()> {
         self.control
@@ -1316,7 +1321,7 @@ impl SessionProcessAdmin {
     /// once the owner's lease lapses. Returns the process as observed after.
     pub async fn request_abandon(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         reason: Option<String>,
     ) -> Result<lash_core::facade_support::ObservedProcess> {
         self.control
@@ -1567,12 +1572,12 @@ impl ChildSessionAdmin {
     }
 
     /// Closes the identified child session.
-    pub async fn close_session(&self, session_id: &str) -> Result<()> {
+    pub async fn close_session(&self, session_id: &SessionId) -> Result<()> {
         self.control.close_child_session(session_id).await
     }
 
     /// Activates an existing managed child session.
-    pub async fn activate_managed_session(&self, session_id: &str) -> Result<()> {
+    pub async fn activate_managed_session(&self, session_id: &SessionId) -> Result<()> {
         self.control.activate_managed_session(session_id).await
     }
 }

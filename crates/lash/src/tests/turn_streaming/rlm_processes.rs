@@ -136,7 +136,7 @@ pub(super) struct ColdReopenFrameState {
 
 #[cfg(feature = "rlm")]
 pub(super) async fn frame_switch_state_after_cold_reopen(
-    session_id: &str,
+    session_id: &SessionId,
     abandoned_global_bytes: usize,
 ) -> Result<ColdReopenFrameState> {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -206,7 +206,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
             let owner = conn
                 .query_row(
                     "SELECT lease_owner_id FROM session_execution_leases WHERE session_id = ?1",
-                    [session_id],
+                    [session_id.as_str()],
                     |row| row.get::<_, Option<String>>(0),
                 )
                 .expect("read session execution lease row");
@@ -221,7 +221,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
 
     let store_request = lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
@@ -293,8 +293,11 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
 #[test]
 pub(super) fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> {
     run_async_test_on_stack_budget("agent-frame-switch-cold-reopen-test", || async {
-        let small = frame_switch_state_after_cold_reopen("frame-clear-small", 16).await?;
-        let large = frame_switch_state_after_cold_reopen("frame-clear-large", 128 * 1024).await?;
+        let small =
+            frame_switch_state_after_cold_reopen(&SessionId::from("frame-clear-small"), 16).await?;
+        let large =
+            frame_switch_state_after_cold_reopen(&SessionId::from("frame-clear-large"), 128 * 1024)
+                .await?;
 
         for (geometry, state) in [
             ("resident", &large.resident_execution_state),
@@ -384,7 +387,11 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
     );
     // The queued ingress admission and the outer chained turn each acquire
     // once; both nested handoffs borrow the outer fence.
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 2);
+    assert_sqlite_session_lane_free_at_generation(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+        2,
+    );
     Ok(())
 }
 
@@ -549,7 +556,7 @@ finish value"#,
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-control-tool").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&turn_session.session_id());
+    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
     let turn = tokio::spawn(async move {
         turn_session
             .turn(TurnInput::text("start tool"))
@@ -623,7 +630,7 @@ finish value"#,
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-lashlang-graph-store").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&turn_session.session_id());
+    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
     let turn = tokio::spawn(async move {
         turn_session
             .turn(TurnInput::text("start tool"))
@@ -851,7 +858,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
         store_factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
         },
@@ -859,7 +866,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
     .await?;
     let dead_lane = dead_boot_store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &lash_core::LeaseOwnerIdentity::opaque("fig1573-host", "fig1573-host:boot-1"),
             "fig1573-boot-1-executor",
             lash_core::facade_support::LeaseTimings::default().ttl_ms(),

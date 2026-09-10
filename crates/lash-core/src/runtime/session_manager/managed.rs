@@ -71,14 +71,14 @@ impl ManagedSessionCapability {
             ))
         })?;
         self.registry.lock().await.insert(
-            plan.session_id.clone(),
+            SessionId::from(plan.session_id.clone().to_string()),
             RuntimeHandle::new(materialized.runtime),
         );
         if let Some(source) = &plan.usage_source {
             usage
                 .child_sources
                 .lock_recover()
-                .insert(plan.session_id.clone(), source.clone());
+                .insert(plan.session_id.clone(), SessionId::from(source.clone()));
         }
         Ok(SessionHandle {
             session_id: plan.session_id,
@@ -103,7 +103,7 @@ impl ManagedSessionCapability {
         &self,
         current: &CurrentSessionCapability,
         usage: &UsageCapability,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), crate::PluginError> {
         if session_id == current.session_id {
             return Err(crate::PluginError::Session(
@@ -119,7 +119,7 @@ impl ManagedSessionCapability {
         };
         if let Some((turn_id, registration, registered_turns)) = running_turn {
             tracing::debug!(
-                session_id,
+                session_id = session_id.as_str(),
                 registered_turns,
                 holder_turn_id = %turn_id,
                 holder_registration = registration,

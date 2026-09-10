@@ -1,3 +1,5 @@
+use crate::ProcessId;
+use crate::SessionId;
 use crate::{ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason};
 pub use lash_sansio::ProcessParentEndPolicy;
 use serde::{Deserialize, Serialize};
@@ -146,7 +148,7 @@ pub enum ToolIntentSubmissionAdmission {
 /// Start declaration consumed by protocol and process-engine implementors.
 pub struct StartProcessIntent {
     /// Session whose authority owns the child.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Complete durable process-start request.
     pub request: crate::ProcessStartRequest,
     /// Ratified action applied when the owning scope ends.
@@ -158,9 +160,9 @@ pub struct StartProcessIntent {
 /// Signal declaration consumed by protocol and process-engine implementors.
 pub struct SignalProcessIntent {
     /// Session whose authority owns the signal.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Target process id.
-    pub process_id: String,
+    pub process_id: ProcessId,
     /// Declared signal name.
     pub signal_name: String,
     /// Signal payload validated by the target event schema.
@@ -171,9 +173,9 @@ pub struct SignalProcessIntent {
 /// Cancellation declaration consumed by protocol and process-engine implementors.
 pub struct CancelProcessIntent {
     /// Session whose authority owns the cancellation.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Target process id.
-    pub process_id: String,
+    pub process_id: ProcessId,
     /// Optional durable cancellation reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -183,9 +185,9 @@ pub struct CancelProcessIntent {
 /// Event declaration consumed by protocol and process-engine implementors.
 pub struct EmitProcessEventIntent {
     /// Session whose authority owns the append.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Target process id.
-    pub process_id: String,
+    pub process_id: ProcessId,
     /// Registered event type.
     pub event_type: String,
     /// Event payload validated by the process registry.
@@ -221,7 +223,7 @@ pub struct EmitProcessEventIntent {
 pub struct EmitTriggerIntent {
     /// Session whose authority owns the emission. Validated: a declaration
     /// naming another session is refused before it reaches the router.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Complete durable trigger-occurrence request handed to the router. Its
     /// own `session_id` is the occurrence's routing scope, not an authority.
     pub request: crate::TriggerOccurrenceRequest,
@@ -235,7 +237,7 @@ const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 2;
 /// [`derive_tool_intent_identity_for_emission`], which additionally binds the
 /// identity to the durable invocation that minted the declaration.
 pub fn derive_tool_intent_identity(
-    session_id: &str,
+    session_id: &SessionId,
     execution_scope_id: &str,
     tool_call_id: Option<&str>,
     intent_index: usize,
@@ -250,7 +252,7 @@ pub fn derive_tool_intent_identity(
 }
 
 pub(crate) fn derive_tool_intent_identity_for_emission(
-    session_id: &str,
+    session_id: &SessionId,
     execution_scope_id: &str,
     tool_call_id: Option<&str>,
     intent_index: usize,
@@ -266,7 +268,7 @@ pub(crate) fn derive_tool_intent_identity_for_emission(
 }
 
 fn derive_tool_intent_identity_inner(
-    session_id: &str,
+    session_id: &SessionId,
     execution_scope_id: &str,
     tool_call_id: Option<&str>,
     intent_index: usize,
@@ -293,7 +295,7 @@ fn derive_tool_intent_identity_inner(
         &encoder.finish(),
     );
     Ok(ToolIntentIdentity {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         execution_scope_id: execution_scope_id.to_string(),
         tool_call_id: tool_call_id.to_string(),
         intent_index,
@@ -425,12 +427,17 @@ mod tests {
 
     #[test]
     fn intent_identity_has_a_literal_stable_oracle() {
-        let identity = derive_tool_intent_identity("session-fig1292", "turn-7", Some("call-3"), 2)
-            .expect("identity");
+        let identity = derive_tool_intent_identity(
+            &SessionId::from("session-fig1292"),
+            "turn-7",
+            Some("call-3"),
+            2,
+        )
+        .expect("identity");
         assert_eq!(
             identity,
             ToolIntentIdentity {
-                session_id: "session-fig1292".to_string(),
+                session_id: SessionId::from("session-fig1292"),
                 execution_scope_id: "turn-7".to_string(),
                 tool_call_id: "call-3".to_string(),
                 intent_index: 2,
@@ -443,7 +450,7 @@ mod tests {
     #[test]
     fn emitted_intent_identity_is_scoped_by_the_minting_replay_key() {
         let first = derive_tool_intent_identity_for_emission(
-            "session",
+            &SessionId::from("session"),
             "process",
             Some("call"),
             0,
@@ -451,7 +458,7 @@ mod tests {
         )
         .expect("first emission identity");
         let second = derive_tool_intent_identity_for_emission(
-            "session",
+            &SessionId::from("session"),
             "process",
             Some("call"),
             0,
@@ -467,19 +474,22 @@ mod tests {
     #[test]
     fn missing_call_id_is_a_typed_refusal() {
         assert_eq!(
-            derive_tool_intent_identity("session", "turn", None, 0),
+            derive_tool_intent_identity(&SessionId::from("session"), "turn", None, 0),
             Err(ToolIntentRefusalReason::MissingToolCallId)
         );
     }
 
     #[test]
     fn intent_identity_is_distinct_across_turn_and_process_execution_scopes() {
-        let turn_7 = derive_tool_intent_identity("session", "turn-7", Some("call"), 0)
-            .expect("turn 7 identity");
-        let turn_8 = derive_tool_intent_identity("session", "turn-8", Some("call"), 0)
-            .expect("turn 8 identity");
-        let process = derive_tool_intent_identity("session", "process-7", Some("call"), 0)
-            .expect("process identity");
+        let turn_7 =
+            derive_tool_intent_identity(&SessionId::from("session"), "turn-7", Some("call"), 0)
+                .expect("turn 7 identity");
+        let turn_8 =
+            derive_tool_intent_identity(&SessionId::from("session"), "turn-8", Some("call"), 0)
+                .expect("turn 8 identity");
+        let process =
+            derive_tool_intent_identity(&SessionId::from("session"), "process-7", Some("call"), 0)
+                .expect("process identity");
         assert_eq!(turn_7.execution_scope_id, "turn-7");
         assert_eq!(turn_8.execution_scope_id, "turn-8");
         assert_eq!(process.execution_scope_id, "process-7");

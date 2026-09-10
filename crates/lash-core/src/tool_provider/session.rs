@@ -1,3 +1,4 @@
+use crate::SessionId;
 use crate::TurnId;
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ pub struct ToolSessionModel {
 
 #[derive(Clone)]
 pub struct ToolSessionAdmin<'run> {
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) sessions: Arc<dyn SessionStateService>,
     pub(super) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(super) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
@@ -70,7 +71,9 @@ impl<'run> ToolSessionAdmin<'run> {
         &self,
         session_id: impl AsRef<str>,
     ) -> Result<SessionSnapshot, PluginError> {
-        self.sessions.snapshot_session(session_id.as_ref()).await
+        self.sessions
+            .snapshot_session(&SessionId::from(session_id.as_ref()))
+            .await
     }
 
     /// Create a managed session through the runtime lifecycle service.
@@ -92,7 +95,7 @@ impl<'run> ToolSessionAdmin<'run> {
     ///
     /// Orchestrating tool implementors use this capability to finish sessions
     /// they own through the supported lifecycle boundary.
-    pub async fn close_session(&self, session_id: &str) -> Result<(), PluginError> {
+    pub async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
         self.session_lifecycle.close_session(session_id).await
     }
 
@@ -106,7 +109,7 @@ impl<'run> ToolSessionAdmin<'run> {
     /// released even when this future is dropped mid-turn.
     pub async fn start_turn(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
         input: crate::TurnInput,
     ) -> Result<crate::AssembledTurn, PluginError> {

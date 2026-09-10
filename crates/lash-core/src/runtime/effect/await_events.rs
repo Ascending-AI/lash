@@ -1,6 +1,7 @@
 //! In-process await-event (Durable Wait) registry backing the native effect
 //! host and controller.
 
+use crate::SessionId;
 use lash_sansio::sync::{MutexExt, RwLockExt};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
@@ -95,9 +96,9 @@ type AwaitEventRegistryShard = Arc<std::sync::Mutex<AwaitEventRegistryState>>;
 #[derive(Debug)]
 pub(super) struct AwaitEventRegistry {
     secret: Vec<u8>,
-    session_shards: RwLock<HashMap<String, AwaitEventRegistryShard>>,
+    session_shards: RwLock<HashMap<SessionId, AwaitEventRegistryShard>>,
     unscoped_shard: AwaitEventRegistryShard,
-    revoked_session_order: std::sync::Mutex<VecDeque<String>>,
+    revoked_session_order: std::sync::Mutex<VecDeque<SessionId>>,
     /// Journal-identity keys of retired non-session scopes. The in-process
     /// twin of the durable scope-retirement fence, and like it unbounded: a
     /// fence that could be evicted would let a retired scope mint again once
@@ -137,25 +138,25 @@ impl AwaitEventRegistry {
         }
     }
 
-    fn shard_for_session(&self, session_id: &str) -> AwaitEventRegistryShard {
+    fn shard_for_session(&self, session_id: &SessionId) -> AwaitEventRegistryShard {
         if let Some(shard) = self.session_shards.read_recover().get(session_id).cloned() {
             return shard;
         }
         let mut shards = self.session_shards.write_recover();
         Arc::clone(
             shards
-                .entry(session_id.to_string())
+                .entry(SessionId::from(session_id.to_string()))
                 .or_insert_with(|| Arc::new(std::sync::Mutex::new(AwaitEventRegistryState::new()))),
         )
     }
 
-    fn existing_session_shard(&self, session_id: &str) -> Option<AwaitEventRegistryShard> {
+    fn existing_session_shard(&self, session_id: &SessionId) -> Option<AwaitEventRegistryShard> {
         self.session_shards.read_recover().get(session_id).cloned()
     }
 
     fn shard_for_scope(&self, scope: &ExecutionScope) -> AwaitEventRegistryShard {
         match scope.session_id() {
-            Some(session_id) => self.shard_for_session(session_id),
+            Some(session_id) => self.shard_for_session(&SessionId::from(session_id)),
             None => Arc::clone(&self.unscoped_shard),
         }
     }
@@ -175,7 +176,7 @@ impl AwaitEventRegistry {
         wait.validate()?;
         match scope.session_id() {
             Some(session_id) => {
-                if let Some(shard) = self.existing_session_shard(session_id) {
+                if let Some(shard) = self.existing_session_shard(&SessionId::from(session_id)) {
                     let state = Self::locked_state(&shard);
                     if !session_allows_access(state.revoked) {
                         return Err(Self::unknown_or_revoked());
@@ -509,7 +510,7 @@ impl AwaitEventRegistry {
     /// `await_event_unknown_or_revoked`, matching entries are drained, and a
     /// bounded recent-session tombstone cache rejects keys created after
     /// deletion without growing for the lifetime of the process.
-    pub(super) fn revoke_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub(super) fn revoke_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
         let shard = self.shard_for_session(session_id);
         let newly_revoked = {
             let mut state = Self::locked_state(&shard);
@@ -529,7 +530,7 @@ impl AwaitEventRegistry {
         }
         let expired = {
             let mut order = self.revoked_session_order.lock_recover();
-            order.push_back(session_id.to_string());
+            order.push_back(session_id.clone());
             let mut expired = Vec::new();
             while order.len() > self.revoked_session_limit {
                 if let Some(session_id) = order.pop_front() {
@@ -661,7 +662,7 @@ impl AwaitEventRegistry {
     /// waits keep their terminal, and waits registered afterwards behave
     /// normally. This is the standalone host lever, in contrast to the
     /// tombstoning [`revoke_session`](Self::revoke_session).
-    pub(super) fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+    pub(super) fn cancel_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
         let Some(shard) = self.existing_session_shard(session_id) else {
             return Ok(());
         };
@@ -689,7 +690,7 @@ mod tests {
     use std::sync::Barrier;
     use std::time::Duration;
 
-    fn turn_scope(session_id: &str, turn_id: &TurnId) -> ExecutionScope {
+    fn turn_scope(session_id: &SessionId, turn_id: &TurnId) -> ExecutionScope {
         ExecutionScope::turn(session_id, turn_id)
     }
 
@@ -701,7 +702,7 @@ mod tests {
         let registry = Arc::new(AwaitEventRegistry::new());
         let key = registry
             .key_for(
-                &turn_scope("completion-gap", &TurnId::from("turn")),
+                &turn_scope(&SessionId::from("completion-gap"), &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("completion key");
@@ -723,14 +724,16 @@ mod tests {
     #[test]
     fn key_derivation_does_not_register_or_materialize_session_state() {
         let registry = AwaitEventRegistry::new();
-        let scope = turn_scope("pure-key", &TurnId::from("turn"));
+        let scope = turn_scope(&SessionId::from("pure-key"), &TurnId::from("turn"));
 
         registry
             .key_for(&scope, AwaitEventWaitIdentity::tool_completion("tool-call"))
             .expect("derive key");
 
         assert!(
-            registry.existing_session_shard("pure-key").is_none(),
+            registry
+                .existing_session_shard(&SessionId::from("pure-key"))
+                .is_none(),
             "key derivation must remain a pure read with no registration write"
         );
     }
@@ -738,7 +741,10 @@ mod tests {
     #[tokio::test]
     async fn completed_turn_control_entries_leave_the_live_registry_and_are_bounded() {
         let registry = AwaitEventRegistry::with_limits(2, 2);
-        let scope = turn_scope("bounded-turn-control", &TurnId::from("turn-1"));
+        let scope = turn_scope(
+            &SessionId::from("bounded-turn-control"),
+            &TurnId::from("turn-1"),
+        );
         let gate = registry
             .key_for(&scope, AwaitEventWaitIdentity::TurnCancelGate)
             .expect("gate key");
@@ -778,7 +784,7 @@ mod tests {
 
         for ordinal in 2..=3 {
             let scope = turn_scope(
-                "bounded-turn-control",
+                &SessionId::from("bounded-turn-control"),
                 &TurnId::from(format!("turn-{ordinal}")),
             );
             let gate = registry
@@ -802,7 +808,7 @@ mod tests {
         let registry = AwaitEventRegistry::with_limits(2, 2);
         let gate = registry
             .key_for(
-                &turn_scope("waiter-cancel", &TurnId::from("turn")),
+                &turn_scope(&SessionId::from("waiter-cancel"), &TurnId::from("turn")),
                 AwaitEventWaitIdentity::TurnCancelGate,
             )
             .expect("gate key");
@@ -826,7 +832,7 @@ mod tests {
         let registry = AwaitEventRegistry::with_limits(2, 2);
         let key = registry
             .key_for(
-                &turn_scope("revoke-1", &TurnId::from("turn")),
+                &turn_scope(&SessionId::from("revoke-1"), &TurnId::from("turn")),
                 AwaitEventWaitIdentity::TurnTerminal,
             )
             .expect("terminal key");
@@ -837,12 +843,18 @@ mod tests {
             result = &mut wait => panic!("wait unexpectedly completed: {result:?}"),
             _ = tokio::task::yield_now() => {}
         }
-        registry.revoke_session("revoke-1").expect("revoke session");
+        registry
+            .revoke_session(&SessionId::from("revoke-1"))
+            .expect("revoke session");
         assert!(wait.await.is_err());
         assert_eq!(registry.counts().0, 0);
 
-        registry.revoke_session("revoke-2").expect("second revoke");
-        registry.revoke_session("revoke-3").expect("third revoke");
+        registry
+            .revoke_session(&SessionId::from("revoke-2"))
+            .expect("second revoke");
+        registry
+            .revoke_session(&SessionId::from("revoke-3"))
+            .expect("third revoke");
         assert_eq!(registry.counts().2, 2);
     }
 
@@ -851,7 +863,7 @@ mod tests {
         let registry = AwaitEventRegistry::new();
         let key = registry
             .key_for(
-                &turn_scope("signature-cache", &TurnId::from("turn")),
+                &turn_scope(&SessionId::from("signature-cache"), &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("await-event key");
@@ -898,13 +910,13 @@ mod tests {
         let registry = Arc::new(AwaitEventRegistry::new());
         let key_a = registry
             .key_for(
-                &turn_scope("shard-a", &TurnId::from("turn")),
+                &turn_scope(&SessionId::from("shard-a"), &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("session A key");
         let key_b = registry
             .key_for(
-                &turn_scope("shard-b", &TurnId::from("turn")),
+                &turn_scope(&SessionId::from("shard-b"), &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("session B key");
@@ -935,7 +947,10 @@ mod tests {
             .map(|ordinal| {
                 let key = registry
                     .key_for(
-                        &turn_scope(&format!("perf-session-{ordinal}"), &TurnId::from("turn")),
+                        &turn_scope(
+                            &SessionId::from(format!("perf-session-{ordinal}")),
+                            &TurnId::from("turn"),
+                        ),
                         AwaitEventWaitIdentity::tool_completion("tool"),
                     )
                     .expect("perf key");

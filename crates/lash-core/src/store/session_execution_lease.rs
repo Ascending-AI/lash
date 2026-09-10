@@ -2,6 +2,8 @@
 //! fences derived from it, and what a claim reports about the holder it displaced.
 
 use super::StoreError;
+use crate::ProcessId;
+use crate::SessionId;
 
 /// Unforgeable proposal that identifies one logical lease-claim attempt.
 ///
@@ -88,7 +90,7 @@ pub struct SessionExecutionLeaseRefusalFacts<'a> {
     pub(crate) current_expires_at_epoch_ms: Option<u64>,
     pub(crate) observed_at_epoch_ms: Option<u64>,
     pub(crate) minimum_expires_at_epoch_ms: Option<u64>,
-    pub(crate) requested_session_id: Option<&'a str>,
+    pub(crate) requested_session_id: Option<&'a SessionId>,
     pub(crate) refusal_cause: Option<&'static str>,
 }
 
@@ -259,14 +261,14 @@ impl LeaseOwnerIdentity {
     /// formatting drift cannot silently turn a continuation into a fresh
     /// execution.
     pub fn restate_process_execution(
-        process_id: &str,
+        process_id: &ProcessId,
         execution_id: impl Into<String>,
     ) -> LeaseOwnerIdentity {
         Self::opaque(format!("restate:{process_id}"), execution_id)
     }
 
     /// Return the Restate execution id when this owner belongs to `process_id`.
-    pub fn restate_process_execution_id(&self, process_id: &str) -> Option<&str> {
+    pub fn restate_process_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
         let expected = Self::restate_process_execution(process_id, &self.incarnation_id);
         self.same_incarnation(&expected)
             .then_some(self.incarnation_id.as_str())
@@ -281,7 +283,7 @@ impl LeaseOwnerIdentity {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionExecutionLease {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub owner: LeaseOwnerIdentity,
     /// Runtime-minted identity for one executor open under the host owner.
     pub executor_id: String,
@@ -318,7 +320,7 @@ pub struct SessionExecutionLeaseObservation {
 /// session-head commit authority.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionExecutionLeaseAuthority {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub owner: LeaseOwnerIdentity,
     pub executor_id: String,
     pub lease_token: String,
@@ -334,7 +336,7 @@ pub struct SessionExecutionLeaseAuthority {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
 pub struct SessionExecutionLeaseClaimIdentity<'a> {
-    pub session_id: &'a str,
+    pub session_id: &'a SessionId,
     pub owner: &'a LeaseOwnerIdentity,
     pub executor_id: &'a str,
     pub lease_token: &'a str,
@@ -381,7 +383,7 @@ pub fn lease_owner_from_columns(
 /// Convert a raw durable row into the live lease it represents.
 #[doc(hidden)]
 pub fn row_to_session_execution_lease(
-    session_id: &str,
+    session_id: &SessionId,
     row: SessionExecutionLeaseRow,
 ) -> Result<SessionExecutionLease, StoreError> {
     let corrupt = |field| StoreError::StoredDataCorrupt {
@@ -389,7 +391,7 @@ pub fn row_to_session_execution_lease(
         message: format!("live row has NULL `{field}`"),
     };
     Ok(SessionExecutionLease {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         owner: row.owner.ok_or_else(|| corrupt("lease_owner_id"))?,
         executor_id: row
             .executor_id
@@ -425,7 +427,7 @@ pub struct SessionExecutionLeaseFenceFacts<'a> {
 /// Every refusal uses the same typed error construction from this function.
 #[doc(hidden)]
 pub fn require_current_session_execution_lease(
-    session_id: &str,
+    session_id: &SessionId,
     current: Option<SessionExecutionLeaseFenceFacts<'_>>,
     presented: &SessionExecutionLeaseAuthority,
     now_epoch_ms: u64,
@@ -460,7 +462,7 @@ pub fn require_current_session_execution_lease(
             },
         );
         Err(StoreError::SessionExecutionLeaseExpired {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
         })
     }
 }
@@ -598,7 +600,7 @@ mod tests {
         ));
 
         let row_error = row_to_session_execution_lease(
-            "session",
+            &SessionId::from("session"),
             SessionExecutionLeaseRow {
                 owner: Some(LeaseOwnerIdentity::opaque("owner", "incarnation")),
                 executor_id: None,
@@ -622,7 +624,7 @@ mod tests {
     #[test]
     fn shared_authority_json_keeps_the_fence_and_completion_shape() {
         let authority = SessionExecutionLeaseAuthority {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             owner: LeaseOwnerIdentity::opaque("owner", "incarnation"),
             executor_id: "executor".to_string(),
             lease_token: "lease".to_string(),
@@ -638,7 +640,7 @@ mod tests {
     fn fence_predicate_requires_every_ruled_authority_fact() {
         let owner = LeaseOwnerIdentity::opaque("owner", "incarnation");
         let authority = SessionExecutionLeaseAuthority {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             owner: owner.clone(),
             executor_id: "executor".to_string(),
             lease_token: "current-token".to_string(),
@@ -651,8 +653,13 @@ mod tests {
             fencing_token: 7,
             expires_at_epoch_ms: 101,
         };
-        require_current_session_execution_lease("session", Some(current), &authority, 100)
-            .expect("all current authority facts match");
+        require_current_session_execution_lease(
+            &SessionId::from("session"),
+            Some(current),
+            &authority,
+            100,
+        )
+        .expect("all current authority facts match");
 
         for rejected in [
             SessionExecutionLeaseFenceFacts {
@@ -670,7 +677,7 @@ mod tests {
         ] {
             assert!(matches!(
                 require_current_session_execution_lease(
-                    "session",
+                    &SessionId::from("session"),
                     Some(rejected),
                     &authority,
                     100
@@ -682,7 +689,7 @@ mod tests {
         let stale_owner = LeaseOwnerIdentity::opaque("owner", "stale-incarnation");
         assert!(matches!(
             require_current_session_execution_lease(
-                "session",
+                &SessionId::from("session"),
                 Some(SessionExecutionLeaseFenceFacts {
                     owner: Some(&stale_owner),
                     ..current
@@ -693,13 +700,23 @@ mod tests {
             Err(StoreError::SessionExecutionLeaseExpired { .. })
         ));
         let mut wrong_session = authority.clone();
-        wrong_session.session_id = "other-session".to_string();
+        wrong_session.session_id = SessionId::from("other-session");
         assert!(matches!(
-            require_current_session_execution_lease("session", Some(current), &wrong_session, 100),
+            require_current_session_execution_lease(
+                &SessionId::from("session"),
+                Some(current),
+                &wrong_session,
+                100
+            ),
             Err(StoreError::SessionExecutionLeaseExpired { .. })
         ));
         assert!(matches!(
-            require_current_session_execution_lease("session", None, &authority, 100),
+            require_current_session_execution_lease(
+                &SessionId::from("session"),
+                None,
+                &authority,
+                100
+            ),
             Err(StoreError::SessionExecutionLeaseExpired { .. })
         ));
     }

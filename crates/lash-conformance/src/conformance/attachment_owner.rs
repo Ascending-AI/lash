@@ -1,6 +1,8 @@
 //! Cross-layer attachment owner / cold effect-replay conformance.
 
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
@@ -33,7 +35,7 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     const PLAIN_BYTES: &[u8] = b"plain-json-owner-bytes";
     const TYPED_BYTES: &[u8] = b"typed-output-owner-bytes";
 
-    let request = session_request(SESSION_ID);
+    let request = session_request(&SessionId::from(SESSION_ID));
     let store_a = backend
         .session_store_factory
         .create_store(&request)
@@ -160,7 +162,7 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
 
     let stamped_commit = final_turn_commit(
         &store_b,
-        SESSION_ID,
+        &SessionId::from(SESSION_ID),
         &TurnId::from(TURN_ID),
         vec![typed_id.clone()],
     )
@@ -339,7 +341,7 @@ fn assert_typed_outcome(outcome: &crate::RuntimeEffectOutcome, id: &crate::Attac
 
 async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     const SESSION_ID: &str = "attachment-owner-superseded";
-    let request = session_request(SESSION_ID);
+    let request = session_request(&SessionId::from(SESSION_ID));
     let store = backend
         .session_store_factory
         .create_store(&request)
@@ -364,7 +366,13 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     (backend.advance_clock)(1_000);
     commit_with_lease(
         &store,
-        final_turn_commit(&store, SESSION_ID, &TurnId::from("later-turn"), Vec::new()).await,
+        final_turn_commit(
+            &store,
+            &SessionId::from(SESSION_ID),
+            &TurnId::from("later-turn"),
+            Vec::new(),
+        )
+        .await,
         "later-turn-owner",
     )
     .await;
@@ -402,7 +410,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
         .expect("register process attachment owner");
     let store = backend
         .session_store_factory
-        .create_store(&session_request(SESSION_ID))
+        .create_store(&session_request(&SessionId::from(SESSION_ID)))
         .await
         .expect("create process attachment store");
     let facade = Arc::new(crate::SessionAttachmentStore::new_with_clock(
@@ -441,7 +449,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     let terminal = backend
         .process_registry
         .complete_process(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -478,7 +486,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
 
 async fn final_turn_commit(
     store: &Arc<dyn crate::RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     adopted_attachment_ids: Vec<crate::AttachmentId>,
 ) -> crate::RuntimeCommit {
@@ -488,7 +496,7 @@ async fn final_turn_commit(
         .expect("load commit session metadata")
         .expect("commit session metadata exists");
     let state = crate::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
@@ -521,10 +529,10 @@ async fn commit_with_lease(
         .expect("commit runtime state")
 }
 
-fn session_request(session_id: &str) -> crate::SessionStoreCreateRequest {
+fn session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
     crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy {
             model: crate::ModelSpec::builder("attachment-owner-conformance-model")
@@ -532,7 +540,7 @@ fn session_request(session_id: &str) -> crate::SessionStoreCreateRequest {
                 .build()
                 .expect("valid model"),
             provider_id: "attachment-owner-conformance".to_string(),
-            session_id: Some(session_id.to_string()),
+            session_id: Some(SessionId::from(session_id.to_string())),
             ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
         },
     }
@@ -563,7 +571,7 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
     use crate::store::MaintenanceReport;
     assert!(!factory.can_prove_process_owner_death());
     let backend = crate::attachments::InMemoryAttachmentStore::new();
-    let request = session_request("degraded-process-owner");
+    let request = session_request(&SessionId::from("degraded-process-owner"));
     let store = factory.create_store(&request).await.expect("create store");
     let reference = backend
         .put(b"degraded-proof".to_vec(), attachment_meta("degraded"))

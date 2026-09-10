@@ -1,3 +1,4 @@
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -10,12 +11,12 @@ use crate::runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, WorkerSlotKind, Work
 
 #[derive(Clone, Debug)]
 pub(super) struct QueuedWorkDemand {
-    pub(super) session_id: Option<String>,
+    pub(super) session_id: Option<SessionId>,
     pub(super) reasons: Vec<String>,
 }
 
 impl QueuedWorkDemand {
-    pub(super) fn new(session_id: Option<String>, reason: String) -> Self {
+    pub(super) fn new(session_id: Option<SessionId>, reason: String) -> Self {
         Self {
             session_id,
             reasons: vec![reason],
@@ -38,8 +39,8 @@ impl QueuedWorkDemand {
 #[derive(Default)]
 pub(super) struct QueuedWorkExecutionSchedulerState {
     pub(super) pending: VecDeque<QueuedWorkDemand>,
-    pub(super) scheduled: BTreeSet<Option<String>>,
-    pub(super) rerun: BTreeMap<Option<String>, QueuedWorkDemand>,
+    pub(super) scheduled: BTreeSet<Option<SessionId>>,
+    pub(super) rerun: BTreeMap<Option<SessionId>, QueuedWorkDemand>,
     pub(super) active: usize,
     pub(super) dispatcher_running: bool,
 }
@@ -53,8 +54,8 @@ pub(crate) struct QueuedWorkExecutionScheduler {
 }
 
 pub(super) struct QueuedWorkExecutionTaskCompletion {
-    pub(super) session_id: Option<String>,
-    pub(super) completed: tokio::sync::mpsc::UnboundedSender<Option<String>>,
+    pub(super) session_id: Option<SessionId>,
+    pub(super) completed: tokio::sync::mpsc::UnboundedSender<Option<SessionId>>,
 }
 
 impl Drop for QueuedWorkExecutionTaskCompletion {

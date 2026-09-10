@@ -1,6 +1,7 @@
 //! Raw diagnostics exposed only to tests and the explicit `testing` feature.
 
 use super::InMemorySessionStore;
+use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
@@ -164,7 +165,7 @@ impl InMemorySessionStore {
             .filter(|entry| {
                 session_id
                     .as_ref()
-                    .is_none_or(|session_id| &entry.batch.session_id == session_id)
+                    .is_none_or(|session_id| entry.batch.session_id == session_id)
             })
             .map(|entry| {
                 (
@@ -289,7 +290,7 @@ impl InMemorySessionStore {
 /// typecheck.
 #[derive(Clone, Debug)]
 pub struct RawSessionExecutionLeaseRow {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub owner: Option<crate::LeaseOwnerIdentity>,
     pub executor_id: Option<String>,
     pub lease_token: Option<String>,
@@ -303,13 +304,13 @@ impl super::InMemorySessionStoreFactory {
     /// Return the concrete testing store after `SessionStoreFactory` created it.
     pub fn raw_store_for_testing(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Option<std::sync::Arc<InMemorySessionStore>> {
         self.stores.lock_recover().get(session_id).cloned()
     }
 
     /// Return explicit node-anchor rows without mixing in implicit live tips.
-    pub fn raw_node_anchors_for_testing(&self) -> Vec<(String, crate::BlobRef, String)> {
+    pub fn raw_node_anchors_for_testing(&self) -> Vec<(String, crate::BlobRef, SessionId)> {
         let mut rows = self
             .node_anchors
             .lock_recover()
@@ -341,14 +342,14 @@ impl crate::store::StoreTestSupport for InMemorySessionStore {
 
     async fn seed_session_trigger_manifest_ref_for_testing(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<bool, crate::store::StoreError> {
         Ok(false)
     }
 
     async fn raw_session_owned_artifact_refs_for_testing(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<Vec<(String, String)>, crate::store::StoreError> {
         Ok(Vec::new())
     }
@@ -374,11 +375,11 @@ impl crate::store::ConformanceSessionStoreFactory for super::InMemorySessionStor
 }
 
 impl InMemorySessionStore {
-    pub fn bind_session_for_conformance(&self, session_id: &str) {
-        *self.bound_session_id.lock_recover() = Some(session_id.to_string());
+    pub fn bind_session_for_conformance(&self, session_id: &SessionId) {
+        *self.bound_session_id.lock_recover() = Some(session_id.clone());
         *self.session_meta.lock_recover() = Some(crate::SessionMeta {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
         });
     }

@@ -22,6 +22,7 @@
 //! or spuriously expire a lease across hosts. Both hand the instant they trust
 //! to the same table.
 
+use crate::ProcessId;
 use crate::plugin::PluginError;
 use crate::store::session_execution_lease::LeaseOwnerIdentity;
 
@@ -99,13 +100,13 @@ impl ProcessLeaseRow {
     /// is the point — yet the retained counter still fences the next holder
     /// against a stale writer that predates the release
     /// (see [`next_process_lease_fencing_token`]).
-    pub fn project(self, process_id: &str) -> Option<ProcessLease> {
+    pub fn project(self, process_id: &ProcessId) -> Option<ProcessLease> {
         let (Some(owner_id), Some(lease_token)) = (self.owner_id, self.lease_token) else {
             return None;
         };
         Some(ProcessLease {
             schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             owner: LeaseOwnerIdentity {
                 incarnation_id: self.incarnation_id.unwrap_or_else(|| owner_id.clone()),
                 owner_id,
@@ -150,14 +151,14 @@ pub fn process_lease_still_holds(
 /// all. Every lease-guarded registry write — renew, leased completion, and every
 /// `*_with_authority` mutation — goes through here.
 pub fn authorize_process_lease_write(
-    process_id: &str,
+    process_id: &ProcessId,
     claimed: &ProcessLease,
     stored: Option<&ProcessLease>,
     now_ms: u64,
 ) -> Result<(), PluginError> {
     if claimed.process_id != process_id || !process_lease_still_holds(stored, claimed, now_ms) {
         return Err(PluginError::ProcessLeaseSuperseded {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
         });
     }
     Ok(())
@@ -287,7 +288,7 @@ pub fn next_process_lease_fencing_token(retained: u64) -> Result<u64, PluginErro
 /// an opaque minted capability compared for equality, never a projection of
 /// live structure, so serde drift cannot reach it.
 pub fn acquired_process_lease(
-    process_id: &str,
+    process_id: &ProcessId,
     owner: &LeaseOwnerIdentity,
     fencing_token: u64,
     now_ms: u64,
@@ -295,7 +296,7 @@ pub fn acquired_process_lease(
 ) -> ProcessLease {
     ProcessLease {
         schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: process_id.to_string(),
+        process_id: ProcessId::from(process_id.to_string()),
         owner: owner.clone(),
         lease_token: crate::stable_hash::blake3_hex(
             "lash-process-lease/v2",
@@ -346,9 +347,9 @@ pub fn process_incarnation_superseded(
 }
 
 /// Refusal for a process id no registry ever knew.
-pub fn unknown_process(process_id: &str) -> PluginError {
+pub fn unknown_process(process_id: &ProcessId) -> PluginError {
     PluginError::ProcessUnknown {
-        process_id: process_id.to_string(),
+        process_id: ProcessId::from(process_id.to_string()),
     }
 }
 
@@ -358,7 +359,7 @@ pub fn unknown_process(process_id: &str) -> PluginError {
 /// what lets a host tell "this finished and was reaped" from "this id is
 /// wrong", so the two absent cases must never collapse into one error.
 pub fn absent_process_error(
-    process_id: &str,
+    process_id: &ProcessId,
     tombstone: Option<ProcessTombstoneStamp>,
 ) -> PluginError {
     match tombstone {
@@ -553,6 +554,7 @@ impl WakeDeliveryRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SessionId;
 
     fn owner(owner_id: &str, incarnation_id: &str) -> LeaseOwnerIdentity {
         LeaseOwnerIdentity {
@@ -563,7 +565,7 @@ mod tests {
 
     fn lease(now_ms: u64, ttl_ms: u64, fencing_token: u64) -> ProcessLease {
         acquired_process_lease(
-            "process",
+            &ProcessId::from("process"),
             &owner("worker", "incarnation"),
             fencing_token,
             now_ms,
@@ -655,8 +657,13 @@ mod tests {
     #[test]
     fn authorization_refuses_a_lease_for_another_process() {
         let stored = lease(1_000, 5_000, 3);
-        let error = authorize_process_lease_write("other-process", &stored, Some(&stored), 2_000)
-            .expect_err("a lease is only authority over its own process");
+        let error = authorize_process_lease_write(
+            &ProcessId::from("other-process"),
+            &stored,
+            Some(&stored),
+            2_000,
+        )
+        .expect_err("a lease is only authority over its own process");
         assert!(
             matches!(
                 &error,
@@ -670,17 +677,30 @@ mod tests {
     fn authorization_succeeds_exactly_when_the_fence_holds() {
         let stored = lease(1_000, 5_000, 3);
         assert!(
-            authorize_process_lease_write("process", &stored, Some(&stored), 2_000).is_ok(),
+            authorize_process_lease_write(
+                &ProcessId::from("process"),
+                &stored,
+                Some(&stored),
+                2_000
+            )
+            .is_ok(),
             "the holder's own live lease authorizes its write"
         );
-        let error = authorize_process_lease_write("process", &stored, None, 2_000)
-            .expect_err("a released lease authorizes nothing");
+        let error =
+            authorize_process_lease_write(&ProcessId::from("process"), &stored, None, 2_000)
+                .expect_err("a released lease authorizes nothing");
         assert!(
             matches!(&error, PluginError::ProcessLeaseSuperseded { process_id } if process_id == "process"),
             "unexpected refusal: {error}"
         );
         assert!(
-            authorize_process_lease_write("process", &stored, Some(&stored), 6_000).is_err(),
+            authorize_process_lease_write(
+                &ProcessId::from("process"),
+                &stored,
+                Some(&stored),
+                6_000
+            )
+            .is_err(),
             "an expired lease authorizes nothing"
         );
     }
@@ -892,7 +912,7 @@ mod tests {
     #[test]
     fn a_populated_lease_row_projects() {
         let lease = populated_row()
-            .project("process")
+            .project(&ProcessId::from("process"))
             .expect("a row with an owner and a token records a holder");
         assert_eq!(lease.schema_version, PROCESS_LEASE_SCHEMA_VERSION);
         assert_eq!(lease.process_id, "process");
@@ -910,7 +930,7 @@ mod tests {
                 owner_id: None,
                 ..populated_row()
             }
-            .project("process")
+            .project(&ProcessId::from("process"))
             .is_none()
         );
     }
@@ -922,7 +942,7 @@ mod tests {
                 lease_token: None,
                 ..populated_row()
             }
-            .project("process")
+            .project(&ProcessId::from("process"))
             .is_none()
         );
     }
@@ -933,7 +953,7 @@ mod tests {
             incarnation_id: None,
             ..populated_row()
         }
-        .project("process")
+        .project(&ProcessId::from("process"))
         .expect("pre-incarnation rows still record a holder");
         assert_eq!(lease.owner, owner("worker", "worker"));
     }
@@ -950,7 +970,7 @@ mod tests {
         };
         let retained = released.fencing_token as u64;
         assert!(
-            released.project("process").is_none(),
+            released.project(&ProcessId::from("process")).is_none(),
             "a released lease is not a holder"
         );
         assert_eq!(
@@ -965,7 +985,7 @@ mod tests {
     #[test]
     fn the_lease_token_preimage_is_pinned() {
         let minted = acquired_process_lease(
-            "process-a",
+            &ProcessId::from("process-a"),
             &owner("owner-a", "incarnation-a"),
             5,
             1_700_000_000_000,
@@ -986,23 +1006,26 @@ mod tests {
 
     #[test]
     fn the_lease_token_preimage_is_field_ordered() {
-        let straight = acquired_process_lease("p", &owner("a", "b"), 1, 10, 10);
-        let swapped = acquired_process_lease("p", &owner("b", "a"), 1, 10, 10);
+        let straight = acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 1, 10, 10);
+        let swapped = acquired_process_lease(&ProcessId::from("p"), &owner("b", "a"), 1, 10, 10);
         assert_ne!(
             straight.lease_token, swapped.lease_token,
             "owner id and incarnation id occupy distinct preimage positions"
         );
         for (left, right) in [
             (
-                acquired_process_lease("p", &owner("a", "b"), 2, 10, 10).lease_token,
+                acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 2, 10, 10)
+                    .lease_token,
                 straight.lease_token.clone(),
             ),
             (
-                acquired_process_lease("p", &owner("a", "b"), 1, 11, 10).lease_token,
+                acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 1, 11, 10)
+                    .lease_token,
                 straight.lease_token.clone(),
             ),
             (
-                acquired_process_lease("q", &owner("a", "b"), 1, 10, 10).lease_token,
+                acquired_process_lease(&ProcessId::from("q"), &owner("a", "b"), 1, 10, 10)
+                    .lease_token,
                 straight.lease_token.clone(),
             ),
         ] {
@@ -1012,7 +1035,8 @@ mod tests {
 
     #[test]
     fn the_minted_expiry_saturates() {
-        let minted = acquired_process_lease("p", &owner("a", "b"), 1, u64::MAX - 1, 10);
+        let minted =
+            acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 1, u64::MAX - 1, 10);
         assert_eq!(minted.expires_at_epoch_ms, u64::MAX);
     }
 
@@ -1021,7 +1045,7 @@ mod tests {
     #[test]
     fn a_retained_tombstone_reports_the_pruned_refusal() {
         let error = absent_process_error(
-            "process",
+            &ProcessId::from("process"),
             Some(ProcessTombstoneStamp {
                 terminal_label: "completed".to_string(),
                 pruned_at_ms: 4_242,
@@ -1041,7 +1065,7 @@ mod tests {
 
     #[test]
     fn an_unknown_process_id_reports_the_unknown_refusal() {
-        let error = absent_process_error("process", None);
+        let error = absent_process_error(&ProcessId::from("process"), None);
         assert!(
             matches!(
                 &error,
@@ -1051,7 +1075,7 @@ mod tests {
         );
         assert!(
             matches!(
-                unknown_process("other"),
+                unknown_process(&ProcessId::from("other")),
                 PluginError::ProcessUnknown { process_id } if process_id == "other"
             ),
             "unknown_process must preserve the refused id"
@@ -1178,8 +1202,8 @@ mod tests {
         let wake = super::super::events::ProcessWakeDelivery {
             version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
-            target_session_id: "session".to_string(),
-            process_id: "process".to_string(),
+            target_session_id: SessionId::from("session"),
+            process_id: ProcessId::from("process"),
             process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             sequence: 4,
             event_type: "process.wake".to_string(),

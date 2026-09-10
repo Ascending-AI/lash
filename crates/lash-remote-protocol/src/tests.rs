@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::{BTreeMap, HashMap};
 
@@ -345,7 +347,7 @@ fn remote_llm_response_json_round_trips() {
 #[test]
 fn remote_turn_request_json_round_trips() {
     let request = RemoteTurnRequest {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         idempotency_key: Some("idem".to_string()),
         input: RemoteTurnInput {
@@ -432,7 +434,7 @@ fn remote_turn_result_json_round_trips() {
         }],
     };
     let result = RemoteTurnReport {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
@@ -553,7 +555,7 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
     assert!(activity.validate().is_err());
 
     let mut result = RemoteTurnReport {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
@@ -642,7 +644,7 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
         ..summary.clone()
     };
     let result = RemoteTurnReport {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
@@ -696,7 +698,7 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
             }],
         };
         RemoteTurnReport {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             turn_id: TurnId::from("turn"),
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
@@ -789,7 +791,7 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
         assert!(activity.validate().is_err(), "activity accepted {record:?}");
 
         let result = RemoteTurnReport {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             turn_id: TurnId::from("turn"),
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
@@ -868,7 +870,7 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         .validate()
         .expect("valid ledger in activity envelope");
         RemoteTurnReport {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             turn_id: TurnId::from("turn"),
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
@@ -1021,7 +1023,7 @@ fn model_attempt_reset_has_pinned_wire_shape() {
 #[test]
 fn remote_turn_result_derives_status_from_its_outcome() {
     let mut result = RemoteTurnReport {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Stopped {
             stop: RemoteTurnStop::Cancelled {
@@ -1091,7 +1093,7 @@ fn remote_cancelled_stop_requires_and_preserves_evidence() {
 #[test]
 fn remote_turn_cancel_envelopes_round_trip() {
     let request = RemoteTurnCancelRequest {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         request_id: "request-1".to_string(),
         origin: Some("test-host".to_string()),
@@ -1193,7 +1195,7 @@ fn remote_trigger_dtos_json_round_trip() {
         deliveries: vec![RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: "process:1".to_string(),
+            process_id: ProcessId::from("process:1"),
             outcome: RemoteTriggerDeliveryEmitOutcome::Started,
         }],
     };
@@ -1285,7 +1287,7 @@ fn session_scoped_trigger_occurrence_has_pinned_wire_shape() {
 #[test]
 fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     let observation = RemoteSessionObservation {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         cursor: "lashsc2:replay-incarnation:3:7:session".to_string(),
         turn_index: 3,
         usage: RemoteUsage {
@@ -1303,7 +1305,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     assert_eq!(decoded, observation);
 
     let event = RemoteSessionObservationEvent {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         replay_incarnation_id: "replay-incarnation".to_string(),
         turn_id: None,
         revision: 3,
@@ -1325,7 +1327,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 
     let process = RemoteSessionObservationEventPayload::ProcessChanged {
         kind: RemoteSessionProcessEventKind::Cancelled,
-        process_ids: vec!["process-1".to_string()],
+        process_ids: vec![ProcessId::from("process-1".to_string())],
     };
     let value = serde_json::to_value(&process).expect("serialize process payload");
     assert!(
@@ -1345,7 +1347,7 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
 #[allow(dead_code)]
 struct Protocol41ObservationEnvelope {
     protocol_version: u32,
-    session_id: String,
+    session_id: SessionId,
     replay_incarnation_id: String,
     #[serde(default)]
     turn_id: Option<TurnId>,
@@ -1408,7 +1410,7 @@ enum Protocol41ObservationSignalShape {
     },
     ProcessChanged {
         kind: serde_json::Value,
-        process_ids: Vec<String>,
+        process_ids: Vec<ProcessId>,
     },
 }
 
@@ -1418,7 +1420,7 @@ enum Protocol41ObservationSignalShape {
 #[test]
 fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     let resident = RemoteSessionObservationEvent {
-        session_id: "resident-session".to_string(),
+        session_id: SessionId::from("resident-session"),
         replay_incarnation_id: "resident-incarnation".to_string(),
         turn_id: None,
         revision: 7,
@@ -1475,7 +1477,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
 #[allow(dead_code)]
 struct Protocol51ProcessAwaitEnvelope {
     protocol_version: u32,
-    process_id: String,
+    process_id: ProcessId,
 }
 
 #[test]
@@ -1497,7 +1499,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
     ));
 
     let current = Envelope::new(RemoteProcessAwaitRequest {
-        process_id: "process:reused".to_string(),
+        process_id: ProcessId::from("process:reused"),
         incarnation: 7,
     })
     .encode_json()
@@ -1511,7 +1513,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 fn remote_process_dtos_json_round_trip() {
     assert_eq!(REMOTE_PROTOCOL_VERSION, 57, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
-        id: "process:1".to_string(),
+        id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
             metadata: serde_json::json!({ "label": "Import" }),
         },
@@ -1538,7 +1540,7 @@ fn remote_process_dtos_json_round_trip() {
             },
         }),
         originator: RemoteProcessOriginator::Session {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             agent_frame_id: Some("frame-a".to_string()),
         },
         identity: Some(RemoteProcessIdentity {
@@ -1546,8 +1548,8 @@ fn remote_process_dtos_json_round_trip() {
             label: Some("Import".to_string()),
             definition: None,
         }),
-        wake_session_id: Some("session".to_string()),
-        observers: vec!["session".to_string()],
+        wake_session_id: Some(SessionId::from("session")),
+        observers: vec![SessionId::from("session".to_string())],
         event_types: vec![remote_process_event_type()],
     };
     start.validate().expect("valid process start request");
@@ -1583,14 +1585,14 @@ fn remote_process_dtos_json_round_trip() {
     assert_eq!(decoded.event_type, "process.completed");
 
     let snapshot = RemoteProcessWorkSnapshot {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         visible_processes: vec![RemoteProcessRef {
-            process_id: "process:1".to_string(),
+            process_id: ProcessId::from("process:1"),
             incarnation: 1,
         }],
         items: vec![RemoteProcessWorkItem {
             process: RemoteObservedProcess {
-                process_id: "process:1".to_string(),
+                process_id: ProcessId::from("process:1"),
                 incarnation: 1,
                 last_event_sequence: 1,
                 graph_key: "process:process:1:incarnation:1".to_string(),
@@ -1658,13 +1660,13 @@ fn remote_process_dtos_json_round_trip() {
     list_response.validate().expect("valid list response");
 
     let cancel = RemoteProcessCancelRequest {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
         reason: Some("requested by host".to_string()),
     };
     cancel.validate().expect("valid cancel request");
     let cancel_result = RemoteProcessCancelReceipt {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
         status: RemoteProcessStatus::Cancelled,
         record: Some(remote_process_record()),
@@ -1672,7 +1674,7 @@ fn remote_process_dtos_json_round_trip() {
     cancel_result.validate().expect("valid cancel result");
 
     let signal = RemoteProcessSignalRequest {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
@@ -1686,12 +1688,12 @@ fn remote_process_dtos_json_round_trip() {
     signal_result.validate().expect("valid signal result");
 
     let await_request = RemoteProcessAwaitRequest {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
     };
     await_request.validate().expect("valid await request");
     let await_result = RemoteProcessAwaitOutcome {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
         output: RemoteProcessAwaitOutput::Settled {
             output: RemoteProcessToolCallOutput {
@@ -1703,13 +1705,13 @@ fn remote_process_dtos_json_round_trip() {
     await_result.validate().expect("valid await result");
 
     let events_request = RemoteProcessEventsRequest {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
         after_sequence: 0,
     };
     events_request.validate().expect("valid events request");
     let events_response = RemoteProcessEventsResponse {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
         events: vec![remote_process_event()],
     };
@@ -1780,14 +1782,14 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
     let record = RemoteTriggerSubscriptionRecord {
         subscription_id: "trigger-subscription:v2:blake3:test".to_string(),
         owner_scope: RemoteTriggerOwnerScope::Session {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
         },
         subscription_key: draft.subscription_key.clone(),
         incarnation: "incarnation-a".to_string(),
         revision: 1,
         definition_fingerprint: "definition-hash-a".to_string(),
         registrant: RemoteProcessOriginator::Session {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             agent_frame_id: None,
         },
         env_ref: draft.env_ref.clone(),
@@ -2344,7 +2346,7 @@ fn remote_process_event_type() -> RemoteProcessEventType {
 
 fn remote_process_record() -> RemoteProcessRecord {
     RemoteProcessRecord {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         incarnation: 1,
         last_event_sequence: 0,
         input: RemoteProcessInput::External {
@@ -2455,25 +2457,25 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
 
 fn remote_process_event() -> RemoteProcessEvent {
     RemoteProcessEvent {
-        process_id: "process:1".to_string(),
+        process_id: ProcessId::from("process:1"),
         process_incarnation: 1,
         sequence: 1,
         event_type: "process.completed".to_string(),
         payload: serde_json::json!({ "await_output": { "type": "success", "value": true } }),
         invocation: Some(RemoteRuntimeInvocation {
             scope: RemoteRuntimeScope {
-                session_id: "session".to_string(),
+                session_id: SessionId::from("session"),
                 turn_id: Some(TurnId::from("turn")),
                 turn_index: Some(1),
                 protocol_iteration: Some(0),
             },
             subject: RemoteRuntimeSubject::ProcessEvent {
-                process_id: "process:1".to_string(),
+                process_id: ProcessId::from("process:1"),
                 sequence: 1,
                 event_type: "process.completed".to_string(),
             },
             caused_by: Some(RemoteCausalRef::Process {
-                process_id: "process:1".to_string(),
+                process_id: ProcessId::from("process:1"),
             }),
             replay: Some(RemoteRuntimeReplay {
                 key: "process:1:completed".to_string(),

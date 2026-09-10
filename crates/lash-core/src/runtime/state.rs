@@ -3,6 +3,7 @@
 //! `RuntimeSessionState` is the runtime-private mutable state shape. Public
 //! host/plugin reads use `SessionSnapshot` from the plugin API instead.
 
+use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 use lash_sansio::PromptUsage;
@@ -699,7 +700,7 @@ pub struct RuntimeSessionAuthority {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionState {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub policy: SessionPolicy,
     /// Derived cache of FrameOpen nodes; never serialized or persisted.
     #[serde(skip)]
@@ -747,7 +748,7 @@ impl RuntimeSessionState {
     /// Construct empty runtime state with an explicitly chosen session policy.
     pub fn new(policy: SessionPolicy) -> Self {
         Self {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy,
             agent_frames: Vec::new(),
             current_frame_node_id: None,
@@ -1369,7 +1370,7 @@ pub(crate) fn apply_session_checkpoint(
 /// resolver is also live-owned, but it lives outside `RuntimeSessionState`
 /// and is never touched by adoption.
 pub(crate) struct LiveOwnedSessionFacts {
-    pub(crate) session_id: Option<String>,
+    pub(crate) session_id: Option<SessionId>,
     pub(crate) turn_budget: crate::TurnBudget,
 }
 
@@ -1475,7 +1476,7 @@ pub fn append_session_nodes_to_state_with_clock(
 /// Frame open and extension apply are no longer callers of this seam. Remaining
 /// references are test helpers and witnesses, not additional production operations.
 pub fn boundary_operation(
-    session_id: &str,
+    session_id: &SessionId,
     boundary_id: &str,
     key: impl Into<String>,
 ) -> crate::OperationId {

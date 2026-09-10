@@ -45,7 +45,7 @@ pub(crate) struct BenchmarkToolCatalogObserver {
 
 struct ActiveToolCatalogObservation {
     variant: &'static str,
-    session_id: String,
+    session_id: SessionId,
     phase_probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
     observation_stage: Arc<dyn Fn() -> u8 + Send + Sync>,
     setup_recomposition_count: u64,
@@ -79,7 +79,7 @@ impl BenchmarkToolCatalogObserver {
     pub(crate) fn arm(
         &self,
         variant: &'static str,
-        session_id: String,
+        session_id: SessionId,
         phase_probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
         observation_stage: Arc<dyn Fn() -> u8 + Send + Sync>,
     ) {
@@ -97,7 +97,7 @@ impl BenchmarkToolCatalogObserver {
 
     pub(crate) fn observe_session_catalog_composition(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::PluginError> {
         if self.suppress_composition_counting.load(Ordering::SeqCst) {
             return Ok(());
@@ -349,7 +349,7 @@ fn execute_benchmark_mail_send(
     let idempotency_key = format!("{replay_key}:mail.received:{account}");
     let _phase = call.context.named_phase("trigger.occurrence_to_delivery");
     let intent = lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
-        session_id: call.context.session_id().to_string(),
+        session_id: SessionId::from(call.context.session_id()),
         request: TriggerOccurrenceRequest::new(
             BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
             source_key,

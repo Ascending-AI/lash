@@ -1539,7 +1539,11 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
     // Initial state admission plus main turn 1, its lane-less TurnPersisted
     // append, and main turn 2 each acquire once. No hidden transfer/reacquire
     // occurs at either boundary.
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 4);
+    assert_sqlite_session_lane_free_at_generation(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+        4,
+    );
     Ok(())
 }
 
@@ -1591,7 +1595,11 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
     );
     // Initial state admission and the outer turn each acquire once; the nested
     // post-commit append borrows the outer fence.
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 2);
+    assert_sqlite_session_lane_free_at_generation(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+        2,
+    );
     Ok(())
 }
 
@@ -1649,7 +1657,11 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
     );
     // The queued ingress admission and the outer queued turn each acquire
     // once; the nested post-commit append borrows that outer fence.
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 2);
+    assert_sqlite_session_lane_free_at_generation(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+        2,
+    );
     Ok(())
 }
 

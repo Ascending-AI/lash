@@ -78,10 +78,11 @@ impl SessionPlugin for MockPlugin {
         Ok(())
     }
     fn session_ready(&self, context: SessionReadyContext) -> Result<(), PluginError> {
-        self.ready_values
-            .lock_recover()
-            .insert(context.session_id.clone(), context.state.get("counter"));
-        let registered = self.handles.lock_recover()[&context.session_id].clone();
+        self.ready_values.lock_recover().insert(
+            context.session_id.clone().to_string(),
+            context.state.get("counter"),
+        );
+        let registered = self.handles.lock_recover()[context.session_id.as_str()].clone();
         assert_eq!(registered.generation(), context.state.generation());
         assert_eq!(
             registered.get("counter"),

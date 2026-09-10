@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::facade_support::ScopedEffectControllerFacadeOps;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
 
@@ -99,14 +101,14 @@ impl RecordingEffectHost {
 impl crate::AwaitEventResolver for RecordingEffectHost {
     async fn revoke_await_events_for_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         Ok(())
     }
 
     async fn cancel_await_events_for_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
         Ok(())
     }
@@ -1096,7 +1098,7 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
         .await
         .expect("await-event key");
 
-    host.revoke_await_events_for_session("await-event-session-revoke")
+    host.revoke_await_events_for_session(&SessionId::from("await-event-session-revoke"))
         .await
         .expect("revoke session");
 
@@ -1123,7 +1125,7 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
 /// refused on this lever exactly as on retirement (ADR 0049, FIG-2499).
 async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<dyn EffectHost>) {
     let suffix = uuid::Uuid::new_v4().simple();
-    let process_id = format!("await-event-reinstated-process-{suffix}");
+    let process_id = ProcessId::from(format!("await-event-reinstated-process-{suffix}"));
     let scope = ExecutionScope::process(process_id.clone());
     host.await_event_key(
         &scope,
@@ -1496,9 +1498,11 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     // (the lever is idempotent) until the waiter observes a terminal.
     let waited = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            host.cancel_await_events_for_session("await-event-session-cancel-waits")
-                .await
-                .expect("cancel session waits");
+            host.cancel_await_events_for_session(&SessionId::from(
+                "await-event-session-cancel-waits",
+            ))
+            .await
+            .expect("cancel session waits");
             if waiter.is_finished() {
                 return waiter.await;
             }
@@ -2344,7 +2348,7 @@ fn replay_conformance_tool_attempt_outcome(
             }),
             intents: crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
-                    session_id: "replay-session".to_string(),
+                    session_id: SessionId::from("replay-session"),
                     request: crate::ProcessStartRequest::external(
                         format!("{call_id}:intent-child"),
                         crate::ProcessOriginator::host_scoped("effect-host-conformance"),

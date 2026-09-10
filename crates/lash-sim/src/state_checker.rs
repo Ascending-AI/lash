@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -65,9 +66,10 @@ fn check_checkpoint_state(
             continue;
         };
         let session_id = write.attributed_session().to_string();
+        let attributed_session = SessionId::from(session_id.clone());
         let checked = sessions.entry(session_id.clone()).or_default();
-        fold_graph_append(checked, &state.submitted_graph_append, &session_id)?;
-        fold_usage_rows(checked, &state.submitted_usage_rows, &session_id)?;
+        fold_graph_append(checked, &state.submitted_graph_append, &attributed_session)?;
+        fold_usage_rows(checked, &state.submitted_usage_rows, &attributed_session)?;
         checked.checked_commits += 1;
 
         let accepted_raw = state.accepted_raw_rows.as_ref().ok_or_else(|| {
@@ -80,7 +82,7 @@ fn check_checkpoint_state(
             checked,
             accepted_raw,
             &state.submitted_turn_state,
-            &session_id,
+            &attributed_session,
         )?;
 
         let accepted_read = state.accepted_read_model.as_ref().ok_or_else(|| {
@@ -89,7 +91,7 @@ fn check_checkpoint_state(
                 write.commit_index
             )
         })?;
-        compare_read_model(checked, accepted_read, &session_id)?;
+        compare_read_model(checked, accepted_read, &SessionId::from(session_id))?;
     }
 
     // Every session the workload declared must reach the checker, checked by
@@ -122,7 +124,7 @@ fn check_checkpoint_state(
                 checked.checked_commits
             ));
         };
-        compare_runtime_facts(checked, runtime, session_id)?;
+        compare_runtime_facts(checked, runtime, &SessionId::from(session_id))?;
         runtime_facts_checked += 1;
     }
 
@@ -142,7 +144,7 @@ fn check_checkpoint_state(
 fn fold_graph_append(
     checked: &mut CheckedSession,
     append: &Value,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), String> {
     let nodes = append
         .get("nodes")
@@ -174,7 +176,7 @@ fn fold_graph_append(
 fn fold_usage_rows(
     checked: &mut CheckedSession,
     rows: &Value,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), String> {
     let rows = rows
         .as_array()
@@ -211,7 +213,7 @@ fn compare_raw_rows(
     checked: &CheckedSession,
     raw: &Value,
     submitted_turn_state: &Value,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), String> {
     let raw_nodes = raw
         .get("graph_nodes")
@@ -246,7 +248,7 @@ fn compare_raw_rows(
 fn compare_read_model(
     checked: &CheckedSession,
     read: &Value,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), String> {
     let graph_count = read
         .get("graph_node_count")
@@ -277,7 +279,7 @@ fn compare_read_model(
 fn compare_runtime_facts(
     checked: &CheckedSession,
     runtime: &DeliveredBoundary,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), String> {
     if runtime
         .observed
@@ -347,7 +349,7 @@ fn compare_runtime_facts(
 
 fn reconstruct_active_transcript(
     checked: &CheckedSession,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Vec<Value>, String> {
     let mut path = Vec::new();
     let mut cursor = checked.leaf_node_id.as_deref();
@@ -370,7 +372,7 @@ fn reconstruct_active_transcript(
         .collect())
 }
 
-fn rows_by_id(rows: &[Value], session_id: &str) -> Result<BTreeMap<String, Value>, String> {
+fn rows_by_id(rows: &[Value], session_id: &SessionId) -> Result<BTreeMap<String, Value>, String> {
     rows.iter()
         .map(|row| {
             let id = row
@@ -438,7 +440,7 @@ mod tests {
             }),
         };
 
-        let error = compare_runtime_facts(&checked, &runtime, "session-001")
+        let error = compare_runtime_facts(&checked, &runtime, &SessionId::from("session-001"))
             .expect_err("corrupted runtime usage must fail the checker");
         assert!(error.contains("usage reconstruction diverged"));
     }
@@ -623,7 +625,7 @@ mod tests {
             .expect("runtime write")
             .clone();
         promoted.schema = "lash.sim.checkpoint-write-event.v2".to_string();
-        promoted.session_id = "promoted-v2-session".to_string();
+        promoted.session_id = SessionId::from("promoted-v2-session");
         promoted.attributed_session_id = None;
         promoted.state = None;
         legacy.push(promoted.clone());

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::{ProcessObserverRegistry as _, ProcessRegistrar as _};
+use lash_sansio::SessionId;
 
 /// A transient registry failure during fork-observer publication is best
 /// effort: it does not fail session creation and the durable intent is
@@ -28,9 +29,9 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
             pending_observer_intents: vec![crate::SessionObserverIntent::fork_inherited(
                 PROCESS_ID,
             )],
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             relation: crate::SessionRelation::Fork {
-                source_session_id: "fork-observer-transient-source".to_string(),
+                source_session_id: SessionId::from("fork-observer-transient-source"),
                 source_node_id: "fork-observer-transient-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::All,
             },
@@ -46,7 +47,7 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
         .await;
     crate::runtime::reconcile_session_process_observer_intents(
         Some(&registry),
-        SESSION_ID,
+        &SessionId::from(SESSION_ID),
         crate::runtime::SessionObserverIntentSource::Persisted(store.as_ref()),
     )
     .await
@@ -56,7 +57,7 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
     assert!(
         registry
             .list_observed_by(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
                     ..Default::default()

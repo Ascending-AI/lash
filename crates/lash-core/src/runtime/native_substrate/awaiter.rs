@@ -1,3 +1,4 @@
+use crate::ProcessId;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -57,7 +58,7 @@ impl NativeProcessAwaiter {
     #[cfg(any(test, feature = "testing"))]
     pub(crate) async fn await_terminal(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<ProcessAwaitOutput, PluginError> {
         match self.registry.resolve_process_ref(process_id).await {
             Ok(process_ref) => self.await_terminal_ref(&process_ref).await,
@@ -89,7 +90,7 @@ impl NativeProcessAwaiter {
 
     pub(crate) async fn await_event(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         event_type: &str,
         after_sequence: u64,
     ) -> Result<ProcessEvent, PluginError> {
@@ -118,7 +119,11 @@ impl NativeProcessAwaiter {
         .await
     }
 
-    async fn wait_for<T, F, Fut>(&self, process_id: &str, mut check: F) -> Result<T, PluginError>
+    async fn wait_for<T, F, Fut>(
+        &self,
+        process_id: &ProcessId,
+        mut check: F,
+    ) -> Result<T, PluginError>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<Option<T>, PluginError>>,

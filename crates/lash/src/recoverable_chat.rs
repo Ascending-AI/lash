@@ -4,6 +4,7 @@
 //! terminal-replacement contract. Hosts own authorization, product events,
 //! transcript presentation, and cancellation controls.
 
+use lash_sansio::SessionId;
 use std::collections::{BTreeSet, VecDeque};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -28,7 +29,7 @@ use crate::session::{ObservableSession, SessionObservationStream, SessionObserva
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RecoverableChatEventId {
     /// Session that produced the observation event.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Replay-store incarnation that produced the observation event.
     pub replay_incarnation_id: String,
     /// Replay cursor of the observation event.
@@ -38,7 +39,7 @@ pub struct RecoverableChatEventId {
 impl RecoverableChatEventId {
     fn from_event(event: &SessionObservationEvent) -> Self {
         Self {
-            session_id: event.session_id().to_string(),
+            session_id: event.session_id(),
             replay_incarnation_id: event.replay_incarnation_id().to_string(),
             cursor: event.cursor.to_string(),
         }

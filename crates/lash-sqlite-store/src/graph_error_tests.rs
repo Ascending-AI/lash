@@ -34,7 +34,7 @@ fn sqlite_graph_generation_uniqueness_is_typed() {
             [],
         )
         .expect_err("duplicate generation must violate SQLite uniqueness");
-    let error = sqlite_graph_node_insert_error(raw, "session-a", 3, "node-b");
+    let error = sqlite_graph_node_insert_error(raw, &SessionId::from("session-a"), 3, "node-b");
     assert!(matches!(
         error,
         StoreError::GraphGenerationCollision {

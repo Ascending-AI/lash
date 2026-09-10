@@ -12,7 +12,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginSessionContext, PluginSpec, SessionPlugin,
     StaticPluginFactory,
 };
-use lash_core::{ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
+use lash_core::{ProcessId, SessionId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
 };
@@ -110,8 +110,8 @@ impl StaticToolExecute for SessionProcessAdminTools {
             })),
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::CancelProcess(
                 lash_core::CancelProcessIntent {
-                    session_id: call.context.session_id().to_string(),
-                    process_id,
+                    session_id: SessionId::from(call.context.session_id()),
+                    process_id: ProcessId::from(process_id),
                     reason: Some("cancelled by processes.cancel".to_string()),
                 },
             )]),
@@ -376,7 +376,7 @@ mod tests {
         .build_session("standard")
         .expect("standard session");
         let standard_names = standard_session
-            .resolved_tool_catalog("standard")
+            .resolved_tool_catalog(&SessionId::from("standard"))
             .expect("standard tool catalog")
             .tool_names()
             .as_ref()
@@ -393,7 +393,7 @@ mod tests {
         .build_session("rlm")
         .expect("rlm session");
         let rlm_names = rlm_session
-            .resolved_tool_catalog("rlm")
+            .resolved_tool_catalog(&SessionId::from("rlm"))
             .expect("rlm tool catalog")
             .tool_names()
             .as_ref()

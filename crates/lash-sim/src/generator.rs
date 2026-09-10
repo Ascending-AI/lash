@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -47,7 +48,7 @@ pub fn validate_workload_profile(profile: &str) -> Result<(), WorkloadProfileErr
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct GeneratedSession {
     pub alias: String,
-    pub raw_session_id: String,
+    pub raw_session_id: SessionId,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -104,7 +105,7 @@ pub fn generate_workload(
     let session_count = profile_kind.session_count(&mut rng);
     let sessions = (0..session_count)
         .map(|index| {
-            let raw_session_id = format!("generated-session-{seed}-{index}");
+            let raw_session_id = SessionId::from(format!("generated-session-{seed}-{index}"));
             let alias = aliases.alias("session", raw_session_id.clone());
             let provider_kind = runtime_provider_kind_for_session(index);
             let provider_script =
@@ -263,7 +264,7 @@ impl WorkloadProfile {
 #[derive(Clone, Debug)]
 struct SessionPlan {
     alias: String,
-    raw_session_id: String,
+    raw_session_id: SessionId,
     provider_kind: &'static str,
     provider_script: &'static str,
     provider_turns: Vec<ProviderTurnPlan>,
@@ -284,7 +285,7 @@ struct SessionPlan {
 impl SessionPlan {
     fn new(
         alias: String,
-        raw_session_id: String,
+        raw_session_id: SessionId,
         provider_kind: &'static str,
         provider_script: &'static str,
     ) -> Self {

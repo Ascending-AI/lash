@@ -6,13 +6,14 @@
 
 use super::session_store_factory::session_store_request;
 use super::*;
+use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "retained-tombstone-source",
+        &SessionId::from("retained-tombstone-source"),
         "tombstone-model",
         crate::SessionRelation::Root,
     );
@@ -58,7 +59,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
     let fork_error = factory
         .fork_at(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "retained-tombstone-fork".to_string(),
+            session_id: SessionId::from("retained-tombstone-fork"),
             node_id: leaf_node_id.clone(),
             relation: crate::SessionRelation::Root,
             policy: request.policy,
@@ -91,12 +92,12 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
 ) {
     // 1. Live sessions: scope agreement over pending turn input tombstones
     let req_a = session_store_request(
-        "vacuum-scope-live-a",
+        &SessionId::from("vacuum-scope-live-a"),
         "tombstone-model",
         crate::SessionRelation::Root,
     );
     let req_b = session_store_request(
-        "vacuum-scope-live-b",
+        &SessionId::from("vacuum-scope-live-b"),
         "tombstone-model",
         crate::SessionRelation::Root,
     );
@@ -186,12 +187,12 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
 
     // 2. Deleted sessions: scope agreement over tombstoned graph nodes
     let req_c = session_store_request(
-        "vacuum-scope-nodes-c",
+        &SessionId::from("vacuum-scope-nodes-c"),
         "tombstone-model",
         crate::SessionRelation::Root,
     );
     let req_d = session_store_request(
-        "vacuum-scope-nodes-d",
+        &SessionId::from("vacuum-scope-nodes-d"),
         "tombstone-model",
         crate::SessionRelation::Root,
     );
@@ -300,7 +301,7 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
-        "vacuum-unpin-before-delete",
+        &SessionId::from("vacuum-unpin-before-delete"),
         "tombstone-model",
         crate::SessionRelation::Root,
     );

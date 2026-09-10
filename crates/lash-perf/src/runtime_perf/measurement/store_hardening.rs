@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 const HARDENING_IDENTITY_ITERATIONS: usize = 64;
 const HARDENING_OCCURRENCE_ITERATIONS: usize = 256;
@@ -74,9 +76,9 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
     .await?;
     let postgres_factory = postgres.session_store_factory_with_shared_process_registry();
 
-    let memory_session_id = format!("perf-hardening-memory-{run_id}");
-    let sqlite_session_id = format!("perf-hardening-sqlite-{run_id}");
-    let postgres_session_id = format!("perf-hardening-postgres-{run_id}");
+    let memory_session_id = SessionId::from(format!("perf-hardening-memory-{run_id}"));
+    let sqlite_session_id = SessionId::from(format!("perf-hardening-sqlite-{run_id}"));
+    let postgres_session_id = SessionId::from(format!("perf-hardening-postgres-{run_id}"));
     let memory_store = memory_factory
         .create_store(&runtime_perf_session_create_request(&memory_session_id))
         .await?;
@@ -346,7 +348,7 @@ fn measure_hardening_identity_phases(
             for index in 0..HARDENING_IDENTITY_ITERATIONS {
                 std::hint::black_box(lash_core::runtime::process_registration_fingerprint(
                     &registration,
-                    &[format!("observer-{index}")],
+                    &[SessionId::from(format!("observer-{index}"))],
                 ));
             }
             Ok(())
@@ -387,7 +389,7 @@ fn measure_hardening_identity_phases(
 
 async fn measure_store_hardening_backend_turn(
     store: &Arc<dyn lash_core::RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     owner: &lash_core::LeaseOwnerIdentity,
     turn_index: usize,
     names: StoreHardeningPhaseNames,
@@ -455,7 +457,7 @@ async fn measure_store_hardening_backend_turn(
     let (_, phase) = measure_runtime_perf_phase(names.attachment_intent, || {
         Ok(store.record_intent(AttachmentIntent {
             attachment_id: attachment_id.clone(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             canonical_uri: format!("sha256:{attachment_id}"),
             intent_at_epoch_ms: turn_index as u64 + 1,
             owner_kind: Some(AttachmentOwnerKind::Turn),
@@ -530,7 +532,9 @@ async fn measure_process_prune(
 ) -> anyhow::Result<()> {
     let prune_scope = format!("perf-prune:{run_id}:{turn_index}");
     for index in 0..HARDENING_PRUNE_BATCH {
-        let process_id = format!("perf-prune-{backend}-{run_id}-{turn_index}-{index}");
+        let process_id = ProcessId::from(format!(
+            "perf-prune-{backend}-{run_id}-{turn_index}-{index}"
+        ));
         registry
             .register_process(lash_core::ProcessRegistration::new(
                 &process_id,
@@ -580,13 +584,13 @@ async fn measure_process_prune(
 
 async fn load_store_hardening_state(
     store: &Arc<dyn lash_core::RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> anyhow::Result<RuntimeSessionState> {
     Ok(
         lash::persistence::load_persisted_session_state(store.as_ref())
             .await?
             .unwrap_or_else(|| RuntimeSessionState {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                 ))
@@ -595,11 +599,11 @@ async fn load_store_hardening_state(
 }
 
 pub(super) fn runtime_perf_session_create_request(
-    session_id: &str,
+    session_id: &SessionId,
 ) -> lash_core::SessionStoreCreateRequest {
     lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     }
@@ -644,7 +648,7 @@ mod store_hardening_tests {
             .expect("register unrelated process");
         registry
             .complete_process(
-                unrelated_process_id,
+                &ProcessId::from(unrelated_process_id),
                 lash_core::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::json!({})),
                 ),
