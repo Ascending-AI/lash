@@ -838,7 +838,7 @@ fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
 }
 
 impl LashRuntime {
-    fn last_committed_turn_id_for_revision(&self, revision: SessionRevision) -> Option<&str> {
+    fn last_committed_turn_id_for_revision(&self, revision: SessionRevision) -> Option<&TurnId> {
         self.resident_session
             .last_committed_turn_id_for_revision(revision.as_u64())
     }

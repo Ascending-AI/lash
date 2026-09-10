@@ -969,7 +969,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         (
                             record.committed_at_ms,
                             crate::TurnFailureSettlement {
-                                turn_id: TurnId::from(turn_id.clone()),
+                                turn_id: turn_id.clone(),
                                 evidence: record.result.failure_evidence.clone(),
                             },
                         )

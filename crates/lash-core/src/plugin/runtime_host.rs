@@ -247,7 +247,7 @@ impl<'run> SessionTurnRequest<'run> {
         &self.turn.session_id
     }
 
-    pub fn turn_id(&self) -> &str {
+    pub fn turn_id(&self) -> &TurnId {
         &self.turn.turn_id
     }
 

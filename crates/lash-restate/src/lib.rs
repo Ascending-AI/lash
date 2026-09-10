@@ -8,6 +8,7 @@
 //! not Lash checkpoint reload.
 //!
 //! ```rust,ignore
+//! use lash_core::TurnId;
 //! use lash_restate::RestateRuntimeEffectController;
 //! use restate_sdk::prelude::*;
 //!

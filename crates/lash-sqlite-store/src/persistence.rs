@@ -35,7 +35,8 @@ pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, resu
      ORDER BY committed_at_ms, turn_id";
 
 struct CorruptTurnFailureReceipt {
-    turn_id: TurnId,
+    /// Operation storage key of the corrupt receipt, not a turn identity.
+    turn_id: String,
     error: String,
 }
 
@@ -65,7 +66,6 @@ fn load_turn_failure_settlements_conn(
     let mut corrupt_rows = Vec::new();
     for row in rows {
         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-        let turn_id = TurnId::from(turn_id);
         let receipt: lash_core::store::RuntimeCommitReceipt =
             match serde_json::from_str(&result_json) {
                 Ok(receipt) => receipt,

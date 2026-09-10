@@ -500,7 +500,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .map_err(store_sqlx_error)?;
         let mut turn_failure_settlements = Vec::new();
         for row in turn_failure_rows {
-            let turn_id = TurnId::from(row.get::<String, _>("turn_id"));
+            let turn_id = row.get::<String, _>("turn_id");
             let result_json = row.get::<String, _>("result_json");
             let receipt: RuntimeCommitReceipt = match serde_json::from_str(&result_json) {
                 Ok(receipt) => receipt,
@@ -2749,7 +2749,7 @@ impl TurnInputStore for PostgresSessionStore {
         .map_err(store_sqlx_error)?;
         let mut commits = Vec::with_capacity(rows.len());
         for row in rows {
-            let turn_id = TurnId::from(row.get::<String, _>(0));
+            let turn_id = row.get::<String, _>(0);
             let result_json: String = row.get(1);
             let result: RuntimeCommitReceipt =
                 store_decode_json(&result_json, "runtime turn commit result")?;

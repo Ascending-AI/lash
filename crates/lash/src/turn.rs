@@ -272,8 +272,8 @@ impl TurnBuilder {
     /// Hosts must keep this id unique within the session. Reusing it addresses
     /// the same trace, effects, and cancellation promises as the earlier turn;
     /// Lash does not mint or check uniqueness for host-supplied ids.
-    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
-        self.turn_id = Some(TurnId::from(id.into()));
+    pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
+        self.turn_id = Some(id.into());
         self
     }
 
@@ -678,8 +678,8 @@ impl QueuedTurnBuilder {
     /// Do not combine this with [`Self::drain_id`]: keep `turn_id` for a
     /// host-minted physical turn identity, or use `drain_id` as the durable
     /// idempotency key for retried drains.
-    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
-        self.turn_id = Some(TurnId::from(id.into()));
+    pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
+        self.turn_id = Some(id.into());
         self
     }
 
@@ -903,7 +903,7 @@ impl SelectedQueuedTurnBuilder {
     ///
     /// Mutually exclusive with [`Self::drain_id`]. See
     /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
-    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
+    pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
         self.builder = self.builder.turn_id(id);
         self
     }
