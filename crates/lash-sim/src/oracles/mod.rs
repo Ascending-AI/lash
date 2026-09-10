@@ -15,6 +15,7 @@ use crate::runtime_contracts::RuntimeGraphInvariantFacts;
 use crate::runtime_contracts::{RuntimeAgentFrameInvariantFacts, RuntimeUsageInvariantFacts};
 use crate::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS;
 use crate::scheduler::{BoundaryKind, DeliveredBoundary};
+use crate::store::CheckpointWriteEvent;
 use crate::trace::{AbstractWorldSummary, OracleVerdict, WorkloadExpectations};
 
 pub const CROSS_SESSION_ISOLATION_ORACLE: &str = "sim.oracle.cross-session-isolation.v1";
@@ -170,3 +171,59 @@ pub use semantic_laws::{
     runtime_provider_turn,
 };
 use standard_contracts::*;
+
+/// Evaluate every generated-workload oracle whose evidence is carried by a
+/// [`SimulationTrace`](crate::trace::SimulationTrace).
+///
+/// The live-provider failure coverage oracle is intentionally absent: its live
+/// turn facts are not serialized into the trace, so minimization can carry its
+/// recorded verdict but cannot re-evaluate it after a shrink. Keeping the
+/// remaining battery here makes the runner and minimizer share one ordering and
+/// one definition instead of maintaining parallel lists.
+pub fn generated_trace_oracles(
+    events: &[DeliveredBoundary],
+    summary: &AbstractWorldSummary,
+    durable_writes: &[CheckpointWriteEvent],
+    expectations: &WorkloadExpectations,
+) -> Vec<OracleVerdict> {
+    let mut oracles = vec![
+        scheduler_controlled_delivery(events),
+        scheduler_owned_runtime_completions(events),
+        state_machine_semantic_invariants(events, summary),
+        operational_coverage(events, summary),
+        ingress_sessions_opened(summary, expectations),
+        queued_ingress_observed(summary, events),
+        cancellation_observed(summary, events),
+        trigger_delivery_observed(summary, events),
+        observer_reconnect_observed(summary, events),
+        backend_failure_observed(summary, events),
+        provider_mutation_rejected(summary, events),
+        provider_transport_mutation_classified(events, expectations),
+        generated_runtime_provider_matrix(events),
+        provider_turn_interleaving_depth(events, expectations),
+        process_wake_observed(summary, events),
+        process_wake_at_most_once(events),
+        process_never_double_started(events),
+        abandoned_requires_evidence(events),
+        tool_boundary_observed(summary, events),
+        exec_code_observed(summary, events),
+        cross_session_isolation(summary),
+        observer_convergence(summary, expectations),
+        runtime_session_graph_contract(summary, expectations),
+        runtime_graph_acyclic(durable_writes),
+        runtime_single_active_agent_frame(events),
+        runtime_usage_monotonic(events),
+        crate::usage_oracle::checkpoint_usage_conservation(durable_writes),
+        durable_effect_exactly_once(summary),
+        worker_stale_completion_rejected(summary),
+        worker_failover_continues_work(events),
+        healthy_long_turn_liveness(events),
+        lease_time_monotonic(events, expectations),
+        generated_suspend_resume(events),
+        generated_final_value_semantic_channel(events, expectations),
+        crate::state_checker::checkpoint_state_consistency(events, durable_writes, expectations),
+    ];
+    oracles.extend(scenario_contract_mini_oracles(events, summary));
+    oracles.extend(scenario_contract_oracles(events, summary));
+    oracles
+}
