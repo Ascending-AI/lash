@@ -479,7 +479,7 @@ where
     tracing::debug!(
         target: "lash::restate",
         event = "restate.turn_cancel_deferred",
-        session_id = %session_id,
+        session_id = session_id.as_str(),
         "after-step stop observed by a parked durable wait; composing to the step boundary"
     );
     let escalation_key =

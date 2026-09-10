@@ -27,7 +27,7 @@ pub(super) fn trace_commit_busy_advisory(session_id: &SessionId, holder: &Sessio
         crate::stable_hash::sha256_hex(holder.owner.incarnation_id.as_bytes());
     let holder_executor_id_sha256 = crate::stable_hash::sha256_hex(holder.executor_id.as_bytes());
     tracing::info!(
-        session_id = %session_id,
+        session_id = session_id.as_str(),
         holder_owner_id_sha256,
         holder_incarnation_id_sha256,
         holder_executor_id_sha256,
@@ -92,7 +92,7 @@ pub(in crate::runtime) fn trace_commit_cas_rejected(
         evidence.executor_id.as_str()
     });
     tracing::warn!(
-        session_id = %session_id,
+        session_id = session_id.as_str(),
         fencing_token = evidence.map(|evidence| evidence.fencing_token),
         owner_id = %owner.owner_id,
         incarnation_id = %owner.incarnation_id,
@@ -115,7 +115,7 @@ pub(crate) fn trace_busy(
     holder: &SessionExecutionLease,
 ) {
     tracing::debug!(
-        session_id = %session_id,
+        session_id = session_id.as_str(),
         claimant_owner_id = %claimant.owner_id,
         claimant_incarnation_id = %claimant.incarnation_id,
         claimant_executor_id,

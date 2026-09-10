@@ -326,7 +326,7 @@ pub(super) fn record_product_commit_admission(
 ) {
     tracing::debug!(
         path,
-        session_id = %session_id,
+        session_id = session_id.as_str(),
         work_identity,
         waited_nanos = waited.as_nanos().min(u128::from(u64::MAX)) as u64,
         queue_depth = queue_depth as u64,

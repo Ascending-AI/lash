@@ -597,7 +597,7 @@ where
                         )))
                     })?;
                     tracing::debug!(
-                        process_id = %process_id,
+                        process_id = process_id.as_str(),
                         segment_ordinal = input.segment_ordinal,
                         latest_segment_ordinal = latest.segment_ordinal,
                         "ignoring retried superseded process segment"
@@ -615,7 +615,7 @@ where
         };
         if input.segment_ordinal == 0 && input.execution_id.is_some() {
             tracing::warn!(
-                process_id = %process_id,
+                process_id = process_id.as_str(),
                 presented_execution_id = input.execution_id.as_deref(),
                 invocation_id = %ctx.invocation_id(),
                 verdict = "ignored",

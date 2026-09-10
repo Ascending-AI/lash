@@ -165,7 +165,7 @@ impl<C: SettlementRows> ClaimSettlement<C> {
             target: "lash_core::claim_settlement",
             event = "claim_settlement.recovered_row_dropped",
             decision_basis = "superseded_recovered_claim",
-            session_id = %session_id,
+            session_id = session_id.as_str(),
             row_kind = C::ROW_KIND,
             row_id,
             stale_claim_id = claim_id,

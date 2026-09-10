@@ -443,7 +443,7 @@ impl LashRuntime {
             let registered = registry.len();
             let Some(handle) = registry.remove(session_id) else {
                 tracing::debug!(
-                    session_id = %session_id,
+                    session_id = session_id.as_str(),
                     managed_sessions = registered,
                     consulted = "managed_session_registry",
                     outcome = "unknown_session",
@@ -461,7 +461,7 @@ impl LashRuntime {
             match handle.try_into_runtime() {
                 Ok(child) => {
                     tracing::debug!(
-                        session_id = %session_id,
+                        session_id = session_id.as_str(),
                         managed_sessions = registered,
                         runtime_references,
                         consulted = "managed_session_handle_references",
@@ -475,7 +475,7 @@ impl LashRuntime {
                     let runtime_references_on_refusal = handle.runtime_reference_count();
                     registry.insert(SessionId::from(session_id.to_string()), handle);
                     tracing::debug!(
-                        session_id = %session_id,
+                        session_id = session_id.as_str(),
                         managed_sessions = registered,
                         runtime_references,
                         runtime_references_on_refusal,

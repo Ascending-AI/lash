@@ -297,7 +297,7 @@ impl ManagedTurnLease {
                 holder_registration,
             } => {
                 tracing::debug!(
-                    session_id = %session_id,
+                    session_id = session_id.as_str(),
                     turn_id = %turn_id,
                     registered_turns,
                     holder_session_id = %holder_session_id,
@@ -316,7 +316,7 @@ impl ManagedTurnLease {
                 holder_registration,
             } => {
                 tracing::debug!(
-                    session_id = %session_id,
+                    session_id = session_id.as_str(),
                     turn_id = %turn_id,
                     registered_turns,
                     holder_turn_id = %holder_turn_id,
@@ -334,7 +334,7 @@ impl ManagedTurnLease {
                 limit,
             } => {
                 tracing::debug!(
-                    session_id = %session_id,
+                    session_id = session_id.as_str(),
                     turn_id = %turn_id,
                     registered_turns,
                     limit,
@@ -350,7 +350,7 @@ impl ManagedTurnLease {
                 )));
             }
             ManagedTurnAdmission::Admitted { registered_turns } => tracing::debug!(
-                session_id = %session_id,
+                session_id = session_id.as_str(),
                 turn_id = %turn_id,
                 registration,
                 registered_turns,

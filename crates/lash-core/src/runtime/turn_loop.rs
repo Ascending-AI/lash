@@ -532,7 +532,7 @@ async fn publish_terminal_after_commit(
     if let Err(err) = turn_control.publish_terminal(resolver, terminal).await {
         tracing::warn!(
             error = %err,
-            session_id = %session_id,
+            session_id = session_id.as_str(),
             turn_id = turn_id.as_str(),
             "turn committed but terminal publication failed"
         );

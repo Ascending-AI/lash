@@ -1509,7 +1509,7 @@ async fn delete_session_from_catalog(
                 }
             }
             tracing::debug!(
-                session_id = %session_id,
+                session_id = session_id.as_str(),
                 enumerated_blob_count = report.enumerated_blob_count,
                 retained_blob_count = report.retained_blob_count,
                 deleted_blob_count = report.deleted_blob_count,

@@ -119,7 +119,7 @@ impl ManagedSessionCapability {
         };
         if let Some((turn_id, registration, registered_turns)) = running_turn {
             tracing::debug!(
-                session_id = %session_id,
+                session_id = session_id.as_str(),
                 registered_turns,
                 holder_turn_id = %turn_id,
                 holder_registration = registration,

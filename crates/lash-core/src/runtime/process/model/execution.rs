@@ -179,8 +179,8 @@ impl ProcessExecutionWriteAuthority {
             execution_id,
         );
         tracing::warn!(
-            process_id = %process_id,
-            presented_process_id = %authority_process_id,
+            process_id = process_id.as_str(),
+            presented_process_id = authority_process_id.as_str(),
             presented_owner_id = presented_owner.owner_id,
             presented_invocation_id = execution_id,
             presented_attempt = ?attempt,
