@@ -84,6 +84,7 @@ run_release_script_tests() {
   python3 scripts/test_check_version_bump_fixtures.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
+  bash scripts/test-ci-reclaim-disk.sh
 }
 
 # Path-scoped gate selection. `scripts/gate_scope.py` maps this branch's
