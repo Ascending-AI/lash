@@ -14,7 +14,7 @@ use axum::response::Response;
 use bytes::Bytes;
 use lash::observe::SessionCursor;
 use lash::rlm::RlmTurnBuilderExt as _;
-use lash::{TurnInput, TurnOutput};
+use lash::{TurnId, TurnInput, TurnOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -99,7 +99,7 @@ pub(crate) async fn send_message_restate(
     user_message: ChatMessage,
     model_selection: ChatModelSelection,
 ) -> AppResult<Response> {
-    let turn_id = uuid::Uuid::new_v4().to_string();
+    let turn_id = TurnId::from(uuid::Uuid::new_v4().to_string());
     state
         .with_db({
             let turn_id = turn_id.clone();
@@ -236,7 +236,7 @@ async fn stream_turn_outbox(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
-        .header("x-lash-turn-id", &turn_id)
+        .header("x-lash-turn-id", turn_id.as_str())
         .body(Body::from_stream(ReceiverStream::new(rx)))
         .expect("valid streaming response"))
 }
@@ -379,12 +379,13 @@ mod restate_tests {
         let message = db
             .insert_message(&chat.id, "assistant", "before done")
             .expect("create message");
-        db.insert_turn_event("turn-1", &StreamItem::Message { message })
+        let turn_id = TurnId::from("turn-1");
+        db.insert_turn_event(&turn_id, &StreamItem::Message { message })
             .expect("insert message event");
-        db.insert_turn_event("turn-1", &StreamItem::Done)
+        db.insert_turn_event(&turn_id, &StreamItem::Done)
             .expect("insert done event");
         db.insert_turn_event(
-            "turn-1",
+            &turn_id,
             &StreamItem::Error {
                 message: "after done".to_string(),
             },
@@ -392,7 +393,7 @@ mod restate_tests {
         .expect("insert trailing event");
 
         let events = db
-            .list_turn_events_after("turn-1", 0)
+            .list_turn_events_after(&turn_id, 0)
             .expect("list turn events");
         let mut resumed = Vec::new();
         for event in events {
