@@ -31,6 +31,26 @@ use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::time::Duration;
 use tokio_rusqlite::Connection as AsyncConnection;
 
+// Fault points are syntax declarations in the transaction code. With the
+// `testing` feature disabled, the invocation and all of its arguments expand
+// to nothing, so production transactions carry no injector branch or state.
+#[cfg(feature = "testing")]
+macro_rules! sim_fault {
+    ($injector:expr, $point:ident, $write_transaction_ordinal:expr) => {
+        if let Some(injector) = $injector.as_ref() {
+            injector.inject(
+                crate::testing::SqliteFaultPoint::$point,
+                $write_transaction_ordinal,
+            )?;
+        }
+    };
+}
+
+#[cfg(not(feature = "testing"))]
+macro_rules! sim_fault {
+    ($($ignored:tt)*) => {};
+}
+
 /// Outcome a write flow returns to decide commit vs rollback while still
 /// handing a value back to the caller. Used for paths that compute a result
 /// *and* may discover mid-transaction that the work must not be persisted
@@ -325,25 +345,10 @@ impl SqliteConnection {
                     let write_transaction_ordinal = fault_injector
                         .as_ref()
                         .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
-                    #[cfg(feature = "testing")]
-                    if let Some(injector) = fault_injector.as_ref() {
-                        injector.inject(
-                            crate::testing::SqliteFaultPoint::AfterBegin,
-                            write_transaction_ordinal,
-                        )?;
-                    }
+                    sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
                     let value = f(&tx)?;
-                    #[cfg(feature = "testing")]
-                    if let Some(injector) = fault_injector.as_ref() {
-                        injector.inject(
-                            crate::testing::SqliteFaultPoint::BeforeCommit,
-                            write_transaction_ordinal,
-                        )?;
-                        injector.inject(
-                            crate::testing::SqliteFaultPoint::CommitIo,
-                            write_transaction_ordinal,
-                        )?;
-                    }
+                    sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
+                    sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
                     tx.commit()?;
                     Ok(Ok(value))
                 })
@@ -370,27 +375,12 @@ impl SqliteConnection {
                     let write_transaction_ordinal = fault_injector
                         .as_ref()
                         .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
-                    #[cfg(feature = "testing")]
-                    if let Some(injector) = fault_injector.as_ref() {
-                        injector.inject(
-                            crate::testing::SqliteFaultPoint::AfterBegin,
-                            write_transaction_ordinal,
-                        )?;
-                    }
+                    sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
                     let outcome = f(&tx)?;
                     let value = match outcome {
                         TxOutcome::Commit(value) => {
-                            #[cfg(feature = "testing")]
-                            if let Some(injector) = fault_injector.as_ref() {
-                                injector.inject(
-                                    crate::testing::SqliteFaultPoint::BeforeCommit,
-                                    write_transaction_ordinal,
-                                )?;
-                                injector.inject(
-                                    crate::testing::SqliteFaultPoint::CommitIo,
-                                    write_transaction_ordinal,
-                                )?;
-                            }
+                            sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
+                            sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
                             tx.commit()?;
                             value
                         }

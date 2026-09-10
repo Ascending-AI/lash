@@ -4,6 +4,7 @@
 //! factories have no injector, and production builds do not compile the hook.
 
 use lash_sansio::sync::{LockResultExt, MutexExt};
+use std::num::NonZeroU64;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
@@ -20,18 +21,54 @@ pub enum SqliteFaultPoint {
     CommitIo,
 }
 
+impl SqliteFaultPoint {
+    const fn index(self) -> usize {
+        match self {
+            Self::AfterBegin => 0,
+            Self::BeforeCommit => 1,
+            Self::CommitIo => 2,
+        }
+    }
+}
+
+/// One deterministic arm in a SQLite fault plan.
+///
+/// `occurrence` is one-based and counts only transactions that actually reach
+/// `point` after the plan is armed. An earlier fault can therefore prevent a
+/// later point from advancing until the next transaction attempt.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SqliteFaultArm {
+    pub seed: u64,
+    pub point: SqliteFaultPoint,
+    pub occurrence: NonZeroU64,
+}
+
+impl SqliteFaultArm {
+    pub const fn new(seed: u64, point: SqliteFaultPoint, occurrence: NonZeroU64) -> Self {
+        Self {
+            seed,
+            point,
+            occurrence,
+        }
+    }
+}
+
 /// Evidence that an armed fault reached the real SQLite transaction seam.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SqliteFaultObservation {
+    /// Zero-based position of this arm in the plan installed by `arm_many`.
+    pub arm_index: usize,
     pub seed: u64,
     pub point: SqliteFaultPoint,
+    /// One-based occurrence of `point` reached since the plan was armed.
+    pub point_occurrence: u64,
     pub write_transaction_ordinal: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct ArmedFault {
-    seed: u64,
-    point: SqliteFaultPoint,
+    arm_index: usize,
+    arm: SqliteFaultArm,
 }
 
 #[derive(Clone, Debug)]
@@ -87,25 +124,57 @@ impl SqliteTransactionPause {
 
 #[derive(Debug, Default)]
 struct InjectorState {
-    armed: Option<ArmedFault>,
+    armed: Vec<ArmedFault>,
+    point_occurrences: [u64; 3],
     pause: Option<ArmedPause>,
     write_transaction_ordinal: u64,
     observations: Vec<SqliteFaultObservation>,
 }
 
-/// Per-factory, one-shot deterministic fault controller.
+/// Per-factory deterministic fault controller.
 ///
-/// Arming replaces any unconsumed fault. A matching transaction consumes the
-/// fault exactly once and records its transaction ordinal for reproduction.
+/// Arming replaces every unconsumed arm. Each arm identifies a fault point and
+/// one reached occurrence, is consumed at most once, and records its plan
+/// position plus transaction ordinal for reproduction.
 #[derive(Clone, Debug, Default)]
 pub struct SqliteFaultInjector {
     state: Arc<Mutex<InjectorState>>,
 }
 
 impl SqliteFaultInjector {
-    /// Arm one seed-selected fault point.
+    /// Arm one seed-selected fault point at its next reached occurrence.
+    ///
+    /// This preserves the original replacement behavior: any unconsumed
+    /// single or multi-arm plan is discarded.
     pub fn arm(&self, seed: u64, point: SqliteFaultPoint) {
-        self.lock_state().armed = Some(ArmedFault { seed, point });
+        self.arm_many([SqliteFaultArm::new(
+            seed,
+            point,
+            NonZeroU64::new(1).expect("one is non-zero"),
+        )]);
+    }
+
+    /// Replace the current plan with multiple deterministic one-shot arms.
+    ///
+    /// Occurrence counters start when this method is called. Observations retain
+    /// each arm's original plan position; their vector order follows execution.
+    pub fn arm_many(&self, arms: impl IntoIterator<Item = SqliteFaultArm>) {
+        let mut state = self.lock_state();
+        state.armed = arms
+            .into_iter()
+            .enumerate()
+            .map(|(arm_index, arm)| ArmedFault { arm_index, arm })
+            .collect();
+        state.point_occurrences = [0; 3];
+    }
+
+    /// Return the unconsumed arms in their original plan order.
+    pub fn remaining_arms(&self) -> Vec<SqliteFaultArm> {
+        self.lock_state()
+            .armed
+            .iter()
+            .map(|armed| armed.arm)
+            .collect()
     }
 
     /// Return all injection observations recorded so far.
@@ -166,16 +235,22 @@ impl SqliteFaultInjector {
             }
         }
         let mut state = self.lock_state();
-        let Some(armed) = state.armed else {
+        let point_occurrence = {
+            let occurrence = &mut state.point_occurrences[point.index()];
+            *occurrence += 1;
+            *occurrence
+        };
+        let Some(position) = state.armed.iter().position(|armed| {
+            armed.arm.point == point && armed.arm.occurrence.get() == point_occurrence
+        }) else {
             return Ok(());
         };
-        if armed.point != point {
-            return Ok(());
-        }
-        state.armed = None;
+        let armed = state.armed.remove(position);
         state.observations.push(SqliteFaultObservation {
-            seed: armed.seed,
+            arm_index: armed.arm_index,
+            seed: armed.arm.seed,
             point,
+            point_occurrence,
             write_transaction_ordinal,
         });
         let code = match point {
@@ -188,12 +263,103 @@ impl SqliteFaultInjector {
             rusqlite::ffi::Error::new(code),
             Some(format!(
                 "injected SQLite {point:?} fault for seed {} at write transaction {write_transaction_ordinal}",
-                armed.seed
+                armed.arm.seed
             )),
         ))
     }
 
     fn lock_state(&self) -> MutexGuard<'_, InjectorState> {
         self.state.lock_recover()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU64;
+
+    use super::*;
+
+    fn arm(seed: u64, point: SqliteFaultPoint, occurrence: u64) -> SqliteFaultArm {
+        SqliteFaultArm::new(
+            seed,
+            point,
+            NonZeroU64::new(occurrence).expect("non-zero occurrence"),
+        )
+    }
+
+    #[test]
+    fn multiple_arms_fire_once_in_reached_point_order() {
+        let injector = SqliteFaultInjector::default();
+        injector.arm_many([
+            arm(11, SqliteFaultPoint::AfterBegin, 1),
+            arm(22, SqliteFaultPoint::CommitIo, 1),
+        ]);
+
+        let first = injector.begin_write();
+        assert!(
+            injector
+                .inject(SqliteFaultPoint::AfterBegin, first)
+                .is_err()
+        );
+        // The abort above prevents this transaction from reaching CommitIo.
+        let second = injector.begin_write();
+        injector
+            .inject(SqliteFaultPoint::AfterBegin, second)
+            .expect("the first arm was consumed");
+        injector
+            .inject(SqliteFaultPoint::BeforeCommit, second)
+            .expect("no before-commit arm");
+        assert!(injector.inject(SqliteFaultPoint::CommitIo, second).is_err());
+
+        let third = injector.begin_write();
+        for point in [
+            SqliteFaultPoint::AfterBegin,
+            SqliteFaultPoint::BeforeCommit,
+            SqliteFaultPoint::CommitIo,
+        ] {
+            injector
+                .inject(point, third)
+                .expect("each arm is consumed at most once");
+        }
+
+        let observations = injector.observations();
+        assert_eq!(observations.len(), 2);
+        assert_eq!(observations[0].arm_index, 0);
+        assert_eq!(observations[0].point, SqliteFaultPoint::AfterBegin);
+        assert_eq!(observations[0].point_occurrence, 1);
+        assert_eq!(observations[1].arm_index, 1);
+        assert_eq!(observations[1].point, SqliteFaultPoint::CommitIo);
+        assert_eq!(observations[1].point_occurrence, 1);
+        assert!(injector.remaining_arms().is_empty());
+    }
+
+    #[test]
+    fn arm_replaces_an_unconsumed_multi_arm_plan() {
+        let injector = SqliteFaultInjector::default();
+        injector.arm_many([
+            arm(11, SqliteFaultPoint::AfterBegin, 1),
+            arm(22, SqliteFaultPoint::CommitIo, 1),
+        ]);
+        injector.arm(33, SqliteFaultPoint::BeforeCommit);
+
+        let ordinal = injector.begin_write();
+        injector
+            .inject(SqliteFaultPoint::AfterBegin, ordinal)
+            .expect("the replaced arm must not fire");
+        assert!(
+            injector
+                .inject(SqliteFaultPoint::BeforeCommit, ordinal)
+                .is_err()
+        );
+        assert_eq!(
+            injector.observations(),
+            vec![SqliteFaultObservation {
+                arm_index: 0,
+                seed: 33,
+                point: SqliteFaultPoint::BeforeCommit,
+                point_occurrence: 1,
+                write_transaction_ordinal: ordinal,
+            }]
+        );
     }
 }
