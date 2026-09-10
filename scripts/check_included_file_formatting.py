@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Format-check the files that `include!` pulls in.
+"""Format or check the files that `include!` pulls in.
 
 `cargo fmt` walks modules, and an `include!`d file is not a module: it is text
 spliced into whichever file names it. Those files are invisible to
@@ -55,7 +55,9 @@ def included_files(roots: list[Path]) -> list[Path]:
 
 def main() -> int:
     root = repo_root()
-    scopes = sys.argv[1:] or list(DEFAULT_SCOPES)
+    args = sys.argv[1:]
+    fix = "--fix" in args
+    scopes = [arg for arg in args if arg != "--fix"] or list(DEFAULT_SCOPES)
     roots = [root / scope for scope in scopes]
     missing = [str(path) for path in roots if not path.exists()]
     if missing:
@@ -68,8 +70,12 @@ def main() -> int:
 
     failures: list[str] = []
     for target in targets:
+        command = ["rustfmt", "--edition", "2024"]
+        if not fix:
+            command.append("--check")
+        command.append(str(target))
         result = subprocess.run(
-            ["rustfmt", "--edition", "2024", "--check", str(target)],
+            command,
             capture_output=True,
             text=True,
         )
@@ -87,7 +93,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"include!d file formatting: ok ({len(targets)} files)")
+    if fix:
+        print(f"include!d files formatted ({len(targets)} files)")
+    else:
+        print(f"include!d file formatting: ok ({len(targets)} files)")
     return 0
 
 

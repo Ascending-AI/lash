@@ -27,6 +27,13 @@ kept releasable.
 4. Keep the branch current and merge only after required CI is green.
 5. Delete the branch after merge.
 
+Install the repository's commit hook in each regular checkout with
+`prek install --hook-type pre-commit`; new warm forks install it automatically.
+The hook formats Rust source, including the enrolled `include!` files. When it
+changes a file, the commit stops so you can review the result, stage the files
+you intend to commit, and retry. The hook never runs `git add`, so it cannot
+silently include unrelated or partially staged changes.
+
 Keep local validation proportional to the change:
 
 - Run cheap formatting and static checks relevant to the files you changed.
