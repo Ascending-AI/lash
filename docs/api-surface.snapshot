@@ -8489,6 +8489,7 @@ lash::runtime::RuntimeErrorCode::SessionCommandPostDriveRefresh
 lash::runtime::RuntimeErrorCode::SessionCommandRefresh
 lash::runtime::RuntimeErrorCode::SessionCommandRefreshTools
 lash::runtime::RuntimeErrorCode::SessionDeleteScopeMismatch
+lash::runtime::RuntimeErrorCode::SessionDeleted
 lash::runtime::RuntimeErrorCode::SessionExecutionLaneBusy
 lash::runtime::RuntimeErrorCode::SessionExecutionLeaseLost
 lash::runtime::RuntimeErrorCode::SessionHeadRefresh
@@ -8511,6 +8512,7 @@ lash::runtime::RuntimeErrorCode::StoreCommitByteBudgetExceeded
 lash::runtime::RuntimeErrorCode::StoreCommitContended
 lash::runtime::RuntimeErrorCode::StoreCommitFailed
 lash::runtime::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+lash::runtime::RuntimeErrorCode::StoreCommitSuperseded
 lash::runtime::RuntimeErrorCode::ToolBatchMissingResult
 lash::runtime::RuntimeErrorCode::ToolBatchResultCountMismatch
 lash::runtime::RuntimeErrorCode::ToolCatalogResolutionFailed

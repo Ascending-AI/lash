@@ -42,6 +42,16 @@ pub enum RuntimeErrorCode {
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
     StoreCommitContended,
+    /// The final runtime commit lost the session-head compare-and-swap to a
+    /// newer commit. Nothing from the losing commit was published, but the
+    /// identical stale commit is not safe to retry: reload the durable head and
+    /// re-establish current lease and claim authority before building new work
+    /// (ADR 0029).
+    StoreCommitSuperseded,
+    /// The session was deleted before its final runtime commit could publish.
+    /// The session id is also retained in [`RuntimeErrorCause::SessionDeleted`]
+    /// so hosts need not recover structured identity from display text.
+    SessionDeleted,
     /// The final runtime commit writes more graph and attachment-adoption rows
     /// than the shared node budget permits. The same turn will fail identically
     /// until the host produces a smaller turn.
@@ -290,12 +300,25 @@ pub enum RuntimeErrorCode {
     ForeignCode(String),
 }
 
-pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
+pub(crate) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
         crate::store::StoreError::Contended => RuntimeError::new(
             RuntimeErrorCode::StoreCommitContended,
             "store commit is contended; retry the identical operation unchanged",
         ),
+        err @ crate::store::StoreError::HeadRevisionConflict { .. } => RuntimeError::new(
+            RuntimeErrorCode::StoreCommitSuperseded,
+            format!(
+                "{err}; reload the durable head and re-establish lease and claim authority before retrying"
+            ),
+        ),
+        ref err @ crate::store::StoreError::SessionDeleted { ref session_id } => {
+            RuntimeError::new(RuntimeErrorCode::SessionDeleted, err.to_string()).with_cause(
+                RuntimeErrorCause::SessionDeleted {
+                    session_id: session_id.clone(),
+                },
+            )
+        }
         err @ crate::store::StoreError::CommitNodeBudgetExceeded { .. } => RuntimeError::new(
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
             err.to_string(),
@@ -349,7 +372,8 @@ pub(super) fn session_commit_error(
     source: crate::store::StoreError,
 ) -> SessionError {
     match source {
-        source @ (crate::store::StoreError::SessionDeleted { .. }
+        source @ (crate::store::StoreError::Contended
+        | crate::store::StoreError::SessionDeleted { .. }
         | crate::store::StoreError::SessionStateVersionNewerThanRuntime { .. }
         | crate::store::StoreError::SessionStateVersionUnsupported { .. }
         | crate::store::StoreError::HeadRevisionConflict { .. }
@@ -501,6 +525,9 @@ mod store_commit_error_tests {
     }
 }
 
+#[cfg(test)]
+mod host_commit_outcome_tests;
+
 impl RuntimeErrorCode {
     /// Provides the canonical str view to store, effect-host, and protocol implementors while
     /// materializing, executing, or persisting a session turn.
@@ -516,6 +543,8 @@ impl RuntimeErrorCode {
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
             Self::TurnInputRedriveSetUnavailable => "turn_input_redrive_set_unavailable",
             Self::StoreCommitContended => "store_commit_contended",
+            Self::StoreCommitSuperseded => "store_commit_superseded",
+            Self::SessionDeleted => "session_deleted",
             Self::StoreCommitNodeBudgetExceeded => "store_commit_node_budget_exceeded",
             Self::StoreCommitByteBudgetExceeded => "store_commit_byte_budget_exceeded",
             Self::CheckpointComponentEncodingVersionMismatch => {
@@ -768,6 +797,7 @@ impl RuntimeErrorCode {
                 | Self::QueuedWorkRowExceedsContextWindow
                 | Self::StoreCommitNodeBudgetExceeded
                 | Self::StoreCommitByteBudgetExceeded
+                | Self::SessionDeleted
                 | Self::CheckpointComponentEncodingVersionMismatch
                 | Self::RecordEncodingFailed
                 | Self::MissingProcessExecutionId
@@ -896,6 +926,8 @@ impl RuntimeErrorCode {
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
             "turn_input_redrive_set_unavailable" => Self::TurnInputRedriveSetUnavailable,
             "store_commit_contended" => Self::StoreCommitContended,
+            "store_commit_superseded" => Self::StoreCommitSuperseded,
+            "session_deleted" => Self::SessionDeleted,
             "store_commit_node_budget_exceeded" => Self::StoreCommitNodeBudgetExceeded,
             "store_commit_byte_budget_exceeded" => Self::StoreCommitByteBudgetExceeded,
             "checkpoint_component_encoding_version_mismatch" => {
@@ -1316,6 +1348,7 @@ mod tests {
             | RuntimeErrorCode::QueuedWorkRowExceedsContextWindow
             | RuntimeErrorCode::StoreCommitNodeBudgetExceeded
             | RuntimeErrorCode::StoreCommitByteBudgetExceeded
+            | RuntimeErrorCode::SessionDeleted
             | RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
             | RuntimeErrorCode::RecordEncodingFailed
             | RuntimeErrorCode::MissingProcessExecutionId
@@ -1425,6 +1458,7 @@ mod tests {
             | RuntimeErrorCode::TurnTerminalUnknownOrRevoked
             | RuntimeErrorCode::TriggerStoreUnavailable => ExpectedClassification::Terminal,
             RuntimeErrorCode::SessionExecutionLeaseLost
+            | RuntimeErrorCode::StoreCommitSuperseded
             | RuntimeErrorCode::ExecutionStateCaptureFailed
             | RuntimeErrorCode::ResidentSessionReloadFailed
             | RuntimeErrorCode::StoreCommitFailed
@@ -1461,6 +1495,8 @@ mod tests {
             RuntimeErrorCode::TurnInputSettlementSuperseded,
             RuntimeErrorCode::TurnInputRedriveSetUnavailable,
             RuntimeErrorCode::StoreCommitContended,
+            RuntimeErrorCode::StoreCommitSuperseded,
+            RuntimeErrorCode::SessionDeleted,
             RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
             RuntimeErrorCode::StoreCommitByteBudgetExceeded,
             RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch,
