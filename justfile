@@ -327,9 +327,13 @@ request-abandon-e2e:
 stack-budget:
   bash "{{repo}}/scripts/ci-stack-budget.sh"
 
+# Opt-in full local diagnostic for unusual risk, release work, or an explicit
+# request. It is not a routine push or merge prerequisite; focused local checks
+# plus CI's aggregate conclusion are the default proof path.
 push-gate:
   bash "{{repo}}/scripts/push-gate.sh"
 
+# Opt-in confidence diagnostics. Choose a lane only for a named risk it covers.
 confidence lane='default':
   bash "{{repo}}/scripts/confidence-gate.sh" "{{lane}}"
 
@@ -342,12 +346,11 @@ confidence-broad:
 confidence-full:
   bash "{{repo}}/scripts/confidence-gate.sh" full
 
-# Iteration-only workspace test run: the whole suite except six tests that
-# between them account for most of its wall clock. It exists to shorten the
-# edit-test loop, and it proves nothing on its own. The full battery stays
-# mandatory at review and stacking boundaries; `just push-gate`, the
-# `just confidence*` lanes, and CI all keep running the unfiltered workspace
-# suite, and this recipe changes none of them.
+# Optional broader iteration run: the whole workspace suite except six tests
+# that between them account for most of its wall clock. It can supplement a
+# focused regression when wider feedback is useful, but it is not a routine
+# review or stacking prerequisite. State its exact scope; CI supplies the broad
+# merge proof.
 #
 # Measured on a 32-core box: 3848 of the 3854 tests in 38s, against 204s for
 # the full run. The list is those six by measurement, not a category sweep —

@@ -26,8 +26,9 @@ only diff-local trade-offs stay here.
 ## Validation
 How you know it works, matched to the Definition of Done: repeatable steps a
 reviewer could rerun, i.e. which runbook passed, which `just` recipe or
-confidence-gate lane you ran, what you checked live. Not "tested locally".
-"Merged with green CI" is necessary, not sufficient, for behavior changes.
+focused test you ran, and what named risk you checked live. State the actual
+scope rather than "tested locally" or implying a narrow run covered the full
+suite. The aggregate `CI conclusion` is the broad merge proof.
 
 ## Risk / not included   (optional)
 Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
@@ -39,7 +40,7 @@ Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
 - **Durable transcript snapshots require one named justification.** If an `insta` inline snapshot diff changes a line containing `Checkpoint`, `DurableEffect`, `stored logical=`, `ref (unchanged)`, or a `rev=` transition, the PR body must include one sentence beginning `Transcript:` that says why. Forced articulation is the moment a wrongly blessed diff gets noticed.
 - **Lead with the summary.** A reviewer reads the first paragraph and knows what the PR does and why. Depth follows; it doesn't open the PR.
 - **Link the ticket, don't restate it.** One or two orienting sentences, then the link. The PR carries the *how*; the ticket carries the *what/why*. Don't copy the ticket body in.
-- **Prove it, per the Definition of Done.** Behavior changes are live-validated (the relevant runbook passes; turn-execution changes run both durable geometries); mechanical changes state the verification you ran ([way-of-working.md](way-of-working.md)). Say what you actually did, including what you skipped.
+- **Prove it, per the Definition of Done.** Run focused regressions for behavior changes and cheap relevant checks for mechanical changes. Add a targeted live check only for a named durability or behavior risk absent from current CI coverage ([way-of-working.md](way-of-working.md)). Say what actually ran, including its scope and intentional omissions.
 - **Match the diff.** The PR body describes what the diff does. No aspirational claims for code that isn't there, no stale description after a force-push.
 - **Follow-ups are tickets, not TODOs.** Work discovered but out of scope gets a FIG issue and a link, not a buried comment.
 - **The ticket's prose bar applies here too:** lede first, cut filler, concrete over abstract ([ticket-style.md](ticket-style.md)). A reviewer skims, and a rambling PR body costs review time.
@@ -49,4 +50,4 @@ Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
 - **Commits.** No AI-assistant attribution or co-author trailers; see the root agent rules.
 - **Branching and releases.** Short-lived branches off fresh `origin/main`, merged by PR; releases are dispatched manually by a maintainer from a green `main` (`CONTRIBUTING.md`, `docs/PUBLISHING.md`). Never tag or publish by hand.
 - **Stacked PRs.** For dependent chains, use the native stack flow (global agent rules).
-- **Generated and gated artifacts.** Run `just push-gate` before pushing. Docs changes must keep `python3 scripts/lint_docs.py` green, and embedded Rust snippets are regenerated with `python3 scripts/lint_docs.py --fix-snippets` rather than hand-edited.
+- **Generated and gated artifacts.** Run the cheap static checks and focused regressions relevant to the diff. `just push-gate` and confidence lanes are opt-in diagnostics for unusual risk, release work, or an explicit request—not routine push prerequisites. Docs changes must keep `python3 scripts/lint_docs.py` green, and embedded Rust snippets are regenerated with `python3 scripts/lint_docs.py --fix-snippets` rather than hand-edited.

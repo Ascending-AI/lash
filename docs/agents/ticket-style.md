@@ -49,7 +49,7 @@ Notes on the fields:
 
 - **`## Out of scope` is required for any non-trivial ticket** (trivial/mechanical tickets skip it with the rest of the template). Naming the boundaries is how you stop scope creep before it starts; an omitted no-go is where a rabbit hole gets in. `ready-for-agent` tickets state theirs as the mandatory "Do not touch" in the Agent spec.
 - **TL;DR is skippable when the title already states the outcome as a full sentence.** Don't say the same thing twice. Keep it when the title is necessarily compressed (a bug title naming the symptom, not the fix).
-- **`## Done when` must be checkable, not aspirational:** an observable end state a reader could confirm. For a **behavior change**, name the runbook that proves it (new or existing); that *is* the Definition of Done ([way-of-working.md](way-of-working.md)), and "merged with green CI" is necessary, not sufficient. For a `ready-for-agent` ticket, make it *machine*-checkable: a test name, a command, an assertable behavior the agent can loop against. An agent with no runnable check knows only that it's *plausibly* done.
+- **`## Done when` must be checkable, not aspirational:** an observable end state a reader could confirm. For a **behavior change**, name the focused regression that proves it. Name a targeted live runbook only for a durability or behavior risk the current CI plan does not exercise; follow the [Definition of Done](way-of-working.md). For a `ready-for-agent` ticket, make it *machine*-checkable: a test name, a command, an assertable behavior the agent can loop against. An agent with no runnable check knows only that it's *plausibly* done.
 
 Variants share the same top:
 
