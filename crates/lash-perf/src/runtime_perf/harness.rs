@@ -18,7 +18,6 @@ use lash::{
 };
 use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
-use lash_protocol_rlm::RlmTurnInputExt;
 use lash_provider_openai::OpenAiCompatibleProvider;
 use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
 use lash_standard_plugins::{StandardToolStackOptions, standard_tool_stack};
@@ -1539,12 +1538,18 @@ pub(crate) async fn seed_runtime_state(
 }
 
 async fn seed_rlm_live_globals(runtime: &mut BenchmarkRuntime) -> anyhow::Result<()> {
+    runtime
+        .session
+        .as_ref()
+        .expect("benchmark session")
+        .admin()
+        .protocol()
+        .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
+            rlm_perf_projected_bindings(RuntimePerfScenario::RlmGlobals, 0)?,
+        ))
+        .await?;
     let turn_input =
-        lash::TurnInput::text("Seed current working variables, then finish the benchmark marker.")
-            .rlm_project(rlm_perf_projected_bindings(
-                RuntimePerfScenario::RlmGlobals,
-                0,
-            )?)?;
+        lash::TurnInput::text("Seed current working variables, then finish the benchmark marker.");
     let turn = runtime
         .run_turn(turn_input, CancellationToken::new())
         .await?;
@@ -1596,3 +1601,6 @@ pub(crate) fn rlm_perf_projected_bindings(
             }),
         )?)
 }
+
+#[cfg(test)]
+mod tests;

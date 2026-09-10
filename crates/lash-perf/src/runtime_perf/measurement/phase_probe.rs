@@ -529,11 +529,7 @@ async fn run_once_inner(
             _ => None,
         };
 
-        let mut turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
-        if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
-            turn_input =
-                turn_input.rlm_project(rlm_perf_projected_bindings(scenario, turn_index)?)?;
-        }
+        let turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
 
         let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
         runtime.set_turn_phase_probe(phase_probe.clone()).await;

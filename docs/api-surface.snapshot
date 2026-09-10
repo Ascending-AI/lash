@@ -206,7 +206,6 @@ lash::LashCoreBuilder::advanced
 lash::LashCoreBuilder::attachment_store
 lash::LashCoreBuilder::build
 lash::LashCoreBuilder::charge_safety
-lash::LashCoreBuilder::child_store_factory
 lash::LashCoreBuilder::clock
 lash::LashCoreBuilder::commit_budget
 lash::LashCoreBuilder::configure_plugins
@@ -231,6 +230,7 @@ lash::LashCoreBuilder::protocol_plugin
 lash::LashCoreBuilder::provider
 lash::LashCoreBuilder::queued_work_batching
 lash::LashCoreBuilder::queued_work_execution_concurrency
+lash::LashCoreBuilder::session_creation_store_factory
 lash::LashCoreBuilder::session_spec
 lash::LashCoreBuilder::store_factory
 lash::LashCoreBuilder::termination
@@ -1014,7 +1014,6 @@ lash::admin::AdvancedToolAdmin
 lash::admin::AdvancedToolAdmin::apply_state
 lash::admin::AdvancedToolAdmin::restore_state
 lash::admin::ChildSessionAdmin
-lash::admin::ChildSessionAdmin::activate_managed_session
 lash::admin::ChildSessionAdmin::close_session
 lash::admin::ChildSessionAdmin::create_session
 lash::admin::Completions
@@ -3383,6 +3382,8 @@ lash::plugins::PluginError::Invoke::0
 lash::plugins::PluginError::MissingRecordedSessionConfig
 lash::plugins::PluginError::MissingRecordedSessionConfig::field
 lash::plugins::PluginError::MissingRecordedSessionConfig::plugin_id
+lash::plugins::PluginError::MissingSessionStore
+lash::plugins::PluginError::MissingSessionStore::session_id
 lash::plugins::PluginError::MonotonicCounterOverflow
 lash::plugins::PluginError::MonotonicCounterOverflow::counter
 lash::plugins::PluginError::MonotonicCounterOverflow::current
@@ -4334,7 +4335,6 @@ lash::prelude::LashCoreBuilder::advanced
 lash::prelude::LashCoreBuilder::attachment_store
 lash::prelude::LashCoreBuilder::build
 lash::prelude::LashCoreBuilder::charge_safety
-lash::prelude::LashCoreBuilder::child_store_factory
 lash::prelude::LashCoreBuilder::clock
 lash::prelude::LashCoreBuilder::commit_budget
 lash::prelude::LashCoreBuilder::configure_plugins
@@ -4359,6 +4359,7 @@ lash::prelude::LashCoreBuilder::protocol_plugin
 lash::prelude::LashCoreBuilder::provider
 lash::prelude::LashCoreBuilder::queued_work_batching
 lash::prelude::LashCoreBuilder::queued_work_execution_concurrency
+lash::prelude::LashCoreBuilder::session_creation_store_factory
 lash::prelude::LashCoreBuilder::session_spec
 lash::prelude::LashCoreBuilder::store_factory
 lash::prelude::LashCoreBuilder::termination

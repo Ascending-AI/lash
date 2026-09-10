@@ -26,7 +26,6 @@ use lash_core::{
     facade_support::ModelToolReturn, facade_support::Response, facade_support::TurnFinish,
     facade_support::TurnOutcome, facade_support::shared_parts,
 };
-use lash_protocol_rlm::RlmTurnInputExt;
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
 use stats_alloc::Stats;
@@ -44,7 +43,7 @@ use super::harness::{
     build_runtime_with_sqlite_store, build_runtime_with_store,
     durable_postgres_session_store_factory_without_commit_measurement,
     durable_sqlite_session_store_factory_without_commit_measurement, prepare_turn,
-    rlm_perf_projected_bindings, seed_runtime_state, validate_runtime_perf_turn,
+    seed_runtime_state, validate_runtime_perf_turn,
 };
 use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;

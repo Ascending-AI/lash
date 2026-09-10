@@ -299,9 +299,8 @@ pub(crate) fn test_host_config() -> EmbeddedRuntimeHost {
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
     ));
-    EmbeddedRuntimeHost::new(config).with_session_store_factory(Arc::new(
-        crate::InMemorySessionStoreFactory::new(),
-    ))
+    EmbeddedRuntimeHost::new(config)
+        .with_session_store_factory(Arc::new(crate::InMemorySessionStoreFactory::new()))
 }
 
 pub(crate) fn test_host_config_with_trace_path(path: PathBuf) -> EmbeddedRuntimeHost {
