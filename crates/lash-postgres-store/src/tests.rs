@@ -1105,7 +1105,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             // armed, and the sweeper issues no delete at all.
             (
                 lash_core::AttachmentDeleteArming::Revoked,
-                lash_core::AttachmentWriteFence::Granted,
+                lash_core::AttachmentWriteFence::Granted(_),
             ) => {
                 assert!(
                     contains_ref,

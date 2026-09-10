@@ -801,7 +801,10 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             // Another sweeper owns this digest. Skip on contention.
             return Ok(crate::AttachmentCondemnation::AlreadyCondemned);
         }
-        condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Condemned);
+        condemnations.insert(
+            id.clone(),
+            super::AttachmentCondemnationPhase::Condemned { write_token: None },
+        );
         Ok(crate::AttachmentCondemnation::Condemned)
     }
 
@@ -818,10 +821,11 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             // matching the SQL backends' `WHERE phase = 'condemned'`.
             None
             | Some(super::AttachmentCondemnationPhase::Deleting)
-            | Some(super::AttachmentCondemnationPhase::Reclaimed) => {
-                Ok(crate::AttachmentDeleteArming::Revoked)
-            }
-            Some(super::AttachmentCondemnationPhase::Condemned) => {
+            | Some(super::AttachmentCondemnationPhase::Reclaimed { .. })
+            | Some(super::AttachmentCondemnationPhase::Condemned {
+                write_token: Some(_),
+            }) => Ok(crate::AttachmentDeleteArming::Revoked),
+            Some(super::AttachmentCondemnationPhase::Condemned { write_token: None }) => {
                 condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Deleting);
                 Ok(crate::AttachmentDeleteArming::Armed)
             }
@@ -837,11 +841,27 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         if matches!(
             condemnations.get(id),
             Some(
-                super::AttachmentCondemnationPhase::Condemned
+                super::AttachmentCondemnationPhase::Condemned { write_token: None }
                     | super::AttachmentCondemnationPhase::Deleting
             )
         ) {
             condemnations.remove(id);
+        } else if let Some(
+            super::AttachmentCondemnationPhase::Condemned {
+                write_token: Some(_),
+            }
+            | super::AttachmentCondemnationPhase::Reclaimed {
+                write_token: Some(_),
+            },
+        ) = condemnations.get(id).copied()
+        {
+            let phase = match condemnations.get(id) {
+                Some(super::AttachmentCondemnationPhase::Condemned { .. }) => {
+                    super::AttachmentCondemnationPhase::Condemned { write_token: None }
+                }
+                _ => super::AttachmentCondemnationPhase::Reclaimed { write_token: None },
+            };
+            condemnations.insert(id.clone(), phase);
         }
         Ok(())
     }
@@ -856,7 +876,10 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             condemnations.get(id),
             Some(super::AttachmentCondemnationPhase::Deleting)
         ) {
-            condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Reclaimed);
+            condemnations.insert(
+                id.clone(),
+                super::AttachmentCondemnationPhase::Reclaimed { write_token: None },
+            );
         }
         Ok(())
     }

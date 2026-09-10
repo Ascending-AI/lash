@@ -51,7 +51,9 @@ struct DeclaredGuard {
 
 const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_condemnations (
             attachment_id TEXT PRIMARY KEY,
-            phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))
+            phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed')),
+            write_token TEXT,
+            CHECK (write_token IS NULL OR phase IN ('condemned', 'reclaimed'))
         )"#;
 
 /// Each projection row is owned by the session whose head or anchor owns the

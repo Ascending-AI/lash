@@ -51,32 +51,41 @@ pub(crate) fn commit_attachment_refs_conn(
     now: i64,
 ) -> Result<(), StoreError> {
     for id in attachment_ids {
-        let phase = tx
+        let condemnation = tx
             .query_row(
-                "SELECT phase FROM attachment_condemnations WHERE attachment_id = ?1",
+                "SELECT phase, write_token FROM attachment_condemnations WHERE attachment_id = ?1",
                 params![id.as_str()],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
             )
             .optional()
             .map_err(sqlite_error)?;
-        match phase.as_deref() {
-            Some("deleting") => {
+        match condemnation
+            .as_ref()
+            .map(|(phase, token)| (phase.as_str(), token.is_some()))
+        {
+            Some(("deleting", _)) => {
                 return Err(StoreError::Backend(format!(
                     "cannot adopt attachment `{id}` while physical deletion is in flight"
                 )));
             }
-            Some("reclaimed") => {
+            Some(("reclaimed", _)) => {
                 return Err(StoreError::AttachmentBytesReclaimed { digest: id.clone() });
             }
-            None | Some("condemned") => {}
-            Some(phase) => {
+            Some(("condemned", true)) => {
+                return Err(StoreError::Backend(format!(
+                    "cannot adopt attachment `{id}` while its bytes are being restored"
+                )));
+            }
+            None | Some(("condemned", false)) => {}
+            Some((phase, _)) => {
                 return Err(StoreError::Backend(format!(
                     "attachment `{id}` has unknown condemnation phase `{phase}`"
                 )));
             }
         }
         tx.execute(
-            "DELETE FROM attachment_condemnations WHERE attachment_id = ?1 AND phase = 'condemned'",
+            "DELETE FROM attachment_condemnations
+             WHERE attachment_id = ?1 AND phase = 'condemned' AND write_token IS NULL",
             params![id.as_str()],
         )
         .map_err(sqlite_error)?;
@@ -534,7 +543,7 @@ impl Store {
             .write(move |tx| {
                 tx.execute(
                     "UPDATE attachment_condemnations SET phase = 'deleting'
-                     WHERE attachment_id = ?1 AND phase = 'condemned'",
+                     WHERE attachment_id = ?1 AND phase = 'condemned' AND write_token IS NULL",
                     params![attachment_id],
                 )
             })
@@ -557,7 +566,16 @@ impl Store {
             .write(move |tx| {
                 tx.execute(
                     "DELETE FROM attachment_condemnations
-                     WHERE attachment_id = ?1 AND phase IN ('condemned', 'deleting')",
+                     WHERE attachment_id = ?1
+                       AND (phase = 'deleting'
+                            OR (phase = 'condemned' AND write_token IS NULL))",
+                    params![attachment_id],
+                )?;
+                tx.execute(
+                    "UPDATE attachment_condemnations SET write_token = NULL
+                     WHERE attachment_id = ?1
+                       AND phase IN ('condemned', 'reclaimed')
+                       AND write_token IS NOT NULL",
                     params![attachment_id],
                 )
             })
@@ -589,6 +607,7 @@ impl Store {
 impl AttachmentManifest for Store {
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
         block_on_store(async {
+            let digest = intent.attachment_id.clone();
             let attachment_id = intent.attachment_id.as_str().to_string();
             let session_id = intent.session_id.clone();
             let canonical_uri = intent.canonical_uri.as_str().to_string();
@@ -599,32 +618,46 @@ impl AttachmentManifest for Store {
                 .write_flow(move |tx| {
                     let outcome: Result<(), StoreError> = (|| {
                         crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
-                        let phase = tx
+                        let condemnation = tx
                             .query_row(
-                                "SELECT phase FROM attachment_condemnations
+                                "SELECT phase, write_token FROM attachment_condemnations
                                  WHERE attachment_id = ?1",
                                 params![attachment_id],
-                                |row| row.get::<_, String>(0),
+                                |row| {
+                                    Ok((
+                                        row.get::<_, String>(0)?,
+                                        row.get::<_, Option<String>>(1)?,
+                                    ))
+                                },
                             )
                             .optional()
                             .map_err(sqlite_error)?;
-                        match phase.as_deref() {
-                            Some("deleting") => {
+                        match condemnation
+                            .as_ref()
+                            .map(|(phase, token)| (phase.as_str(), token.is_some()))
+                        {
+                            Some(("deleting", _)) => {
                                 return Err(StoreError::Backend(format!(
                                     "cannot record attachment `{attachment_id}` while physical deletion is in flight"
                                 )));
                             }
-                            Some("condemned" | "reclaimed") => {
-                                tx.execute(
-                                    "DELETE FROM attachment_condemnations
-                                     WHERE attachment_id = ?1
-                                       AND phase IN ('condemned', 'reclaimed')",
-                                    params![attachment_id],
-                                )
-                                .map_err(sqlite_error)?;
+                            Some(("reclaimed", false)) => {
+                                return Err(StoreError::AttachmentBytesReclaimed {
+                                    digest,
+                                });
+                            }
+                            Some(("condemned", false)) => {
+                                return Err(StoreError::Backend(format!(
+                                    "cannot record attachment `{attachment_id}` through the unfenced manifest path while it is condemned; use begin_attachment_write"
+                                )));
+                            }
+                            Some(("condemned" | "reclaimed", true)) => {
+                                return Err(StoreError::Backend(format!(
+                                    "cannot record attachment `{attachment_id}` while its bytes are being restored"
+                                )));
                             }
                             None => {}
-                            Some(phase) => {
+                            Some((phase, _)) => {
                                 return Err(StoreError::Backend(format!(
                                     "attachment `{attachment_id}` has unknown condemnation phase `{phase}`"
                                 )));
@@ -682,48 +715,58 @@ impl AttachmentManifest for Store {
                 .write_flow(move |tx| {
                     let outcome: Result<lash_core::AttachmentWriteFence, StoreError> = (|| {
                         crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
-                        let phase = tx
+                        let condemnation = tx
                             .query_row(
-                                "SELECT phase FROM attachment_condemnations
+                                "SELECT phase, write_token FROM attachment_condemnations
                                  WHERE attachment_id = ?1",
                                 params![attachment_id],
-                                |row| row.get::<_, String>(0),
+                                |row| {
+                                    Ok((
+                                        row.get::<_, String>(0)?,
+                                        row.get::<_, Option<String>>(1)?,
+                                    ))
+                                },
                             )
                             .optional()
                             .map_err(sqlite_error)?;
-                        match phase.as_deref() {
+                        let permit = match condemnation
+                            .as_ref()
+                            .map(|(phase, token)| (phase.as_str(), token.is_some()))
+                        {
                             // The physical delete is already in flight: record
                             // nothing, so these bytes cannot land inside it.
-                            Some("deleting") => {
+                            Some(("deleting", _))
+                            | Some(("condemned" | "reclaimed", true)) => {
                                 return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
                             }
-                            // Take the digest back before the sweeper can arm.
-                            // The predicate is repeated on the DELETE so this
-                            // can only ever remove a revocable condemnation or
-                            // a completed-delete fact, the same belt the
-                            // PostgreSQL writer wears.
-                            Some("condemned" | "reclaimed") => {
-                                let revoked = tx
+                            // Keep the prior phase present and own it with an
+                            // opaque token until the backend put settles.
+                            Some(("condemned" | "reclaimed", false)) => {
+                                let token = lash_core::AttachmentWriteToken::new();
+                                let claimed = tx
                                     .execute(
-                                        "DELETE FROM attachment_condemnations
+                                        "UPDATE attachment_condemnations
+                                         SET write_token = ?2
                                          WHERE attachment_id = ?1
-                                           AND phase IN ('condemned', 'reclaimed')",
-                                        params![attachment_id],
+                                           AND phase IN ('condemned', 'reclaimed')
+                                           AND write_token IS NULL",
+                                        params![attachment_id, token.as_hex()],
                                     )
                                     .map_err(sqlite_error)?;
-                                if revoked == 0 {
+                                if claimed == 0 {
                                     return Ok(
                                         lash_core::AttachmentWriteFence::ReclamationInFlight,
                                     );
                                 }
+                                lash_core::AttachmentWritePermit::restoring(token)
                             }
-                            None => {}
-                            Some(phase) => {
+                            None => lash_core::AttachmentWritePermit::ordinary(),
+                            Some((phase, _)) => {
                                 return Err(StoreError::Backend(format!(
                                     "attachment `{attachment_id}` has unknown condemnation phase `{phase}`"
                                 )));
                             }
-                        }
+                        };
                         tx.execute(
                             "INSERT INTO attachment_manifest
                             (attachment_id, session_id, canonical_uri, intent_at_ms,
@@ -744,11 +787,87 @@ impl AttachmentManifest for Store {
                             ],
                         )
                         .map_err(sqlite_error)?;
-                        Ok(lash_core::AttachmentWriteFence::Granted)
+                        Ok(lash_core::AttachmentWriteFence::Granted(permit))
                     })(
                     );
                     Ok(match outcome {
                         Ok(fence) => TxOutcome::Commit(Ok(fence)),
+                        Err(err) => TxOutcome::Rollback(Err(err)),
+                    })
+                })
+                .await
+                .map_err(sqlite_error)?
+        })
+    }
+
+    fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: lash_core::AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        let Some(token) = permit.rollback_token() else {
+            return Ok(());
+        };
+        let attachment_id = intent.attachment_id.as_str().to_string();
+        block_on_store(async move {
+            self.conn
+                .write(move |tx| {
+                    tx.execute(
+                        "DELETE FROM attachment_condemnations
+                         WHERE attachment_id = ?1 AND write_token = ?2",
+                        params![attachment_id, token.as_hex()],
+                    )
+                })
+                .await
+                .map_err(sqlite_error)?;
+            Ok(())
+        })
+    }
+
+    fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: lash_core::AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        let Some(token) = permit.rollback_token() else {
+            return Ok(());
+        };
+        let attachment_id = intent.attachment_id.as_str().to_string();
+        let session_id = intent.session_id.clone();
+        block_on_store(async move {
+            self.conn
+                .write_flow(move |tx| {
+                    let outcome: Result<(), StoreError> = (|| {
+                        let token = token.as_hex();
+                        let owns_phase = tx
+                            .query_row(
+                                "SELECT 1 FROM attachment_condemnations
+                                 WHERE attachment_id = ?1 AND write_token = ?2",
+                                params![attachment_id, token],
+                                |_| Ok(()),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?
+                            .is_some();
+                        if owns_phase {
+                            tx.execute(
+                                "DELETE FROM attachment_manifest
+                                 WHERE attachment_id = ?1 AND session_id = ?2
+                                   AND committed_at_ms IS NULL",
+                                params![attachment_id, session_id.as_str()],
+                            )
+                            .map_err(sqlite_error)?;
+                            tx.execute(
+                                "UPDATE attachment_condemnations SET write_token = NULL
+                                 WHERE attachment_id = ?1 AND write_token = ?2",
+                                params![attachment_id, token],
+                            )
+                            .map_err(sqlite_error)?;
+                        }
+                        Ok(())
+                    })();
+                    Ok(match outcome {
+                        Ok(()) => TxOutcome::Commit(Ok(())),
                         Err(err) => TxOutcome::Rollback(Err(err)),
                     })
                 })

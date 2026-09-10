@@ -141,14 +141,20 @@ pub(crate) type SharedAttachmentCondemnations =
     Arc<Mutex<HashMap<crate::AttachmentId, AttachmentCondemnationPhase>>>;
 
 /// The three condemnation phases. Absence from the map is the `Free` state.
+/// A token on `Condemned` or `Reclaimed` gives one writer temporary ownership
+/// while it restores the bytes; the phase itself remains durable until success.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AttachmentCondemnationPhase {
     /// Claimed by a sweeper, no physical delete issued yet: a writer revokes it.
-    Condemned,
+    Condemned {
+        write_token: Option<crate::AttachmentWriteToken>,
+    },
     /// The physical delete is in flight: a writer must wait for its outcome.
     Deleting,
     /// The physical delete succeeded: adoption refuses until a fresh put.
-    Reclaimed,
+    Reclaimed {
+        write_token: Option<crate::AttachmentWriteToken>,
+    },
 }
 
 pub struct InMemorySessionStore {

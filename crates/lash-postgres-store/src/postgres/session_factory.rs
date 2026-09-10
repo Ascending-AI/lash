@@ -713,7 +713,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         let armed = sqlx::query(
             "UPDATE lash_attachment_condemnations SET phase = 'deleting'
-             WHERE attachment_id = $1 AND phase = 'condemned'",
+             WHERE attachment_id = $1 AND phase = 'condemned' AND write_token IS NULL",
         )
         .bind(id.as_str())
         .execute(&mut *tx)
@@ -733,17 +733,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         &self,
         id: &lash_core::AttachmentId,
     ) -> Result<(), lash_core::StoreError> {
-        // Same key, same reason: the release must not interleave with a writer's
-        // open condemnation read.
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1 AND phase IN ('condemned', 'deleting')")
-        .bind(id.as_str())
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(())
+        crate::attachments::release_abandoned_attachment_condemnation(&self.pool, id.as_str()).await
     }
 
     async fn reclaim_attachment_condemnation(

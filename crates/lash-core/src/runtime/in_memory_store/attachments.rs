@@ -26,10 +26,18 @@ impl InMemorySessionStore {
                         "cannot adopt attachment `{id}` while physical deletion is in flight"
                     )));
                 }
-                Some(super::AttachmentCondemnationPhase::Reclaimed) => {
+                Some(super::AttachmentCondemnationPhase::Reclaimed { .. }) => {
                     return Err(crate::StoreError::AttachmentBytesReclaimed { digest: id.clone() });
                 }
-                None | Some(super::AttachmentCondemnationPhase::Condemned) => {}
+                None
+                | Some(super::AttachmentCondemnationPhase::Condemned { write_token: None }) => {}
+                Some(super::AttachmentCondemnationPhase::Condemned {
+                    write_token: Some(_),
+                }) => {
+                    return Err(crate::StoreError::Backend(format!(
+                        "cannot adopt attachment `{id}` while its bytes are being restored"
+                    )));
+                }
             }
         }
         let mut manifest = self.attachment_manifest.lock_recover();
@@ -123,7 +131,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
     ) -> Result<(), crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
         {
-            let mut condemnations = self.attachment_condemnations.lock_recover();
+            let condemnations = self.attachment_condemnations.lock_recover();
             match condemnations.get(&intent.attachment_id) {
                 Some(super::AttachmentCondemnationPhase::Deleting) => {
                     return Err(crate::StoreError::Backend(format!(
@@ -131,11 +139,29 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                         intent.attachment_id
                     )));
                 }
+                Some(super::AttachmentCondemnationPhase::Reclaimed { write_token: None }) => {
+                    return Err(crate::StoreError::AttachmentBytesReclaimed {
+                        digest: intent.attachment_id,
+                    });
+                }
+                Some(super::AttachmentCondemnationPhase::Condemned { write_token: None }) => {
+                    return Err(crate::StoreError::Backend(format!(
+                        "cannot record attachment `{}` through the unfenced manifest path while it is condemned; use begin_attachment_write",
+                        intent.attachment_id
+                    )));
+                }
                 Some(
-                    super::AttachmentCondemnationPhase::Condemned
-                    | super::AttachmentCondemnationPhase::Reclaimed,
+                    super::AttachmentCondemnationPhase::Condemned {
+                        write_token: Some(_),
+                    }
+                    | super::AttachmentCondemnationPhase::Reclaimed {
+                        write_token: Some(_),
+                    },
                 ) => {
-                    condemnations.remove(&intent.attachment_id);
+                    return Err(crate::StoreError::Backend(format!(
+                        "cannot record attachment `{}` while its bytes are being restored",
+                        intent.attachment_id
+                    )));
                 }
                 None => {}
             }
@@ -152,26 +178,108 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         intent: crate::AttachmentIntent,
     ) -> Result<crate::AttachmentWriteFence, crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
-        {
+        self.ensure_session_not_deleted(&intent.session_id)?;
+        let permit = {
             let mut condemnations = self.attachment_condemnations.lock_recover();
-            match condemnations.get(&intent.attachment_id) {
+            match condemnations.get(&intent.attachment_id).copied() {
                 // The delete is already in flight: record nothing, so the bytes
                 // this writer is about to put cannot be swallowed by it.
                 Some(super::AttachmentCondemnationPhase::Deleting) => {
                     return Ok(crate::AttachmentWriteFence::ReclamationInFlight);
                 }
-                // Take the digest back before the sweeper can arm its delete.
                 Some(
-                    super::AttachmentCondemnationPhase::Condemned
-                    | super::AttachmentCondemnationPhase::Reclaimed,
-                ) => {
-                    condemnations.remove(&intent.attachment_id);
+                    super::AttachmentCondemnationPhase::Condemned {
+                        write_token: Some(_),
+                    }
+                    | super::AttachmentCondemnationPhase::Reclaimed {
+                        write_token: Some(_),
+                    },
+                ) => return Ok(crate::AttachmentWriteFence::ReclamationInFlight),
+                // Own the prior phase until the backend put settles. Keeping
+                // the phase present means adoption cannot outrun restoration.
+                Some(super::AttachmentCondemnationPhase::Condemned { write_token: None }) => {
+                    let token = crate::AttachmentWriteToken::new();
+                    condemnations.insert(
+                        intent.attachment_id.clone(),
+                        super::AttachmentCondemnationPhase::Condemned {
+                            write_token: Some(token),
+                        },
+                    );
+                    crate::AttachmentWritePermit::restoring(token)
                 }
-                None => {}
+                Some(super::AttachmentCondemnationPhase::Reclaimed { write_token: None }) => {
+                    let token = crate::AttachmentWriteToken::new();
+                    condemnations.insert(
+                        intent.attachment_id.clone(),
+                        super::AttachmentCondemnationPhase::Reclaimed {
+                            write_token: Some(token),
+                        },
+                    );
+                    crate::AttachmentWritePermit::restoring(token)
+                }
+                None => crate::AttachmentWritePermit::ordinary(),
             }
+        };
+        self.record_intent_in_transaction(intent)?;
+        Ok(crate::AttachmentWriteFence::Granted(permit))
+    }
+
+    fn complete_attachment_write(
+        &self,
+        intent: &crate::AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::store::StoreError> {
+        let Some(token) = permit.rollback_token() else {
+            return Ok(());
+        };
+        let _transaction = self.write_transaction.lock_recover();
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        if matches!(
+            condemnations.get(&intent.attachment_id),
+            Some(
+                super::AttachmentCondemnationPhase::Condemned {
+                    write_token: Some(current),
+                }
+                    | super::AttachmentCondemnationPhase::Reclaimed {
+                        write_token: Some(current),
+                    }
+            ) if *current == token
+        ) {
+            condemnations.remove(&intent.attachment_id);
         }
-        self.record_intent_in_transaction(intent)
-            .map(|()| crate::AttachmentWriteFence::Granted)
+        Ok(())
+    }
+
+    fn abort_attachment_write(
+        &self,
+        intent: &crate::AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::store::StoreError> {
+        let Some(token) = permit.rollback_token() else {
+            return Ok(());
+        };
+        let _transaction = self.write_transaction.lock_recover();
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        let restored = match condemnations.get(&intent.attachment_id).copied() {
+            Some(super::AttachmentCondemnationPhase::Condemned {
+                write_token: Some(current),
+            }) if current == token => {
+                Some(super::AttachmentCondemnationPhase::Condemned { write_token: None })
+            }
+            Some(super::AttachmentCondemnationPhase::Reclaimed {
+                write_token: Some(current),
+            }) if current == token => {
+                Some(super::AttachmentCondemnationPhase::Reclaimed { write_token: None })
+            }
+            _ => None,
+        };
+        if let Some(restored) = restored {
+            self.attachment_manifest
+                .lock_recover()
+                .remove(&(intent.session_id.clone(), intent.attachment_id.clone()));
+            condemnations.insert(intent.attachment_id.clone(), restored);
+        }
+        Ok(())
     }
 
     fn commit_refs(

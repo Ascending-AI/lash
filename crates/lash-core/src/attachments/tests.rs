@@ -1223,7 +1223,7 @@ fn window_writer(
             match attempts.recv().await {
                 // The writer is inside the window with an intent recorded: give
                 // its bytes time to land before the window closes.
-                Some(AttachmentWriteFence::Granted) => {
+                Some(AttachmentWriteFence::Granted(_)) => {
                     let _ = put_done_rx.await;
                 }
                 // The writer is parked on the fence. Nothing more will happen
@@ -1253,6 +1253,22 @@ impl AttachmentManifest for SignalingManifest {
         let fence = self.inner.begin_attachment_write(intent)?;
         let _ = self.attempts.send(fence);
         Ok(fence)
+    }
+
+    fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.complete_attachment_write(intent, permit)
+    }
+
+    fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.abort_attachment_write(intent, permit)
     }
 
     fn commit_refs(
@@ -1346,12 +1362,12 @@ async fn same_content_put_inside_the_delete_window_survives() {
     assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
 }
 
-/// CONTENTION (the condemned window). The sweep has condemned the digest but not
-/// yet armed the delete when a writer takes it back. The arm CAS loses, so no
-/// delete is issued at all and the digest is deferred to the next sweep — the
-/// sweep never waits for the writer and the writer never waits for the sweep.
+/// CONTENTION after arming and before final `HEAD`. Arming must precede the
+/// absence observation, so a writer arriving in this window parks until the
+/// sweep records `Reclaimed`, then claims that fact, restores the bytes, and
+/// clears only its own token.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
+async fn writer_after_delete_arming_restores_the_reclaimed_digest() {
     let fixture = fenced_fixture(&SessionId::from("condemned-window-writer")).await;
     let bytes = vec![2, 7, 1, 8];
     let id = content_id(&bytes);
@@ -1381,17 +1397,17 @@ async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
     writer
         .await
         .expect("writer task")
-        .expect("a writer in the condemned window is granted immediately");
+        .expect("a writer after arming retries and restores the digest");
     assert_eq!(
-        report.reclaimed_count, 0,
-        "a revoked condemnation must not produce a delete"
+        report.reclaimed_count, 1,
+        "the armed sweep must record its completed reclamation"
     );
     assert_eq!(
         *backend.delete_calls.lock_recover(),
-        0,
+        1,
         "the physical delete is only ever issued for an armed digest"
     );
-    assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
+    assert!(report.condemn_deferred_ids.is_empty());
     assert!(
         report.deleted_while_referenced.is_empty(),
         "a fenced sweep must never delete a referenced blob: {:?}",

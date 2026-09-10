@@ -2159,7 +2159,7 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         matches!(
             crate::AttachmentManifest::begin_attachment_write(&*store, intent())
                 .expect("first fenced write"),
-            crate::AttachmentWriteFence::Granted
+            crate::AttachmentWriteFence::Granted(_)
         ),
         "a write against a free digest must be granted"
     );
@@ -2196,7 +2196,7 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         matches!(
             crate::AttachmentManifest::begin_attachment_write(&*store, intent())
                 .expect("write against a condemned digest"),
-            crate::AttachmentWriteFence::Granted
+            crate::AttachmentWriteFence::Granted(_)
         ),
         "a writer must be able to take a condemned digest back"
     );
@@ -2246,7 +2246,7 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
         matches!(
             crate::AttachmentManifest::begin_attachment_write(&*store, intent())
                 .expect("write after the release"),
-            crate::AttachmentWriteFence::Granted
+            crate::AttachmentWriteFence::Granted(_)
         ),
         "a released digest must grant the next writer immediately"
     );
@@ -2283,7 +2283,7 @@ async fn session_store_factory_attachment_gc_fence_state_machine(
     assert!(matches!(
         crate::AttachmentManifest::begin_attachment_write(&*store, intent())
             .expect("fresh write clears a reclaimed digest"),
-        crate::AttachmentWriteFence::Granted
+        crate::AttachmentWriteFence::Granted(_)
     ));
 }
 
@@ -2364,7 +2364,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
             },
         )
         .expect("write after a completed sweep"),
-        crate::AttachmentWriteFence::Granted
+        crate::AttachmentWriteFence::Granted(_)
     ));
 }
 
@@ -2407,7 +2407,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
             },
         )
         .expect("record aged_uncommitted intent"),
-        crate::AttachmentWriteFence::Granted
+        crate::AttachmentWriteFence::Granted(_)
     ));
 
     assert!(matches!(
@@ -2423,7 +2423,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
             },
         )
         .expect("record committed intent"),
-        crate::AttachmentWriteFence::Granted
+        crate::AttachmentWriteFence::Granted(_)
     ));
     // Commit the ref for committed_id.
     crate::AttachmentManifest::commit_refs(
@@ -2446,7 +2446,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
             },
         )
         .expect("record cond_target intent"),
-        crate::AttachmentWriteFence::Granted
+        crate::AttachmentWriteFence::Granted(_)
     ));
 
     // Test with cutoffs that exceed i64::MAX (e.g., u64::MAX, (i64::MAX as u64) + 1).

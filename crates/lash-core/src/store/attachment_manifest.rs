@@ -64,7 +64,7 @@ mod attachment_owner_kind_tests {
 /// A pending attachment write recorded *before* the bytes hit the
 /// [`AttachmentStore`](crate::AttachmentStore) backend.
 ///
-/// The runtime calls [`AttachmentManifest::record_intent`] from the
+/// The runtime calls [`AttachmentManifest::begin_attachment_write`] from the
 /// [`SessionAttachmentStore`](crate::SessionAttachmentStore)
 /// wrapper before each `put`, so the manifest is a durable record that
 /// "some bytes are about to land at this URI." When the turn that
@@ -99,15 +99,74 @@ pub struct AttachmentIntent {
 /// mutation. See [`AttachmentCondemnation`] for the state machine both sides
 /// share.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentWriteToken(u128);
+
+impl AttachmentWriteToken {
+    /// Mint an opaque identity for one attempt to restore condemned attachment
+    /// bytes. Stores persist this token only while the backend `put` is in
+    /// flight, so completion and rollback can affect only their own attempt.
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4().as_u128())
+    }
+
+    /// Stable lowercase hexadecimal encoding used by durable stores.
+    pub fn as_hex(self) -> String {
+        format!("{:032x}", self.0)
+    }
+}
+
+impl Default for AttachmentWriteToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Authority returned with a granted attachment write fence.
+///
+/// Ordinary writes carry no rollback token. A write that temporarily owns a
+/// `Condemned` or `Reclaimed` fact carries the token the manifest must complete
+/// after the backend put succeeds or abort after it fails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentWritePermit {
+    rollback_token: Option<AttachmentWriteToken>,
+}
+
+impl AttachmentWritePermit {
+    /// A granted write that did not take ownership of a condemnation fact.
+    pub const fn ordinary() -> Self {
+        Self {
+            rollback_token: None,
+        }
+    }
+
+    /// A granted write that temporarily owns a condemnation fact.
+    pub const fn restoring(token: AttachmentWriteToken) -> Self {
+        Self {
+            rollback_token: Some(token),
+        }
+    }
+
+    /// The conditional rollback token, when this write owns one.
+    pub const fn rollback_token(self) -> Option<AttachmentWriteToken> {
+        self.rollback_token
+    }
+}
+
+impl Default for AttachmentWritePermit {
+    fn default() -> Self {
+        Self::ordinary()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentWriteFence {
     /// The intent row exists and the digest is rooted: no sweep can condemn it
     /// until the intent is committed, forgotten, or reconciled. The writer may
     /// now `put` the bytes.
-    Granted,
-    /// A sweep has already armed the physical delete for this digest. No intent
-    /// was recorded; the bytes are about to disappear. The writer must not write
-    /// bytes into a delete that is in flight — it retries, and once the sweep
-    /// releases the condemnation the retry is granted and re-puts the content.
+    Granted(AttachmentWritePermit),
+    /// A sweep has already armed the physical delete, or another writer owns a
+    /// condemned digest until its backend put settles. No intent was recorded;
+    /// this writer retries until the current owner completes or aborts.
     ReclamationInFlight,
 }
 
@@ -123,9 +182,9 @@ pub enum AttachmentWriteFence {
 /// defers work rather than waiting for anything.
 ///
 /// ```text
-///                 writer: begin_attachment_write (revoke + record intent)
+///                  writer: claim phase + record intent
 ///                 ┌──────────────────────────────────────────────┐
-///                 v                                              │
+///                 │                                              v
 ///   ┌────────┐  condemn (no root, no row)                  ┌───────────┐
 ///   │  Free  │ ──────────────────────────────────────────> │ Condemned │
 ///   └────────┘ <──────────── release (sweep abandons)──────└───────────┘
@@ -137,21 +196,23 @@ pub enum AttachmentWriteFence {
 ///                                                                │ delete succeeds
 ///                                                                v
 ///                                                          ┌───────────┐
-///                 fresh put: clear + record intent         │ Reclaimed │
-///                 <────────────────────────────────────────└───────────┘
+///                 └──── put succeeds: token-matched clear ─┤ Reclaimed │
+///                        put fails: preserve phase          └───────────┘
 /// ```
 ///
 /// * `Free` — the ordinary state. A writer records its intent and the digest is
 ///   rooted; a sweeper that finds no root may condemn it.
 /// * `Condemned` — a sweeper claimed the digest for deletion but has issued no
-///   physical delete yet. A writer arriving here *revokes* the condemnation and
-///   records its intent in one mutation, so the sweeper's later arm CAS fails
-///   and the delete is never issued.
+///   physical delete yet. A writer arriving here claims the phase with a unique
+///   token and records its intent in one mutation, so the sweeper's later arm
+///   CAS fails. Success clears the token-matched phase after bytes exist;
+///   failure releases the token while preserving `Condemned`.
 /// * `Deleting` — the physical delete is in flight. A writer arriving here
 ///   cannot un-issue it, so it records nothing and retries.
 /// * `Reclaimed` — the physical delete succeeded and the bytes are known absent.
-///   Adoption refuses this digest. A fresh put clears the fact while recording
-///   its write-ahead intent, then restores the bytes.
+///   Adoption refuses this digest. A fresh put claims the fact while recording
+///   its write-ahead intent, restores the bytes, and only then clears the
+///   token-matched fact. Failure preserves `Reclaimed`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttachmentCondemnation {
     /// The digest moved `Free -> Condemned` under this sweeper's CAS.
@@ -175,8 +236,10 @@ pub enum AttachmentDeleteArming {
     /// `Condemned -> Deleting`: this sweeper owns the delete. Writers arriving
     /// from here on retry instead of writing bytes.
     Armed,
-    /// The condemnation is gone — a writer revoked it to record an intent. The
-    /// delete is not issued and the digest is deferred to the next sweep.
+    /// This caller no longer owns an armable condemnation. A writer may hold
+    /// the existing phase with a restoration token, or the row may be absent or
+    /// in another phase. The delete is not issued and this caller must not
+    /// release state it does not own.
     Revoked,
 }
 
@@ -203,6 +266,13 @@ pub struct AttachmentManifestEntry {
 /// participate transparently — `record_intent` is a no-op, the
 /// scoped wrapper still works, and GC sweeps return empty.
 pub trait AttachmentManifest: Send + Sync {
+    /// Record an intent without acquiring the writer-side GC fence.
+    ///
+    /// Fenced stores must refuse this path while a digest is condemned or
+    /// reclaimed; callers that are about to put bytes use
+    /// [`Self::begin_attachment_write`] and settle its permit instead. The
+    /// method remains the primitive used by unfenced stores and direct writes
+    /// to an otherwise free digest.
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError>;
 
     /// Record the write-ahead intent *and* resolve the digest's condemnation
@@ -215,14 +285,15 @@ pub trait AttachmentManifest: Send + Sync {
     ///
     /// * no condemnation — insert/refresh the intent, return
     ///   [`AttachmentWriteFence::Granted`];
-    /// * `Condemned` — delete the condemnation row (revoking it, so the
+    /// * `Condemned` — claim the condemnation with a unique write token (so the
     ///   sweeper's arm CAS fails) and insert/refresh the intent in the *same*
-    ///   transaction, return [`AttachmentWriteFence::Granted`];
+    ///   transaction, return [`AttachmentWriteFence::Granted`] with a restoring
+    ///   permit;
     /// * `Deleting` — record nothing and return
     ///   [`AttachmentWriteFence::ReclamationInFlight`];
-    /// * `Reclaimed` — delete the byte-absence fact and insert/refresh the
-    ///   intent in the *same* transaction, return
-    ///   [`AttachmentWriteFence::Granted`].
+    /// * `Reclaimed` — claim the byte-absence fact with a unique write token and
+    ///   insert/refresh the intent in the *same* transaction, return
+    ///   [`AttachmentWriteFence::Granted`] with a restoring permit.
     ///
     /// Splitting the condemnation read from the intent insert reopens exactly
     /// the window the fence closes, so a backend that cannot express both in one
@@ -238,7 +309,40 @@ pub trait AttachmentManifest: Send + Sync {
         intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, StoreError> {
         self.record_intent(intent)
-            .map(|()| AttachmentWriteFence::Granted)
+            .map(|()| AttachmentWriteFence::Granted(AttachmentWritePermit::ordinary()))
+    }
+
+    /// Commit a granted attachment write after the backend put succeeds.
+    ///
+    /// A restoring permit removes its still-token-matched `Condemned` or
+    /// `Reclaimed` fact only after the bytes exist. It must leave the write-ahead
+    /// intent in place. An ordinary permit is a no-op. Implementations that
+    /// return restoring permits from [`Self::begin_attachment_write`] must
+    /// override this method in the same authority as the condemnation state.
+    fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        let _ = (intent, permit);
+        Ok(())
+    }
+
+    /// Abort a granted attachment write after the backend put fails.
+    ///
+    /// A restoring permit conditionally removes only this attempt's uncommitted
+    /// intent and releases its write token while preserving the exact prior
+    /// `Condemned` or `Reclaimed` phase. A stale token is a no-op: it must not
+    /// clobber a newer successful writer or sweep. An ordinary permit is a
+    /// no-op. Implementations that return restoring permits from
+    /// [`Self::begin_attachment_write`] must override this method atomically.
+    fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        let _ = (intent, permit);
+        Ok(())
     }
 
     /// Mark a set of attachment ids as committed (i.e. now referenced

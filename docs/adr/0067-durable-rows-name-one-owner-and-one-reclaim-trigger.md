@@ -301,9 +301,10 @@ the same witness the sweep uses everywhere else — "the backend says the blob i
 gone" and "the backend errored" are different answers, and only the first
 completes the delete. Release is limited to abandoned `Condemned` or `Deleting`
 work. A completed delete's `Reclaimed` row is the durable fact that its bytes are
-absent; release leaves it in place, and only a fresh put clears it while recording
-the new write intent. FIG-1510's stuck-forever state becomes unreachable, with no
-timer anywhere.
+absent; release leaves that phase in place. A fresh put claims it with an opaque
+token while recording the new write intent, restores the bytes, and clears the
+phase only after success; failure releases its token and preserves `Reclaimed`.
+FIG-1510's stuck-forever state becomes unreachable, with no timer anywhere.
 
 The generation pin is the **sweep pass's own generation**, not a session-lease
 token: a factory sweeper holds no session-execution lease, so it cannot pin the
