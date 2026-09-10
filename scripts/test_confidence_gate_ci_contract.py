@@ -459,9 +459,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         trunk_only = {
             "heavy-tests",
-            "lashlang-git-consumer",
-            "package-feature-checks",
-            "runtime-feature-boundary",
             "stack-budget",
             "confidence-fast",
             "confidence-fast-summary",
@@ -469,6 +466,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "functional-e2e",
             "functional-e2e-process-operations",
             "fuzz-smoke",
+        }
+        # FIG-2854: these three dedicated compile lanes left the shared
+        # deferral. They still skip on pull requests, but every merge group --
+        # docs-only ones included -- must show them green, so they carry their
+        # own guard and their own conclusion expectation.
+        queue_required = {
+            "lashlang-git-consumer",
+            "package-feature-checks",
+            "runtime-feature-boundary",
         }
         guard = (
             "github.event_name != 'pull_request' "
@@ -479,9 +485,17 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn(f"if: {guard} && needs.plan.outputs.", block.replace(
                 "if: always() && " + guard, "if: " + guard
             ), job)
+        queue_guard = (
+            "if: github.event_name == 'merge_group' "
+            "|| (github.event_name != 'pull_request' "
+            "&& needs.plan.outputs.rust == 'true')"
+        )
+        for job in sorted(queue_required):
+            self.assertIn(queue_guard, workflow_job_block(workflow, job), job)
 
         plan = runpy.run_path(str(ROOT / "scripts" / "ci_plan.py"))
         self.assertEqual(plan["TRUNK_ONLY_JOBS"], trunk_only)
+        self.assertEqual(plan["QUEUE_REQUIRED_COMPILE_JOBS"], queue_required)
         self.assertEqual(plan["DEFERRED_EVENTS"], {"pull_request", "merge_group"})
 
         evaluate = plan["evaluate_conclusion"]
@@ -499,7 +513,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # Full-profile jobs skip everywhere except workflow_dispatch.
         self.assertEqual(plan["FULL_PROFILE_JOBS"], {"facade-gates"})
         needs["facade-gates"] = {"result": "skipped", "outputs": {}}
+        for job in queue_required:
+            needs[job] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
+        for job in queue_required:
+            needs[job] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
         push_problems = evaluate(needs, "push")
         self.assertEqual(len(push_problems), len(trunk_only) + 3)

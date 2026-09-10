@@ -504,9 +504,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+    # Deferred on pull requests per the 2026-08-25 CI-scope ruling, but required
+    # on every merge group -- including docs-only ones. This compile
+    # configuration is resolved nowhere else, and the change classifier
+    # certifies the diff, not the health of the base the group is built over
+    # (FIG-2854).
+    if: github.event_name == 'merge_group' || (github.event_name != 'pull_request' && needs.plan.outputs.rust == 'true')
 
     steps:
       - name: Check out repository
@@ -557,9 +560,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+    # Deferred on pull requests per the 2026-08-25 CI-scope ruling, but required
+    # on every merge group -- including docs-only ones. This compile
+    # configuration is resolved nowhere else, and the change classifier
+    # certifies the diff, not the health of the base the group is built over
+    # (FIG-2854).
+    if: github.event_name == 'merge_group' || (github.event_name != 'pull_request' && needs.plan.outputs.rust == 'true')
 
     steps:
       - name: Check out repository
@@ -655,9 +661,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+    # Deferred on pull requests per the 2026-08-25 CI-scope ruling, but required
+    # on every merge group -- including docs-only ones. This compile
+    # configuration is resolved nowhere else, and the change classifier
+    # certifies the diff, not the health of the base the group is built over
+    # (FIG-2854).
+    if: github.event_name == 'merge_group' || (github.event_name != 'pull_request' && needs.plan.outputs.rust == 'true')
 
     steps:
       - name: Check out repository

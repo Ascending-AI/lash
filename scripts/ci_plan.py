@@ -58,16 +58,31 @@ GATED_JOBS = {
     "unused-deps": "rust",
 }
 
+# The dedicated compile configurations that must witness every head the merge
+# queue is about to publish. Each resolves its own feature graph -- named
+# package features, `lash-runtime` without defaults, and lashlang consumed as an
+# external Git dependency -- so none of them is covered by the workspace check.
+# They are required on merge_group INCLUDING docs-only groups: the change
+# classifier certifies a diff, not the health of the base the group is built
+# over, and a docs-only group over an already broken base is exactly how
+# #1199 and #1198 published a green conclusion over a head that did not
+# compile. They stay skipped on pull_request and keep their `rust` family
+# behaviour on push / workflow_dispatch (FIG-2854).
+QUEUE_REQUIRED_COMPILE_JOBS = {
+    "lashlang-git-consumer",
+    "package-feature-checks",
+    "runtime-feature-boundary",
+}
+
 # Jobs deferred entirely to trunk runs (push / workflow_dispatch): their
 # job-level conditions skip them on pull_request and merge_group events per
 # the 2026-08-25 CI-scope ruling; reassess after the FIG-2169 test-prune sweep.
 # postgres-store is intentionally absent: its focused runtime Agent Scenario
 # runs on pull requests and merge groups while its heavier steps remain trunk-only.
+# The QUEUE_REQUIRED_COMPILE_JOBS above are absent for the same kind of reason:
+# they are deferred on pull_request only, and required in the queue.
 TRUNK_ONLY_JOBS = {
     "heavy-tests",
-    "lashlang-git-consumer",
-    "package-feature-checks",
-    "runtime-feature-boundary",
     "stack-budget",
     "confidence-fast",
     "confidence-fast-summary",
@@ -356,6 +371,18 @@ def evaluate_conclusion(
                 problems.append(
                     f"trunk-only job {job} ended with {result!r} on a"
                     f" {event_name} event, expected skipped"
+                )
+            continue
+        # The dedicated compile lanes are judged by the event before the family
+        # expectation below ever applies: a docs-only merge group still has to
+        # show them green, because the plan classifies the diff and these jobs
+        # witness the head (FIG-2854).
+        if job in QUEUE_REQUIRED_COMPILE_JOBS and event_name in DEFERRED_EVENTS:
+            wanted = "skipped" if event_name == "pull_request" else "success"
+            if result != wanted:
+                problems.append(
+                    f"queue-required compile job {job} ended with {result!r} on a"
+                    f" {event_name} event, expected {wanted}"
                 )
             continue
         # A diff that moves a Lashlang identity version must not be able to
