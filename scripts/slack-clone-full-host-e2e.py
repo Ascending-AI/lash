@@ -705,10 +705,10 @@ class Journey:
                 if part.get("kind") == "ToolResult" and part.get("tool_name"):
                     tool_results[part["tool_name"]] = json.loads(part["content"])
         tools = (
-            "mcp__slack_clone__sample_summary",
-            "mcp__slack_clone__elicit_confirmation",
-            "mcp__slack_clone__elicit_via_url",
-            "mcp__slack_clone__list_host_roots",
+            "mcp__slack_clone__sample_summary_jsravcec3hbi6h74ol3czagt3i",
+            "mcp__slack_clone__elicit_confirmation_43iv5ippbzi6gmt6qpg5o4qley",
+            "mcp__slack_clone__elicit_via_url_ejcpavacnltc6fxpb3qci66emq",
+            "mcp__slack_clone__list_host_roots_pxgy6luaf6ydj2bcftrvqdcnwm",
         )
         self.gate("06-mcp-depth", "dom", "one request and one deterministic MCP result render identically", all("Host-generated summary" in self.dom_rows(p)[-1]["text"] and len(self.dom_rows(p)) == before_main + 2 for p in self.pages.values()), "06-mcp-depth-*.png")
         self.gate("06-mcp-depth", "platform", "platform API/database add exactly the MCP request and attributed bot reply", len(self.history()) == before_main + 2 and len(self.platform_rows()) == before_total + 2 and any(row["event_id"] in (r["metadata_json"] or "") for r in self.platform_rows()), "06-mcp-depth-four-layers.json")
@@ -797,7 +797,7 @@ class Journey:
 
     def checkpoint_mcp_runtime_attach(self) -> None:
         """Attach an MCP integration while the bot serves, use it, detach it."""
-        badge_tool = f"mcp__{self.mcp_http_server}__workspace_badge"
+        badge_tool = "mcp__workspace_http__workspace_badge_kczjjxpbmhykdl67ll7vfkvwre"
         badge_bytes = b"slack-clone workspace badge v1\x00\x01\x02\x03"
         before_turns = len(self.turn_traces())
         before_main = len(self.history())

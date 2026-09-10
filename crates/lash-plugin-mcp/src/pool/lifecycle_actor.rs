@@ -355,6 +355,27 @@ impl LifecycleActor {
             }
         };
 
+        let imported = match import_tools(&server_name, tools) {
+            Ok(imported) => imported,
+            Err(error) => {
+                self.record_error(error.to_string());
+                let shutdown = self
+                    .cancel_and_reap(
+                        &server_name,
+                        &request_tasks,
+                        cancellation.take().expect("service cancellation token"),
+                        &mut waiting,
+                        stdio_child.take(),
+                    )
+                    .await;
+                if shutdown {
+                    send_shutdown(initial_reply);
+                    return ConnectionExit::Shutdown;
+                }
+                send_result(initial_reply, Err(error));
+                return ConnectionExit::Failed;
+            }
+        };
         let Some(entry) = self.entry.upgrade() else {
             let _ = self
                 .cancel_and_reap(
@@ -367,7 +388,25 @@ impl LifecycleActor {
                 .await;
             return ConnectionExit::Shutdown;
         };
-        *entry.imported_tools.write_recover() = import_tools(&server_name, tools);
+        if let Err(error) = entry.replace_imported_tools(imported) {
+            drop(entry);
+            self.record_error(error.to_string());
+            let shutdown = self
+                .cancel_and_reap(
+                    &server_name,
+                    &request_tasks,
+                    cancellation.take().expect("service cancellation token"),
+                    &mut waiting,
+                    stdio_child.take(),
+                )
+                .await;
+            if shutdown {
+                send_shutdown(initial_reply);
+                return ConnectionExit::Shutdown;
+            }
+            send_result(initial_reply, Err(error));
+            return ConnectionExit::Failed;
+        }
         entry.consecutive_timeouts.store(0, Ordering::SeqCst);
         *entry.last_error.write_recover() = None;
         entry.reconnect_exhausted.store(false, Ordering::SeqCst);
@@ -480,7 +519,16 @@ impl LifecycleActor {
                     }
                     Some(LifecycleCommand::InstallToolCatalog { generation: observed, tools }) if observed == generation => {
                         if let Some(entry) = self.entry.upgrade() {
-                            *entry.imported_tools.write_recover() = import_tools(&server_name, tools);
+                            if let Err(error) = import_tools(&server_name, tools)
+                                .and_then(|imported| entry.replace_imported_tools(imported))
+                            {
+                                tracing::warn!(
+                                    server = %server_name,
+                                    error = %error,
+                                    "MCP tools/list refresh refused"
+                                );
+                                self.record_error(error.to_string());
+                            }
                         }
                     }
                     Some(LifecycleCommand::InstallToolCatalog { .. }) => {}
@@ -591,7 +639,16 @@ impl LifecycleActor {
                                         let _ = reply.send(None);
                                     }
                                     Some(LifecycleCommand::InstallToolCatalog { generation: observed, tools }) if observed == generation => {
-                                        *entry.imported_tools.write_recover() = import_tools(&server_name, tools);
+                                        if let Err(error) = import_tools(&server_name, tools)
+                                            .and_then(|imported| entry.replace_imported_tools(imported))
+                                        {
+                                            tracing::warn!(
+                                                server = %server_name,
+                                                error = %error,
+                                                "MCP tools/list refresh refused"
+                                            );
+                                            self.record_error(error.to_string());
+                                        }
                                     }
                                     Some(LifecycleCommand::InstallToolCatalog { .. })
                                     | Some(LifecycleCommand::CallSucceeded { .. })

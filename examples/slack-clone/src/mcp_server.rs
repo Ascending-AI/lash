@@ -13,6 +13,7 @@ use rmcp::{
     Json, Peer, RoleServer, ServerHandler, schemars::JsonSchema, tool, tool_handler, tool_router,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 use crate::bot::slack_api::SlackApi;
 use crate::wire::methods::ChannelObject;
@@ -24,17 +25,23 @@ pub const API_BASE_URL_ENV: &str = "SLACK_CLONE_MCP_API_BASE_URL";
 /// Environment variable carrying the bot token used for read-only API calls.
 pub const BOT_TOKEN_ENV: &str = "SLACK_CLONE_MCP_BOT_TOKEN";
 /// MCP name imported by the bot for the channel-summary tool.
-pub const LIST_CHANNELS_SUMMARY_TOOL: &str = "mcp__slack_clone__list_channels_summary";
+pub static LIST_CHANNELS_SUMMARY_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "list_channels_summary"));
 /// MCP name imported by the bot for the workspace-statistics tool.
-pub const WORKSPACE_STATS_TOOL: &str = "mcp__slack_clone__workspace_stats";
+pub static WORKSPACE_STATS_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "workspace_stats"));
 /// MCP name imported by the bot for provider-backed sampling.
-pub const SAMPLE_SUMMARY_TOOL: &str = "mcp__slack_clone__sample_summary";
+pub static SAMPLE_SUMMARY_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "sample_summary"));
 /// MCP name imported by the bot for form elicitation.
-pub const ELICIT_CONFIRMATION_TOOL: &str = "mcp__slack_clone__elicit_confirmation";
+pub static ELICIT_CONFIRMATION_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_confirmation"));
 /// MCP name imported by the bot for URL elicitation and completion.
-pub const URL_ELICITATION_TOOL: &str = "mcp__slack_clone__elicit_via_url";
+pub static URL_ELICITATION_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "elicit_via_url"));
 /// MCP name imported by the bot for roots listing.
-pub const LIST_HOST_ROOTS_TOOL: &str = "mcp__slack_clone__list_host_roots";
+pub static LIST_HOST_ROOTS_TOOL: LazyLock<String> =
+    LazyLock::new(|| lash_plugin_mcp::mcp_tool_name(SERVER_NAME, "list_host_roots"));
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]

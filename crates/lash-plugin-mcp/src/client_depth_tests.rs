@@ -193,6 +193,10 @@ for line in sys.stdin:
     record("after_call", message)
 "#;
 
+fn depth_tool_name() -> String {
+    crate::naming::build_prefixed_name("depth", "exercise_client_depth").0
+}
+
 struct SamplingHost {
     calls: AtomicUsize,
 }
@@ -392,9 +396,10 @@ async fn scripted_server_round_trips_sampling_elicitation_roots_and_change_notif
         .expect("connect scripted MCP server");
 
     let provider = McpToolProvider::new(Arc::clone(factory.pool()));
+    let tool_name = depth_tool_name();
     let result = provider
         .execute(lash_core::ToolCall {
-            name: "mcp__depth__exercise_client_depth",
+            name: &tool_name,
             args: &json!({}),
             context: &lash_core::testing::mock_attempt_context(),
         })
@@ -625,9 +630,10 @@ async fn advertised_url_elicitation_routes_its_completion_notification() {
 }
 
 async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
+    let tool_name = depth_tool_name();
     McpToolProvider::new(Arc::clone(factory.pool()))
         .execute(lash_core::ToolCall {
-            name: "mcp__depth__exercise_client_depth",
+            name: &tool_name,
             args: &json!({}),
             context: &lash_core::testing::mock_attempt_context(),
         })

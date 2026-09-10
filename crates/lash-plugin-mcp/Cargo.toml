@@ -24,6 +24,7 @@ lashlang = ["dep:lash-lashlang-runtime", "lash-tool-support/lashlang"]
 workspace = true
 
 [dependencies]
+blake3 = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }

@@ -16,6 +16,10 @@ use super::*;
 #[path = "policy_script.rs"]
 mod scripted;
 
+fn mcp_name(server: &str, native_tool: &str) -> String {
+    crate::naming::build_prefixed_name(server, native_tool).0
+}
+
 pub(super) struct ActorPauseHook {
     pub(super) reached: tokio::sync::Notify,
     pub(super) release: tokio::sync::Notify,
@@ -248,8 +252,9 @@ async fn connect_mock(root: &Path, options: MockOptions) -> Arc<McpConnectionPoo
 }
 
 async fn call(pool: &McpConnectionPool) -> ToolOutcome {
+    let name = mcp_name("mock", "work");
     pool.call_tool(
-        "mcp__mock__work",
+        &name,
         &json!({}),
         &lash_core::testing::mock_attempt_context(),
     )
@@ -766,7 +771,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>(),
-        ["mcp__mock__generation_2"]
+        [mcp_name("mock", "generation_2")]
     );
     pool.shutdown_all().await;
 }
@@ -2018,7 +2023,7 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>(),
-        ["mcp__mock__work"]
+        [mcp_name("mock", "work")]
     );
     pool.shutdown_all().await;
 }

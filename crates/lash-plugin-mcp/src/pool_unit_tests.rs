@@ -2,6 +2,91 @@ use super::*;
 use lash_core::ToolProvider;
 use lash_sansio::sync::{MutexExt, RwLockExt};
 
+fn mcp_name(server: &str, native_tool: &str) -> String {
+    naming::build_prefixed_name(server, native_tool).0
+}
+
+fn advertised_tool(name: &str) -> rmcp::model::Tool {
+    serde_json::from_value(json!({
+        "name": name,
+        "inputSchema": { "type": "object" }
+    }))
+    .expect("valid MCP tool fixture")
+}
+
+#[test]
+fn import_refuses_a_forced_final_name_collision_without_overwriting() {
+    let result = import_tools_with_name_builder(
+        "directory",
+        vec![advertised_tool("get-user"), advertised_tool("get_user")],
+        |server, tool| naming::build_prefixed_name_with_digest(server, tool, [7; 16]),
+    );
+    let error = match result {
+        Ok(_) => panic!("colliding final names must be refused"),
+        Err(error) => error,
+    };
+    let message = error.to_string();
+    assert!(message.contains("model-facing name collision"), "{message}");
+    assert!(message.contains("get-user"), "{message}");
+    assert!(message.contains("get_user"), "{message}");
+}
+
+#[tokio::test]
+async fn publication_refuses_a_forced_cross_server_collision_atomically() {
+    let pool = Arc::new(McpConnectionPool::empty());
+    let first = McpEntry::new_with_name_index(
+        Arc::clone(&pool.published_tool_names),
+        "abcdefghijklmno-one".to_string(),
+        McpServerConfig::stdio("sh", Vec::new()),
+        McpHostServices::default(),
+    );
+    let second = McpEntry::new_with_name_index(
+        Arc::clone(&pool.published_tool_names),
+        "abcdefghijklmno-two".to_string(),
+        McpServerConfig::stdio("sh", Vec::new()),
+        McpHostServices::default(),
+    );
+    pool.install(first.server_name.clone(), Arc::clone(&first))
+        .unwrap_or_else(|(_, error)| panic!("install first server: {error}"));
+    pool.install(second.server_name.clone(), Arc::clone(&second))
+        .unwrap_or_else(|(_, error)| panic!("install second server: {error}"));
+    let forced_catalog = |server: &str| {
+        import_tools_with_name_builder(
+            server,
+            vec![advertised_tool("abcdefghijklmnop")],
+            |server, tool| naming::build_prefixed_name_with_digest(server, tool, [9; 16]),
+        )
+        .expect("one-tool catalog")
+    };
+
+    first
+        .replace_imported_tools(forced_catalog(&first.server_name))
+        .expect("first catalog publishes");
+    let error = second
+        .replace_imported_tools(forced_catalog(&second.server_name))
+        .expect_err("second catalog must be refused");
+
+    assert!(error.to_string().contains("model-facing name collision"));
+    let advertised = pool.advertised_tools();
+    assert_eq!(advertised.len(), 1);
+    assert_eq!(
+        advertised[0].manifest.id,
+        first
+            .imported_tools
+            .read_recover()
+            .values()
+            .next()
+            .expect("first catalog remains published")
+            .definition
+            .manifest
+            .id
+    );
+    assert!(second.imported_tools.read_recover().is_empty());
+    assert_eq!(pool.published_tool_names.lock_recover().len(), 1);
+
+    pool.shutdown_all().await;
+}
+
 #[tokio::test]
 async fn roots_notification_failures_are_aggregated_after_every_attempt() {
     let attempts = Arc::new(AtomicU64::new(0));
@@ -124,9 +209,10 @@ async fn connect_tolerates_unreachable_server() {
         "the connection failure is recorded for observability"
     );
 
+    let unknown_name = mcp_name("down", "anything");
     let result = pool
         .call_tool(
-            "mcp__down__anything",
+            &unknown_name,
             &json!({}),
             &lash_core::testing::mock_attempt_context(),
         )
@@ -137,7 +223,7 @@ async fn connect_tolerates_unreachable_server() {
 
     let result = pool
         .call_tool(
-            "mcp__down__anything",
+            &unknown_name,
             &json!({}),
             &lash_core::testing::mock_attempt_context(),
         )
@@ -282,7 +368,7 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
     assert!(
         manifests
             .iter()
-            .any(|manifest| manifest.name == "mcp__docs__lookup"),
+            .any(|manifest| manifest.name == mcp_name("Docs", "lookup")),
         "the original MCP tool remains in the rebuilt catalog"
     );
     let native_result = registry
@@ -405,7 +491,7 @@ async fn tools_list_changed_refreshes_the_live_catalog() {
                 .into_iter()
                 .map(|tool| tool.name().to_string())
                 .collect::<Vec<_>>();
-            if names == ["mcp__live__new_tool"] {
+            if names == [mcp_name("live", "new-tool")] {
                 break;
             }
             tokio::task::yield_now().await;
@@ -486,15 +572,15 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
     let initial = pool.advertised_tools();
     let dropped_id = initial
         .iter()
-        .find(|definition| definition.name() == "mcp__directory__get_user")
-        .expect("hyphenated tool receives the base advertised name")
+        .find(|definition| definition.name() == mcp_name("directory", "get-user"))
+        .expect("hyphenated tool has its identity-derived name")
         .manifest
         .id
         .clone();
     let survivor_id = initial
         .iter()
-        .find(|definition| definition.name() == "mcp__directory__get_user_2")
-        .expect("underscore tool receives the collision suffix")
+        .find(|definition| definition.name() == mcp_name("directory", "get_user"))
+        .expect("underscore tool has its distinct identity-derived name")
         .manifest
         .id
         .clone();
@@ -547,8 +633,7 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
 }
 
 #[cfg(unix)]
-#[tokio::test]
-async fn deferred_grant_follows_native_identity_when_a_collision_adds_a_display_suffix() {
+async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     let scratch = tempfile::tempdir().expect("tempdir");
     let refresh_marker = scratch.path().join("refresh");
     let initialize = json!({
@@ -566,12 +651,17 @@ async fn deferred_grant_follows_native_identity_when_a_collision_adds_a_display_
             { "name": "get_user", "inputSchema": { "type": "object" } }
         ] }
     });
+    let refreshed_tools = if retain_original {
+        vec![
+            json!({ "name": "get-user", "inputSchema": { "type": "object" } }),
+            json!({ "name": "get_user", "inputSchema": { "type": "object" } }),
+        ]
+    } else {
+        vec![json!({ "name": "get-user", "inputSchema": { "type": "object" } })]
+    };
     let refreshed_list = json!({
         "jsonrpc": "2.0", "id": 2,
-        "result": { "tools": [
-            { "name": "get-user", "inputSchema": { "type": "object" } },
-            { "name": "get_user", "inputSchema": { "type": "object" } }
-        ] }
+        "result": { "tools": refreshed_tools }
     });
     let notification = json!({
         "jsonrpc": "2.0", "method": "notifications/tools/list_changed"
@@ -622,35 +712,74 @@ async fn deferred_grant_follows_native_identity_when_a_collision_adds_a_display_
 
     let initial = pool.advertised_tools();
     assert_eq!(initial.len(), 1);
-    assert_eq!(initial[0].name(), "mcp__directory__get_user");
+    let stable_name = mcp_name("directory", "get_user");
+    assert_eq!(initial[0].name(), stable_name);
     let saved_id = initial[0].manifest.id.clone();
+    let resolved = Arc::new(policy_tests::ActorPauseHook::default());
+    pool.set_resolved_target_hook(Some(Arc::clone(&resolved)));
+    let call_pool = Arc::clone(&pool);
+    let call_id = saved_id.clone();
+    let call = tokio::spawn(async move {
+        let deferred = crate::McpDeferredToolProvider::new(call_pool);
+        let context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
+            "kind": "mcp",
+            "server": "directory",
+            "tool_id": call_id.to_string(),
+        }));
+        if retain_original {
+            deferred.execute_by_id(&call_id, &json!({}), &context).await
+        } else {
+            match deferred
+                .execute_attempt_by_id(&call_id, &json!({}), &context)
+                .await
+            {
+                lash_core::ToolAttemptOutcome::Done { result, .. } => {
+                    ToolOutcome::from_output(result.into_output())
+                }
+                lash_core::ToolAttemptOutcome::Pending(pending) => ToolOutcome::pending(pending),
+            }
+        }
+    });
+    resolved.reached.notified().await;
     std::fs::write(&refresh_marker, "refresh").expect("release tools/list_changed notification");
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if pool.advertised_tools().len() == 2 {
+            let refreshed = pool.advertised_tools();
+            if refreshed.len() == usize::from(retain_original) + 1
+                && refreshed
+                    .iter()
+                    .any(|definition| definition.name() == mcp_name("directory", "get-user"))
+            {
                 break;
             }
             tokio::task::yield_now().await;
         }
     })
     .await
-    .expect("tools/list_changed adds the colliding tool");
-    let suffixed_definition = pool
+    .expect("tools/list_changed installs the refreshed catalog");
+    let refreshed_original = pool
         .advertised_tools()
         .into_iter()
-        .find(|definition| definition.name() == "mcp__directory__get_user_2")
-        .expect("the original native tool receives the collision suffix");
+        .find(|definition| definition.name() == stable_name);
+    if retain_original {
+        assert_eq!(
+            refreshed_original
+                .expect("surviving tool keeps its model-facing name")
+                .manifest
+                .id,
+            saved_id,
+            "stable name must retain the saved native identity"
+        );
+    } else {
+        assert!(
+            refreshed_original.is_none(),
+            "the accepted raw target must no longer be discoverable by its model name"
+        );
+    }
 
-    let deferred = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
-    let context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
-        "kind": "mcp",
-        "server": "directory",
-        "tool_id": saved_id.to_string(),
-    }));
-    let result = deferred
-        .execute_by_id(&saved_id, &json!({}), &context)
-        .await;
+    resolved.release.notify_one();
+    let result = call.await.expect("deferred call task");
     assert!(
         result.is_success(),
         "saved deferred grant must validate: {result:?}"
@@ -658,14 +787,21 @@ async fn deferred_grant_follows_native_identity_when_a_collision_adds_a_display_
     assert_eq!(
         result.value_for_projection(),
         json!("underscore"),
-        "saved grant must still dispatch the original native tool"
+        "accepted call must dispatch the captured native tool after refresh"
     );
-    assert_eq!(
-        suffixed_definition.manifest.id, saved_id,
-        "the display suffix must not change the saved native identity"
-    );
-
     pool.shutdown_all().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn deferred_call_keeps_captured_raw_target_across_catalog_refresh() {
+    exercise_deferred_call_across_catalog_refresh(true).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn deferred_call_uses_captured_raw_target_after_refresh_removes_original() {
+    exercise_deferred_call_across_catalog_refresh(false).await;
 }
 
 #[tokio::test]
@@ -1096,7 +1232,8 @@ async fn pool_reconnects_after_transport_death() {
     let reconnect = Arc::new(policy_tests::ActorPauseHook::default());
     pool.entries.read_recover()["flaky"].set_mid_establish_hook(Some(Arc::clone(&reconnect)));
     let replacement = replacement_connection(&pool, "flaky");
-    let first = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
+    let ping_name = mcp_name("flaky", "ping");
+    let first = pool.call_tool(&ping_name, &args, &ctx).await;
     assert!(first.is_success(), "first call succeeds: {first:?}");
 
     // Pause the reconnect after the old peer is unpublished, so the outage
@@ -1107,7 +1244,7 @@ async fn pool_reconnects_after_transport_death() {
         1,
         "tool definitions are kept across a disconnect"
     );
-    let unavailable = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
+    let unavailable = pool.call_tool(&ping_name, &args, &ctx).await;
     let output = unavailable
         .as_done_output()
         .expect("a disconnected MCP call must complete with a failure");
@@ -1125,7 +1262,7 @@ async fn pool_reconnects_after_transport_death() {
     reconnect.release.notify_one();
     replacement.await;
     assert_eq!(pool.advertised_tools().len(), 1);
-    let result = pool.call_tool("mcp__flaky__ping", &args, &ctx).await;
+    let result = pool.call_tool(&ping_name, &args, &ctx).await;
     assert!(result.is_success(), "replacement call succeeds: {result:?}");
 
     pool.shutdown_all().await;
@@ -1187,7 +1324,7 @@ async fn call_timeout_is_a_typed_retryable_failure() {
 
     let result = pool
         .call_tool(
-            "mcp__slow__hang",
+            &mcp_name("slow", "hang"),
             &json!({}),
             &lash_core::testing::mock_attempt_context(),
         )
@@ -1339,9 +1476,10 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
 
     let ctx = lash_core::testing::mock_attempt_context();
     let args = json!({});
+    let ping_name = mcp_name("svc", "ping");
     let (a, b) = tokio::join!(
-        pool.call_tool("mcp__svc__ping", &args, &ctx),
-        pool.call_tool("mcp__svc__ping", &args, &ctx),
+        pool.call_tool(&ping_name, &args, &ctx),
+        pool.call_tool(&ping_name, &args, &ctx),
     );
     assert!(a.is_success(), "first concurrent call failed: {a:?}");
     assert!(b.is_success(), "second concurrent call failed: {b:?}");
