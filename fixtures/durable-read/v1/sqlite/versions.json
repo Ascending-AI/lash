@@ -1,5 +1,5 @@
 {
-  "durable_core": 53,
+  "durable_core": 54,
   "processes": 32,
   "triggers": 8,
   "effects": 17

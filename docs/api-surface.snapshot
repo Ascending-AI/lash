@@ -1844,6 +1844,7 @@ lash::persistence::AttachmentRootSet::condemn_attachment
 lash::persistence::AttachmentRootSet::fence
 lash::persistence::AttachmentRootSet::has_live_attachment_ref
 lash::persistence::AttachmentRootSet::live_attachment_refs
+lash::persistence::AttachmentRootSet::reclaim_attachment_condemnation
 lash::persistence::AttachmentRootSet::release_attachment_condemnation
 lash::persistence::AttachmentStore
 lash::persistence::AttachmentStore::delete
@@ -2773,6 +2774,8 @@ lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::attempted
 lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::operation_key
 lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::session_id
 lash::persistence::StoreError::AppendReceiptRequestedNodeCountCorrupt::stored
+lash::persistence::StoreError::AttachmentBytesReclaimed
+lash::persistence::StoreError::AttachmentBytesReclaimed::digest
 lash::persistence::StoreError::Backend
 lash::persistence::StoreError::Backend::0
 lash::persistence::StoreError::CheckpointComponentEncodingVersionMismatch
