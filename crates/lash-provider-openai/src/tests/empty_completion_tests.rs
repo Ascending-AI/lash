@@ -148,6 +148,7 @@ async fn empty_responses_require_completed_status_in_terminal_payload() {
         "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n";
     const IN_PROGRESS: &str = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"in_progress\",\"output\":[]}}\n\n";
     const UNKNOWN: &str = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"unknown\",\"output\":[]}}\n\n";
+    const INCOMPLETE_EVENT_WITH_COMPLETED_STATUS: &str = "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n";
 
     for (body, description) in [
         (
@@ -169,6 +170,10 @@ async fn empty_responses_require_completed_status_in_terminal_payload() {
         (
             UNKNOWN,
             "response.completed with unknown status must not prove success",
+        ),
+        (
+            INCOMPLETE_EVENT_WITH_COMPLETED_STATUS,
+            "response.incomplete cannot carry a completed success status",
         ),
     ] {
         assert_empty_responses_stream_is_rejected(body, description).await;

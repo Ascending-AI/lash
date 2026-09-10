@@ -654,6 +654,8 @@ fn complete_buffered_responses(
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
         state.parts = OpenAiCompatibleProvider::response_parts_from_value(&value);
+        state.completed_status_seen =
+            value.get("status").and_then(Value::as_str) == Some("completed");
         state.final_response = Some(value);
     }
     let terminal_event_seen = state.terminal_event_seen

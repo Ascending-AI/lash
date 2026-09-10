@@ -953,8 +953,6 @@ impl ResponsesStreamState {
         response: &Value,
         terminal_event: bool,
     ) -> Result<(), LlmTransportError> {
-        self.completed_status_seen |=
-            terminal_event && response.get("status").and_then(Value::as_str) == Some("completed");
         let usage = response.get("usage").unwrap_or(&Value::Null);
         let provider_finish_reason = terminal_event
             .then(|| {

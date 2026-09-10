@@ -49,6 +49,8 @@ pub fn process_sse_event(
 
     if let Some(response) = event.get("response") {
         state.capture_execution_evidence(response, event_type.is_terminal())?;
+        state.completed_status_seen |= event_type == ResponsesStreamEvent::ResponseCompleted
+            && response.get("status").and_then(Value::as_str) == Some("completed");
     }
 
     if let Some(resp) = event.get("response") {
