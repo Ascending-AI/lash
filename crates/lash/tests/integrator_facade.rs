@@ -40,9 +40,9 @@ use lash::plugins::{
 };
 use lash::process::{
     ObserverInheritance, ProcessChange, ProcessCompletionOutcome, ProcessEventSemantics,
-    ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessId, ProcessOutcome,
+    ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessOutcome,
     ProcessParentEndPlan, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
-    ProcessTombstone, SessionId, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason,
 };
@@ -62,6 +62,7 @@ use lash::tools::{
     ToolTriggerEffectOutcome, ToolValue,
 };
 use lash::triggers::TriggerEventCatalog;
+use lash::{ProcessId, SessionId};
 
 struct Protocol;
 

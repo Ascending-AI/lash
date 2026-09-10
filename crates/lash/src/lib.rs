@@ -671,11 +671,11 @@ pub mod process {
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ObserverInheritance, ProcessChange, ProcessCompletionOutcome,
-        ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessId,
-        ProcessOutcome, ProcessParentEndPlan, ProcessStartOutcome, ProcessTerminalSemantics,
-        ProcessTerminalSpec, ProcessTombstone, SessionId, WaitKind, WaitState, WakeDelivery,
-        WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryDisposition,
-        WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+        ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessOutcome,
+        ProcessParentEndPlan, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
+        ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+        WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+        WakeDiscardReason,
     };
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, NativeProcessWork,

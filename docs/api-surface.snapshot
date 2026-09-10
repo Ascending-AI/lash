@@ -5092,10 +5092,6 @@ lash::process::ProcessHandleView::new
 lash::process::ProcessHandleView::process_id
 lash::process::ProcessHandleView::status
 lash::process::ProcessHandleView::with_definition
-lash::process::ProcessId
-lash::process::ProcessId::as_str
-lash::process::ProcessId::into_inner
-lash::process::ProcessId::new
 lash::process::ProcessIdentity
 lash::process::ProcessIdentity::definition
 lash::process::ProcessIdentity::from_process_input
@@ -5528,10 +5524,6 @@ lash::process::RecoveryContract
 lash::process::RecoveryContract::ExternallyOwned
 lash::process::RecoveryContract::OwnerBound
 lash::process::RecoveryContract::Rerunnable
-lash::process::SessionId
-lash::process::SessionId::as_str
-lash::process::SessionId::into_inner
-lash::process::SessionId::new
 lash::process::SessionProcessAdmin
 lash::process::SessionProcessAdmin::await_output
 lash::process::SessionProcessAdmin::cancel
