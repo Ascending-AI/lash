@@ -1080,7 +1080,7 @@ pub(super) async fn fig1631_await_event_completion_retires_its_gate_entry() {
 #[tokio::test]
 pub(super) async fn fig1631_turn_cancelled_await_event_releases_the_losing_event_wait() {
     let endpoint = fig1631_await_event_endpoint();
-    let workflow_key = "fig1631-await-gate-cancel";
+    let workflow_key = "fig1631-await-gate-cancel"; // gitleaks:allow -- synthetic workflow/turn identity fixture
     let calls = fig1631_parked_await_event_gate(&endpoint, workflow_key).await;
 
     let replay = encode_call_replay(
@@ -1127,7 +1127,7 @@ pub(super) async fn fig1631_turn_cancelled_await_event_releases_the_losing_event
 #[tokio::test]
 pub(super) async fn fig1631_session_revoked_await_event_unwinds_as_a_deleted_session() {
     let endpoint = fig1631_await_event_endpoint();
-    let workflow_key = "fig1631-await-gate-revoked";
+    let workflow_key = "fig1631-await-gate-revoked"; // gitleaks:allow -- synthetic workflow/turn identity fixture
     let calls = fig1631_parked_await_event_gate(&endpoint, workflow_key).await;
 
     let replay = encode_call_replay(
@@ -1262,7 +1262,7 @@ pub(super) async fn fig1631_sleep_gate_redrives_from_its_journal_positions() {
 #[tokio::test]
 pub(super) async fn fig1631_session_revoked_mid_sleep_unwinds_as_a_deleted_session() {
     let endpoint = fig1631_sleep_gate_endpoint();
-    let workflow_key = "fig1631-sleep-gate-revoked-mid-sleep";
+    let workflow_key = "fig1631-sleep-gate-revoked-mid-sleep"; // gitleaks:allow -- synthetic workflow/turn identity fixture
     let (_parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
 
     let replay = encode_call_replay(
@@ -1325,7 +1325,7 @@ pub(super) async fn fig1631_session_revoked_before_sleep_registers_never_journal
 #[tokio::test]
 pub(super) async fn fig1631_sleep_completion_retires_its_gate_entry() {
     let endpoint = fig1631_sleep_gate_endpoint();
-    let workflow_key = "fig1631-sleep-gate-completion-retires";
+    let workflow_key = "fig1631-sleep-gate-completion-retires"; // gitleaks:allow -- synthetic workflow/turn identity fixture
     let (parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
 
     let replay = encode_completed_gate_sleep_replay(
@@ -1361,7 +1361,7 @@ pub(super) async fn fig1631_sleep_completion_retires_its_gate_entry() {
 #[tokio::test]
 pub(super) async fn fig1631_turn_cancelled_sleep_leaves_gate_retirement_to_the_index() {
     let endpoint = fig1631_sleep_gate_endpoint();
-    let workflow_key = "fig1631-sleep-gate-cancel-retires";
+    let workflow_key = "fig1631-sleep-gate-cancel-retires"; // gitleaks:allow -- synthetic workflow/turn identity fixture
     let (_parked, calls) = fig1631_parked_sleep_gate(&endpoint, workflow_key).await;
 
     let replay = encode_call_replay(
@@ -1644,7 +1644,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
         .build();
     let object_key = "fig1943-session";
     let key = restate_await_event_key(
-        &durable_turn_scope(object_key, "fig1943-turn"),
+        &durable_turn_scope(object_key, "fig1943-turn"), // gitleaks:allow -- synthetic workflow/turn identity fixture
         AwaitEventWaitIdentity::tool_completion("fig1943-tool-wait"),
     )
     .expect("derive FIG-1943 tool-wait key");

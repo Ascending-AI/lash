@@ -102,7 +102,7 @@ pub(super) async fn fig1126_revoked_await_refuses_before_command_on_first_execut
     let endpoint = Endpoint::builder()
         .bind(Fig1126RevokedAwaitBoundaryImpl.serve())
         .build();
-    let workflow_key = "fig1126-revoked-await-boundary";
+    let workflow_key = "fig1126-revoked-await-boundary"; // gitleaks:allow -- synthetic workflow/turn identity fixture
     let input = Fig1126PendingToolRedriveInput;
 
     let first = invoke_endpoint_with_named_call_responses(
@@ -1560,7 +1560,7 @@ pub(super) async fn fig1464_self_waking_run_closure_does_not_fuse_the_run() {
     let endpoint = Endpoint::builder()
         .bind(Fig1464RunGuardReproImpl.serve())
         .build();
-    let key = "fig1464-self-waking-run";
+    let key = "fig1464-self-waking-run"; // gitleaks:allow -- synthetic workflow/turn identity fixture
     let input = Fig1464RunGuardReproInput {
         effect_name: "lash:fig1464-self-waking-effect".to_string(),
     };
