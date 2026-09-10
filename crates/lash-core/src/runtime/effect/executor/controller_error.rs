@@ -125,6 +125,22 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             | crate::StoreError::MonotonicCounterOverflow { .. } => {
                 crate::RuntimeErrorCode::RuntimeStoreCorrupt
             }
+            crate::StoreError::SessionDeleted { .. } => crate::RuntimeErrorCode::SessionDeleted,
+            crate::StoreError::HeadRevisionConflict { .. } => {
+                crate::RuntimeErrorCode::StoreCommitSuperseded
+            }
+            crate::StoreError::CommitNodeBudgetExceeded { .. } => {
+                crate::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+            }
+            crate::StoreError::CommitByteBudgetExceeded { .. } => {
+                crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded
+            }
+            crate::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
+                crate::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
+            }
+            crate::StoreError::RecordEncodingFailed { .. } => {
+                crate::RuntimeErrorCode::RecordEncodingFailed
+            }
             _ => crate::RuntimeErrorCode::RuntimeStore,
         };
         Self {
