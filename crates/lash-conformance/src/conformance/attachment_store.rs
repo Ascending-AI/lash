@@ -1,6 +1,7 @@
 //! [`AttachmentStore`] conformance: content addressing, freshness, and round trips.
 
 use super::*;
+use pretty_assertions::assert_eq;
 
 /// Run the full [`AttachmentStore`] conformance suite against the backend
 /// produced by `make`. `make` must return a fresh, empty store on each call.

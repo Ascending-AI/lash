@@ -154,6 +154,10 @@ struct SpawnAgentOrchestratingTool {
     definition: ToolDefinition,
 }
 
+#[expect(
+    unsafe_code,
+    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+)]
 pub(crate) fn spawn_agent_orchestrating_tool(
     provider: Arc<RlmSubagentToolsProvider>,
 ) -> lash_core::facade_support::OrchestratingToolDef {

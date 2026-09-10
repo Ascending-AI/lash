@@ -808,6 +808,10 @@ impl lash_core::facade_support::OrchestratingToolImplementation for RuntimeBatch
     }
 }
 
+#[expect(
+    unsafe_code,
+    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+)]
 fn runtime_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
     let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
         Arc::new(RuntimeBatchOrchestratingTool);

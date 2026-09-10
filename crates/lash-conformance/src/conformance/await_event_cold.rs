@@ -5,6 +5,7 @@
 
 use super::*;
 use lash_core::testing::conformance_support::ActiveTurnControl;
+use pretty_assertions::assert_eq;
 
 /// Number of named Layer-A vector groups executed by
 /// [`effect_host_await_events_cold_instance`].

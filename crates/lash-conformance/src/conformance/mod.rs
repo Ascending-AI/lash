@@ -145,6 +145,7 @@ mod tests {
     use super::*;
     use crate::SessionStoreFactory;
     use lash_sansio::sync::MutexExt;
+    use pretty_assertions::assert_eq;
 
     struct InMemoryFenceIntegrityInjector {
         runtime: Arc<crate::InMemorySessionStore>,

@@ -19,6 +19,7 @@ use crate::{
     PluginError, ProcessObserverBy, ProcessRecord, ProcessRef, ProjectionWatermark,
     TestProcessRegistryWriteExt,
 };
+use pretty_assertions::assert_eq;
 
 // The shared registry fixture leaves 59 modeled registrations after its
 // compaction probes; the cold refold fixture below adds the 60th. The

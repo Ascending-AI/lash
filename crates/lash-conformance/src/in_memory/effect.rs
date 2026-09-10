@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 use crate::conformance::StagedGroupExecutors;
 use crate::*;
 use crate::{EffectGroupHandle, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
+use pretty_assertions::assert_eq;
 
 const SCOPE: &str = "fig1535-session";
 

@@ -5,6 +5,7 @@
 //! level-1 matrix in the parent module owns the seam scaffolding they reuse.
 
 use super::*;
+use pretty_assertions::assert_eq;
 
 /// Level-2 crash sites driven by the backend helper processes.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

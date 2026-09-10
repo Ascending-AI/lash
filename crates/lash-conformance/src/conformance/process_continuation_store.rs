@@ -1,5 +1,6 @@
 //! Cross-backend conformance for substrate-scoped process continuations.
 
+use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 use crate::{

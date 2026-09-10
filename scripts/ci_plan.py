@@ -56,6 +56,7 @@ GATED_JOBS = {
     "functional-e2e": "functional_e2e",
     "functional-e2e-process-operations": "functional_e2e",
     "fuzz-smoke": "rust",
+    "unused-deps": "rust",
 }
 
 # Jobs deferred entirely to trunk runs (push / workflow_dispatch): their

@@ -979,6 +979,10 @@ impl ChildSessionTool {
     /// Managed child turns are journal-capable session work, so this test tool
     /// registers in the runtime-owned orchestrating lane; a recorded leaf
     /// attempt has no route to `sessions().start_turn()`.
+    #[expect(
+        unsafe_code,
+        reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+    )]
     pub(crate) fn orchestrating() -> crate::tool_provider::orchestration::OrchestratingToolDef {
         let implementation: Arc<
             dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,

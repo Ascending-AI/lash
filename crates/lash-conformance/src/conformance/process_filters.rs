@@ -1,5 +1,6 @@
 use super::process_registry::registration;
 use super::*;
+use pretty_assertions::assert_eq;
 
 pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn ProcessRegistry>) {
     async fn filtered_ids(

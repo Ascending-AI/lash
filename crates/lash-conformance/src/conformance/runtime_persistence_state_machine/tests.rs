@@ -1,4 +1,5 @@
 use super::*;
+use pretty_assertions::assert_eq;
 
 async fn one_pending_batch_model(store: &crate::InMemorySessionStore) -> ReferenceModel {
     let mut model = ReferenceModel::default();

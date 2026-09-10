@@ -43,6 +43,7 @@ use crate::{
     EffectGroupHandle, GroupExecutors, GroupSettlement, GroupWakePolicy, LoserPolicy,
     RuntimeEffectGroup,
 };
+use pretty_assertions::assert_eq;
 
 /// A caller's whole interaction with one group: open, await, close.
 type Host = Arc<dyn EffectHost>;

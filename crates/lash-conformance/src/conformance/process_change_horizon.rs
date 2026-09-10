@@ -3,6 +3,7 @@
 use super::process_registry::registration;
 use super::*;
 use crate::{PluginError, ProjectionWatermark};
+use pretty_assertions::assert_eq;
 
 /// Test-consumer model for the typed Process Change Feed recovery contract:
 /// a pruned cursor requires a complete relist before resuming at the reported

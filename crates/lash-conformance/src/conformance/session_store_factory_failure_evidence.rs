@@ -1,6 +1,7 @@
 //! Durable failed-generation evidence shared by every session-store backend.
 
 use super::session_store_factory::session_store_request;
+use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 /// Prove that a real mid-stream provider failure settles durable evidence that

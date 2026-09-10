@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::{RuntimePersistence, SessionExecutionLease, StoreError};
+use pretty_assertions::assert_eq;
 
 /// Backend-specific control for forcing an already-validated conditional
 /// renewal write to affect no row.

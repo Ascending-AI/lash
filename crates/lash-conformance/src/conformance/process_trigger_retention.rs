@@ -1,5 +1,6 @@
 //! Cross-backend conformance for process retention's trigger-store effects.
 
+use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;

@@ -11,6 +11,7 @@
 //! `list_pending_turn_inputs`, `list_turn_input_applications`, and
 //! `cancel_pending_turn_input`.
 
+use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

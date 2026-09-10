@@ -1,5 +1,6 @@
 //! Hostile identifiers must fail before namespace lookup or mutation.
 use super::*;
+use pretty_assertions::assert_eq;
 
 fn malformed_attachment_ids() -> Vec<String> {
     ["../x", "/abs", "", "a\0b", "é", "e\u{301}", "．．／x"]

@@ -1,0 +1,8 @@
+# Stable-only rustfmt configuration. CI formats with the stable toolchain, so a
+# nightly-only key here would be silently ignored on developer machines and
+# rejected in CI; every option below is stable.
+edition = "2024"
+style_edition = "2024"
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true

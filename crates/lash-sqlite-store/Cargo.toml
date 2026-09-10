@@ -48,7 +48,6 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 lash-conformance.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
-lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }

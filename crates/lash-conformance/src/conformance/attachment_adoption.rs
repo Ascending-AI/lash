@@ -6,6 +6,7 @@ use lash_core::facade_support::{
 };
 use lash_core::testing::store_fixtures::session_store_request;
 use lash_core::*;
+use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 fn state(id: &str) -> RuntimeSessionState {

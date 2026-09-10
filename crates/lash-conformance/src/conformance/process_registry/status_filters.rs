@@ -1,4 +1,5 @@
 use super::*;
+use pretty_assertions::assert_eq;
 
 pub(super) async fn list_filters_match_extracted_and_json_fields(
     registry: Arc<dyn ProcessRegistry>,

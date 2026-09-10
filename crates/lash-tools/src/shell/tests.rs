@@ -1062,6 +1062,10 @@ async fn write_stdin_emits_process_signal() {
 }
 
 #[cfg(unix)]
+#[expect(
+    unsafe_code,
+    reason = "libc::kill(pid, 0) is the existence probe and has no safe std equivalent"
+)]
 fn process_alive(pid: u32) -> bool {
     // kill(pid, 0) probes existence/permission without delivering a signal.
     unsafe { libc::kill(pid as i32, 0) == 0 }
@@ -1121,6 +1125,10 @@ async fn shell_runtime_teardown_kills_tracked_pty_children() {
 
 #[cfg(unix)]
 #[tokio::test]
+#[expect(
+    unsafe_code,
+    reason = "reaping the deliberately detached process group needs libc::kill"
+)]
 async fn spawn_detached_is_untracked_and_survives_teardown() {
     let runtime = ShellRuntime::new().with_cwd("/");
     let launch = runtime
@@ -1164,6 +1172,10 @@ async fn spawn_detached_is_untracked_and_survives_teardown() {
 }
 
 #[tokio::test]
+#[expect(
+    unsafe_code,
+    reason = "reaping the deliberately detached process group needs libc::kill"
+)]
 async fn internal_detached_process_body_reports_launch_identity() {
     let shell = shell_provider(StandardShell::new().with_cwd("/"));
     let service = Arc::new(TestProcessService::default());

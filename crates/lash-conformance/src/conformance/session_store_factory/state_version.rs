@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::session_store_request;
+use pretty_assertions::assert_eq;
 
 /// The ADR 0077 marker is read before guarded payloads, and its admission seam
 /// is unavailable until the caller owns the session execution lease.

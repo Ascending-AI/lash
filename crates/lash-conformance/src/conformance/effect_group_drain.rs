@@ -72,6 +72,7 @@ use crate::{EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserPolicy, Ru
 use lash_core::testing::conformance_support::{
     ChildDrainOutcome, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
 };
+use pretty_assertions::assert_eq;
 
 /// One host over the substrate under test, plus the drain wired to it.
 ///
@@ -1289,6 +1290,7 @@ impl GroupExecutors for RecordingExecutors {
 mod tests {
     use super::*;
     use lash_core::testing::conformance_support::DrainedChild;
+    use pretty_assertions::assert_eq;
 
     fn drained(replay_key: &str, outcome: ChildDrainOutcome) -> DrainedChild {
         DrainedChild {

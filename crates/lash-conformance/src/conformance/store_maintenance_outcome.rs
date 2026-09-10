@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use super::session_store_factory::session_store_request;
 use crate::store::{MaintenanceReport, MaintenanceStop, MaintenanceSweep};
+use pretty_assertions::assert_eq;
 
 /// Breaks a backend so its next `gc_unreachable` must fail.
 ///

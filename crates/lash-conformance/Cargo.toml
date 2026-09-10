@@ -22,6 +22,7 @@ serde.workspace = true
 serde_json.workspace = true
 futures-util.workspace = true
 uuid.workspace = true
+pretty_assertions.workspace = true
 proptest = "1"
 tokio-util.workspace = true
 sha2.workspace = true

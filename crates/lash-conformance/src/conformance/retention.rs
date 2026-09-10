@@ -1,6 +1,7 @@
 //! FIG-2502 / FIG-853: terminal-gated horizons and documented retry outcomes.
 use super::session_store_factory::session_store_request;
 use super::*;
+use pretty_assertions::assert_eq;
 
 /// Certify the explicit factory retention lever on one fresh backend.
 pub async fn retention_conformance(factory: Arc<dyn crate::SessionStoreFactory>) {

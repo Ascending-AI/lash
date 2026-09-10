@@ -1,5 +1,6 @@
 use super::*;
 use crate::testing::TestClock;
+use pretty_assertions::assert_eq;
 
 #[derive(Default)]
 struct RecordingWakeTurnHandle {

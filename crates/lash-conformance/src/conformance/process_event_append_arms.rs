@@ -1,6 +1,7 @@
 //! Cross-backend contract for the two arms of a process-event append.
 
 use super::*;
+use pretty_assertions::assert_eq;
 
 /// The two arms of a process-event append leave different durable footprints,
 /// and every entry point into the append sequence must produce the same one.

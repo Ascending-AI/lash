@@ -1,5 +1,6 @@
 //! Shared durable-counter corruption and exhaustion conformance.
 
+use pretty_assertions::assert_eq;
 use std::future::Future;
 use std::sync::Arc;
 

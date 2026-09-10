@@ -9,6 +9,7 @@
 //! tell a physically reclaimed row from a merely hidden one. A reclaiming prune
 //! or delete leaves nothing for that vacuum to remove.
 
+use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 use super::session_delete_blob_reclaim::{

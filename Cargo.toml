@@ -88,11 +88,92 @@ documentation = "https://samgalanakis.github.io/lash/"
 readme = "README.md"
 rust-version = "1.90"
 
+# Workspace lint table. Every member inherits it through `[lints] workspace =
+# true`; `crates/lash-regress` is the one deliberate abstention (maintained
+# third-party code whose upstream suite participates in workspace gates).
+#
+# The table is the codex-rs lint set filtered by one rule: a lint is adopted
+# only when the current tree needs at most 40 production edits to satisfy it.
+# The lints that exceed that budget are listed, with their measured site count
+# on this tree, in the "Deliberately not adopted" block below so the next round
+# starts from a number instead of a survey.
+[workspace.lints.rust]
+# New `unsafe` anywhere in the workspace fails the build. The 41 spans that
+# exist today are annotated at their site with `#[expect(unsafe_code, reason =
+# "...")]`, so each one states why it is allowed and the expectation goes stale
+# (and fails) the moment the unsafe block disappears.
+unsafe_code = "deny"
+
 [workspace.lints.clippy]
+await_holding_lock = "deny"
+# The configured list lives in `crates/lash-core/clippy.toml` and is scoped to
+# that crate on purpose: `lash_core::task::spawn` is core's tracing-context
+# idiom, and hosts, examples and runbooks legitimately call `tokio::spawn`
+# directly (234 call sites outside core). The lint level is workspace-wide so a
+# new entry in that list is enforced everywhere it applies.
 disallowed_methods = "deny"
+identity_op = "deny"
+manual_clamp = "deny"
+manual_filter = "deny"
+manual_find = "deny"
+manual_flatten = "deny"
+manual_map = "deny"
+manual_memcpy = "deny"
+manual_non_exhaustive = "deny"
+manual_ok_or = "deny"
+manual_range_contains = "deny"
+manual_retain = "deny"
+manual_strip = "deny"
+manual_try_fold = "deny"
+manual_unwrap_or = "deny"
+needless_borrow = "deny"
+needless_borrowed_reference = "deny"
+needless_late_init = "deny"
+needless_option_as_deref = "deny"
+needless_question_mark = "deny"
+needless_update = "deny"
+redundant_closure = "deny"
+redundant_static_lifetimes = "deny"
+unnecessary_filter_map = "deny"
+unnecessary_lazy_evaluations = "deny"
+unnecessary_sort_by = "deny"
+unnecessary_to_owned = "deny"
+
+# Size lints stay advisory: they are threshold heuristics, not defects.
 large_enum_variant = "warn"
 large_futures = "warn"
 result_large_err = "warn"
+
+# Deliberately not adopted, with the site count measured on this tree
+# (`cargo clippy --workspace --all-targets` with the table set to "warn"):
+#
+#   clippy::expect_used                        4351   (2427 of them in the
+#                                                     conformance crate, whose
+#                                                     laws are library code and
+#                                                     therefore outside
+#                                                     `allow-expect-in-tests`)
+#   clippy::unwrap_used                         286
+#   rust::missing_debug_implementations         361
+#   clippy::redundant_closure_for_method_calls  180
+#   clippy::redundant_clone                     161
+#   clippy::await_holding_invalid_type          137   (with codex-rs's
+#                                                     `await-holding-invalid-types`
+#                                                     tokio-guard list; the lint
+#                                                     is vacuous without it)
+#   clippy::needless_collect                     22   (18 of them are not
+#                                                     machine-applicable, and
+#                                                     the lint is wrong on at
+#                                                     least two: a `collect()`
+#                                                     that ends a borrow so the
+#                                                     loop body can mutate, and
+#                                                     a `BTreeSet` collect that
+#                                                     is there to dedupe)
+#   clippy::trivially_copy_pass_by_ref           46
+#   clippy::uninlined_format_args                41
+#
+# `unwrap_used`/`expect_used` are the ones worth a dedicated round: the
+# exemption keys they need are already set in `clippy.toml`, so that round is a
+# level change plus the site work, not a config design.
 
 # The release series CI advances. `scripts/release_version.py print-next` reads
 # this channel and returns the next `<channel>.N` (or, for a clean X.Y.Z
@@ -124,6 +205,9 @@ httpdate = "1"
 jsonschema = { version = "0.18", default-features = false }
 object_store = { version = "0.13.2", default-features = false }
 percent-encoding = "2.3"
+# Assertion diffs for the conformance laws: a failed store law prints a
+# line-oriented diff of the two structures instead of two wrapped Debug blobs.
+pretty_assertions = "1"
 reqwest = { version = "0.13", default-features = false }
 rmp-serde = "1.3.1"
 ryu-js = "=1.0.3"

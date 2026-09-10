@@ -20,6 +20,10 @@ static ALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 
 struct CountingAllocator;
 
+#[expect(
+    unsafe_code,
+    reason = "the allocation-accounting harness installs a counting global allocator, and GlobalAlloc is an unsafe trait"
+)]
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let pointer = unsafe { System.alloc(layout) };

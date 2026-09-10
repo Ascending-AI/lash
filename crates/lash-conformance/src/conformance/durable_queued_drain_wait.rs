@@ -21,6 +21,7 @@ use crate::{
 use lash_core::testing::conformance_support::{
     QueuedLaneGiveUp, QueuedLaneWait, QueuedLaneWaitStep,
 };
+use pretty_assertions::assert_eq;
 
 /// Certify one queued-lane admission through the supplied effect boundary.
 ///

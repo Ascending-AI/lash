@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use pretty_assertions::assert_eq;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ProcessCountConservation {

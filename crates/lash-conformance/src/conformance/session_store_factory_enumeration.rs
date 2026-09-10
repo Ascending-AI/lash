@@ -1,5 +1,6 @@
 use super::session_store_factory::session_store_request;
 use super::*;
+use pretty_assertions::assert_eq;
 
 pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tombstones(
     factory: Arc<dyn crate::SessionStoreFactory>,

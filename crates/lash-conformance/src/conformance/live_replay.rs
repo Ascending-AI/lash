@@ -7,6 +7,7 @@
 use super::*;
 use crate::runtime::LiveReplayEventDraft;
 use futures_util::StreamExt as _;
+use pretty_assertions::assert_eq;
 
 /// Run the full [`LiveReplayStore`] conformance suite against the backend
 /// produced by `make`. `make` must return a fresh, empty store on each call.

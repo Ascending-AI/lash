@@ -6,6 +6,7 @@ use crate::plugin::{
 };
 use lash_core::{PluginError, PluginStateEdit, PluginStateError, PluginStateStore};
 use lash_sansio::sync::MutexExt;
+use pretty_assertions::assert_eq;
 use std::sync::Mutex;
 
 #[derive(Clone, Copy, Default)]
