@@ -80,14 +80,6 @@ repos:
         files: '^crates/lash-restate/src/.*\.rs$'
         pass_filenames: false
 
-      # Mirrors CI Lint "Check durable-read fixture schema declaration".
-      - id: durable-read-fixture-version
-        name: durable-read fixture schema declaration
-        language: system
-        entry: python3 scripts/check-durable-read-fixture-version.py --cached
-        files: '^(fixtures/durable-read/|crates/lash-core/tests/support/durable_read_fixture\.rs$)'
-        pass_filenames: false
-
       # Every *_json column must stay explicitly enrolled, excluded, or proven
       # not to carry a serialized struct.
       - id: postgres-json-carrier-coverage

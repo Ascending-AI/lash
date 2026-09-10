@@ -20,11 +20,10 @@
 # and to the exact guarded bytes enrolled. Registering without one fails, and
 # names the fingerprint to burn.
 #
-# This check is deliberately CI-only, unlike the sibling PostgreSQL-payload and
-# durable-read fixture checkers: its merge-base guarantee requires a current
-# fetched target branch. PR protection must require an up-to-date merge ref or
-# merge queue so independently landed version bumps cannot be hidden by a stale
-# merge-base.
+# This check is deliberately CI-only, unlike the sibling PostgreSQL-payload
+# checker: its merge-base guarantee requires a current fetched target branch. PR
+# protection must require an up-to-date merge ref or merge queue so
+# independently landed version bumps cannot be hidden by a stale merge-base.
 
 [[surface]]
 constant = "REMOTE_PROTOCOL_VERSION"
@@ -872,11 +871,11 @@ symbols = [
 
 # Sweep exclusions: APP_VERSION and LASHLANG_COMPILER_VERSION mirror package
 # versions; MCP_PROTOCOL_VERSION, ANTHROPIC_VERSION, and CODE_ASSIST_API_VERSION
-# pin upstream protocols; DURABLE_READ_FIXTURE_SCHEMA_VERSION and GENERATOR_VERSION
-# version generated/test artifacts; LASHLANG_SEMANTIC_HASH_VERSION,
-# LASHLANG_VM_ABI_VERSION, and SOURCE_CACHE_VERSION identify hashes/caches rather
-# than serialized shapes. TOOL_INTENT_PROTOCOL_V1 is a permanently named v1
-# discriminator, not a mutable current-version constant.
+# pin upstream protocols; GENERATOR_VERSION versions a generated test artifact;
+# LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, and
+# SOURCE_CACHE_VERSION identify hashes/caches rather than serialized shapes.
+# TOOL_INTENT_PROTOCOL_V1 is a permanently named v1 discriminator, not a mutable
+# current-version constant.
 
 [[surface]]
 constant = "NATIVE_DRIVER_STATE_VERSION"
@@ -907,3 +906,24 @@ description = "complete session continuation generation including mediated plugi
 kind = "rust_items"
 paths = ["crates/lash-core/src/plugin/state.rs"]
 symbols = ["PluginState", "PluginNamespaceState"]
+
+[[surface]]
+constant = "DURABLE_READ_FIXTURE_SCHEMA_VERSION"
+constant_path = "crates/lash-core/tests/support/durable_read_fixture.rs"
+description = "checked-in durable-read fixture databases, dumps, and expectations"
+
+# The fixtures are the authoritative bytes a durable-read regression replays,
+# so this is a whole-file guard over the entire tree: the SQLite databases, the
+# PostgreSQL dump, the per-backend version manifests, and the expectations. Four
+# of the guarded files are binary SQLite databases; the `SQLite format 3` marker
+# below pins that they really are in the signature, so a later narrowing of
+# `paths` fails rather than quietly dropping the files a schema change rewrites.
+[[surface.guard]]
+kind = "file"
+paths = ["fixtures/durable-read/*"]
+must_cover = [
+  "SQLite format 3",
+  "PostgreSQL database dump",
+  "\"fixture_schema_version\"",
+  "\"durable_core\"",
+]

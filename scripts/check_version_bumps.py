@@ -382,8 +382,21 @@ class CheckError(RuntimeError):
 
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True
+    # Captured as bytes and decoded here rather than through subprocess's text
+    # mode, for two reasons that both matter to the guard signatures built from
+    # this output. Strict UTF-8 cannot read the binary durable-read fixtures at
+    # all, so decoding is lenient -- but lenient as `surrogateescape`, which
+    # round-trips every byte to a distinct code point, never `replace`, which
+    # collapses every invalid byte to one U+FFFD and would render a changed
+    # binary fixture identical to the original. And text mode also applies
+    # universal-newline translation, which folds CR and CRLF into LF: in a
+    # binary payload that is a real content change reading as no change.
+    completed = subprocess.run(["git", *args], cwd=repo, capture_output=True)
+    result: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(
+        completed.args,
+        completed.returncode,
+        completed.stdout.decode("utf-8", errors="surrogateescape"),
+        completed.stderr.decode("utf-8", errors="surrogateescape"),
     )
     if check and result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -1234,7 +1247,7 @@ def surface_fingerprint(entries: Iterable[tuple[str, str]]) -> str:
     for key, value in entries:
         digest.update(key.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(value.encode("utf-8"))
+        digest.update(value.encode("utf-8", errors="surrogateescape"))
         digest.update(b"\0")
     return f"sha256:{digest.hexdigest()}"
 
