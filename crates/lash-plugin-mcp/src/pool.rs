@@ -498,9 +498,9 @@ impl McpConnectionPool {
         // snapshot from combining the old owner and the new owner of a name.
         let _publication = self.publication_state.lock_recover();
         #[cfg(test)]
-        let hook = self.advertised_tools_hook.read_recover().clone();
+        let mut hook = self.advertised_tools_hook.read_recover().clone();
         let mut tools = Vec::new();
-        for (_index, entry) in entries.values().enumerate() {
+        for entry in entries.values() {
             tools.extend(
                 entry
                     .imported_tools
@@ -509,9 +509,7 @@ impl McpConnectionPool {
                     .map(|tool| tool.definition.clone()),
             );
             #[cfg(test)]
-            if _index == 0
-                && let Some(hook) = &hook
-            {
+            if let Some(hook) = hook.take() {
                 hook();
             }
         }
