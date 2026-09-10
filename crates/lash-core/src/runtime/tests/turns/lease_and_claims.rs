@@ -1881,7 +1881,7 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
         .await
         .expect("stale runtime task joins")
         .expect_err("the intent-owning stale conversational tail loses head CAS");
-    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitSuperseded);
     assert!(
         error.message.contains("head revision conflict"),
         "the same-turn loser must retain typed CAS diagnostics: {error:?}"
