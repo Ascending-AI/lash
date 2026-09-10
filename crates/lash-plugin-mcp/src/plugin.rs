@@ -517,11 +517,7 @@ mod tests {
                     .as_ref(),
                 "{recorded:?}"
             );
-            assert_eq!(
-                recorded.get("aliases"),
-                Some(&serde_json::json!([])),
-                "{recorded:?}"
-            );
+            assert!(recorded.get("aliases").is_none(), "{recorded:?}");
         }
         assert_eq!(
             defs[0]

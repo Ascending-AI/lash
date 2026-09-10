@@ -771,7 +771,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>(),
-        [mcp_name("mock", "generation_2")]
+        [mcp_name("mock", "generation-2")]
     );
     pool.shutdown_all().await;
 }

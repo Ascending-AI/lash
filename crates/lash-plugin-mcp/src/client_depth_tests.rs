@@ -194,7 +194,7 @@ for line in sys.stdin:
 "#;
 
 fn depth_tool_name() -> String {
-    crate::naming::build_prefixed_name("depth", "exercise_client_depth").0
+    crate::naming::build_prefixed_name("depth", "exercise-client-depth").0
 }
 
 struct SamplingHost {
