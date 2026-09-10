@@ -3,58 +3,9 @@ use super::*;
 #[async_trait::async_trait]
 impl StoreMaintenance for PostgresSessionStore {
     async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {
-        // `lash_deleted_sessions` is deliberately exempt: it is permanent
-        // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
-        let removed_node_count =
-            sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
-                .bind(self.session_id.as_str())
-                .execute(&self.pool)
-                .await
-                .map_err(|error| {
-                    lash_core::MaintenanceFailure::failed_before_any_work(store_sqlx_error(error))
-                })?
-                .rows_affected() as usize;
-        // The two deletes are separate statements, so the node delete has
-        // already committed by the time this one can fail: its count rides out
-        // with the failure rather than being lost.
-        let removed_pending_turn_input_tombstone_count = sqlx::query(
-            "DELETE FROM lash_pending_turn_inputs
-             WHERE session_id = $1 AND state IN ($2, $3)",
-        )
-        .bind(self.session_id.as_str())
-        .bind(lash_core::TurnInputState::Cancelled.as_str())
-        .bind(lash_core::TurnInputState::Completed.as_str())
-        .execute(&self.pool)
-        .await
-        .map_err(|error| {
-            lash_core::MaintenanceFailure::failed(
-                store_sqlx_error(error),
-                VacuumReport {
-                    removed_node_count,
-                    removed_pending_turn_input_tombstone_count: 0,
-                },
-            )
-        })?
-        .rows_affected();
-        sqlx::query("DELETE FROM lash_turn_cancel_requests WHERE session_id = $1")
-            .bind(self.session_id.as_str())
-            .execute(&self.pool)
+        self.vacuum_tombstones()
             .await
-            .map_err(|error| {
-                lash_core::MaintenanceFailure::failed(
-                    store_sqlx_error(error),
-                    VacuumReport {
-                        removed_node_count,
-                        removed_pending_turn_input_tombstone_count:
-                            removed_pending_turn_input_tombstone_count as usize,
-                    },
-                )
-            })?;
-        Ok(VacuumReport {
-            removed_node_count,
-            removed_pending_turn_input_tombstone_count: removed_pending_turn_input_tombstone_count
-                as usize,
-        })
+            .map_err(lash_core::MaintenanceFailure::failed_before_any_work)
     }
 
     /// Checkpoint-rooted mark/sweep over `lash_blobs`, mirroring the SQLite
@@ -75,6 +26,41 @@ impl StoreMaintenance for PostgresSessionStore {
 }
 
 impl PostgresSessionStore {
+    async fn vacuum_tombstones(&self) -> Result<VacuumReport, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        // `lash_deleted_sessions` is deliberately exempt: it is permanent
+        // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
+        let removed_node_count =
+            sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
+                .bind(self.session_id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?
+                .rows_affected() as usize;
+        let removed_pending_turn_input_tombstone_count = sqlx::query(
+            "DELETE FROM lash_pending_turn_inputs
+             WHERE session_id = $1 AND state IN ($2, $3)",
+        )
+        .bind(self.session_id.as_str())
+        .bind(lash_core::TurnInputState::Cancelled.as_str())
+        .bind(lash_core::TurnInputState::Completed.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+        sqlx::query("DELETE FROM lash_turn_cancel_requests WHERE session_id = $1")
+            .bind(self.session_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(VacuumReport {
+            removed_node_count,
+            removed_pending_turn_input_tombstone_count: removed_pending_turn_input_tombstone_count
+                as usize,
+        })
+    }
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;

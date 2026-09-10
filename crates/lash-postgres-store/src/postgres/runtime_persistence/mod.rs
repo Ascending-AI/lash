@@ -458,6 +458,8 @@ mod session_commit;
 mod session_execution_lease;
 mod turn_input;
 
+#[cfg(any(test, feature = "testing"))]
+pub use claim_support::TurnCancelReadPause as TestTurnCancelReadPause;
 use claim_support::*;
 pub(crate) use claim_support::{
     load_session_execution_lease_tx, read_session_execution_lease_unlocked,

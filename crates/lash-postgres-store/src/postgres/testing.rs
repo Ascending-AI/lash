@@ -15,6 +15,9 @@
 
 use sqlx::{Connection, PgConnection};
 
+#[doc(hidden)]
+pub use crate::runtime_persistence::TestTurnCancelReadPause as TurnCancelReadPause;
+
 /// A throwaway Postgres database, created for one test and dropped with it.
 ///
 /// Construction connects to the maintenance database named in the base URL,
