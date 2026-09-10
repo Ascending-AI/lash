@@ -683,7 +683,7 @@ fn complete_buffered_responses(
         .as_ref()
         .map(|value| terminal_reason_from_responses_value(value, &parts))
         .unwrap_or_else(|| terminal_reason_from_parts(&parts));
-    if invalid_empty_response(&parts, terminal_reason, terminal_event_seen) {
+    if invalid_empty_response(&parts, terminal_reason, state.completed_status_seen) {
         return Err(empty_response_error(text));
     }
     if let Some(tx) = &stream_events {
@@ -769,12 +769,7 @@ fn complete_buffered_chat(
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(chat_response_from_state(state, &url)));
     }
-    let finish_reason_seen = state
-        .execution_evidence
-        .as_ref()
-        .and_then(|evidence| evidence.provider_finish_reason.as_ref())
-        .is_some();
-    if invalid_empty_response(&parts, state.terminal_reason, finish_reason_seen) {
+    if invalid_empty_response(&parts, state.terminal_reason, state.normal_stop_seen) {
         return Err(empty_response_error(text));
     }
     if let Some(tx) = &stream_events {
@@ -992,7 +987,7 @@ async fn drive_streaming_responses(
         .as_ref()
         .map(|value| terminal_reason_from_responses_value(value, &parts))
         .unwrap_or_else(|| terminal_reason_from_parts(&parts));
-    if invalid_empty_response(&parts, terminal_reason, state.terminal_event_seen) {
+    if invalid_empty_response(&parts, terminal_reason, state.completed_status_seen) {
         return Err(empty_response_diagnostic(
             state
                 .final_response
@@ -1096,12 +1091,7 @@ async fn drive_streaming_chat(
             .with_partial_response(chat_response_from_state(state, &url)));
     }
     let parts = state.parts();
-    let finish_reason_seen = state
-        .execution_evidence
-        .as_ref()
-        .and_then(|evidence| evidence.provider_finish_reason.as_ref())
-        .is_some();
-    if invalid_empty_response(&parts, state.terminal_reason, finish_reason_seen) {
+    if invalid_empty_response(&parts, state.terminal_reason, state.normal_stop_seen) {
         return Err(empty_response_error(
             state.final_response_raw.take().unwrap_or_default(),
         ));

@@ -58,19 +58,19 @@ pub(crate) fn has_response_content(parts: &[lash_core::llm::types::LlmOutputPart
 
 /// Whether a contentless response is still missing the evidence needed to
 /// classify it. A normal stop is valid only when the wire carried an explicit
-/// terminal event; compatibility EOF tolerance must not manufacture success
+/// successful terminal status; compatibility EOF tolerance must not manufacture success
 /// from an empty, unterminated stream. The other terminal outcomes already
 /// carry their own distinct semantics even when they contain no output.
 pub(crate) fn invalid_empty_response(
     parts: &[lash_core::llm::types::LlmOutputPart],
     terminal_reason: lash_core::llm::types::LlmTerminalReason,
-    terminal_evidence_seen: bool,
+    normal_completion_seen: bool,
 ) -> bool {
     if has_response_content(parts) {
         return false;
     }
     match terminal_reason {
-        lash_core::llm::types::LlmTerminalReason::Stop => !terminal_evidence_seen,
+        lash_core::llm::types::LlmTerminalReason::Stop => !normal_completion_seen,
         lash_core::llm::types::LlmTerminalReason::OutputLimit
         | lash_core::llm::types::LlmTerminalReason::ContentFilter
         | lash_core::llm::types::LlmTerminalReason::Cancelled => false,

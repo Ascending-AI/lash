@@ -126,3 +126,108 @@ async fn eof_tolerance_does_not_turn_empty_unterminated_streams_into_success() {
     assert_eq!(responses_error.code.as_deref(), Some("empty_response"));
     assert_eq!(responses_transport.calls(), 1);
 }
+
+async fn assert_empty_responses_stream_is_rejected(body: &'static str, description: &str) {
+    let transport = single_stream_transport(body);
+    let mut provider = OpenAiProvider::new("key").with_transport(Arc::clone(&transport) as _);
+    let error = provider
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
+        .await
+        .expect_err(description);
+    assert_eq!(error.code.as_deref(), Some("empty_response"));
+    assert_eq!(transport.calls(), 1);
+}
+
+#[tokio::test]
+async fn empty_responses_require_completed_status_in_terminal_payload() {
+    const BARE_COMPLETED: &str = "data: {\"type\":\"response.completed\"}\n\n";
+    const BARE_INCOMPLETE: &str = "data: {\"type\":\"response.incomplete\"}\n\n";
+    const MISSING_STATUS: &str =
+        "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n";
+    const IN_PROGRESS: &str = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"in_progress\",\"output\":[]}}\n\n";
+    const UNKNOWN: &str = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"unknown\",\"output\":[]}}\n\n";
+
+    for (body, description) in [
+        (
+            BARE_COMPLETED,
+            "bare response.completed must not prove success",
+        ),
+        (
+            BARE_INCOMPLETE,
+            "bare response.incomplete must not default to successful stop",
+        ),
+        (
+            MISSING_STATUS,
+            "response.completed without status must not prove success",
+        ),
+        (
+            IN_PROGRESS,
+            "response.completed with in_progress must not prove success",
+        ),
+        (
+            UNKNOWN,
+            "response.completed with unknown status must not prove success",
+        ),
+    ] {
+        assert_empty_responses_stream_is_rejected(body, description).await;
+    }
+}
+
+#[tokio::test]
+async fn empty_buffered_responses_require_completed_status() {
+    for (body, description) in [
+        (
+            r#"{"id":"resp-missing-status","output":[]}"#,
+            "buffered response without status must not prove success",
+        ),
+        (
+            r#"{"id":"resp-in-progress","status":"in_progress","output":[]}"#,
+            "buffered in_progress response must not prove success",
+        ),
+        (
+            r#"{"id":"resp-unknown","status":"unknown","output":[]}"#,
+            "buffered unknown response must not prove success",
+        ),
+    ] {
+        let transport = Arc::new(RecordingHttpTransport::responding_with(Vec::new(), body));
+        let mut provider = OpenAiProvider::new("key").with_transport(transport.clone());
+        let error = provider
+            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .await
+            .expect_err(description);
+        assert_eq!(error.code.as_deref(), Some("empty_response"));
+        assert_eq!(transport.requests.lock_recover().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn empty_chat_requires_wire_stop_even_when_native_evidence_exists() {
+    const CHAT_NATIVE_LENGTH_ONLY: &str = r#"{"id":"chat-native-only","model":"provider/model","choices":[{"message":{"role":"assistant","content":""},"native_finish_reason":"length"}]}"#;
+    let value: Value = serde_json::from_str(CHAT_NATIVE_LENGTH_ONLY).expect("valid fixture");
+    let mut state = ChatStreamState::default();
+    state
+        .capture_response_value(&value)
+        .expect("native evidence is valid");
+    assert_eq!(
+        state
+            .execution_evidence
+            .as_ref()
+            .and_then(|evidence| evidence.provider_finish_reason.as_deref()),
+        Some("length")
+    );
+    assert!(!state.normal_stop_seen);
+
+    let transport = Arc::new(RecordingHttpTransport::responding_with(
+        Vec::new(),
+        CHAT_NATIVE_LENGTH_ONLY,
+    ));
+    let mut provider = openrouter_provider().with_transport(transport.clone());
+    let error = provider
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .await
+        .expect_err("native evidence cannot replace a missing wire finish_reason");
+    assert_eq!(error.code.as_deref(), Some("empty_response"));
+    assert_eq!(transport.requests.lock_recover().len(), 1);
+}
