@@ -309,3 +309,28 @@ fn responses_reasoning_summary_parts_with_one_item_id_stay_distinct() {
         .collect::<Vec<_>>();
     assert_eq!(reasoning, vec!["First", "Second"]);
 }
+
+#[test]
+fn responses_indexed_reasoning_summary_parts_reuse_the_output_owner() {
+    let mut state = ResponsesStreamState::default();
+    for event in [
+        r#"{"type":"response.reasoning_summary_part.added","output_index":0,"item_id":"rs_1","summary_index":0}"#,
+        r#"{"type":"response.reasoning_summary_text.delta","output_index":0,"item_id":"rs_1","summary_index":0,"delta":"First"}"#,
+        r#"{"type":"response.reasoning_summary_part.done","output_index":0,"item_id":"rs_1","summary_index":0}"#,
+        r#"{"type":"response.reasoning_summary_part.added","output_index":0,"item_id":"rs_1","summary_index":1}"#,
+        r#"{"type":"response.reasoning_summary_text.delta","output_index":0,"item_id":"rs_1","summary_index":1,"delta":"Second"}"#,
+        r#"{"type":"response.reasoning_summary_part.done","output_index":0,"item_id":"rs_1","summary_index":1}"#,
+    ] {
+        OpenAiCompatibleProvider::process_sse_event(event, &mut state, None).unwrap();
+    }
+
+    let reasoning = state
+        .response_parts()
+        .into_iter()
+        .filter_map(|part| match part {
+            LlmOutputPart::Reasoning { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reasoning, vec!["FirstSecond"]);
+}

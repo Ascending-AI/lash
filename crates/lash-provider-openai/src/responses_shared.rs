@@ -1358,12 +1358,17 @@ impl ResponsesStreamState {
     }
 
     pub fn begin_reasoning_part(&mut self, output_index: Option<usize>, item_id: Option<&str>) {
+        let allocation = if output_index.is_some() {
+            ResponsesPartSlotAllocation::Resolve
+        } else {
+            ResponsesPartSlotAllocation::Fresh
+        };
         self.current_reasoning_slot = self.allocate_or_find_part_slot(
             output_index,
             item_id,
             ResponsesPartKind::Reasoning,
             None,
-            ResponsesPartSlotAllocation::Fresh,
+            allocation,
         );
     }
 
