@@ -692,7 +692,10 @@ async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
     assert_eq!(durable.head_revision, 1);
     drop(turn);
     assert_eq!(runtime.state.turn_index, 1);
-    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
     let recovered = runtime
         .run_turn_assembled(
             TurnInput::text("continue after dropped host delivery"),
@@ -780,7 +783,7 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         issue.code.as_deref() == Some("protocol_restore_session") && issue.retryable == Some(false)
     }));
     assert!(matches!(
-        runtime.resident_session_state,
+        runtime.resident_session.validity(),
         ResidentSessionState::Invalidated { .. }
     ));
     let durable = crate::store::SessionCommitStore::load_session(store.as_ref())
@@ -811,7 +814,10 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         crate::RuntimeErrorCode::ResidentSessionReloadFailed
     );
     assert_eq!(exported.head_revision, 1);
-    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
     assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
 
     let refusal_event = capture.exactly_one("resident_session_state.sync_refusal");
@@ -873,7 +879,10 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         recovered.assistant_output.safe_text,
         "resident state reloaded"
     );
-    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
     assert_eq!(protocol.restore_count.load(Ordering::SeqCst), 4);
 }
 
@@ -882,10 +891,13 @@ async fn double_invalidation_preserves_first_decision_id() {
     let mut runtime =
         runtime_with_plugins_and_tools(Vec::new(), Arc::new(EmptyTools), mock_provider(Vec::new()))
             .await;
-    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
 
     runtime.invalidate_resident_session_state();
-    let initial_decision_id = match &runtime.resident_session_state {
+    let initial_decision_id = match runtime.resident_session.validity() {
         ResidentSessionState::Invalidated { decision_id } => decision_id.clone(),
         ResidentSessionState::Valid => panic!("expected invalidated resident state"),
     };
@@ -893,7 +905,7 @@ async fn double_invalidation_preserves_first_decision_id() {
 
     // A second invalidation while already invalidated must preserve the first decision id
     runtime.invalidate_resident_session_state();
-    match &runtime.resident_session_state {
+    match runtime.resident_session.validity() {
         ResidentSessionState::Invalidated { decision_id } => {
             assert_eq!(
                 decision_id, &initial_decision_id,
@@ -915,11 +927,14 @@ async fn successful_reload_clears_invalidated_state_to_valid() {
         store.clone() as Arc<dyn crate::RuntimePersistence>,
     )
     .await;
-    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
 
     runtime.invalidate_resident_session_state();
     assert!(matches!(
-        runtime.resident_session_state,
+        runtime.resident_session.validity(),
         ResidentSessionState::Invalidated { .. }
     ));
 
@@ -929,7 +944,7 @@ async fn successful_reload_clears_invalidated_state_to_valid() {
         .expect("successful reload from store/snapshot");
 
     assert_eq!(
-        runtime.resident_session_state,
+        *runtime.resident_session.validity(),
         ResidentSessionState::Valid,
         "successful reload must clear invalidated state back to Valid"
     );
@@ -4813,7 +4828,7 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
         issue.code.as_deref() == Some("store_commit_failed") && issue.retryable == Some(false)
     }));
     assert!(matches!(
-        runtime.resident_session_state,
+        runtime.resident_session.validity(),
         ResidentSessionState::Invalidated { .. }
     ));
 

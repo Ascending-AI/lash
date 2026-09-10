@@ -53,7 +53,6 @@ declare -A allowlist=(
   ["crates/lashlang/src/parser.rs"]="Lashlang recursive-descent parser"
   ["crates/lash-protocol-rlm/src/executor.rs"]="RLM protocol turn executor"
   ["crates/lash-remote-protocol/src/core_conversions/processes.rs"]="process DTO <-> core conversions"
-  ["crates/lash-core/src/runtime/turn_loop.rs"]="core runtime turn loop"
   ["crates/lash-perf/src/runtime_perf/providers.rs"]="dev-only runtime perf provider harness"
   ["runbooks/restate-postgres-workers/src/bin/runner.rs"]="distributed-workers e2e runner binary"
   ["crates/lash-restate/src/tests.rs"]="Restate backend test suite"

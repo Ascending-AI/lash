@@ -1,5 +1,8 @@
 use super::turn_input_ingress::TurnInputDrive;
-use super::turn_loop::{SessionExecutionLeaseReleasePolicy, TurnStopwatch};
+use super::turn_loop::{
+    LogicalTurnErrorContext, PreparedTurnExecuteContext, SessionExecutionLeaseReleasePolicy,
+    TurnLeaseScope, TurnPrepareContext, TurnSinks, TurnStopwatch,
+};
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
@@ -232,16 +235,23 @@ impl LashRuntime {
                 LogicalTurnStart::Input(mut input) => {
                     input.trace_turn_id = Some(turn_trace_turn_id.clone());
                     Box::pin(self.stream_turn_with_scoped_effect_controller_inner(
-                        input,
-                        events,
-                        turn_events,
-                        turn_effect_controller,
-                        cancel.clone(),
-                        claims.queued,
-                        claims.turn_inputs,
-                        true,
-                        session_execution_lease.as_ref(),
-                        SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
+                        TurnPrepareContext {
+                            input,
+                            sinks: TurnSinks {
+                                events,
+                                turn_events,
+                            },
+                            scoped_effect_controller: turn_effect_controller,
+                            cancel: cancel.clone(),
+                            queued_claims: claims.queued,
+                            turn_input_claims: claims.turn_inputs,
+                            materialize_initial_claims: true,
+                            lease: TurnLeaseScope {
+                                guard: session_execution_lease.as_ref(),
+                                release_policy:
+                                    SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
+                            },
+                        },
                     ))
                     .await
                 }
@@ -257,24 +267,22 @@ impl LashRuntime {
                         .durability
                         .attachment_store
                         .bind_turn_scoped(prepared.trace_turn_id.clone());
-                    Box::pin(self.stream_prepared_turn_inner(
-                        prepared.messages,
-                        prepared.previous_prompt_usage,
-                        prepared.protocol_turn_options,
-                        prepared.protocol_extension,
-                        prepared.turn_context,
-                        prepared.initial_turn_causes,
-                        prepared.trace_turn_id,
-                        prepared.turn_index,
-                        events,
-                        turn_events,
-                        turn_effect_controller,
-                        cancel.clone(),
-                        claims.queued,
-                        claims.turn_inputs,
-                        session_execution_lease.as_ref(),
-                        SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
-                    ))
+                    Box::pin(self.stream_prepared_turn_inner(PreparedTurnExecuteContext {
+                        turn: prepared,
+                        sinks: TurnSinks {
+                            events,
+                            turn_events,
+                        },
+                        scoped_effect_controller: turn_effect_controller,
+                        cancel: cancel.clone(),
+                        initial_queue_claims: claims.queued,
+                        initial_turn_input_claims: claims.turn_inputs,
+                        lease: TurnLeaseScope {
+                            guard: session_execution_lease.as_ref(),
+                            release_policy:
+                                SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
+                        },
+                    }))
                     .await
                 }
             };
@@ -479,16 +487,20 @@ impl LashRuntime {
                 Self::emit_physical_turn_start(turn_events, &terminal_trace_turn_id, &next_claims)
                     .await;
                 let terminal_result = Box::pin(self.finish_logical_turn_error(
-                        format!(
-                            "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
-                        ),
-                        terminal_trace_turn_id,
-                        events,
-                        turn_events,
-                        terminal_effect_controller,
-                        cancel.clone(),
-                        next_claims,
-                        session_execution_lease.as_ref(),
+                        LogicalTurnErrorContext {
+                            message: format!(
+                                "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
+                            ),
+                            trace_turn_id: terminal_trace_turn_id,
+                            sinks: TurnSinks {
+                                events,
+                                turn_events,
+                            },
+                            scoped_effect_controller: terminal_effect_controller,
+                            cancel: cancel.clone(),
+                            claims: next_claims,
+                            session_execution_lease: session_execution_lease.as_ref(),
+                        },
                     ))
                     .await;
                 let mut terminal = match terminal_result {

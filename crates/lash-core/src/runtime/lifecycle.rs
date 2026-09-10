@@ -309,12 +309,8 @@ impl LashRuntime {
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
             unreported_usage_attempts: outstanding_unreported_attempts,
             process_sync_needed: Arc::new(AtomicBool::new(false)),
-            resident_graph_head_stale: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
-            last_committed_lease_continuity: None,
-            last_committed_observation_turn: None,
-            graph_loaded_from_store: false,
-            resident_session_state: ResidentSessionState::Valid,
+            resident_session: ResidentSessionContinuity::fresh(),
             materialized_protocol_config_dirty: false,
         })
     }
