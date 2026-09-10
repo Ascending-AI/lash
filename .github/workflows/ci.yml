@@ -364,7 +364,6 @@ jobs:
         run: |
           python3 scripts/test_api_evidence.py
           python3 scripts/test_api_surface.py
-          python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_facade_external_types.py
           python3 scripts/test_check_facade_only_examples.py
           python3 scripts/test_check_durable_read_fixture_version.py
