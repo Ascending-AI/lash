@@ -1552,6 +1552,11 @@ jobs:
 
       - name: Start MinIO and create test bucket
         run: |
+          # Pull both images up front with retries so a transient Docker Hub
+          # error fails the pull instead of leaving `docker run` to report
+          # "No such image" and take the whole trunk run red.
+          bash scripts/docker-pull-with-retry.sh minio/minio:RELEASE.2025-04-22T22-12-26Z
+          bash scripts/docker-pull-with-retry.sh minio/mc:RELEASE.2025-04-16T18-13-26Z
           docker run -d --name lash-ci-minio \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
