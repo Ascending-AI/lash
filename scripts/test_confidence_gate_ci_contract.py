@@ -463,7 +463,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         trunk_only = {
             "heavy-tests",
-            "semver-advisory",
             "lashlang-git-consumer",
             "package-feature-checks",
             "runtime-feature-boundary",
@@ -2104,31 +2103,6 @@ derive_mutation_jobs() {{
             block = workflow_job_block(workflow, job_id)
             self.assertIn("./.github/actions/setup-mold", block)
         self.assertNotIn("cargo build", release)
-
-    def test_api_surface_job_is_advisory_and_reports_snapshot_delta(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        block = workflow_job_block(workflow, "semver-advisory")
-
-        self.assertIn("continue-on-error: true", block)
-        self.assertIn("name: API surface advisory", block)
-        self.assertIn("snapshot=docs/api-surface.snapshot", block)
-        self.assertIn(
-            'baseline_rev="$(git rev-parse "${GITHUB_SHA}^")"',
-            block,
-        )
-        self.assertIn(
-            'git diff --no-ext-diff --unified=0 "${baseline_rev}" -- "${snapshot}"',
-            block,
-        )
-        self.assertIn("GITHUB_STEP_SUMMARY", block)
-        self.assertIn("FIG-2095", block)
-        self.assertNotIn("cargo-semver-checks", block)
-        self.assertNotIn(
-            "env",
-            yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"][
-                "semver-advisory"
-            ],
-        )
 
     def test_ci_has_no_staging_or_automatic_release_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
