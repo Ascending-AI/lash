@@ -548,7 +548,6 @@ pub mod facade_support {
     pub use crate::triggers::TriggerEmitReport;
     pub use crate::triggers::TriggerEvent;
     pub use crate::triggers::TriggerEventType;
-    pub use crate::triggers::TriggerManifestMembership;
     pub use crate::triggers::TriggerRegistration;
     pub use crate::triggers::TriggerRouter;
     pub use crate::triggers::TriggerTarget;

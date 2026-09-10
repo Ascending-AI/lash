@@ -15,11 +15,7 @@ impl RawDurableReader {
 
     pub(super) async fn observe(&self) -> RawDurableState {
         match self {
-            Self::InMemory {
-                store,
-                factory,
-                session_id,
-            } => {
+            Self::InMemory { store, factory } => {
                 let durable_nodes = store
                     .raw_graph_nodes_for_testing()
                     .into_iter()
@@ -84,12 +80,6 @@ impl RawDurableReader {
                         },
                     )
                     .collect();
-                let session_owned_artifact_refs = session_owned_artifact_ref_observations(
-                    store
-                        .raw_session_owned_artifact_refs_for_testing(session_id)
-                        .await
-                        .expect("read in-memory session-owned artifact refs"),
-                );
                 let checkpoint = store.raw_checkpoint_for_testing().map(|checkpoint| {
                     checkpoint_observation(store.raw_checkpoint_ref_for_testing(), checkpoint)
                 });
@@ -154,7 +144,6 @@ impl RawDurableReader {
                     session_execution_leases,
                     pending_turn_inputs,
                     queued_work,
-                    session_owned_artifact_refs,
                 }
             }
             Self::Sqlite {
@@ -436,12 +425,6 @@ impl RawDurableReader {
                 .expect("read Postgres queued-work items");
                 let queued_work =
                     queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
-                let session_owned_artifact_refs = session_owned_artifact_ref_observations(
-                    store
-                        .raw_session_owned_artifact_refs_for_testing(session_id)
-                        .await
-                        .expect("read Postgres session-owned artifact refs"),
-                );
                 RawDurableState {
                     head_revision,
                     leaf_node_id,
@@ -455,7 +438,6 @@ impl RawDurableReader {
                     session_execution_leases,
                     pending_turn_inputs,
                     queued_work,
-                    session_owned_artifact_refs,
                 }
             }
         }

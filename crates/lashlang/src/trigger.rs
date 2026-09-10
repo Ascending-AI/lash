@@ -161,14 +161,6 @@ pub fn add_trigger_resource_operations(
                 required_field("incarnation", TypeExpr::Str),
                 required_field("revision", TypeExpr::Int),
                 required_field("registrant", TypeExpr::Dict),
-                required_field(
-                    "manifest_membership",
-                    TypeExpr::Enum(vec![
-                        "present_in_current_artifact".into(),
-                        "orphaned".into(),
-                        "unknown".into(),
-                    ]),
-                ),
                 required_field("source_key", TypeExpr::Str),
                 optional_field("name", TypeExpr::Str),
                 required_field("source_type", TypeExpr::Str),

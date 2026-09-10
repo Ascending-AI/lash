@@ -6,7 +6,6 @@
 
 use super::*;
 use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
-use lash_sansio::SessionId;
 
 #[async_trait::async_trait]
 impl StoreTestSupport for Store {
@@ -26,61 +25,6 @@ impl StoreTestSupport for Store {
                     params![session_id.as_str()],
                 )?;
                 Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<bool, StoreError> {
-        let artifact_ref = lash_core::TriggerOwnerScope::session(session_id).namespace();
-        let blob_ref = format!("testing-trigger-manifest:{session_id}");
-        self.conn
-            .write(move |tx| {
-                tx.execute(
-                    "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, X'01')",
-                    params![blob_ref],
-                )?;
-                tx.execute(
-                    "INSERT OR REPLACE INTO artifact_refs (namespace, artifact_ref, blob_ref)
-                     VALUES (?1, ?2, ?3)",
-                    params![
-                        crate::attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
-                        artifact_ref,
-                        blob_ref
-                    ],
-                )?;
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)?;
-        Ok(true)
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<(String, String)>, StoreError> {
-        let artifact_ref = lash_core::TriggerOwnerScope::session(session_id).namespace();
-        self.conn
-            .call(move |connection| {
-                let mut statement = connection.prepare(
-                    "SELECT namespace, artifact_ref
-                     FROM artifact_refs
-                     WHERE namespace = ?1 AND artifact_ref = ?2
-                     ORDER BY namespace, artifact_ref",
-                )?;
-                statement
-                    .query_map(
-                        params![
-                            crate::attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
-                            artifact_ref
-                        ],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )?
-                    .collect()
             })
             .await
             .map_err(sqlite_error)

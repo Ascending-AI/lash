@@ -271,21 +271,6 @@ mod tests {
             Ok(None)
         }
 
-        async fn replace_current_trigger_manifest(
-            &self,
-            _owner_namespace: &str,
-            _artifact: &ModuleArtifact,
-        ) -> Result<crate::TriggerManifestReplacement, ArtifactStoreError> {
-            Err(ArtifactStoreError::Backend("disk full".to_string()))
-        }
-
-        async fn get_current_trigger_manifest(
-            &self,
-            _owner_namespace: &str,
-        ) -> Result<Option<crate::CurrentTriggerKeyManifest>, ArtifactStoreError> {
-            Ok(None)
-        }
-
         async fn put_artifact_bytes(
             &self,
             _artifact_ref: &str,

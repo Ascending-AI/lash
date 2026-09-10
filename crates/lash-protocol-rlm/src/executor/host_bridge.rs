@@ -39,7 +39,6 @@ pub(super) struct HostBridge<'run> {
     host_environment: lashlang::LashlangHostEnvironment,
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
-    trigger_key_manifest: lashlang::TriggerKeyManifest,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -49,8 +48,6 @@ pub(super) struct HostBridgeConfig<'run> {
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
-    pub trigger_key_manifest: lashlang::TriggerKeyManifest,
-    pub initial_observations: Vec<Observation>,
 }
 
 type HostAbilityFuture<'a> =
@@ -61,7 +58,7 @@ impl<'run> HostBridge<'run> {
         Self {
             ctx: config.ctx,
             print_projector: config.print_projector,
-            observations: Mutex::new(config.initial_observations),
+            observations: Mutex::new(Vec::new()),
             printed_images: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
             next_tool_index: Mutex::new(0),
@@ -70,7 +67,6 @@ impl<'run> HostBridge<'run> {
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
             artifact_store: config.artifact_store,
-            trigger_key_manifest: config.trigger_key_manifest,
         }
     }
 
@@ -841,12 +837,7 @@ impl HostBridge<'_> {
             lash_core::TriggerCommandOutcome::List { records } => serde_json::to_value(
                 records
                     .iter()
-                    .map(|record| {
-                        lash_core::facade_support::TriggerRegistration::from_record_with_manifest(
-                            record,
-                            Some(&self.trigger_key_manifest.subscription_keys),
-                        )
-                    })
+                    .map(lash_core::facade_support::TriggerRegistration::from)
                     .collect::<Vec<_>>(),
             )
             .map_err(|err| {

@@ -579,18 +579,6 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
             .await,
     );
 
-    let trigger_artifact = lashlang::ModuleArtifact::from_program(
-        lashlang::parse("process readonly(root: str) { finish root }")
-            .expect("parse trigger artifact"),
-    )
-    .expect("build trigger artifact");
-    assert_artifact_storage_failure(
-        "replace_current_trigger_manifest",
-        store
-            .replace_current_trigger_manifest("readonly-owner", &trigger_artifact)
-            .await,
-    );
-
     let state = lash_core::RuntimeSessionState {
         session_id: SessionId::from("readonly-session"),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(

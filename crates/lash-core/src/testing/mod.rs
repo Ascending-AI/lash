@@ -631,6 +631,18 @@ pub fn code_execution_context() -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new().build().into_runtime()
 }
 
+/// Build an empty code-execution context for a specific durable process.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn code_execution_context_for_process(
+    registration: &crate::ProcessRegistration,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .build()
+        .into_runtime()
+        .with_process_execution(registration, None)
+}
+
 /// Build an empty code-execution context whose cancellation is already visible.
 pub fn cancelled_code_execution_context() -> crate::RuntimeExecutionContext<'static> {
     let cancellation = tokio_util::sync::CancellationToken::new();

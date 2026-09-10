@@ -295,17 +295,6 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     {
         let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
         conn.execute(
-            "INSERT INTO blobs (hash, content) VALUES ('session-trigger-blob', X'01')",
-            [],
-        )
-        .expect("insert session trigger blob");
-        conn.execute(
-            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-             VALUES ('lashlang_trigger_manifest', 'session:delete/me', 'session-trigger-blob')",
-            [],
-        )
-        .expect("insert session trigger ref");
-        conn.execute(
             "INSERT INTO blobs (hash, content) VALUES ('host-artifact-blob', X'02')",
             [],
         )
@@ -343,30 +332,6 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
             .is_some()
     );
     let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
-    let deleted_ref_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM artifact_refs
-             WHERE namespace = 'lashlang_trigger_manifest'
-               AND artifact_ref = 'session:delete/me'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("count deleted trigger refs");
-    assert_eq!(
-        deleted_ref_count, 0,
-        "session-owned artifact ref must be deleted"
-    );
-    let deleted_blob_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM blobs WHERE hash = 'session-trigger-blob'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("count deleted trigger blob");
-    assert_eq!(
-        deleted_blob_count, 0,
-        "unrooted session blob must be reclaimed"
-    );
     let host_ref_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM artifact_refs
@@ -384,7 +349,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .expect("count retained blobs");
     assert_eq!(
         blob_count, 1,
-        "deleting the session must reclaim its checkpoint tree and trigger blob"
+        "deleting the session must reclaim its checkpoint tree"
     );
 }
 

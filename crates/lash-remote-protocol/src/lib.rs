@@ -34,6 +34,9 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 58: trigger registration projections no longer carry mutable
+// current-artifact membership. Version 57 peers require that obsolete field,
+// so exact negotiation rejects the incompatible registration shape.
 // Bumped to 48: `RemoteTurnEvent` gains the first-class `TurnStarted` identity
 // contract. A version 47 peer has no name for the first activity in every turn,
 // so exact negotiation rejects it before a stream is partially decoded.
@@ -134,7 +137,7 @@ pub use usage_activity::*;
 // and token-ledger rows (unreported holes with their attempt identities,
 // reconciled corrections) plus the report's unreported/reconciled attempt
 // counts. Peers must adopt 57.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 57;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 58;
 
 /// One versioned remote-protocol message.
 ///

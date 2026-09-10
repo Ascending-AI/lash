@@ -27,9 +27,6 @@ use crate::ast::{
 use crate::linker::{
     LashlangAbilities, LashlangHostCatalog, LashlangLanguageFeatures, ResourceOperationBinding,
 };
-use crate::trigger_manifest::{
-    CurrentTriggerKeyManifest, TriggerKeyManifest, TriggerManifestReplacement,
-};
 
 pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -148,8 +145,6 @@ pub struct ModuleArtifact {
     pub exports: ModuleExports,
     /// Never defaulted: a defaulted dialect lets a TypeScript artifact verify as Lashlang.
     pub compilation_dialect: crate::CompilationDialect,
-    #[serde(default)]
-    pub trigger_key_manifest: TriggerKeyManifest,
     pub canonical_ir: Program,
 }
 
@@ -180,7 +175,6 @@ impl ModuleArtifact {
     ) -> Result<Self, ModuleArtifactError> {
         let host_requirements_ref = host_requirements_ref(&requirements);
         let exports = module_exports(&canonical_ir);
-        let trigger_key_manifest = TriggerKeyManifest::from_program(&canonical_ir);
         let module_ref = module_ref(
             &canonical_ir,
             &host_requirements_ref,
@@ -193,7 +187,6 @@ impl ModuleArtifact {
             host_requirements: requirements,
             exports,
             compilation_dialect,
-            trigger_key_manifest,
             canonical_ir,
         })
     }
@@ -275,13 +268,6 @@ impl ModuleArtifact {
                 actual: "artifact exports".to_string(),
             });
         }
-        if rebuilt.trigger_key_manifest != self.trigger_key_manifest {
-            return Err(ModuleArtifactError::HashMismatch {
-                field: "trigger_key_manifest",
-                expected: "canonical trigger key manifest".to_string(),
-                actual: "artifact trigger key manifest".to_string(),
-            });
-        }
         Ok(())
     }
 
@@ -320,6 +306,12 @@ impl ModuleArtifact {
 /// version envelope: their module ref is the identity fence, and a host must
 /// recompile and republish source when this build cannot read that identity.
 fn reject_future_shape(raw: &serde_json::Value) -> Result<(), ModuleArtifactError> {
+    if raw.get("trigger_key_manifest").is_some() {
+        return Err(ModuleArtifactError::FutureShape {
+            field: "trigger_key_manifest",
+            value: "obsolete current-trigger manifest artifact field".to_string(),
+        });
+    }
     let Some(dialect) = raw
         .get("compilation_dialect")
         .and_then(|value| value.as_str())
@@ -391,19 +383,6 @@ pub trait LashlangArtifactStore: Send + Sync {
         module_ref: &ModuleRef,
     ) -> Result<Option<Arc<ModuleArtifact>>, ArtifactStoreError>;
 
-    /// Atomically make `artifact` the current module for an owner namespace and
-    /// return the key-set delta from the prior current artifact.
-    async fn replace_current_trigger_manifest(
-        &self,
-        owner_namespace: &str,
-        artifact: &ModuleArtifact,
-    ) -> Result<TriggerManifestReplacement, ArtifactStoreError>;
-
-    async fn get_current_trigger_manifest(
-        &self,
-        owner_namespace: &str,
-    ) -> Result<Option<CurrentTriggerKeyManifest>, ArtifactStoreError>;
-
     async fn put_artifact_bytes(
         &self,
         artifact_ref: &str,
@@ -420,14 +399,6 @@ pub trait LashlangArtifactStore: Send + Sync {
 #[derive(Clone, Default)]
 pub struct InMemoryLashlangArtifactStore {
     modules: Arc<Mutex<BTreeMap<ModuleRef, Arc<ModuleArtifact>>>>,
-    // This store is process-global in ephemeral mode, so current manifests are
-    // intentionally retained for the process lifetime and this map can grow
-    // without bound. The store is independently injected and has no per-session
-    // owner: no session-store factory holds a handle to it, so a factory-level
-    // session delete has nothing it could coherently clear here. A bounded
-    // lifecycle therefore requires a durable artifact-store backend rather than
-    // coupling the in-memory session factory to this map.
-    current_trigger_manifests: Arc<Mutex<BTreeMap<String, CurrentTriggerKeyManifest>>>,
     artifacts: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
 }
 
@@ -471,49 +442,6 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         }
         let modules = self.modules.lock_recover();
         Ok(modules.get(module_ref).cloned())
-    }
-
-    async fn replace_current_trigger_manifest(
-        &self,
-        owner_namespace: &str,
-        artifact: &ModuleArtifact,
-    ) -> Result<TriggerManifestReplacement, ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
-            return Err(ArtifactStoreError::Backend(
-                "invalid artifact namespace key".into(),
-            ));
-        }
-        let mut manifests = self.current_trigger_manifests.lock_recover();
-        let previous = manifests.insert(
-            owner_namespace.to_string(),
-            CurrentTriggerKeyManifest {
-                module_ref: artifact.module_ref.clone(),
-                manifest: artifact.trigger_key_manifest.clone(),
-            },
-        );
-        Ok(TriggerManifestReplacement {
-            previous_module_ref: previous.as_ref().map(|entry| entry.module_ref.clone()),
-            current_module_ref: artifact.module_ref.clone(),
-            diff: previous
-                .map(|entry| entry.manifest.diff(&artifact.trigger_key_manifest))
-                .unwrap_or_default(),
-        })
-    }
-
-    async fn get_current_trigger_manifest(
-        &self,
-        owner_namespace: &str,
-    ) -> Result<Option<CurrentTriggerKeyManifest>, ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
-            return Err(ArtifactStoreError::Backend(
-                "invalid artifact namespace key".into(),
-            ));
-        }
-        Ok(self
-            .current_trigger_manifests
-            .lock_recover()
-            .get(owner_namespace)
-            .cloned())
     }
 
     async fn put_artifact_bytes(
@@ -1117,9 +1045,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frozen_sha256_artifact_is_rejected_by_the_blake3_identity_fence() {
+    fn artifact_with_obsolete_trigger_manifest_field_is_explicitly_rejected() {
         let error = ModuleArtifact::from_store_bytes(
             include_str!("../tests/fixtures/module-artifact-old.json").as_bytes(),
+        )
+        .expect_err("an artifact carrying current-trigger manifest state must be refused");
+        assert!(matches!(error, ModuleArtifactError::FutureShape { .. }));
+        assert!(error.to_string().contains("trigger_key_manifest"));
+    }
+
+    #[test]
+    fn frozen_sha256_artifact_without_the_obsolete_field_hits_the_identity_fence() {
+        let mut raw: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/module-artifact-old.json"))
+                .expect("frozen fixture should be JSON");
+        raw.as_object_mut()
+            .expect("artifact is an object")
+            .remove("trigger_key_manifest");
+        let error = ModuleArtifact::from_store_bytes(
+            &serde_json::to_vec(&raw).expect("legacy artifact should encode"),
         )
         .expect_err("a SHA-256 artifact must not verify under the BLAKE3 generation");
         assert!(matches!(error, ModuleArtifactError::HashMismatch { .. }));

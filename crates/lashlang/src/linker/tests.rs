@@ -847,7 +847,7 @@ fn linked_module_allows_explicit_keys_for_default_key_collision_shape() {
 }
 
 #[test]
-fn linked_artifact_manifest_contains_explicit_and_materialized_keys() {
+fn linked_artifact_materializes_explicit_and_generated_keys_into_register_calls() {
     let source = serde_json::json!({ "expr": "0 8 * * *" });
     let source_key = semantic_trigger_source_key("timer.Schedule", &source);
     let derived_key = semantic_trigger_subscription_key("scan", "timer.Schedule", &source_key);
@@ -871,20 +871,20 @@ fn linked_artifact_manifest_contains_explicit_and_materialized_keys() {
             })?
             "#,
     )
-    .expect("parse trigger manifest module");
+    .expect("parse trigger registration module");
     let linked =
         LinkedModule::link(program, full_host_environment()).expect("link manifest module");
 
-    assert_eq!(
-        linked.artifact.trigger_key_manifest.subscription_keys,
-        BTreeSet::from([derived_key.clone(), "evening-scan".to_string()])
-    );
     let canonical = linked
         .artifact
         .canonical_source()
         .expect("canonical linked source");
     assert!(
         canonical.contains(&format!("subscription_key: \"{derived_key}\"")),
+        "{canonical}"
+    );
+    assert!(
+        canonical.contains("subscription_key: \"evening-scan\""),
         "{canonical}"
     );
 }
