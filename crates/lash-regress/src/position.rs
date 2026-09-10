@@ -126,6 +126,10 @@ impl RefPosition<'_> {
 
     /// Construct from a pointer, which must never be null.
     #[inline(always)]
+    #[expect(
+        unsafe_code,
+        reason = "all internal constructors provide a non-null slice-derived pointer"
+    )]
     pub fn new(ptr: *const u8) -> Self {
         debug_assert!(!ptr.is_null(), "Pointer cannot be null");
         // Annoyingly there's no *const NonNull.
@@ -133,6 +137,8 @@ impl RefPosition<'_> {
         let nonnullp = if cfg!(feature = "prohibit-unsafe") {
             core::ptr::NonNull::new(mutp).expect("Pointer was null")
         } else {
+            // SAFETY: every caller passes either a slice-derived pointer or an
+            // in-bounds offset from one, both of which are non-null.
             unsafe { core::ptr::NonNull::new_unchecked(mutp) }
         };
         Self(nonnullp, PhantomData)
@@ -145,7 +151,13 @@ impl ops::Add<usize> for RefPosition<'_> {
     type Output = Self;
 
     #[inline(always)]
+    #[expect(
+        unsafe_code,
+        reason = "position arithmetic remains within its originating input allocation"
+    )]
     fn add(self, rhs: usize) -> Self::Output {
+        // SAFETY: matcher positions and offsets are maintained within the
+        // originating input allocation, including its one-past-the-end value.
         Self::new(unsafe { self.ptr().add(rhs) })
     }
 }
@@ -154,9 +166,15 @@ impl<'a> ops::Sub<RefPosition<'a>> for RefPosition<'a> {
     type Output = usize;
 
     #[inline(always)]
+    #[expect(
+        unsafe_code,
+        reason = "positions being subtracted belong to the same input allocation"
+    )]
     fn sub(self, rhs: Self) -> Self::Output {
         debug_assert!(self.0 >= rhs.0, "Underflow");
         // Note Rust has backwards naming here. The "origin" is self, not the param; the rhs is the offset value.
+        // SAFETY: both positions originate from the same input slice and
+        // matcher state preserves their order.
         unsafe { self.ptr().offset_from(rhs.ptr()) as usize }
     }
 }
@@ -165,8 +183,14 @@ impl ops::Sub<usize> for RefPosition<'_> {
     type Output = Self;
 
     #[inline(always)]
+    #[expect(
+        unsafe_code,
+        reason = "position arithmetic remains within its originating input allocation"
+    )]
     fn sub(self, rhs: usize) -> Self::Output {
         debug_assert!(self.ptr() as usize >= rhs, "Underflow");
+        // SAFETY: matcher offsets never move a position before the originating
+        // input allocation.
         Self::new(unsafe { self.ptr().sub(rhs) })
     }
 }

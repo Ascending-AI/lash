@@ -1,3 +1,8 @@
+#![allow(
+    clippy::duplicate_mod,
+    reason = "upstream test modules load the shared harness as private sibling modules"
+)]
+
 #[path = "anchored_optimization.rs"]
 mod anchored_optimization;
 #[path = "escape_tests.rs"]

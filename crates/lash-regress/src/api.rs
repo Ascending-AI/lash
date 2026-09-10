@@ -871,6 +871,13 @@ mod pattern_impl {
         }
     }
 
+    // The nightly `Searcher` trait requires an unsafe impl. This preserves the
+    // inherited implementation; its zero-width partition behavior is not
+    // repaired by this lint-policy change.
+    #[expect(
+        unsafe_code,
+        reason = "retain the existing nightly Searcher implementation at its required unsafe trait boundary"
+    )]
     unsafe impl<'r, 't> Searcher<'t> for RegexSearcher<'r, 't> {
         fn haystack(&self) -> &'t str {
             self.haystack
@@ -933,6 +940,13 @@ mod pattern_impl {
         }
     }
 
+    // The nightly `ReverseSearcher` trait requires an unsafe impl. This
+    // preserves the inherited implementation; its zero-width partition
+    // behavior is not repaired by this lint-policy change.
+    #[expect(
+        unsafe_code,
+        reason = "retain the existing nightly ReverseSearcher implementation at its required unsafe trait boundary"
+    )]
     unsafe impl<'r, 't> ReverseSearcher<'t> for RegexSearcher<'r, 't> {
         fn next_back(&mut self) -> SearchStep {
             if self.reverse_done {

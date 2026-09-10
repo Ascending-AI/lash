@@ -14,10 +14,8 @@ edition.workspace = true
 rust-version.workspace = true
 readme = "README.md"
 
-# Maintained fork code is tested, not linted. Keep this at the package boundary so it
-# applies to the upstream integration-test crates as well as the library.
-[lints.clippy]
-all = "allow"
+[lints]
+workspace = true
 
 [features]
 default = ["backend-pikevm", "std"]

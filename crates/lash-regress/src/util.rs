@@ -14,14 +14,30 @@ macro_rules! rs_unreachable {
         if cfg!(feature = "prohibit-unsafe") {
             unreachable!();
         } else {
-            unsafe { core::hint::unreachable_unchecked() }
+            // SAFETY: each macro invocation names an interpreter state that
+            // its caller has already ruled out through the bytecode invariants.
+            #[expect(
+                unsafe_code,
+                reason = "callers establish that the named interpreter state is unreachable"
+            )]
+            unsafe {
+                core::hint::unreachable_unchecked()
+            }
         }
     }};
     ($msg:expr) => {
         if cfg!(feature = "prohibit-unsafe") {
             unreachable!($msg);
         } else {
-            unsafe { core::hint::unreachable_unchecked() }
+            // SAFETY: each macro invocation names an interpreter state that
+            // its caller has already ruled out through the bytecode invariants.
+            #[expect(
+                unsafe_code,
+                reason = "callers establish that the named interpreter state is unreachable"
+            )]
+            unsafe {
+                core::hint::unreachable_unchecked()
+            }
         }
     };
 }
@@ -42,7 +58,15 @@ where
         if cfg!(feature = "prohibit-unsafe") {
             self.index(idx)
         } else {
-            unsafe { self.get_unchecked(idx) }
+            // SAFETY: `DebugCheckIndex` callers uphold the index bounds; the
+            // assertion above checks that contract in debug builds.
+            #[expect(
+                unsafe_code,
+                reason = "the indexing contract keeps the requested Vec index in bounds"
+            )]
+            unsafe {
+                self.get_unchecked(idx)
+            }
         }
     }
 
@@ -52,7 +76,15 @@ where
         if cfg!(feature = "prohibit-unsafe") {
             self.index_mut(idx)
         } else {
-            unsafe { self.get_unchecked_mut(idx) }
+            // SAFETY: `DebugCheckIndex` callers uphold the index bounds; the
+            // assertion above checks that contract in debug builds.
+            #[expect(
+                unsafe_code,
+                reason = "the indexing contract keeps the requested mutable Vec index in bounds"
+            )]
+            unsafe {
+                self.get_unchecked_mut(idx)
+            }
         }
     }
 }
@@ -67,7 +99,15 @@ where
         if cfg!(feature = "prohibit-unsafe") {
             self.index(idx)
         } else {
-            unsafe { self.get_unchecked(idx) }
+            // SAFETY: `DebugCheckIndex` callers uphold the index bounds; the
+            // assertion above checks that contract in debug builds.
+            #[expect(
+                unsafe_code,
+                reason = "the indexing contract keeps the requested slice index in bounds"
+            )]
+            unsafe {
+                self.get_unchecked(idx)
+            }
         }
     }
 
@@ -77,7 +117,15 @@ where
         if cfg!(feature = "prohibit-unsafe") {
             self.index_mut(idx)
         } else {
-            unsafe { self.get_unchecked_mut(idx) }
+            // SAFETY: `DebugCheckIndex` callers uphold the index bounds; the
+            // assertion above checks that contract in debug builds.
+            #[expect(
+                unsafe_code,
+                reason = "the indexing contract keeps the requested mutable slice index in bounds"
+            )]
+            unsafe {
+                self.get_unchecked_mut(idx)
+            }
         }
     }
 }
