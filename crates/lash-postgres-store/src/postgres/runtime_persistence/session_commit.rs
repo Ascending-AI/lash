@@ -64,7 +64,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 Ok(receipt) => receipt,
                 Err(error) => {
                     tracing::warn!(
-                        target: "lash_postgres_store::postgres::runtime_persistence",
+                        target: "lash_postgres_store::runtime_persistence",
                         session_id,
                         turn_id = turn_id.as_str(),
                         error = %error,

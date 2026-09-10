@@ -328,6 +328,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
     Ok(())
 }
 
+#[cfg(feature = "rlm")]
 #[test]
 pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
     run_async_test_on_stack_budget("rlm-streamed-cell-raw-final-test", || async {
