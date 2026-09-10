@@ -518,17 +518,16 @@ impl LifecycleActor {
                         let _ = reply.send(None);
                     }
                     Some(LifecycleCommand::InstallToolCatalog { generation: observed, tools }) if observed == generation => {
-                        if let Some(entry) = self.entry.upgrade() {
-                            if let Err(error) = import_tools(&server_name, tools)
+                        if let Some(entry) = self.entry.upgrade()
+                            && let Err(error) = import_tools(&server_name, tools)
                                 .and_then(|imported| entry.replace_imported_tools(imported))
-                            {
-                                tracing::warn!(
-                                    server = %server_name,
-                                    error = %error,
-                                    "MCP tools/list refresh refused"
-                                );
-                                self.record_error(error.to_string());
-                            }
+                        {
+                            tracing::warn!(
+                                server = %server_name,
+                                error = %error,
+                                "MCP tools/list refresh refused"
+                            );
+                            self.record_error(error.to_string());
                         }
                     }
                     Some(LifecycleCommand::InstallToolCatalog { .. }) => {}

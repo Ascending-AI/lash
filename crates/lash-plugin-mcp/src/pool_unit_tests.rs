@@ -163,6 +163,85 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
 }
 
 #[tokio::test]
+async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations() {
+    let pool = Arc::new(McpConnectionPool::empty());
+    let first = McpEntry::new_with_publication_state(
+        Arc::clone(&pool.publication_state),
+        "abcdefghijklmno-one".to_string(),
+        McpServerConfig::stdio("sh", Vec::new()),
+        McpHostServices::default(),
+    );
+    let second = McpEntry::new_with_publication_state(
+        Arc::clone(&pool.publication_state),
+        "abcdefghijklmno-two".to_string(),
+        McpServerConfig::stdio("sh", Vec::new()),
+        McpHostServices::default(),
+    );
+    pool.install(first.server_name.clone(), Arc::clone(&first))
+        .unwrap_or_else(|(_, error)| panic!("install first server: {error}"));
+    pool.install(second.server_name.clone(), Arc::clone(&second))
+        .unwrap_or_else(|(_, error)| panic!("install second server: {error}"));
+    let forced_catalog = |server: &str| {
+        import_tools_with_name_builder(
+            server,
+            vec![advertised_tool("abcdefghijklmnop")],
+            |server, tool| naming::build_prefixed_name_with_digest(server, tool, [9; 16]),
+        )
+        .expect("one-tool catalog")
+    };
+    first
+        .replace_imported_tools(forced_catalog(&first.server_name))
+        .expect("first catalog publishes");
+
+    let snapshot_paused = Arc::new(std::sync::Barrier::new(2));
+    let snapshot_released = Arc::new(std::sync::Barrier::new(2));
+    let hook_paused = Arc::clone(&snapshot_paused);
+    let hook_released = Arc::clone(&snapshot_released);
+    *pool.advertised_tools_hook.write_recover() = Some(Arc::new(move || {
+        hook_paused.wait();
+        hook_released.wait();
+    }));
+
+    let reader_pool = Arc::clone(&pool);
+    let reader = std::thread::spawn(move || reader_pool.advertised_tools());
+    snapshot_paused.wait();
+
+    let (writer_started_tx, writer_started_rx) = std::sync::mpsc::channel();
+    let (writer_done_tx, writer_done_rx) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        writer_started_tx.send(()).expect("signal writer start");
+        first
+            .replace_imported_tools(BTreeMap::new())
+            .expect("first catalog retires its name");
+        second
+            .replace_imported_tools(forced_catalog(&second.server_name))
+            .expect("second catalog acquires the released name");
+        writer_done_tx.send(()).expect("signal writer completion");
+        (first, second)
+    });
+    writer_started_rx.recv().expect("writer started");
+    assert!(
+        writer_done_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_err(),
+        "catalog transfer must wait until the aggregate snapshot releases publication"
+    );
+
+    snapshot_released.wait();
+    let snapshot = reader.join().expect("snapshot reader joins");
+    writer_done_rx.recv().expect("writer completes");
+    let (first, second) = writer.join().expect("catalog writer joins");
+    *pool.advertised_tools_hook.write_recover() = None;
+
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(pool.advertised_tools().len(), 1);
+    assert!(first.imported_tools.read_recover().is_empty());
+    assert_eq!(second.imported_tools.read_recover().len(), 1);
+
+    pool.shutdown_all().await;
+}
+
+#[tokio::test]
 async fn roots_notification_failures_are_aggregated_after_every_attempt() {
     let attempts = Arc::new(AtomicU64::new(0));
     let failures = collect_notification_failures(

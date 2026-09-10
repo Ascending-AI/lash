@@ -92,6 +92,8 @@ pub struct McpConnectionPool {
     attach_return_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
     resolved_target_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    #[cfg(test)]
+    advertised_tools_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Copied onto every entry this pool installs, so tests observe the
     /// lifecycle of children spawned before they can reach the entry.
     #[cfg(test)]
@@ -222,6 +224,8 @@ impl McpConnectionPool {
             attach_return_hook: RwLock::new(None),
             #[cfg(test)]
             resolved_target_hook: RwLock::new(None),
+            #[cfg(test)]
+            advertised_tools_hook: RwLock::new(None),
             #[cfg(test)]
             lifecycle_observer: RwLock::new(None),
         }
@@ -488,18 +492,30 @@ impl McpConnectionPool {
     /// Includes tools of currently disconnected servers (last successful
     /// discovery) so the tool catalog stays stable across an outage.
     pub fn advertised_tools(&self) -> Vec<ToolDefinition> {
-        let guard = self.entries.read_recover();
-        guard
-            .values()
-            .flat_map(|entry| {
+        let entries = self.entries.read_recover();
+        // Catalog replacement reserves all model-facing names under this same
+        // guard. Holding it across every per-entry read prevents one returned
+        // snapshot from combining the old owner and the new owner of a name.
+        let _publication = self.publication_state.lock_recover();
+        #[cfg(test)]
+        let hook = self.advertised_tools_hook.read_recover().clone();
+        let mut tools = Vec::new();
+        for (index, entry) in entries.values().enumerate() {
+            tools.extend(
                 entry
                     .imported_tools
                     .read_recover()
                     .values()
-                    .map(|tool| tool.definition.clone())
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+                    .map(|tool| tool.definition.clone()),
+            );
+            #[cfg(test)]
+            if index == 0
+                && let Some(hook) = &hook
+            {
+                hook();
+            }
+        }
+        tools
     }
 
     /// Advertised tools belonging to the exact configured server name.
