@@ -496,8 +496,9 @@ jobs:
         if: always()
         run: bash scripts/ci/report-cache.sh
 
-  # The API surface snapshot is ADVISORY: it must not be able to fail the
-  # workflow until the future cutover release. FIG-2095.
+  # A dependency workspace's [patch] table is invisible to its consumers.
+  # Resolve lashlang from this checkout as a Git dependency in a fresh external
+  # crate so every dependency needed by downstream users is carried explicitly.
   lashlang-git-consumer:
     name: Lashlang Git consumer
     runs-on: ubuntu-24.04
