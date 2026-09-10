@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::{
-    EffectHost, ExecutionScope, ProcessRegistry, ProcessWorkSubstrate, RuntimeError,
-    ScopedEffectController, SessionStoreFactory,
+    EffectHost, ExecutionScope, ProcessWorkWiring, RuntimeError, ScopedEffectController,
+    SessionStoreFactory,
 };
 
 /// Lifecycle services selected together for session administration.
@@ -14,8 +14,7 @@ use super::{
 pub struct SessionAdministration {
     store_factory: Arc<dyn SessionStoreFactory>,
     effect_host: Arc<dyn EffectHost>,
-    process_registry: Option<Arc<dyn ProcessRegistry>>,
-    process_work: Option<Arc<dyn ProcessWorkSubstrate>>,
+    process: Option<ProcessWorkWiring>,
     trigger_store: Option<Arc<dyn crate::TriggerStore>>,
 }
 
@@ -28,15 +27,13 @@ impl SessionAdministration {
     pub fn new(
         store_factory: Arc<dyn SessionStoreFactory>,
         effect_host: Arc<dyn EffectHost>,
-        process_registry: Option<Arc<dyn ProcessRegistry>>,
-        process_work: Option<Arc<dyn ProcessWorkSubstrate>>,
+        process: Option<ProcessWorkWiring>,
         trigger_store: Option<Arc<dyn crate::TriggerStore>>,
     ) -> Self {
         Self {
             store_factory,
             effect_host,
-            process_registry,
-            process_work,
+            process,
             trigger_store,
         }
     }
@@ -61,13 +58,8 @@ impl SessionAdministration {
     }
 
     #[doc(hidden)]
-    pub fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
-        self.process_registry.as_ref()
-    }
-
-    #[doc(hidden)]
-    pub fn process_work(&self) -> Option<Arc<dyn ProcessWorkSubstrate>> {
-        self.process_work.clone()
+    pub fn process(&self) -> Option<&ProcessWorkWiring> {
+        self.process.as_ref()
     }
 
     #[doc(hidden)]

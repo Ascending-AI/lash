@@ -305,7 +305,12 @@ async fn inherited_child_session_carries_parent_tool_state() {
 
 #[tokio::test]
 async fn existing_session_start_propagates_unknown_checkpoint_component_into_child_first_root() {
-    let runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+    let host = test_host_config().with_session_store_factory(factory.clone());
+    let runtime = TestRuntime::new(mock_provider(Vec::new()))
+        .host(host)
+        .build()
+        .await;
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
@@ -327,7 +332,7 @@ async fn existing_session_start_propagates_unknown_checkpoint_component_into_chi
         .get(&source.session_id)
         .cloned()
         .expect("managed source runtime");
-    let unknown_ref = crate::BlobRef("future-component-ref".to_string());
+    let unknown_ref = factory.seed_checkpoint_blob_for_testing(b"future component".to_vec());
     {
         let mut source_runtime = source_handle.runtime.lock().await;
         source_runtime.state.checkpoint_components =

@@ -305,9 +305,8 @@ impl SessionBuilder {
             lash_core::facade_support::settle_reopen_seeded_config(&mut runtime, persisted_config)
                 .await?;
         }
-        let process_work = binding.process_work();
-        if let Some(process_work) = process_work.as_ref() {
-            drive_process_on_open(ports.drive_process_on_open, process_work.as_ref()).await?;
+        if let Some(process) = binding.process() {
+            drive_process_on_open(ports.drive_process_on_open, process.port().as_ref()).await?;
         }
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
@@ -838,7 +837,10 @@ impl LashSession {
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),
-            process_work: self.binding.process_work(),
+            process_work: self
+                .binding
+                .process()
+                .map(|process| Arc::clone(process.port())),
         }
     }
 

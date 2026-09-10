@@ -1,6 +1,6 @@
 use crate::support::{
-    Arc, EffectHost, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate,
-    RuntimeEnvironment, RuntimePersistence, SessionStoreFactory,
+    Arc, EffectHost, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeEnvironment,
+    RuntimePersistence, SessionStoreFactory,
 };
 
 /// Immutable owner-issued capabilities for one successfully opened session.
@@ -59,10 +59,8 @@ impl BoundSession {
         Arc::clone(&self.effect_host)
     }
 
-    pub(crate) fn process_work(&self) -> Option<Arc<dyn ProcessWorkSubstrate>> {
-        self.process
-            .as_ref()
-            .map(|wiring| Arc::clone(wiring.port()))
+    pub(crate) fn process(&self) -> Option<&ProcessWorkWiring> {
+        self.process.as_ref()
     }
 
     pub(crate) fn catalog(&self) -> Option<Arc<dyn SessionStoreFactory>> {
@@ -74,10 +72,7 @@ impl BoundSession {
             lash_core::SessionAdministration::new(
                 catalog,
                 self.effect_host(),
-                self.process
-                    .as_ref()
-                    .map(|wiring| Arc::clone(wiring.registry())),
-                self.process_work(),
+                self.process.clone(),
                 self.trigger_store.clone(),
             )
         })

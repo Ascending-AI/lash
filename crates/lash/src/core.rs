@@ -295,8 +295,7 @@ impl LashCore {
         Ok(lash_core::SessionAdministration::new(
             Arc::clone(store_factory),
             Arc::clone(&resolved_env.core.control.effect_host),
-            resolved_env.process_registry.clone(),
-            resolved_env.process_work(),
+            ports.process,
             resolved_env.trigger_store.clone(),
         ))
     }
@@ -651,10 +650,7 @@ impl LashCore {
                 .into());
             }
         }
-        let process = if let (Some(process_registry), Some(process_work)) = (
-            administration.process_registry(),
-            administration.process_work(),
-        ) {
+        let process = if let Some(process) = administration.process() {
             let invocation = RuntimeInvocation::effect(
                 RuntimeScope::new(session_id.clone()),
                 format!("process:delete-session:{session_id}"),
@@ -672,8 +668,8 @@ impl LashCore {
                         }),
                     ),
                     RuntimeEffectLocalExecutor::processes(
-                        Arc::clone(process_registry),
-                        process_work,
+                        Arc::clone(process.registry()),
+                        Arc::clone(process.port()),
                     ),
                 )
                 .await
