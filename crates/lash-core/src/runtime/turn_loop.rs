@@ -20,7 +20,9 @@ mod prepare;
 mod queued_work;
 mod resident_session;
 
-use commit::TurnFinishInput;
+pub(in crate::runtime) use commit::LogicalTurnErrorContext;
+use commit::{CancelledTurnFinishContext, TurnCommitContext, TurnFinishInput};
+pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
 #[cfg(test)]
 pub(in crate::runtime) use execute::TURN_CANCEL_WATCH_MAX_ATTEMPTS;
 use execute::TurnDriverRemainder;
@@ -30,6 +32,7 @@ use execute::{
     await_turn_cancellation_with_retry,
 };
 use post_commit::PostCommitDelivery;
+pub(in crate::runtime) use prepare::TurnPrepareContext;
 pub use queued_work::{
     EmptyQueuedDrainReason, QueuedTurnDrain, SelectedQueuedWorkBatchSatisfaction,
     SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainOutcome,
@@ -37,6 +40,25 @@ pub use queued_work::{
 };
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub(crate) use resident_session::ResidentSessionState;
+
+/// The pair of sinks every turn phase writes to.
+///
+/// Bundled so the phase context structs carry one field instead of two
+/// adjacent trait-object references that transpose silently.
+pub(in crate::runtime) struct TurnSinks<'sinks> {
+    pub(in crate::runtime) events: &'sinks dyn EventSink,
+    pub(in crate::runtime) turn_events: &'sinks dyn TurnActivitySink,
+}
+
+/// The session-execution lease a turn phase runs under, together with the
+/// policy that decides whether reaching the end of the phase releases it.
+///
+/// The guard and the policy are always passed together and are meaningless
+/// apart, so they travel as one field on the phase contexts.
+pub(in crate::runtime) struct TurnLeaseScope<'lease> {
+    pub(in crate::runtime) guard: Option<&'lease SessionExecutionLeaseGuard>,
+    pub(in crate::runtime) release_policy: SessionExecutionLeaseReleasePolicy,
+}
 
 /// How many pending next-turn inputs one idle claim absorbs into a single turn.
 ///
@@ -528,7 +550,6 @@ impl RuntimeStreamEventPump<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn emit_runtime_stream_event_to_sinks(
     events: &dyn EventSink,
     turn_events: &dyn TurnActivitySink,

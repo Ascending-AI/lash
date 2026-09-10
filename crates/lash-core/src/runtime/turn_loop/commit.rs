@@ -49,6 +49,26 @@ struct PreparedTurn {
     events: Vec<SessionStreamEvent>,
 }
 
+/// What the final commit writes: the session it advances, the usage it stages,
+/// the claim settlement it carries, and the lease it is fenced by.
+struct TurnCommitRequest<'commit> {
+    session: Option<&'commit mut Session>,
+    staged_usage: session_manager::StagedTokenLedger,
+    commit_effects: super::logical_turn::LogicalTurnCommitEffects,
+    session_execution_lease: Option<&'commit SessionExecutionLeaseGuard>,
+    release_session_execution_lease: bool,
+    trace_turn_id: &'commit str,
+    recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
+}
+
+/// The local commit-admission handles: only the head-advancing attempt uses
+/// them, and they are dropped when the store needs no admission.
+struct TurnCommitAdmission<'admission> {
+    cancellation: CancellationToken,
+    effect_controller: &'admission dyn crate::RuntimeEffectController,
+    turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+}
+
 impl PreparedTurn {
     fn outcome(&self) -> &TurnOutcome {
         &self.turn.outcome
@@ -58,41 +78,28 @@ impl PreparedTurn {
         self.turn_pipeline.final_operation()
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn commit(
         self,
-        session: Option<&mut Session>,
-        staged_usage: session_manager::StagedTokenLedger,
-        commit_effects: super::logical_turn::LogicalTurnCommitEffects,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-        release_session_execution_lease: bool,
-        trace_turn_id: &str,
-        recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-        cancellation: CancellationToken,
-        effect_controller: &dyn crate::RuntimeEffectController,
-        turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+        request: TurnCommitRequest<'_>,
+        admission: TurnCommitAdmission<'_>,
     ) -> Result<CommittedTurn, crate::StoreError> {
-        let has_durable_store = session
+        let TurnCommitAdmission {
+            cancellation,
+            effect_controller,
+            turn_phase_probe,
+        } = admission;
+        let has_durable_store = request
+            .session
             .as_deref()
             .and_then(Session::history_store)
             .is_some();
         if !has_durable_store
             || !super::commit_admission::requires_local_commit_admission(effect_controller)
         {
-            return self
-                .commit_after_admission(
-                    session,
-                    staged_usage,
-                    commit_effects,
-                    session_execution_lease,
-                    release_session_execution_lease,
-                    trace_turn_id,
-                    recorded_attachment_intent_ids,
-                )
-                .await;
+            return self.commit_after_admission(request).await;
         }
         let session_id = self.turn_pipeline.state().session_id.clone();
-        let work_identity = trace_turn_id.to_string();
+        let work_identity = request.trace_turn_id.to_string();
         super::run_head_advancing_commit_attempt(
             session_id.clone(),
             work_identity.clone(),
@@ -109,32 +116,25 @@ impl PreparedTurn {
                     turn_phase_probe,
                     "commit_admission.product_attempt",
                 );
-                Box::pin(self.commit_after_admission(
-                    session,
-                    staged_usage,
-                    commit_effects,
-                    session_execution_lease,
-                    release_session_execution_lease,
-                    trace_turn_id,
-                    recorded_attachment_intent_ids,
-                ))
-                .await
+                Box::pin(self.commit_after_admission(request)).await
             },
         )
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn commit_after_admission(
         mut self,
-        session: Option<&mut Session>,
-        staged_usage: session_manager::StagedTokenLedger,
-        commit_effects: super::logical_turn::LogicalTurnCommitEffects,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-        release_session_execution_lease: bool,
-        trace_turn_id: &str,
-        recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
+        request: TurnCommitRequest<'_>,
     ) -> Result<CommittedTurn, crate::StoreError> {
+        let TurnCommitRequest {
+            session,
+            staged_usage,
+            commit_effects,
+            session_execution_lease,
+            release_session_execution_lease,
+            trace_turn_id,
+            recorded_attachment_intent_ids,
+        } = request;
         let accepted = self
             .turn_pipeline
             .final_commit(
@@ -225,19 +225,64 @@ impl CommittedTurn {
     }
 }
 
+/// What the commit phase needs to settle one physical turn: the assembled turn
+/// itself, the claims it must settle, and the lease and control handles the
+/// settlement runs under.
+pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
+    pub(in crate::runtime) finish: TurnFinishInput,
+    pub(in crate::runtime) claims: &'commit LogicalTurnClaims,
+    pub(in crate::runtime) events: &'commit dyn EventSink,
+    pub(in crate::runtime) scoped_effect_controller: &'commit ScopedEffectController<'run>,
+    pub(in crate::runtime) cancel_state: &'commit CancellationToken,
+    pub(in crate::runtime) lease: TurnLeaseScope<'commit>,
+    pub(in crate::runtime) turn_control: &'commit ActiveTurnControl,
+}
+
+/// The cancellation tail of the execute phase: the driver remainder a cancelled
+/// effect loop left behind, handed to the commit phase to settle.
+pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
+    pub(super) driver: TurnDriverRemainder,
+    pub(super) assembler: TurnAssembler,
+    pub(super) cancellation_messages: crate::MessageSequence,
+    pub(super) events: &'cancel dyn EventSink,
+    pub(super) finish_scoped_effect_controller: &'cancel ScopedEffectController<'run>,
+    pub(super) cancel: &'cancel CancellationToken,
+    pub(super) lease: TurnLeaseScope<'cancel>,
+    pub(super) turn_control: &'cancel ActiveTurnControl,
+    pub(super) turn_index: usize,
+    pub(super) trace_turn_id: String,
+}
+
+/// The terminal turn a logical run commits when it refuses to switch agent
+/// frames again.
+pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
+    pub(in crate::runtime) message: String,
+    pub(in crate::runtime) trace_turn_id: String,
+    pub(in crate::runtime) sinks: TurnSinks<'error>,
+    pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
+    pub(in crate::runtime) cancel: CancellationToken,
+    pub(in crate::runtime) claims: LogicalTurnClaims,
+    pub(in crate::runtime) session_execution_lease: Option<&'error SessionExecutionLeaseGuard>,
+}
+
 impl LashRuntime {
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn finish_turn(
         &mut self,
-        finish: TurnFinishInput,
-        claims: &LogicalTurnClaims,
-        events: &dyn EventSink,
-        scoped_effect_controller: &ScopedEffectController<'_>,
-        cancel_state: &CancellationToken,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-        session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
-        turn_control: &ActiveTurnControl,
+        context: TurnCommitContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        let TurnCommitContext {
+            finish,
+            claims,
+            events,
+            scoped_effect_controller,
+            cancel_state,
+            lease:
+                TurnLeaseScope {
+                    guard: session_execution_lease,
+                    release_policy: session_execution_lease_release_policy,
+                },
+            turn_control,
+        } = context;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), scoped_effect_controller).await?;
@@ -472,20 +517,25 @@ impl LashRuntime {
         };
         let committed = match Box::pin(
             prepared.commit(
-                self.session.as_mut(),
-                staged_usage,
-                commit_effects,
-                session_execution_lease,
-                release_session_execution_lease,
-                &trace_turn_id,
-                self.host
-                    .core
-                    .durability
-                    .attachment_store
-                    .recorded_turn_intent_ids(&trace_turn_id),
-                cancel_state.clone(),
-                scoped_effect_controller.controller(),
-                self.turn_phase_probe.clone(),
+                TurnCommitRequest {
+                    session: self.session.as_mut(),
+                    staged_usage,
+                    commit_effects,
+                    session_execution_lease,
+                    release_session_execution_lease,
+                    trace_turn_id: &trace_turn_id,
+                    recorded_attachment_intent_ids: self
+                        .host
+                        .core
+                        .durability
+                        .attachment_store
+                        .recorded_turn_intent_ids(&trace_turn_id),
+                },
+                TurnCommitAdmission {
+                    cancellation: cancel_state.clone(),
+                    effect_controller: scoped_effect_controller.controller(),
+                    turn_phase_probe: self.turn_phase_probe.clone(),
+                },
             ),
         )
         .await
@@ -637,21 +687,26 @@ impl LashRuntime {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn finish_cancelled_turn_after_effect_abort(
         &mut self,
-        driver: TurnDriverRemainder,
-        mut assembler: TurnAssembler,
-        cancellation_messages: crate::MessageSequence,
-        events: &dyn EventSink,
-        finish_scoped_effect_controller: &ScopedEffectController<'_>,
-        cancel: &CancellationToken,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-        session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
-        turn_control: &ActiveTurnControl,
-        turn_index: usize,
-        trace_turn_id: String,
+        context: CancelledTurnFinishContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        let CancelledTurnFinishContext {
+            driver,
+            mut assembler,
+            cancellation_messages,
+            events,
+            finish_scoped_effect_controller,
+            cancel,
+            lease:
+                TurnLeaseScope {
+                    guard: session_execution_lease,
+                    release_policy: session_execution_lease_release_policy,
+                },
+            turn_control,
+            turn_index,
+            trace_turn_id,
+        } = context;
         let TurnDriverRemainder {
             policy,
             turn_pipeline,
@@ -669,8 +724,8 @@ impl LashRuntime {
         )
         .await;
         let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
-        Box::pin(self.finish_turn(
-            TurnFinishInput {
+        Box::pin(self.finish_turn(TurnCommitContext {
+            finish: TurnFinishInput {
                 turn_pipeline,
                 assembler,
                 new_messages: cancellation_messages,
@@ -678,14 +733,16 @@ impl LashRuntime {
                 turn_index,
                 trace_turn_id,
             },
-            &claims,
+            claims: &claims,
             events,
-            finish_scoped_effect_controller,
-            cancel,
-            session_execution_lease,
-            session_execution_lease_release_policy,
+            scoped_effect_controller: finish_scoped_effect_controller,
+            cancel_state: cancel,
+            lease: TurnLeaseScope {
+                guard: session_execution_lease,
+                release_policy: session_execution_lease_release_policy,
+            },
             turn_control,
-        ))
+        }))
         .await
     }
 
@@ -714,18 +771,22 @@ impl LashRuntime {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::runtime) async fn finish_logical_turn_error(
         &mut self,
-        message: String,
-        trace_turn_id: String,
-        events: &dyn EventSink,
-        turn_events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-        cancel: CancellationToken,
-        claims: LogicalTurnClaims,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        context: LogicalTurnErrorContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        let LogicalTurnErrorContext {
+            message,
+            trace_turn_id,
+            sinks: TurnSinks {
+                events,
+                turn_events,
+            },
+            scoped_effect_controller,
+            cancel,
+            claims,
+            session_execution_lease,
+        } = context;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
@@ -769,8 +830,8 @@ impl LashRuntime {
             self.host.core.durability.commit_budget,
         );
         turn_pipeline.apply_prepared_messages(&messages);
-        let finish_result = Box::pin(self.finish_turn(
-            TurnFinishInput {
+        let finish_result = Box::pin(self.finish_turn(TurnCommitContext {
+            finish: TurnFinishInput {
                 turn_pipeline,
                 assembler,
                 new_messages: messages,
@@ -779,14 +840,16 @@ impl LashRuntime {
                 turn_index: self.state.turn_index + 1,
                 trace_turn_id,
             },
-            &claims,
+            claims: &claims,
             events,
-            &scoped_effect_controller,
-            &cancel,
-            session_execution_lease,
-            SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
-            &turn_control,
-        ))
+            scoped_effect_controller: &scoped_effect_controller,
+            cancel_state: &cancel,
+            lease: TurnLeaseScope {
+                guard: session_execution_lease,
+                release_policy: SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
+            },
+            turn_control: &turn_control,
+        }))
         .await;
         if let Err(err) = &finish_result {
             self.abandon_queued_work_claims_after_local_abort(err, &claims.queued)

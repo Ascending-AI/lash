@@ -26,20 +26,27 @@ impl LashRuntime {
             })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::runtime) async fn stream_turn_with_scoped_effect_controller_inner(
         &mut self,
-        mut input: TurnInput,
-        events: &dyn EventSink,
-        turn_events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-        cancel: CancellationToken,
-        queued_claims: Vec<crate::QueuedWorkClaim>,
-        turn_input_claims: Vec<super::turn_input_ingress::TurnInputDrive>,
-        materialize_initial_claims: bool,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-        session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
+        context: TurnPrepareContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        let TurnPrepareContext {
+            mut input,
+            sinks: TurnSinks {
+                events,
+                turn_events,
+            },
+            scoped_effect_controller,
+            cancel,
+            queued_claims,
+            turn_input_claims,
+            materialize_initial_claims,
+            lease:
+                TurnLeaseScope {
+                    guard: session_execution_lease,
+                    release_policy: session_execution_lease_release_policy,
+                },
+        } = context;
         if queued_claims.is_empty()
             && turn_input_claims.is_empty()
             && let Some(lease) = session_execution_lease
@@ -83,18 +90,22 @@ impl LashRuntime {
             .durability
             .attachment_store
             .bind_turn_scoped(turn_id);
-        Box::pin(self.stream_turn_inner(
-            input.clone(),
-            events,
-            turn_events,
+        Box::pin(self.stream_turn_inner(TurnPrepareContext {
+            input: input.clone(),
+            sinks: TurnSinks {
+                events,
+                turn_events,
+            },
             scoped_effect_controller,
-            cancel.clone(),
+            cancel: cancel.clone(),
             queued_claims,
             turn_input_claims,
             materialize_initial_claims,
-            session_execution_lease,
-            session_execution_lease_release_policy,
-        ))
+            lease: TurnLeaseScope {
+                guard: session_execution_lease,
+                release_policy: session_execution_lease_release_policy,
+            },
+        }))
         .await
     }
 
@@ -556,7 +567,12 @@ impl LashRuntime {
     }
 
     /// Run one logical turn using host-prepared message history.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "this is the published `LashRuntime::stream_prepared_turn` signature in \
+                  docs/api-surface.snapshot; folding these into a context struct would be a \
+                  public API change, which this ticket forbids"
+    )]
     pub async fn stream_prepared_turn(
         &mut self,
         messages: crate::MessageSequence,

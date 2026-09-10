@@ -4,21 +4,44 @@
 
 use super::*;
 
+/// Everything the prepare phase needs to turn a claimed [`TurnInput`] into a
+/// driven physical turn.
+///
+/// The accept phase builds one of these and the prepare phase consumes it; the
+/// fields are the phase's inputs in the order the phase reads them.
+pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
+    pub(in crate::runtime) input: TurnInput,
+    pub(in crate::runtime) sinks: TurnSinks<'sinks>,
+    pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
+    pub(in crate::runtime) cancel: CancellationToken,
+    pub(in crate::runtime) queued_claims: Vec<crate::QueuedWorkClaim>,
+    pub(in crate::runtime) turn_input_claims: Vec<super::turn_input_ingress::TurnInputDrive>,
+    pub(in crate::runtime) materialize_initial_claims: bool,
+    pub(in crate::runtime) lease: TurnLeaseScope<'sinks>,
+}
+
 impl LashRuntime {
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn stream_turn_inner(
         &mut self,
-        mut input: TurnInput,
-        events: &dyn EventSink,
-        turn_events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-        cancel: CancellationToken,
-        queued_claims: Vec<crate::QueuedWorkClaim>,
-        mut turn_input_claims: Vec<super::turn_input_ingress::TurnInputDrive>,
-        materialize_initial_claims: bool,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-        session_execution_lease_release_policy: SessionExecutionLeaseReleasePolicy,
+        context: TurnPrepareContext<'_, '_>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
+        let TurnPrepareContext {
+            mut input,
+            sinks: TurnSinks {
+                events,
+                turn_events,
+            },
+            scoped_effect_controller,
+            cancel,
+            queued_claims,
+            mut turn_input_claims,
+            materialize_initial_claims,
+            lease:
+                TurnLeaseScope {
+                    guard: session_execution_lease,
+                    release_policy: session_execution_lease_release_policy,
+                },
+        } = context;
         self.reload_invalidated_resident_session_state_under_lease(session_execution_lease)
             .await?;
         let lease_continuity =
@@ -139,8 +162,8 @@ impl LashRuntime {
                 );
                 turn_pipeline.apply_prepared_messages(&messages);
                 let claims = LogicalTurnClaims::new(queued_claims, turn_input_claims);
-                return Box::pin(self.finish_turn(
-                    TurnFinishInput {
+                return Box::pin(self.finish_turn(TurnCommitContext {
+                    finish: TurnFinishInput {
                         turn_pipeline,
                         assembler,
                         new_messages: messages,
@@ -148,14 +171,16 @@ impl LashRuntime {
                         turn_index,
                         trace_turn_id,
                     },
-                    &claims,
+                    claims: &claims,
                     events,
-                    &scoped_effect_controller,
-                    &cancel,
-                    session_execution_lease,
-                    session_execution_lease_release_policy,
-                    &turn_control,
-                ))
+                    scoped_effect_controller: &scoped_effect_controller,
+                    cancel_state: &cancel,
+                    lease: TurnLeaseScope {
+                        guard: session_execution_lease,
+                        release_policy: session_execution_lease_release_policy,
+                    },
+                    turn_control: &turn_control,
+                }))
                 .await;
             }
         };
@@ -345,22 +370,30 @@ impl LashRuntime {
 
         self.state.last_prompt_usage = None;
         Box::pin(self.stream_prepared_turn_inner_with_graph_appends(
-            messages,
-            previous_prompt_usage,
-            input.protocol_turn_options.clone(),
-            input.protocol_extension.clone(),
-            input.turn_context.clone(),
-            initial_turn_causes,
-            trace_turn_id,
-            turn_index,
-            events,
-            turn_events,
-            scoped_effect_controller,
-            cancel,
-            queued_claims,
-            turn_input_claims,
-            session_execution_lease,
-            session_execution_lease_release_policy,
+            PreparedTurnExecuteContext {
+                turn: PreparedLogicalTurn {
+                    messages,
+                    previous_prompt_usage,
+                    protocol_turn_options: input.protocol_turn_options.clone(),
+                    protocol_extension: input.protocol_extension.clone(),
+                    turn_context: input.turn_context.clone(),
+                    initial_turn_causes,
+                    trace_turn_id,
+                    turn_index,
+                },
+                sinks: TurnSinks {
+                    events,
+                    turn_events,
+                },
+                scoped_effect_controller,
+                cancel,
+                initial_queue_claims: queued_claims,
+                initial_turn_input_claims: turn_input_claims,
+                lease: TurnLeaseScope {
+                    guard: session_execution_lease,
+                    release_policy: session_execution_lease_release_policy,
+                },
+            },
             turn_graph_appends,
         ))
         .await
