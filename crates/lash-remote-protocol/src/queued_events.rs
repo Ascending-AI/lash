@@ -1,6 +1,7 @@
 //! Typed queued-work activity payloads.
 
 use crate::*;
+use lash_sansio::ProcessId;
 use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -29,7 +30,7 @@ pub enum RemoteMessageOrigin {
         transient: bool,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
         event_type: String,
         sequence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]

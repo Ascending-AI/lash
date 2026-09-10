@@ -21,8 +21,9 @@ use lash_core::plugin::{
 };
 use lash_core::runtime::ProcessEventSemanticsSpec;
 use lash_core::{
-    PreparedToolCall, ProcessEventType, ProcessInput, ProcessStartRequest, PromptContribution,
-    SessionToolAccess, ToolCall, ToolDefinition, ToolOutcome, ToolProvider,
+    PreparedToolCall, ProcessEventType, ProcessId, ProcessInput, ProcessStartRequest,
+    PromptContribution, SessionId, SessionToolAccess, ToolCall, ToolDefinition, ToolOutcome,
+    ToolProvider,
 };
 
 use lash_tool_support::{
@@ -155,7 +156,7 @@ impl StandardShell {
         let detached_process_id = args
             .get("detached_process_id")
             .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
+            .map(ProcessId::from);
 
         Ok(StartCommandParams {
             cmd: common.cmd,
@@ -269,7 +270,7 @@ impl StandardShell {
                 "the internal detached process runner requires a durable process id",
             );
         };
-        let Some(detached_process_id) = params.detached_process_id.as_deref() else {
+        let Some(detached_process_id) = params.detached_process_id.as_ref() else {
             return execution_failure(
                 "detached_process_runner_missing_audit_id",
                 "the recorded detached process body requires a stable audit process id",
@@ -379,8 +380,10 @@ impl StandardShell {
             }
         };
         let process_id = identity.replay_key;
-        let detached_process_id = params.detach.then(|| format!("{process_id}:detached"));
-        let args = start_command_process_args(params, detached_process_id.as_deref());
+        let detached_process_id = params
+            .detach
+            .then(|| ProcessId::from(format!("{process_id}:detached")));
+        let args = start_command_process_args(params, detached_process_id.as_ref());
         let call = PreparedToolCall::from_parts(
             process_id.clone(),
             RUN_START_COMMAND_TOOL_ID,
@@ -417,7 +420,7 @@ impl StandardShell {
         .with_extra_event_types([shell_signal_event_type()]);
         if !params.detach {
             request = request
-                .with_wake_session_id(Some(context.session_id().to_string()))
+                .with_wake_session_id(Some(SessionId::from(context.session_id())))
                 .with_observers([context.session_id().to_string()]);
         }
         let public_process_id = detached_process_id.as_deref().unwrap_or(&process_id);
@@ -433,7 +436,7 @@ impl StandardShell {
             result,
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
-                    session_id: context.session_id().to_string(),
+                    session_id: SessionId::from(context.session_id()),
                     request,
                     on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                 },
@@ -554,8 +557,8 @@ impl StandardShell {
             })),
             lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::SignalProcess(
                 lash_core::SignalProcessIntent {
-                    session_id: context.session_id().to_string(),
-                    process_id,
+                    session_id: SessionId::from(context.session_id()),
+                    process_id: ProcessId::from(process_id),
                     signal_name: SHELL_STDIN_SIGNAL.to_string(),
                     payload: json!({
                         "chars": chars,
@@ -578,7 +581,7 @@ fn tool_result_without_intents(result: ToolOutcome) -> lash_core::ToolAttemptOut
 
 fn start_command_process_args(
     params: &StartCommandParams,
-    detached_process_id: Option<&str>,
+    detached_process_id: Option<&ProcessId>,
 ) -> serde_json::Value {
     let mut args = serde_json::Map::new();
     args.insert("cmd".to_string(), json!(params.cmd.clone()));

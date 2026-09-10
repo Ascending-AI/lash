@@ -1,3 +1,4 @@
+use lash_sansio::ProcessId;
 use lash_sansio::core_support::Blake3DomainHasher;
 use serde::{Deserialize, Serialize};
 
@@ -240,7 +241,7 @@ pub enum ProcessBranchSelection {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LashlangExecutionChild {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub module_ref: ModuleRef,
     pub process_ref: ProcessRef,
     pub process_name: String,

@@ -7,6 +7,8 @@ use super::contracts::{
     assert_successful_agent_scenario,
 };
 use lash_core::llm::types::LlmUsage;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::VecDeque;
 
@@ -22,7 +24,7 @@ pub(super) struct AgentScenarioExpectations {
 
 pub(super) struct AgentScenario {
     pub(super) name: &'static str,
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) scripted_provider_responses: Vec<String>,
     pub(super) scripted_provider_usage: LlmUsage,
     pub(super) root_prompt: &'static str,
@@ -31,7 +33,7 @@ pub(super) struct AgentScenario {
     pub(super) install_subagents: bool,
     pub(super) install_shell_processes: bool,
     pub(super) max_turns: Option<usize>,
-    pub(super) precompleted_process: Option<(String, lash_core::ProcessAwaitOutput)>,
+    pub(super) precompleted_process: Option<(ProcessId, lash_core::ProcessAwaitOutput)>,
     pub(super) expected_contracts: AgentScenarioExpectations,
 }
 
@@ -99,7 +101,7 @@ impl AgentScenario {
 
     pub(super) fn precompleted_process(
         mut self,
-        process_id: impl Into<String>,
+        process_id: impl Into<ProcessId>,
         output: lash_core::ProcessAwaitOutput,
     ) -> Self {
         self.precompleted_process = Some((process_id.into(), output));
@@ -146,7 +148,7 @@ impl AgentScenario {
     }
 }
 
-fn agent_scenario_session_id(name: &str) -> String {
+fn agent_scenario_session_id(name: &str) -> SessionId {
     let mut slug = String::from("agent-scenario-");
     let mut previous_dash = true;
     for byte in name.bytes() {
@@ -166,11 +168,11 @@ fn agent_scenario_session_id(name: &str) -> String {
     while slug.ends_with('-') {
         slug.pop();
     }
-    slug
+    SessionId::from(slug)
 }
 
 pub(super) struct AgentScenarioRun {
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) turn_output: Option<TurnReport>,
     pub(super) streamed_events: Vec<TurnActivity>,
     pub(super) graph_snapshots: Vec<crate::tracing::TraceLashlangGraph>,
@@ -364,7 +366,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         runtime
             .process_registry
             .complete_process(
-                &process_id,
+                &ProcessId::from(process_id),
                 output,
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )
@@ -444,7 +446,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
 
 async fn assert_session_process_admission_contract(
     registry: &dyn lash_core::ProcessRegistry,
-    session_id: &str,
+    session_id: &SessionId,
     expected_processes: &[(&str, &str)],
 ) {
     if expected_processes.is_empty() {
@@ -549,7 +551,7 @@ fn observed_process_summary(
 async fn assert_remote_process_dto_surface(
     core: &LashCore,
     registry: &dyn lash_core::ProcessRegistry,
-    session_id: &str,
+    session_id: &SessionId,
 ) {
     let filter = lash_core::ProcessListFilter {
         definition: None,
@@ -657,17 +659,17 @@ fn assert_remote_process_summaries_round_trip(summaries: &[lash_core::ProcessHan
 }
 
 struct AgentSessionTurnProcessScenario {
-    session_id: &'static str,
-    child_session_id: &'static str,
-    process_id: &'static str,
+    session_id: SessionId,
+    child_session_id: SessionId,
+    process_id: ProcessId,
 }
 
 impl Default for AgentSessionTurnProcessScenario {
     fn default() -> Self {
         Self {
-            session_id: "agent-scenario-session-turn-root",
-            child_session_id: "agent-scenario-session-turn-child",
-            process_id: "agent-scenario-session-turn-process",
+            session_id: SessionId::from("agent-scenario-session-turn-root"),
+            child_session_id: SessionId::from("agent-scenario-session-turn-child"),
+            process_id: ProcessId::from("agent-scenario-session-turn-process"),
         }
     }
 }
@@ -678,13 +680,13 @@ impl AgentSessionTurnProcessScenario {
         // while shared AgentScenario setup still covers the provider, process
         // registry, graph store, and remote DTO assertions.
         let runtime = self.runtime()?;
-        let session = runtime.core.session(self.session_id).open().await?;
+        let session = runtime.core.session(&self.session_id).open().await?;
         let handle = session
             .admin()
             .processes()
             .start(
                 self.start_request(),
-                native_scope(lash_core::ExecutionScope::process(self.process_id)),
+                native_scope(lash_core::ExecutionScope::process(self.process_id.clone())),
             )
             .await?;
         assert_eq!(handle.process_id, self.process_id);
@@ -704,7 +706,7 @@ impl AgentSessionTurnProcessScenario {
 
     fn start_request(&self) -> lash_core::ProcessStartRequest {
         lash_core::ProcessStartRequest::new(
-            self.process_id,
+            self.process_id.clone(),
             lash_core::ProcessInput::SessionTurn {
                 definition_key: "agent-scenario-session-turn:v1".to_string(),
                 create_request: Box::new(self.child_create_request()),
@@ -723,19 +725,19 @@ impl AgentSessionTurnProcessScenario {
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
         lash_core::SessionCreateRequest::child(
-            self.session_id,
+            self.session_id.clone(),
             lash_core::SessionStartPoint::Empty,
             child_policy,
             lash_core::PluginOptions::default(),
             "agent-scenario-session-turn",
         )
-        .with_session_id(self.child_session_id)
+        .with_session_id(self.child_session_id.clone())
     }
 
     async fn assert_process_output(&self, runtime: &AgentScenarioRuntime) -> Result<()> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = runtime.process_registry.clone();
         let await_output = lash_core::NativeProcessWork::for_registry(registry)
-            .await_terminal(self.process_id)
+            .await_terminal(&self.process_id)
             .await?;
         let output = await_output.into_tool_output();
         assert!(
@@ -768,12 +770,12 @@ impl AgentSessionTurnProcessScenario {
         assert_remote_process_dto_surface(
             &runtime.core,
             runtime.process_registry.as_ref(),
-            self.session_id,
+            &self.session_id,
         )
         .await;
         assert_remote_process_summaries_round_trip(&final_process_list);
         let run = AgentScenarioRun {
-            session_id: self.session_id.to_string(),
+            session_id: SessionId::from(self.session_id.to_string()),
             turn_output: None,
             streamed_events: Vec::new(),
             graph_snapshots: runtime.graph_store.graphs(),
@@ -782,25 +784,25 @@ impl AgentSessionTurnProcessScenario {
             checkpoint_writes: runtime.checkpoint_writes.events(),
             committed_attachment_ids: runtime
                 .checkpoint_writes
-                .committed_attachment_ids(self.session_id, 0)
+                .committed_attachment_ids(&self.session_id, 0)
                 .unwrap_or_default(),
         };
         assert_eq!(run.prompt_captures.len(), 1);
         assert_all_processes_terminal(&run.final_process_list);
-        assert_session_turn_child_graph(&run, self.child_session_id, self.process_id);
+        assert_session_turn_child_graph(&run, &self.child_session_id, &self.process_id);
         Ok(())
     }
 }
 
 struct AgentDurableInputSuspensionScenario {
-    session_id: &'static str,
+    session_id: SessionId,
     request_id: &'static str,
 }
 
 impl Default for AgentDurableInputSuspensionScenario {
     fn default() -> Self {
         Self {
-            session_id: "agent-scenario-durable-input-request",
+            session_id: SessionId::from("agent-scenario-durable-input-request"),
             request_id: "request-1",
         }
     }
@@ -813,7 +815,7 @@ impl AgentDurableInputSuspensionScenario {
         let (key_tx, key_rx) = oneshot::channel();
         let tools = Arc::new(DurableInputTools::new(key_tx));
         let runtime = self.runtime(Arc::clone(&tools) as Arc<dyn ToolProvider>)?;
-        let session = runtime.core.session(self.session_id).open().await?;
+        let session = runtime.core.session(&self.session_id).open().await?;
         let events = Arc::new(RecordingEvents::default());
         let turn_session = session.clone();
         let turn_events = Arc::clone(&events);
@@ -935,7 +937,7 @@ finish result.answer"#,
         assert_remote_process_dto_surface(
             &runtime.core,
             runtime.process_registry.as_ref(),
-            self.session_id,
+            &self.session_id,
         )
         .await;
         assert_remote_process_summaries_round_trip(&final_process_list);

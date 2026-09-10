@@ -2,6 +2,7 @@
 //!
 //! These live in their own file so `otel.rs` carries only the exporter itself.
 
+use lash_sansio::ProcessId;
 use lash_sansio::TurnId;
 use opentelemetry::trace::noop::NoopTracerProvider;
 
@@ -220,7 +221,7 @@ fn failed_language_execution_yields_error_span() {
     let identity = TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
         subject: TraceRuntimeSubject::Process {
-            process_id: "p1".to_string(),
+            process_id: ProcessId::from("p1".to_string()),
         },
         module_ref: "module".to_string(),
         entry_kind: "process".to_string(),

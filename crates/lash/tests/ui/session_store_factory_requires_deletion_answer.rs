@@ -52,7 +52,7 @@ impl SessionStoreFactory for SilentFactory {
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }

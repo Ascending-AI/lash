@@ -20,6 +20,8 @@
 //! and the schema-evolution policy that governs [`TRACE_SCHEMA_VERSION`], see
 //! `docs/reporting.html`; for the attach-a-sink how-to, see `docs/tracing.html`.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -156,7 +158,7 @@ pub struct TraceContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub split: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     /// Stable id of the span this record represents (e.g. `turn:<session>:<turn>`,
@@ -184,7 +186,7 @@ pub struct TraceContext {
 }
 
 impl TraceContext {
-    pub fn for_session(mut self, session_id: impl Into<String>) -> Self {
+    pub fn for_session(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
@@ -1293,7 +1295,7 @@ impl TraceDurableTimerStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRuntimeScope {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1303,7 +1305,7 @@ pub struct TraceRuntimeScope {
 }
 
 impl TraceRuntimeScope {
-    pub fn new(session_id: impl Into<String>) -> Self {
+    pub fn new(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
             turn_id: None,
@@ -1317,7 +1319,7 @@ impl TraceRuntimeScope {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TraceRuntimeSubject {
     Effect { effect_id: String, kind: String },
-    Process { process_id: String },
+    Process { process_id: ProcessId },
 }
 
 impl TraceRuntimeSubject {

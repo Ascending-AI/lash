@@ -1,5 +1,7 @@
 use super::*;
 use lash_core::{ProcessEventLog as _, ProcessObserverRegistry as _};
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 struct NoopProcessWork;
 
@@ -469,7 +471,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .admin()
         .processes()
         .cancel(
-            process_id,
+            &ProcessId::from(process_id),
             native_scope(lash_core::ExecutionScope::process(process_id)),
         )
         .await?;
@@ -583,7 +585,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("nonblocking-observation").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&turn_session.session_id());
+    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
     let turn = tokio::spawn(async move {
         turn_session
             .turn(TurnInput::text("blocked"))
@@ -658,7 +660,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         .admin()
         .processes()
         .cancel(
-            "host-process",
+            &ProcessId::from("host-process"),
             native_scope(lash_core::ExecutionScope::process("host-process")),
         )
         .await?;
@@ -671,7 +673,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     );
     assert!(
         core.processes()
-            .events("host-process", 0)
+            .events(&ProcessId::from("host-process"), 0)
             .await?
             .iter()
             .any(|event| event.event_type == "process.cancel_requested"),
@@ -728,7 +730,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .admin()
         .processes()
         .signal(
-            "host-filter-signal",
+            &ProcessId::from("host-filter-signal"),
             "ready",
             "host-filter-signal-id",
             serde_json::json!({"source": "host"}),
@@ -739,7 +741,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         session
             .admin()
             .processes()
-            .events("host-filter-signal", 0)
+            .events(&ProcessId::from("host-filter-signal"), 0)
             .await?
             .iter()
             .any(|event| event.event_type == "signal.ready"),
@@ -749,7 +751,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .admin()
         .processes()
         .cancel(
-            "host-filter-cancel",
+            &ProcessId::from("host-filter-cancel"),
             native_scope(lash_core::ExecutionScope::process("host-filter-cancel")),
         )
         .await?;
@@ -757,7 +759,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         session
             .admin()
             .processes()
-            .events("host-filter-cancel", 0)
+            .events(&ProcessId::from("host-filter-cancel"), 0)
             .await?
             .iter()
             .any(|event| event.event_type == "process.cancel_requested"),
@@ -884,9 +886,9 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
     let children = session.admin().children();
     let child = children
         .create_session(SessionCreateRequest {
-            session_id: Some("child-control".to_string()),
+            session_id: Some(SessionId::from("child-control")),
             relation: lash_core::SessionRelation::Child {
-                parent_session_id: "parent-control".to_string(),
+                parent_session_id: SessionId::from("parent-control"),
                 caused_by: None,
             },
             start: lash_core::SessionStartPoint::Empty,
@@ -927,9 +929,9 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
     ];
 
     for (case, store_factory) in cases {
-        let parent_session_id = format!("managed-observer-parent-{case}");
-        let child_session_id = format!("managed-observer-child-{case}");
-        let create_process_id = format!("managed-create-process-{case}");
+        let parent_session_id = SessionId::from(format!("managed-observer-parent-{case}"));
+        let child_session_id = SessionId::from(format!("managed-observer-child-{case}"));
+        let create_process_id = ProcessId::from(format!("managed-create-process-{case}"));
         let registry = Arc::new(TestLocalProcessRegistry::default());
         let process_registry = registry.clone() as Arc<dyn lash_core::ProcessRegistry>;
         let watched = lash_core::facade_support::watch_process_registry(process_registry);
@@ -967,7 +969,7 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
         .with_session_id(&child_session_id)
         .with_observed_processes([&create_process_id]);
         request.relation = lash_core::SessionRelation::Fork {
-            source_session_id: format!("managed-observer-source-{case}"),
+            source_session_id: SessionId::from(format!("managed-observer-source-{case}")),
             source_node_id: format!("managed-observer-source-node-{case}"),
             observer_inheritance: lash_core::ObserverInheritance::All,
         };

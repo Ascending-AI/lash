@@ -18,6 +18,7 @@
 //! been without the append, and a turn rejected before its commit never hands
 //! its execution to the next ordinary turn (storeless and store-backed).
 
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -313,7 +314,7 @@ async fn open_with_plugins(
 async fn projected_prompt(runtime: &LashRuntime, plugins: &PluginSession) -> String {
     let contributions = plugins
         .collect_prompt_contributions(PromptHookContext {
-            session_id: runtime.read_view().session_id().to_string(),
+            session_id: SessionId::from(runtime.read_view().session_id()),
             sessions: Arc::new(NoSessions),
             state: runtime.read_view(),
             protocol_turn_options: ProtocolTurnOptions::default(),
@@ -403,11 +404,11 @@ impl Backend {
         script: Arc<Script>,
         extra_plugins: &[Arc<dyn PluginFactory>],
     ) -> SeededSession {
-        let session_id = format!(
+        let session_id = SessionId::from(format!(
             "fig2521-{scenario}-{}-{}",
             self.label,
             uuid::Uuid::new_v4().simple()
-        );
+        ));
         let request = SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
@@ -1077,7 +1078,7 @@ async fn storeless_runtime(
         inner: InMemorySessionStoreFactory::new()
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: "fig2521-detached".to_string(),
+                session_id: SessionId::from("fig2521-detached"),
                 relation: SessionRelation::Root,
                 policy: policy(),
             })
@@ -1087,7 +1088,10 @@ async fn storeless_runtime(
         commits: Mutex::new(Vec::new()),
     });
     let state = RuntimeSessionState {
-        session_id: format!("fig2521-storeless-{}", uuid::Uuid::new_v4().simple()),
+        session_id: SessionId::from(format!(
+            "fig2521-storeless-{}",
+            uuid::Uuid::new_v4().simple()
+        )),
         protocol_turn_options: ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
             dialect: Some(lash_rlm_types::RlmDialect::Lashlang),
             ..Default::default()

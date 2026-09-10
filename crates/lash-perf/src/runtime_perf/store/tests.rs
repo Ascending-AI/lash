@@ -1,10 +1,11 @@
 use super::*;
 use lash_core::SessionCommitStore;
 use lash_core::runtime::{DeliveryPolicy, QueuedWorkBatchDraft, RuntimeSessionState};
+use lash_sansio::SessionId;
 
-fn test_state(session_id: &str) -> RuntimeSessionState {
+fn test_state(session_id: &SessionId) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: session_id.clone(),
         turn_index: 1,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -12,7 +13,7 @@ fn test_state(session_id: &str) -> RuntimeSessionState {
     }
 }
 
-fn state_with_one_pending_node(session_id: &str) -> RuntimeSessionState {
+fn state_with_one_pending_node(session_id: &SessionId) -> RuntimeSessionState {
     let mut state = test_state(session_id);
     state.ensure_agent_frame_initialized();
     state
@@ -23,7 +24,7 @@ async fn perf_factory_reopens_created_root_session_by_id() {
     let factory = RuntimePerfStoreFactory::new(Arc::new(RuntimePerfStore::default()));
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "runtime-perf-turn_cancel_round_trip".to_string(),
+        session_id: SessionId::from("runtime-perf-turn_cancel_round_trip"),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -43,7 +44,7 @@ async fn perf_factory_reopens_created_root_session_by_id() {
     );
     assert!(
         factory
-            .open_existing_store_by_id("runtime-perf-never-created")
+            .open_existing_store_by_id(&SessionId::from("runtime-perf-never-created"))
             .await
             .expect("look up an unknown benchmark session")
             .is_none(),
@@ -54,8 +55,10 @@ async fn perf_factory_reopens_created_root_session_by_id() {
 #[tokio::test]
 async fn successful_commits_are_counted_after_the_inner_store_accepts_them() {
     let store = RuntimePerfStore::default();
-    let commit =
-        RuntimeCommit::persisted_state_for_test(&state_with_one_pending_node("counted"), &[]);
+    let commit = RuntimeCommit::persisted_state_for_test(
+        &state_with_one_pending_node(&SessionId::from("counted")),
+        &[],
+    );
     let expected_node_count = commit.graph.nodes.len();
     assert!(expected_node_count > 0, "fixture must commit graph nodes");
 
@@ -69,12 +72,16 @@ async fn successful_commits_are_counted_after_the_inner_store_accepts_them() {
 #[tokio::test]
 async fn rejected_commits_do_not_change_the_instrumentation_counter() {
     let store = RuntimePerfStore::default();
-    let mut commit = RuntimeCommit::persisted_state_for_test(&test_state("root"), &[]);
+    let mut commit =
+        RuntimeCommit::persisted_state_for_test(&test_state(&SessionId::from("root")), &[]);
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "other-session",
         DeliveryPolicy::AfterCurrentTurnCommit,
         lash_core::runtime::TurnWorkPayload::agent_frame_task(
-            lash_core::facade_support::frame_node_id("other-session", "follow-frame"),
+            lash_core::facade_support::frame_node_id(
+                &SessionId::from("other-session"),
+                "follow-frame",
+            ),
             "follow-on task",
             None,
         ),

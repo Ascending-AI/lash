@@ -470,6 +470,8 @@ fn duration_ms(first: &str, last: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
+    use lash_sansio::ProcessId;
+    use lash_sansio::SessionId;
     use lash_sansio::TurnId;
 
     use super::*;
@@ -481,7 +483,7 @@ mod tests {
     fn identity() -> LanguageIdentity {
         LanguageIdentity {
             scope: TraceRuntimeScope {
-                session_id: "session-1".to_string(),
+                session_id: SessionId::from("session-1".to_string()),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
@@ -869,7 +871,7 @@ mod tests {
                     child: TraceLanguageChildExecution {
                         scope: TraceRuntimeScope::new("session-1"),
                         subject: TraceRuntimeSubject::Process {
-                            process_id: "process:child".to_string(),
+                            process_id: ProcessId::from("process:child".to_string()),
                         },
                         module_ref: Some("module-1".to_string()),
                         entry_ref: Some("process:0".to_string()),

@@ -888,6 +888,7 @@ fn batch_child_args(batch_args: &serde_json::Value, index: usize) -> serde_json:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::SessionId;
     use serde_json::json;
 
     struct TestSpillDirectory {
@@ -987,7 +988,7 @@ mod tests {
             "this is an example of a long output that should be truncated",
             &Budget::from(&config),
             &ToolResultProjectionContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 call_id: "call".to_string(),
                 tool_name: "grep".to_string(),
                 args: json!({}),
@@ -1004,7 +1005,7 @@ mod tests {
     fn default_config_truncates_without_spilling_to_the_filesystem() {
         let text = "x".repeat(DEFAULT_TOOL_OUTPUT_BUDGET_LIMIT_BYTES + 1);
         let ctx = ToolResultProjectionContext {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             call_id: "call".to_string(),
             tool_name: "grep".to_string(),
             args: json!({}),
@@ -1036,7 +1037,7 @@ mod tests {
             }),
         };
         let ctx = ToolResultProjectionContext {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             call_id: "call".to_string(),
             tool_name: "grep".to_string(),
             args: json!({"query": "needle"}),
@@ -1080,7 +1081,7 @@ mod tests {
             spill: Some(policy.clone()),
         };
         let ctx = ToolResultProjectionContext {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             call_id: "call".to_string(),
             tool_name: "grep".to_string(),
             args: json!({"query": "needle"}),
@@ -1209,7 +1210,7 @@ mod tests {
         let projected = project_tool_result(
             &Budget::from(&config),
             ToolResultProjectionContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 call_id: "call".to_string(),
                 tool_name: "exec_command".to_string(),
                 args: json!({}),
@@ -1249,7 +1250,7 @@ mod tests {
         let projected = project_tool_result(
             &Budget::from(&config),
             ToolResultProjectionContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 call_id: "call".to_string(),
                 tool_name: "search_tools".to_string(),
                 args: json!({}),
@@ -1268,7 +1269,7 @@ mod tests {
         let projected = project_tool_result(
             &Budget::from(ToolOutputBudgetConfig::default()),
             ToolResultProjectionContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 call_id: "call".to_string(),
                 tool_name: "batch".to_string(),
                 args: json!({}),
@@ -1304,7 +1305,7 @@ mod tests {
                 ..ToolOutputBudgetConfig::default()
             }),
             ToolResultProjectionContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 call_id: "call".to_string(),
                 tool_name: "batch".to_string(),
                 args: json!({}),
@@ -1338,7 +1339,7 @@ mod tests {
         let error = project_tool_result(
             &Budget::from(ToolOutputBudgetConfig::default()),
             ToolResultProjectionContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 call_id: "call".to_string(),
                 tool_name: "batch".to_string(),
                 args: json!({}),
@@ -1376,7 +1377,7 @@ mod tests {
             spill: None,
         };
         let ctx = ToolResultProjectionContext {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             call_id: "call".to_string(),
             tool_name: "read_file".to_string(),
             args: json!({}),
@@ -1415,7 +1416,7 @@ mod tests {
         assert_eq!(token_budget.max_lines, byte_budget.max_lines);
 
         let ctx = ToolResultProjectionContext {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             call_id: "call".to_string(),
             tool_name: "read_file".to_string(),
             args: json!({}),

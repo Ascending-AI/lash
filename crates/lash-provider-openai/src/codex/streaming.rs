@@ -736,7 +736,10 @@ impl Provider for CodexProvider {
             ),
             ("originator".to_string(), Self::CODEX_ORIGINATOR.to_string()),
             ("User-Agent".to_string(), Self::codex_user_agent()),
-            ("session-id".to_string(), req.scope.session_id.clone()),
+            (
+                "session-id".to_string(),
+                req.scope.session_id.clone().to_string(),
+            ),
             (
                 "x-client-request-id".to_string(),
                 req.scope.request_id.clone(),

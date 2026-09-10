@@ -6,6 +6,7 @@
 //! the full payload shape of the load-bearing variants, and a JSONL round-trip
 //! carrying an `exec_code_completed` diagnostic.
 
+use lash_sansio::ProcessId;
 use std::collections::BTreeSet;
 
 use lash_trace::{
@@ -196,7 +197,7 @@ fn lashlang_identity() -> TraceLanguageExecutionIdentity {
     TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
         subject: TraceRuntimeSubject::Process {
-            process_id: "p1".to_string(),
+            process_id: ProcessId::from("p1"),
         },
         module_ref: "module".to_string(),
         entry_kind: "process".to_string(),
@@ -771,7 +772,7 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::new("s1"),
                     subject: TraceRuntimeSubject::Process {
-                        process_id: "p1".to_string(),
+                        process_id: ProcessId::from("p1"),
                     },
                     module_ref: "module:v1".to_string(),
                     entry_kind: "program".to_string(),
@@ -1584,7 +1585,7 @@ fn language_execution_all_seven_payload_variants_round_trip() {
             child: TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::new("s1"),
                 subject: TraceRuntimeSubject::Process {
-                    process_id: "p2".to_string(),
+                    process_id: ProcessId::from("p2"),
                 },
                 module_ref: Some("child_mod".to_string()),
                 entry_ref: Some("component:1".to_string()),

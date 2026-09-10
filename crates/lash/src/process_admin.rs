@@ -12,6 +12,8 @@
 
 use crate::support::{Arc, EmbedError, LashCore, Result, ScopedEffectController};
 use lash_core::facade_support::ScopedEffectControllerFacadeOps;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
 async fn await_process_terminal(
@@ -42,7 +44,7 @@ impl<'a> SurveyedTriggerStore<'a> {
         }
     }
 
-    fn delivery_process_ids(&self) -> Vec<String> {
+    fn delivery_process_ids(&self) -> Vec<ProcessId> {
         self.retention_candidates
             .lock_recover()
             .iter()
@@ -77,7 +79,7 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
 
     async fn delete_session_subscriptions(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<usize, lash_core::PluginError> {
         self.inner.delete_session_subscriptions(session_id).await
     }
@@ -118,7 +120,7 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
 
     async fn list_deliveries_by_process_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> std::result::Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError>
     {
         self.inner.list_deliveries_by_process_id(process_id).await
@@ -133,7 +135,7 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
 
     async fn list_delivery_process_ids(
         &self,
-    ) -> std::result::Result<Vec<String>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<ProcessId>, lash_core::PluginError> {
         Ok(self.delivery_process_ids())
     }
 
@@ -148,14 +150,14 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
 
     async fn list_session_owner_ids_for_retention(
         &self,
-    ) -> std::result::Result<Vec<String>, lash_core::PluginError> {
+    ) -> std::result::Result<Vec<SessionId>, lash_core::PluginError> {
         self.inner.list_session_owner_ids_for_retention().await
     }
 
     async fn reconcile_trigger_retention(
         &self,
         candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[String],
+        deleted_session_ids: &[SessionId],
     ) -> std::result::Result<lash_core::TriggerRetentionReconciliationReport, lash_core::PluginError>
     {
         let report = self
@@ -405,7 +407,7 @@ impl Processes {
     /// Returns the identified process handle, if it exists.
     pub async fn get(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Option<lash_core::facade_support::ObservedProcess>> {
         self.make_observer()?
             .process(process_id)
@@ -416,7 +418,7 @@ impl Processes {
     /// Returns the process event stream from the requested offset.
     pub async fn events(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<lash_core::facade_support::ObservedProcessEvent>> {
         self.make_observer()?
@@ -426,7 +428,10 @@ impl Processes {
     }
 
     /// Waits for the identified process to produce terminal output.
-    pub async fn await_output(&self, process_id: &str) -> Result<lash_core::ProcessAwaitOutput> {
+    pub async fn await_output(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<lash_core::ProcessAwaitOutput> {
         let process_ref = self
             .core
             .process_registry()
@@ -448,7 +453,7 @@ impl Processes {
     /// Requests cancellation of the identified process.
     pub async fn cancel(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
         let process_ref = self
@@ -476,7 +481,7 @@ impl Processes {
     /// Delivers a signal to the identified process.
     pub async fn signal(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         signal_name: impl Into<String>,
         signal_id: impl Into<String>,
         request: lash_core::ProcessEventAppendRequest,
@@ -508,7 +513,7 @@ impl Processes {
     /// Returns the current process-session snapshot.
     pub async fn session_snapshot(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
     ) -> Result<lash_core::facade_support::ProcessWorkSnapshot> {
         self.make_observer()?
             .snapshot_for_session(session_id)
@@ -550,7 +555,7 @@ impl Processes {
         &self,
         from_scope: &lash_core::SessionScope,
         to_scope: &lash_core::SessionScope,
-        process_ids: &[String],
+        process_ids: &[ProcessId],
     ) -> Result<()> {
         self.registry()?
             .transfer_observers(
@@ -825,7 +830,7 @@ impl Processes {
     /// as observed after the marker is written.
     pub async fn request_abandon(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         requested_by: impl Into<String>,
         reason: Option<String>,
     ) -> Result<lash_core::facade_support::ObservedProcess> {

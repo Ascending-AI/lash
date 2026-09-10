@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -131,7 +132,7 @@ fn capability_can_build_complete_spawn_request() {
 
     let request = build_spawn_create_request(SpawnCreateRequestInput {
         registry: &registry,
-        parent_session_id: "root",
+        parent_session_id: &SessionId::from("root"),
         current_snapshot: current_snapshot.to_snapshot(),
         session_spec: &SessionSpec::inherit(),
         tool_access: &tool_access,
@@ -359,7 +360,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
 
     let request = build_spawn_create_request(SpawnCreateRequestInput {
         registry: &registry,
-        parent_session_id: "root",
+        parent_session_id: &SessionId::from("root"),
         current_snapshot: current_snapshot.to_snapshot(),
         session_spec: &SessionSpec::inherit(),
         tool_access: &tool_access,
@@ -391,7 +392,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
 
     let structured_request = build_spawn_create_request(SpawnCreateRequestInput {
         registry: &registry,
-        parent_session_id: "root",
+        parent_session_id: &SessionId::from("root"),
         current_snapshot: current_snapshot.to_snapshot(),
         session_spec: &SessionSpec::inherit(),
         tool_access: &tool_access,
@@ -1157,7 +1158,7 @@ async fn run_seed_probe_inner(
         host,
         RuntimeServices::new(plugins),
         RuntimeSessionState {
-            session_id: "root".to_string(),
+            session_id: SessionId::from("root"),
             policy,
             protocol_turn_options: match parent_dialect {
                 Some(dialect) => {
@@ -1223,7 +1224,7 @@ impl SeedProbe {
     async fn assert_process_visibility(&self, kind: &str, label: &str) {
         let observed_processes = lash_core::ProcessObserverRegistry::list_observed_by(
             self.process_registry.as_ref(),
-            "root",
+            &SessionId::from("root"),
             &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..Default::default()
@@ -1321,7 +1322,7 @@ fn request_text(request: &LlmRequest) -> String {
 async fn subagents_plugin_builds_without_mode_context() {
     let factory = SubagentsPluginFactory::new(Arc::new(default_registry(&BTreeMap::new())));
     let ctx = PluginSessionContext {
-        session_id: "parent".to_string(),
+        session_id: SessionId::from("parent"),
         tool_access: lash_core::SessionToolAccess::default(),
         subagent: None,
         extensions: Default::default(),
@@ -1353,7 +1354,7 @@ fn subagents_plugin_final_answer_format_defaults_raw_and_can_be_overridden() {
 async fn rlm_provider_does_not_require_process_support() {
     let factory = SubagentsPluginFactory::new(Arc::new(default_registry(&BTreeMap::new())));
     let ctx = PluginSessionContext {
-        session_id: "parent".to_string(),
+        session_id: SessionId::from("parent"),
         tool_access: lash_core::SessionToolAccess::default(),
         subagent: None,
         extensions: Default::default(),
@@ -1370,7 +1371,7 @@ async fn rlm_provider_does_not_require_process_support() {
 #[test]
 fn sublashlang_binding_reports_authority_notes() {
     let authority = lash_core::SubagentSessionContext {
-        parent_session_id: "root".to_string(),
+        parent_session_id: SessionId::from("root"),
         capability: "explore".to_string(),
         depth: 1,
         max_depth: 5,

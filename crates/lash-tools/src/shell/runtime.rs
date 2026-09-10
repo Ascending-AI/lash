@@ -24,7 +24,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-use lash_core::{ToolFailure, ToolFailureClass};
+use lash_core::{ProcessId, ToolFailure, ToolFailureClass};
 
 use crate::shell::output::{
     OUTPUT_QUIET_PERIOD_MS, PollOutcome, ProcessState, ReaderSignals, ShellOutputBuffer,
@@ -131,7 +131,7 @@ pub(crate) struct StartCommandParams {
     pub(crate) detach: bool,
     /// Stable id of the ExternallyOwned audit row produced by the detached
     /// launcher body. Present exactly when `detach` is true.
-    pub(crate) detached_process_id: Option<String>,
+    pub(crate) detached_process_id: Option<ProcessId>,
 }
 
 /// Identity of a launched [Detached Command](StartCommandParams::detach) — the

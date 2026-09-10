@@ -6,6 +6,8 @@
 //! payload from a *future* build — the build that writes it is the one running
 //! the test — and the version boundary that matters most is exactly that one.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
@@ -179,8 +181,8 @@ fn segment_item(process: &str, session: &str, segment: u32, continuation: u32) -
     DurableItem {
         surface: DurableSurface::ParkedSegment,
         cursor: format!("{process}:0"),
-        process_id: Some(process.to_string()),
-        session_id: Some(session.to_string()),
+        process_id: Some(ProcessId::from(process.to_string())),
+        session_id: Some(SessionId::from(session.to_string())),
         status: Some("waiting".to_string()),
         owner_record: None,
         payload: DurablePayload::Json(
@@ -197,8 +199,8 @@ fn wake_item(delivery: &str, process: &str, version: u32) -> DurableItem {
     DurableItem {
         surface: DurableSurface::PendingWake,
         cursor: delivery.to_string(),
-        process_id: Some(process.to_string()),
-        session_id: Some("s-1".to_string()),
+        process_id: Some(ProcessId::from(process.to_string())),
+        session_id: Some(SessionId::from("s-1")),
         status: None,
         owner_record: None,
         payload: DurablePayload::Json(
@@ -217,7 +219,7 @@ fn checkpoint_item(session: &str, schema_version: u32, encoding: u32) -> Durable
         surface: DurableSurface::SessionCheckpoint,
         cursor: session.to_string(),
         process_id: None,
-        session_id: Some(session.to_string()),
+        session_id: Some(SessionId::from(session.to_string())),
         status: None,
         owner_record: None,
         payload: DurablePayload::MessagePack(bytes),
@@ -231,7 +233,7 @@ fn execution_state_item(session: &str, version: u32) -> DurableItem {
         surface: DurableSurface::SessionExecutionState,
         cursor: session.to_string(),
         process_id: None,
-        session_id: Some(session.to_string()),
+        session_id: Some(SessionId::from(session.to_string())),
         status: None,
         owner_record: None,
         payload: DurablePayload::MessagePack(bytes),

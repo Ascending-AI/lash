@@ -114,6 +114,7 @@ fn push_web_tools(stack: &mut PluginStack, tavily_api_key: Redacted) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::SessionId;
 
     fn stack_ids(stack: &PluginStack) -> Vec<&'static str> {
         stack
@@ -136,7 +137,7 @@ mod tests {
         .into_factories();
         factories.extend(protocol_factories);
         let host = lash_core::facade_support::PluginHost::new(factories);
-        let session_id = "test".to_string();
+        let session_id = SessionId::from("test".to_string());
         let session = host.build_session(session_id.clone()).expect("session");
         session
             .resolved_tool_catalog(&session_id)

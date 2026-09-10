@@ -1,6 +1,8 @@
 //! Session observation: cursors, resumable observation events, and live
 //! replay gap envelopes.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -62,7 +64,7 @@ impl RemoteSessionCursor {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionObservation {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub cursor: String,
     pub turn_index: u64,
     pub usage: RemoteUsage,
@@ -77,7 +79,7 @@ impl RemoteSessionObservation {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionObservationEvent {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub replay_incarnation_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
@@ -158,7 +160,7 @@ pub enum RemoteSessionObservationEventPayload {
     },
     ProcessChanged {
         kind: RemoteSessionProcessEventKind,
-        process_ids: Vec<String>,
+        process_ids: Vec<ProcessId>,
     },
 }
 
@@ -178,7 +180,7 @@ pub enum RemoteSessionProcessEventKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLiveReplayGap {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub requested_cursor: String,
     pub latest_cursor: String,
     pub latest_revision: u64,

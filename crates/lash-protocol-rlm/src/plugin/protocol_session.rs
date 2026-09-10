@@ -394,6 +394,7 @@ pub(crate) fn resolve_recorded_rlm_session_dialect(
 
 #[cfg(test)]
 mod tests {
+    use lash_sansio::SessionId;
     use std::sync::Arc;
 
     use super::*;
@@ -415,7 +416,7 @@ mod tests {
 
         async fn snapshot_session(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<lash_core::SessionSnapshot, lash_core::plugin::PluginError> {
             Err(lash_core::plugin::PluginError::Session(
                 "not used".to_string(),
@@ -424,7 +425,7 @@ mod tests {
 
         async fn tool_catalog(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<Vec<serde_json::Value>, lash_core::plugin::PluginError> {
             Ok(Vec::new())
         }
@@ -444,7 +445,7 @@ mod tests {
 
         async fn close_session(
             &self,
-            _session_id: &str,
+            _session_id: &SessionId,
         ) -> Result<(), lash_core::plugin::PluginError> {
             Ok(())
         }
@@ -733,7 +734,7 @@ mod tests {
         };
         let directives = session
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 checkpoint: lash_core::CheckpointKind::AfterWork,
                 state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),
@@ -788,7 +789,7 @@ mod tests {
 
         let directives = session
             .soft_warn_directives(lash_core::plugin::CheckpointHookContext {
-                session_id: "root".to_string(),
+                session_id: SessionId::from("root"),
                 checkpoint: lash_core::CheckpointKind::AfterWork,
                 state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 pub(super) fn measure_runtime_perf_phase<T>(
@@ -213,7 +214,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     )?;
     let store = lash_core::runtime::InMemorySessionStore::new();
     let mut runtime_state = RuntimeSessionState {
-        session_id: "runtime-perf-checkpoint-state".to_string(),
+        session_id: SessionId::from("runtime-perf-checkpoint-state"),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -629,7 +630,7 @@ fn checkpoint_config(
         system_prompt: Arc::from(
             "Synthetic sans-IO checkpoint profiler prompt. Preserve pending effects across checkpoint restore.",
         ),
-        session_id: "runtime-perf-turn-checkpoint".to_string(),
+        session_id: SessionId::from("runtime-perf-turn-checkpoint"),
         turn_id: TurnId::from("runtime-perf-turn"),
         emit_llm_trace: false,
         termination: ProtocolTurnOptions::default(),
@@ -956,7 +957,7 @@ pub(crate) async fn run_once_embed(
     let store = Arc::new(RuntimePerfStore::default());
     let core = build_embed_core(scenario, Arc::clone(&store))?;
     let session = core
-        .open_session(format!("runtime-perf-{}", scenario.name()))
+        .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
         .await
         .with_context(|| format!("open embed session for {}", scenario.name()))?;
     let build_runtime_ms = elapsed_ms(build_started);

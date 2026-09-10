@@ -1,4 +1,6 @@
 use lash_core::ProcessRegistrar as _;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::{Arc, Mutex};
 
 const SESSION: &str = "intent-ingress-observability-session";
@@ -17,7 +19,7 @@ async fn test_core() -> lash::Result<lash::LashCore> {
                 lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
             ),
-            &[SESSION.to_string()],
+            &[SessionId::from(SESSION.to_string())],
         )
         .await?;
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
@@ -48,10 +50,10 @@ async fn test_core() -> lash::Result<lash::LashCore> {
     Ok(core)
 }
 
-fn cancel_intent(session_id: &str) -> lash::tools::ToolIntent {
+fn cancel_intent(session_id: &SessionId) -> lash::tools::ToolIntent {
     lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
-        session_id: session_id.to_string(),
-        process_id: PROCESS.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
+        process_id: ProcessId::from(PROCESS.to_string()),
         reason: Some("observability-law".to_string()),
     })
 }
@@ -102,11 +104,15 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
                 core.tool_intents(SESSION, lash::runtime::ExecutionScope::turn(SESSION, SCOPE))?;
             let key = ingress.key("observable", 0);
             assert!(matches!(
-                ingress.submit(key.clone(), cancel_intent(SESSION)).await,
+                ingress
+                    .submit(key.clone(), cancel_intent(&SessionId::from(SESSION)))
+                    .await,
                 lash::tools::ToolIntentIngressOutcome::Admitted { .. }
             ));
             assert!(matches!(
-                ingress.submit(key, cancel_intent(SESSION)).await,
+                ingress
+                    .submit(key, cancel_intent(&SessionId::from(SESSION)))
+                    .await,
                 lash::tools::ToolIntentIngressOutcome::Refused {
                     refusal: lash::tools::ToolIntentIngressRefusal::DuplicateIdentity { .. }
                 }
@@ -115,7 +121,7 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
                 ingress
                     .submit(
                         ingress.key("observable-refused", 0),
-                        cancel_intent("foreign")
+                        cancel_intent(&SessionId::from("foreign"))
                     )
                     .await,
                 lash::tools::ToolIntentIngressOutcome::Refused {

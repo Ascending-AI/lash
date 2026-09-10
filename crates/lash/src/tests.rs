@@ -17,6 +17,8 @@ use lash_core::facade_support::{
     SessionNodeProjection, ToolStateFacadeOps,
 };
 use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -40,7 +42,7 @@ fn now_epoch_ms() -> u64 {
 }
 
 fn test_session_execution_lease(
-    session_id: &str,
+    session_id: &SessionId,
     owner: &lash_core::LeaseOwnerIdentity,
     executor_id: &str,
     lease_ttl_ms: u64,
@@ -48,7 +50,7 @@ fn test_session_execution_lease(
 ) -> lash_core::SessionExecutionLease {
     let claimed_at_epoch_ms = now_epoch_ms();
     lash_core::SessionExecutionLease {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         owner: owner.clone(),
         executor_id: executor_id.to_string(),
         lease_token: format!(
@@ -88,13 +90,14 @@ struct SnapshotStore {
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     runtime_turn_commits: std::sync::Mutex<
         std::collections::HashMap<
-            (String, String),
+            (SessionId, String),
             (String, lash_core::store::RuntimeCommitReceipt),
         >,
     >,
     usage_delta_identities:
         std::sync::Mutex<std::collections::HashSet<lash_core::store::RuntimeUsageDeltaIdentity>>,
-    session_execution_leases: std::sync::Mutex<HashMap<String, lash_core::SessionExecutionLease>>,
+    session_execution_leases:
+        std::sync::Mutex<HashMap<SessionId, lash_core::SessionExecutionLease>>,
     /// Accepted-but-unsettled turn inputs, in enqueue order.
     ///
     /// Every turn — direct or queued — is admitted here before it is driven
@@ -109,7 +112,7 @@ struct SnapshotStore {
     /// double is not exempt. This store drops the live lease row on release, so
     /// generation authority has to live somewhere that survives it, or a stale
     /// generation would be reissued and fencing would silently stop working.
-    session_execution_lease_generations: std::sync::Mutex<HashMap<String, u64>>,
+    session_execution_lease_generations: std::sync::Mutex<HashMap<SessionId, u64>>,
 }
 
 impl SnapshotStore {
@@ -419,7 +422,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
 impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &lash_core::LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
@@ -439,7 +442,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
                     lease.lease_token = lease_token.to_string();
                 }
                 lease.expires_at_epoch_ms = now_epoch_ms().saturating_add(lease_ttl_ms);
-                leases.insert(session_id.to_string(), lease.clone());
+                leases.insert(SessionId::from(session_id.to_string()), lease.clone());
                 return Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
                     lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
                 ));
@@ -472,7 +475,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             .copied()
             .unwrap_or(0)
             .saturating_add(1);
-        generations.insert(session_id.to_string(), next_fencing_token);
+        generations.insert(SessionId::from(session_id.to_string()), next_fencing_token);
         drop(generations);
         let mut lease = test_session_execution_lease(
             session_id,
@@ -482,7 +485,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
             next_fencing_token,
         );
         lease.lease_token = lease_token.to_string();
-        leases.insert(session_id.to_string(), lease.clone());
+        leases.insert(SessionId::from(session_id.to_string()), lease.clone());
         Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
             match displaced {
                 Some((previous, previous_executor_id, generation, expired_at_epoch_ms)) => {
@@ -573,7 +576,7 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
 
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<SessionExecutionLeaseObservation, StoreError> {
         let lease = self
             .session_execution_leases
@@ -603,7 +606,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn claim_leading_ready_session_command(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
     ) -> std::result::Result<
@@ -615,7 +618,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn claim_ready_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
@@ -628,7 +631,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn claim_checkpoint_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
@@ -647,7 +650,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
@@ -670,7 +673,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn cancel_queued_work_batch(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _batch_id: &str,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkBatch>,
@@ -681,7 +684,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn queued_work_batch_completed(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _batch_id: &str,
     ) -> std::result::Result<bool, lash_core::store::StoreError> {
         Ok(false)
@@ -689,7 +692,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn pending_session_work_ordering(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<
         lash_core::store::PendingSessionWorkOrdering,
         lash_core::store::StoreError,
@@ -702,7 +705,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn list_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
     {
         Ok(Vec::new())
@@ -710,7 +713,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 
     async fn list_pending_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
     {
         Ok(Vec::new())
@@ -749,7 +752,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
     async fn list_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
         Ok(self
             .pending_turn_inputs
@@ -762,7 +765,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
     async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> std::result::Result<
         Vec<lash_core::PendingTurnInputCancelReceipt>,
@@ -799,7 +802,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _anchor: &lash_core::PendingTurnInputCancelTarget,
     ) -> std::result::Result<
         lash_core::PendingTurnInputSuffixCancelOutcome,
@@ -812,7 +815,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     // turn; this store's queue is always empty, so claims find nothing.
     async fn claim_active_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
@@ -827,7 +830,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     // back exactly where a real backend's cleared claim columns would.
     async fn claim_next_turn_inputs(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         max_inputs: usize,
@@ -855,7 +858,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
             .copied()
             .unwrap_or_default();
         Ok(Some(lash_core::TurnInputClaim {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             claim_id: format!("snapshot-turn-input-claim-{}", claimed[0].enqueue_seq),
             owner: owner.clone(),
             lease_token: session_execution_lease.lease_token.clone(),
@@ -887,7 +890,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     // nothing to repair.
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
@@ -944,20 +947,23 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
     }
 
     // The single reused store is never dropped and no tombstone is recorded.
-    async fn session_was_deleted(&self, _session_id: &str) -> std::result::Result<bool, String> {
+    async fn session_was_deleted(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         Ok(lash_core::SessionBlobReclaimReport::default())
     }
 }
 
 struct BoundSessionStore {
-    session_id: String,
+    session_id: SessionId,
 }
 
 lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
@@ -1035,7 +1041,7 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
 impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &lash_core::LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
@@ -1075,7 +1081,7 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 
     async fn get_session_execution_lease(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<SessionExecutionLeaseObservation, StoreError> {
         Ok(SessionExecutionLeaseObservation {
             observed_at_epoch_ms: now_epoch_ms(),
@@ -1097,14 +1103,14 @@ impl lash_core::TurnInputStore for BoundSessionStore {
 
     async fn list_pending_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
         Ok(Vec::new())
     }
 
     async fn cancel_pending_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> std::result::Result<
         Vec<lash_core::PendingTurnInputCancelReceipt>,
@@ -1115,7 +1121,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
 
     async fn cancel_pending_turn_input_suffix(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _anchor: &lash_core::PendingTurnInputCancelTarget,
     ) -> std::result::Result<
         lash_core::PendingTurnInputSuffixCancelOutcome,
@@ -1126,7 +1132,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
 
     async fn claim_active_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
@@ -1138,7 +1144,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
 
     async fn claim_next_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _max_inputs: usize,
@@ -1157,7 +1163,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     // nothing to repair.
     async fn defer_orphaned_active_turn_inputs(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
@@ -1179,7 +1185,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn claim_leading_ready_session_command(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
     ) -> std::result::Result<
@@ -1191,7 +1197,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn claim_ready_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
@@ -1204,7 +1210,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn claim_checkpoint_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _turn_id: &lash_core::TurnId,
@@ -1223,7 +1229,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
@@ -1246,7 +1252,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn cancel_queued_work_batch(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _batch_id: &str,
     ) -> std::result::Result<
         Option<lash_core::runtime::QueuedWorkBatch>,
@@ -1257,7 +1263,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn queued_work_batch_completed(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _batch_id: &str,
     ) -> std::result::Result<bool, lash_core::store::StoreError> {
         Ok(false)
@@ -1265,7 +1271,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn pending_session_work_ordering(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<
         lash_core::store::PendingSessionWorkOrdering,
         lash_core::store::StoreError,
@@ -1278,7 +1284,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn list_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
     {
         Ok(Vec::new())
@@ -1286,7 +1292,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
 
     async fn list_pending_queued_work(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
     {
         Ok(Vec::new())
@@ -1310,7 +1316,7 @@ struct RecordingStoreFactory {
 }
 
 impl RecordingStoreFactory {
-    fn session_ids(&self) -> Vec<String> {
+    fn session_ids(&self) -> Vec<SessionId> {
         self.requests
             .lock_recover()
             .iter()
@@ -1353,13 +1359,16 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
     }
 
     // Every create_store hands back a fresh store; nothing is ever tombstoned.
-    async fn session_was_deleted(&self, _session_id: &str) -> std::result::Result<bool, String> {
+    async fn session_was_deleted(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
         Ok(false)
     }
 
     async fn delete_session(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         Ok(lash_core::SessionBlobReclaimReport::default())
     }
@@ -1367,8 +1376,8 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
 
 #[derive(Default)]
 struct DeletingStoreFactory {
-    stores: std::sync::Mutex<std::collections::HashMap<String, Arc<SnapshotStore>>>,
-    tombstones: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    stores: std::sync::Mutex<std::collections::HashMap<SessionId, Arc<SnapshotStore>>>,
+    tombstones: std::sync::Mutex<std::collections::BTreeSet<SessionId>>,
     delete_failure: std::sync::Mutex<
         Option<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
     >,
@@ -1434,13 +1443,16 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
     }
 
     // This fixture really deletes, so it really keeps the tombstone.
-    async fn session_was_deleted(&self, session_id: &str) -> std::result::Result<bool, String> {
+    async fn session_was_deleted(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
         Ok(self.tombstones.lock_recover().contains(session_id))
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         if let Some(failure) = self.delete_failure.lock_recover().take() {
             return Err(failure);
@@ -1448,7 +1460,7 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
         self.stores.lock_recover().remove(session_id);
         self.tombstones
             .lock_recover()
-            .insert(session_id.to_string());
+            .insert(SessionId::from(session_id.to_string()));
         Ok(lash_core::SessionBlobReclaimReport::default())
     }
 }
@@ -2317,7 +2329,7 @@ fn native_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectCont
     .expect("native execution scope")
 }
 
-fn turn_scope(session_id: &str) -> lash_core::ScopedEffectController<'static> {
+fn turn_scope(session_id: &SessionId) -> lash_core::ScopedEffectController<'static> {
     native_scope(lash_core::ExecutionScope::turn(
         session_id,
         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
@@ -2338,7 +2350,7 @@ fn runtime_operation_scope(
 
 async fn session_delete_scope(
     core: &LashCore,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> lash_core::ScopedEffectController<'static> {
     native_scope(
         core.session_delete_scope(session_id)
@@ -2415,8 +2427,11 @@ mod usage_durability;
 #[tokio::test]
 async fn snapshot_store_reports_the_holder_a_claim_displaces() {
     let store = SnapshotStore::default();
-    lash_conformance::session_execution_lease_displacement(&store, "snapshot-lease-displacement")
-        .await;
+    lash_conformance::session_execution_lease_displacement(
+        &store,
+        &SessionId::from("snapshot-lease-displacement"),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -2457,12 +2472,12 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
         .invocation_started()
         .expect("attempt-bound invocation has a start fact");
     registry
-        .record_first_started_with_authority(process_id, started, &authority)
+        .record_first_started_with_authority(&ProcessId::from(process_id), started, &authority)
         .await
         .expect("record process start");
     registry
         .set_process_wait_with_authority(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::WaitState {
                 since_ms: 1,
                 kind: lash_core::WaitKind::Signal {

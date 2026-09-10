@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 struct ShutdownRecordingPluginFactory {
     id: &'static str,
@@ -232,7 +233,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     let persisted_tool_state =
         persisted_tool_state_at_generation(session.admin().tools().state().await?, 9);
     let mut state = RuntimeSessionState {
-        session_id: "persisted-tools".to_string(),
+        session_id: SessionId::from("persisted-tools"),
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),

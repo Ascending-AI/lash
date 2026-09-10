@@ -1,5 +1,6 @@
 //! Token usage accounting and the streaming turn-activity event vocabulary.
 
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -244,7 +245,7 @@ pub enum RemoteTurnEvent {
         cumulative: RemoteUsage,
     },
     ChildUsage {
-        session_id: String,
+        session_id: SessionId,
         source: String,
         model: String,
         protocol_iteration: usize,

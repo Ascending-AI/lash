@@ -1,6 +1,7 @@
 //! LLM request/response envelopes: messages, attachments, tool specs, output
 //! specs, provider metadata, and schema-projection contracts.
 
+use lash_sansio::SessionId;
 use std::collections::{BTreeMap, HashMap};
 
 use schemars::JsonSchema;
@@ -705,14 +706,14 @@ impl RemoteGenerationOptions {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLlmRequestScope {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub agent_frame_id: String,
     pub request_id: String,
 }
 
 impl RemoteLlmRequestScope {
     pub fn new(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         agent_frame_id: impl Into<String>,
         request_id: impl Into<String>,
     ) -> Self {

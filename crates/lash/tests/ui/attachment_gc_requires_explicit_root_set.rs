@@ -26,13 +26,13 @@ impl SessionStoreFactory for DelegatingFactory {
         self.inner.open_existing_store(request).await
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }

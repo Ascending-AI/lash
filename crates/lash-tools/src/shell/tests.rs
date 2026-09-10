@@ -121,14 +121,14 @@ async fn shell_spawn_failure_is_structured_io() {
 }
 
 fn async_process_context(
-    process_id: &str,
+    process_id: &ProcessId,
     cancel: CancellationToken,
 ) -> lash_core::ToolContext<'static> {
     lash_core::testing::mock_tool_context().with_async_process(process_id, cancel)
 }
 
 fn async_process_context_with_events(
-    process_id: &str,
+    process_id: &ProcessId,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     execution_write_authority: lash_core::ProcessExecutionWriteAuthority,
     cancel: CancellationToken,
@@ -157,7 +157,7 @@ impl TestProcessService {
 impl lash_core::ProcessService for TestProcessService {
     async fn start_from_recorded_intent(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: lash_core::ProcessStartRequest,
         scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessHandleView, PluginError> {
@@ -166,9 +166,9 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn finish_recorded_intent_parent(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _identity: lash_core::ToolIntentIdentity,
-        _process_id: String,
+        _process_id: ProcessId,
         _policy: lash_core::ProcessParentEndPolicy,
         _reason: String,
         _scope: lash_core::ProcessOpScope<'_>,
@@ -180,7 +180,7 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn start_from_request(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         request: lash_core::ProcessStartRequest,
         scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessHandleView, PluginError> {
@@ -214,7 +214,7 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn start(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         registration: lash_core::ProcessRegistration,
         options: lash_core::ProcessStartOptions,
         _scope: lash_core::ProcessOpScope<'_>,
@@ -226,8 +226,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn complete_external(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         await_output: lash_core::ProcessAwaitOutput,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
@@ -260,8 +260,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn report_caller_departure(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
     ) -> Result<lash_core::ProcessRecord, PluginError> {
         if !self.registry.is_observer(session_id, process_id).await? {
             return Err(PluginError::Session(format!(
@@ -273,7 +273,7 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn await_process(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessAwaitOutput, PluginError> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
@@ -284,7 +284,7 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn list_visible(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         mode: lash_core::ProcessListMode,
         scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<Vec<lash_core::ProcessRecord>, PluginError> {
@@ -309,8 +309,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn validate_visible(
         &self,
-        session_id: &str,
-        process_ids: &[String],
+        session_id: &SessionId,
+        process_ids: &[ProcessId],
         scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         let _ = scope;
@@ -326,8 +326,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn cancel(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, PluginError> {
         self.registry
@@ -347,8 +347,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         reason: Option<String>,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, PluginError> {
@@ -366,8 +366,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn signal_possessed(
         &self,
-        session_id: &str,
-        process_id: &str,
+        session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -401,8 +401,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn signal_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
@@ -410,7 +410,7 @@ impl lash_core::ProcessService for TestProcessService {
     ) -> Result<lash_core::ProcessEvent, PluginError> {
         if self.registry.get_process(process_id).await?.is_none() {
             return Err(PluginError::ProcessNotVisible {
-                process_id: process_id.to_string(),
+                process_id: ProcessId::from(process_id.to_string()),
             });
         }
         let event_type = lash_core::facade_support::process_signal_event_type(&signal_name)?;
@@ -427,8 +427,8 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn emit_event_recorded_intent(
         &self,
-        _session_id: &str,
-        process_id: &str,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
         event_type: String,
         replay_key: String,
         payload: serde_json::Value,
@@ -446,9 +446,9 @@ impl lash_core::ProcessService for TestProcessService {
 
     async fn transfer(
         &self,
-        _from_session_id: &str,
-        _to_session_id: &str,
-        _process_ids: Vec<String>,
+        _from_session_id: &SessionId,
+        _to_session_id: &SessionId,
+        _process_ids: Vec<ProcessId>,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         Ok(())
@@ -462,7 +462,7 @@ fn context_with_processes(
     let host = Arc::new(lash_core::testing::MockSessionManager::default());
     let processes: Arc<dyn lash_core::ProcessService> = service;
     lash_core::ToolContext::__for_testing(
-        "test-session".to_string(),
+        SessionId::from("test-session"),
         host.clone(),
         host.clone(),
         host,
@@ -477,7 +477,10 @@ fn context_with_processes(
     )
 }
 
-async fn register_signal_target(registry: &lash_core::TestLocalProcessRegistry, process_id: &str) {
+async fn register_signal_target(
+    registry: &lash_core::TestLocalProcessRegistry,
+    process_id: &ProcessId,
+) {
     register_signal_target_with_disposition(
         registry,
         process_id,
@@ -488,7 +491,7 @@ async fn register_signal_target(registry: &lash_core::TestLocalProcessRegistry, 
 
 async fn register_executable_signal_target(
     registry: &lash_core::TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) {
     register_signal_target_with_disposition(
         registry,
@@ -500,7 +503,7 @@ async fn register_executable_signal_target(
 
 async fn register_signal_target_with_disposition(
     registry: &lash_core::TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
     disposition: lash_core::RecoveryContract,
 ) {
     registry
@@ -519,7 +522,7 @@ async fn register_signal_target_with_disposition(
         .expect("register process");
     registry
         .add_observer(
-            "test-session",
+            &SessionId::from("test-session"),
             process_id,
             lash_core::ProcessObserverBy::host("shell-test"),
         )
@@ -529,7 +532,7 @@ async fn register_signal_target_with_disposition(
 
 async fn claim_signal_target_execution(
     registry: &lash_core::TestLocalProcessRegistry,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> lash_core::ProcessExecutionWriteAuthority {
     let lease = registry
         .claim_process_lease(
@@ -737,7 +740,7 @@ async fn shell_output_drains_stdout_stderr_during_incremental_reads() {
 #[tokio::test]
 async fn start_command_runs_in_a_pty() {
     let shell = test_shell();
-    let ctx = async_process_context("shell-pty", CancellationToken::new());
+    let ctx = async_process_context(&ProcessId::from("shell-pty"), CancellationToken::new());
     let result = run_with_context(
         &shell,
         "start_command",
@@ -919,7 +922,7 @@ async fn start_command_registers_process_handle() {
 
     let entries = service
         .registry()
-        .list_live_observed_by("test-session")
+        .list_live_observed_by(&SessionId::from("test-session"))
         .await
         .expect("list live observed");
     assert_eq!(entries.len(), 1);
@@ -1033,7 +1036,7 @@ async fn write_stdin_emits_process_signal() {
     let shell = test_shell();
     let service = Arc::new(TestProcessService::default());
     let registry = service.registry();
-    register_signal_target(registry.as_ref(), "shell-call-1").await;
+    register_signal_target(registry.as_ref(), &ProcessId::from("shell-call-1")).await;
     let ctx = context_with_processes(Arc::clone(&service), "write-call-1");
 
     let result = run_with_context(
@@ -1049,7 +1052,7 @@ async fn write_stdin_emits_process_signal() {
 
     let events = service
         .registry()
-        .events_after("shell-call-1", 0)
+        .events_after(&ProcessId::from("shell-call-1"), 0)
         .await
         .expect("events");
     let signal_events = events
@@ -1208,7 +1211,7 @@ async fn internal_detached_process_body_reports_launch_identity() {
         "detach reports started_at",
     );
     let record = registry
-        .get_process("detach-call-1")
+        .get_process(&ProcessId::from("detach-call-1"))
         .await
         .expect("read detached audit row")
         .expect("detached audit row exists");
@@ -1249,10 +1252,10 @@ async fn write_stdin_projects_the_recorded_terminal_target_refusal() {
     let provider = Arc::new(shell_provider(shell));
     let service = Arc::new(TestProcessService::default());
     let registry = service.registry();
-    register_signal_target(registry.as_ref(), "detached-production").await;
+    register_signal_target(registry.as_ref(), &ProcessId::from("detached-production")).await;
     registry
         .complete_process(
-            "detached-production",
+            &ProcessId::from("detached-production"),
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 json!({"pid": 1234}),
             )),
@@ -1269,7 +1272,7 @@ async fn write_stdin_projects_the_recorded_terminal_target_refusal() {
     let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
-        "test-session",
+        &SessionId::from("test-session"),
         definition.clone(),
         provider,
         PreparedToolCall::from_parts(
@@ -1319,7 +1322,7 @@ async fn write_stdin_projects_the_recorded_absent_target_discriminator() {
     let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
-        "test-session",
+        &SessionId::from("test-session"),
         definition.clone(),
         provider,
         PreparedToolCall::from_parts(
@@ -1358,10 +1361,10 @@ async fn write_stdin_projects_the_recorded_pruned_target_discriminator() {
     let provider = Arc::new(shell_provider(shell));
     let service = Arc::new(TestProcessService::default());
     let registry = service.registry();
-    register_signal_target(registry.as_ref(), "pruned-production").await;
+    register_signal_target(registry.as_ref(), &ProcessId::from("pruned-production")).await;
     registry
         .complete_process(
-            "pruned-production",
+            &ProcessId::from("pruned-production"),
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 json!({"pid": 1234}),
             )),
@@ -1388,7 +1391,7 @@ async fn write_stdin_projects_the_recorded_pruned_target_discriminator() {
     let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
-        "test-session",
+        &SessionId::from("test-session"),
         definition.clone(),
         provider,
         PreparedToolCall::from_parts(
@@ -1427,7 +1430,8 @@ async fn write_stdin_projects_the_recorded_signal_sequence() {
     let provider = Arc::new(shell_provider(shell));
     let service = Arc::new(TestProcessService::default());
     let registry = service.registry();
-    register_executable_signal_target(registry.as_ref(), "write-production").await;
+    register_executable_signal_target(registry.as_ref(), &ProcessId::from("write-production"))
+        .await;
     let scope = lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
         lash_core::ExecutionScope::turn("test-session", "write-sequence-turn"),
@@ -1437,7 +1441,7 @@ async fn write_stdin_projects_the_recorded_signal_sequence() {
     let completed = lash_conformance::coordinate_tool_provider_with_services(
         scope,
         processes,
-        "test-session",
+        &SessionId::from("test-session"),
         definition.clone(),
         provider,
         PreparedToolCall::from_parts(
@@ -1522,7 +1526,7 @@ async fn cancelled_detached_spawn_cannot_escape_without_a_durable_audit_row() {
     let audit = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             if let Some(record) = registry
-                .get_process("detach-cancel-audit")
+                .get_process(&ProcessId::from("detach-cancel-audit"))
                 .await
                 .expect("read cancellation audit row")
             {
@@ -1554,7 +1558,7 @@ async fn cancelled_detached_spawn_cannot_escape_without_a_durable_audit_row() {
     let departed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             let record = registry
-                .get_process("detach-cancel-audit")
+                .get_process(&ProcessId::from("detach-cancel-audit"))
                 .await
                 .expect("read post-cancel audit row")
                 .expect("a post-cancel host launch must retain its pre-spawn durable audit row");
@@ -1586,7 +1590,7 @@ async fn cancelled_detached_spawn_cannot_escape_without_a_durable_audit_row() {
     let refusal = lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>
     )
-    .await_terminal("detach-cancel-audit")
+    .await_terminal(&ProcessId::from("detach-cancel-audit"))
     .await
     .expect_err("awaiting a caller-departed row must be refused, not parked");
     assert!(
@@ -1603,12 +1607,12 @@ async fn cancelled_detached_spawn_cannot_escape_without_a_durable_audit_row() {
 async fn start_command_process_consumes_stdin_signals() {
     let shell = test_shell();
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    register_executable_signal_target(registry.as_ref(), "shell-worker").await;
+    register_executable_signal_target(registry.as_ref(), &ProcessId::from("shell-worker")).await;
     let execution_write_authority =
-        claim_signal_target_execution(registry.as_ref(), "shell-worker").await;
+        claim_signal_target_execution(registry.as_ref(), &ProcessId::from("shell-worker")).await;
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let ctx = Arc::new(async_process_context_with_events(
-        "shell-worker",
+        &ProcessId::from("shell-worker"),
         registry_dyn,
         execution_write_authority,
         CancellationToken::new(),
@@ -1628,7 +1632,7 @@ async fn start_command_process_consumes_stdin_signals() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     registry
         .append_event(
-            "shell-worker",
+            &ProcessId::from("shell-worker"),
             lash_core::ProcessEventAppendRequest::new(
                 SHELL_STDIN_SIGNAL_EVENT,
                 json!({"chars": "hello\n", "close_stdin": false}),
@@ -1652,12 +1656,14 @@ async fn start_command_process_consumes_stdin_signals() {
 async fn start_command_process_can_close_stdin_from_signal() {
     let shell = test_shell();
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    register_executable_signal_target(registry.as_ref(), "shell-close-stdin").await;
+    register_executable_signal_target(registry.as_ref(), &ProcessId::from("shell-close-stdin"))
+        .await;
     let execution_write_authority =
-        claim_signal_target_execution(registry.as_ref(), "shell-close-stdin").await;
+        claim_signal_target_execution(registry.as_ref(), &ProcessId::from("shell-close-stdin"))
+            .await;
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let ctx = Arc::new(async_process_context_with_events(
-        "shell-close-stdin",
+        &ProcessId::from("shell-close-stdin"),
         registry_dyn,
         execution_write_authority,
         CancellationToken::new(),
@@ -1674,7 +1680,7 @@ async fn start_command_process_can_close_stdin_from_signal() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     registry
         .append_event(
-            "shell-close-stdin",
+            &ProcessId::from("shell-close-stdin"),
             lash_core::ProcessEventAppendRequest::new(
                 SHELL_STDIN_SIGNAL_EVENT,
                 json!({"chars": "hello", "close_stdin": true}),
@@ -1697,7 +1703,7 @@ async fn start_command_process_can_close_stdin_from_signal() {
 #[tokio::test]
 async fn start_command_process_nonzero_exit_returns_result_data() {
     let shell = test_shell();
-    let ctx = async_process_context("shell-exit-7", CancellationToken::new());
+    let ctx = async_process_context(&ProcessId::from("shell-exit-7"), CancellationToken::new());
     let result = run_with_context(
         &shell,
         "start_command",
@@ -1715,7 +1721,10 @@ async fn start_command_process_nonzero_exit_returns_result_data() {
 #[tokio::test]
 async fn start_command_process_reports_full_output_path_when_token_truncated() {
     let shell = test_shell();
-    let ctx = async_process_context("shell-token-truncated", CancellationToken::new());
+    let ctx = async_process_context(
+        &ProcessId::from("shell-token-truncated"),
+        CancellationToken::new(),
+    );
     let result = run_with_context(
         &shell,
         "start_command",
@@ -1739,12 +1748,12 @@ async fn start_command_process_completes_short_lived_commands() {
     let cmd =
         "python3 -u -c 'import sys; line = sys.stdin.readline(); print(\"got:\" + line.strip())'";
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    register_executable_signal_target(registry.as_ref(), "shell-short").await;
+    register_executable_signal_target(registry.as_ref(), &ProcessId::from("shell-short")).await;
     let execution_write_authority =
-        claim_signal_target_execution(registry.as_ref(), "shell-short").await;
+        claim_signal_target_execution(registry.as_ref(), &ProcessId::from("shell-short")).await;
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let ctx = Arc::new(async_process_context_with_events(
-        "shell-short",
+        &ProcessId::from("shell-short"),
         registry_dyn,
         execution_write_authority,
         CancellationToken::new(),
@@ -1761,7 +1770,7 @@ async fn start_command_process_completes_short_lived_commands() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     registry
         .append_event(
-            "shell-short",
+            &ProcessId::from("shell-short"),
             lash_core::ProcessEventAppendRequest::new(
                 SHELL_STDIN_SIGNAL_EVENT,
                 json!({"chars": "hello\n", "close_stdin": false}),
@@ -2105,7 +2114,7 @@ async fn start_command_cancel_token_kills_running_child() {
 
     let shell = test_shell();
     let token = CancellationToken::new();
-    let ctx = async_process_context("shell-cancel", token.clone());
+    let ctx = async_process_context(&ProcessId::from("shell-cancel"), token.clone());
     let args = json!({
         "cmd": "sleep 5",
         "login": false,

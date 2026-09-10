@@ -4,6 +4,8 @@
 //! again, and registration lifts the fence so the new incarnation starts
 //! unfenced with the empty journal the prune left (FIG-2499, ADR 0049).
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash::LashCore;
@@ -297,7 +299,7 @@ impl Backend {
     }
 }
 
-fn external_registration(process_id: &str) -> lash_core::ProcessRegistration {
+fn external_registration(process_id: &ProcessId) -> lash_core::ProcessRegistration {
     lash_core::ProcessRegistration::new(
         process_id,
         lash_core::ProcessInput::External {
@@ -309,7 +311,7 @@ fn external_registration(process_id: &str) -> lash_core::ProcessRegistration {
     .with_identity(lash_core::ProcessIdentity::new("test"))
 }
 
-async fn register_and_complete(registry: &dyn lash_core::ProcessRegistry, process_id: &str) {
+async fn register_and_complete(registry: &dyn lash_core::ProcessRegistry, process_id: &ProcessId) {
     registry
         .register_process(external_registration(process_id))
         .await
@@ -349,7 +351,7 @@ async fn prune_fences_only_what_the_registry_prunes(kind: Kind) {
     };
     let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry));
     let process_id = "retained-by-watermark";
-    register_and_complete(backend.registry.as_ref(), process_id).await;
+    register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
     let key = backend
         .host
@@ -375,7 +377,7 @@ async fn prune_fences_only_what_the_registry_prunes(kind: Kind) {
     assert!(
         backend
             .registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read the process")
             .is_some(),
@@ -419,7 +421,7 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
     };
     let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry));
     let process_id = "reused-by-host";
-    register_and_complete(backend.registry.as_ref(), process_id).await;
+    register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
     admission(backend.host.as_ref(), &scope, "first-incarnation")
         .await
@@ -544,7 +546,7 @@ enum RegistrationPath {
 
 const REUSE_SESSION: &str = "fence-reuse-session";
 
-fn start_request(process_id: &str) -> lash_core::ProcessStartRequest {
+fn start_request(process_id: &ProcessId) -> lash_core::ProcessStartRequest {
     lash_core::ProcessStartRequest::new(
         process_id,
         lash_core::ProcessInput::External {
@@ -596,6 +598,7 @@ async fn trigger_delivery_process_id(
         record.revision,
     )
     .expect("delivery process id")
+    .to_string()
 }
 
 /// A pruned process id is fenced until it is registered again, whichever
@@ -638,7 +641,11 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
         }
         RegistrationPath::ToolIntentIngress => ingress_key.identity().replay_key.clone(),
     };
-    register_and_complete(backend.registry.as_ref(), &process_id).await;
+    register_and_complete(
+        backend.registry.as_ref(),
+        &ProcessId::from(process_id.clone()),
+    )
+    .await;
     let scope = ExecutionScope::process(&process_id);
     admission(backend.host.as_ref(), &scope, "first-incarnation")
         .await
@@ -674,14 +681,17 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
         RegistrationPath::DirectRegistry => {
             backend
                 .registry
-                .register_process(external_registration(&process_id))
+                .register_process(external_registration(&ProcessId::from(process_id.clone())))
                 .await
                 .expect("the host registers the pruned id again");
         }
         RegistrationPath::CoreStart => {
             let record = core
                 .processes()
-                .start(start_request(&process_id), start_scope())
+                .start(
+                    start_request(&ProcessId::from(process_id.clone())),
+                    start_scope(),
+                )
                 .await
                 .expect("the core registers the pruned id again");
             assert_eq!(record.id, process_id);
@@ -695,7 +705,10 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
             let view = session
                 .admin()
                 .processes()
-                .start(start_request(&process_id), start_scope())
+                .start(
+                    start_request(&ProcessId::from(process_id.clone())),
+                    start_scope(),
+                )
                 .await
                 .expect("the session registers the pruned id again");
             assert_eq!(view.id, process_id);
@@ -718,8 +731,8 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
                 .submit(
                     ingress_key.clone(),
                     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                        session_id: REUSE_SESSION.to_string(),
-                        request: start_request("host-chosen-id-is-replaced"),
+                        session_id: SessionId::from(REUSE_SESSION.to_string()),
+                        request: start_request(&ProcessId::from("host-chosen-id-is-replaced")),
                         on_parent_end: Default::default(),
                     })),
                 )
@@ -733,7 +746,7 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
     assert!(
         backend
             .registry
-            .get_process(&process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("read the process")
             .is_some(),
@@ -776,7 +789,7 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
     };
     let core = core_with(Arc::clone(&backend.host), Arc::clone(&backend.registry));
     let process_id = "reused-but-insert-fails";
-    register_and_complete(backend.registry.as_ref(), process_id).await;
+    register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     let scope = ExecutionScope::process(process_id);
     let report = core
         .processes()
@@ -820,7 +833,7 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
         .expect("owned runtime operation scope");
     let err = core
         .processes()
-        .start(start_request(process_id), start_scope)
+        .start(start_request(&ProcessId::from(process_id)), start_scope)
         .await
         .expect_err("the injected failure reaches the caller");
     assert!(
@@ -828,7 +841,10 @@ async fn failed_registration_keeps_the_fence(kind: Kind) {
         "the failure is the injected insert failure: {err}"
     );
 
-    let lookup = backend.registry.get_process(process_id).await;
+    let lookup = backend
+        .registry
+        .get_process(&ProcessId::from(process_id))
+        .await;
     assert!(
         matches!(
             lookup,
@@ -883,7 +899,7 @@ async fn registration_reinstates_every_bound_host(kind: Kind) {
     );
     backend
         .registry
-        .register_process(external_registration(process_id))
+        .register_process(external_registration(&ProcessId::from(process_id)))
         .await
         .expect("register the id");
     admission(other.as_ref(), &scope, "after-registration")
@@ -1017,7 +1033,7 @@ async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_
     let process_id = "crash-cut";
     let scope = ExecutionScope::process(process_id);
     let key = scope_key(&scope);
-    register_and_complete(backend.registry.as_ref(), process_id).await;
+    register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
     admission(backend.host.as_ref(), &scope, "first-incarnation")
         .await
         .expect("the first incarnation journals");
@@ -1042,7 +1058,7 @@ async fn sqlite_registration_crash_cut_leaves_the_id_fenced_or_registered_never_
     // state back so the crashing writer can replay the registration itself.
     backend
         .registry
-        .register_process(external_registration(process_id))
+        .register_process(external_registration(&ProcessId::from(process_id)))
         .await
         .expect("register the pruned id once to capture its row");
     let (columns, values) = {
@@ -1176,7 +1192,7 @@ async fn sqlite_fence_committed_before_a_lost_journal_purge_refuses_cold_admissi
     let mut keys = Vec::new();
     for process_id in ["purge-lost-swept", "purge-lost-bound"] {
         let scope = ExecutionScope::process(process_id);
-        register_and_complete(backend.registry.as_ref(), process_id).await;
+        register_and_complete(backend.registry.as_ref(), &ProcessId::from(process_id)).await;
         admission(backend.host.as_ref(), &scope, "journaled-before-retirement")
             .await
             .expect("the process journals");

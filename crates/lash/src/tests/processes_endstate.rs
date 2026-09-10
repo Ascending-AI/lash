@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::TestProcessRegistryWriteExt;
+use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -78,7 +79,7 @@ impl LinkedTestProcess {
             .with_definition(Some(input.definition()))
     }
 
-    fn start_request(&self, process_id: &str) -> lash_core::ProcessStartRequest {
+    fn start_request(&self, process_id: &ProcessId) -> lash_core::ProcessStartRequest {
         lash_core::ProcessStartRequest::new(
             process_id,
             self.process_input(),
@@ -144,7 +145,7 @@ async fn persist_process_env_ref(
 }
 
 fn signal_request(
-    process_id: &str,
+    process_id: &ProcessId,
     signal_name: &str,
     signal_id: &str,
     payload: serde_json::Value,
@@ -158,7 +159,7 @@ fn signal_request(
 
 async fn wait_for_process(
     core: &LashCore,
-    process_id: &str,
+    process_id: &ProcessId,
     label: &str,
     matches: impl Fn(&lash_core::facade_support::ObservedProcess) -> bool,
 ) -> lash_core::facade_support::ObservedProcess {
@@ -180,7 +181,7 @@ async fn wait_for_process(
 
 async fn wait_for_waiting_signal(
     core: &LashCore,
-    process_id: &str,
+    process_id: &ProcessId,
     signal_name: &str,
 ) -> lash_core::facade_support::ObservedProcess {
     wait_for_process(core, process_id, "process signal wait", |process| {
@@ -194,7 +195,7 @@ async fn wait_for_waiting_signal(
 
 async fn wait_for_terminal(
     core: &LashCore,
-    process_id: &str,
+    process_id: &ProcessId,
     status: lash_core::ProcessStatus,
 ) -> lash_core::facade_support::ObservedProcess {
     wait_for_process(core, process_id, "terminal process", |process| {
@@ -501,16 +502,20 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
 
     core.processes()
         .start(
-            process.start_request("sessionless-direct"),
+            process.start_request(&ProcessId::from("sessionless-direct")),
             runtime_operation_scope(&core, "sessionless-direct-start"),
         )
         .await?;
-    let waiting = wait_for_waiting_signal(&core, "sessionless-direct", "ready").await;
+    let waiting =
+        wait_for_waiting_signal(&core, &ProcessId::from("sessionless-direct"), "ready").await;
     assert!(matches!(
         waiting.originator,
         lash_core::ProcessOriginator::Host { .. }
     ));
-    let waiting_events = core.processes().events("sessionless-direct", 0).await?;
+    let waiting_events = core
+        .processes()
+        .events(&ProcessId::from("sessionless-direct"), 0)
+        .await?;
     assert!(
         waiting_events
             .iter()
@@ -520,14 +525,14 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let cancelled = core
         .processes()
         .cancel(
-            "sessionless-direct",
+            &ProcessId::from("sessionless-direct"),
             runtime_operation_scope(&core, "sessionless-direct-cancel"),
         )
         .await?;
     assert_eq!(cancelled.status, lash_core::ProcessStatus::Waiting);
     wait_for_terminal(
         &core,
-        "sessionless-direct",
+        &ProcessId::from("sessionless-direct"),
         lash_core::ProcessStatus::Cancelled,
     )
     .await;
@@ -752,19 +757,24 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 
     core.processes()
         .start(
-            process.start_request(process_id),
+            process.start_request(&ProcessId::from(process_id)),
             runtime_operation_scope(&core, "signal-validation-start"),
         )
         .await?;
-    wait_for_waiting_signal(&core, process_id, "ready").await;
+    wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
 
     let undeclared = core
         .processes()
         .signal(
-            process_id,
+            &ProcessId::from(process_id),
             "nope",
             "undeclared-1",
-            signal_request(process_id, "nope", "undeclared-1", serde_json::json!("x")),
+            signal_request(
+                &ProcessId::from(process_id),
+                "nope",
+                "undeclared-1",
+                serde_json::json!("x"),
+            ),
             runtime_operation_scope(&core, "signal-validation-undeclared"),
         )
         .await;
@@ -777,11 +787,11 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let mistyped = core
         .processes()
         .signal(
-            process_id,
+            &ProcessId::from(process_id),
             "ready",
             "mistyped-1",
             signal_request(
-                process_id,
+                &ProcessId::from(process_id),
                 "ready",
                 "mistyped-1",
                 serde_json::json!({ "not": "a string" }),
@@ -795,11 +805,11 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     );
 
     // Both rejected sends left the process parked with nothing consumed.
-    let still_waiting = wait_for_waiting_signal(&core, process_id, "ready").await;
+    let still_waiting = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     assert_eq!(still_waiting.lifecycle, lash_core::ProcessStatus::Waiting);
     assert!(
         core.processes()
-            .events(process_id, 0)
+            .events(&ProcessId::from(process_id), 0)
             .await?
             .iter()
             .all(|event| event.event_type != "signal.ready" && event.event_type != "signal.nope")
@@ -807,14 +817,22 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 
     core.processes()
         .signal(
-            process_id,
+            &ProcessId::from(process_id),
             "ready",
             "valid-1",
-            signal_request(process_id, "ready", "valid-1", serde_json::json!("done")),
+            signal_request(
+                &ProcessId::from(process_id),
+                "ready",
+                "valid-1",
+                serde_json::json!("done"),
+            ),
             runtime_operation_scope(&core, "signal-validation-valid"),
         )
         .await?;
-    let output = core.processes().await_output(process_id).await?;
+    let output = core
+        .processes()
+        .await_output(&ProcessId::from(process_id))
+        .await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("process did not succeed after valid signal: {output:#?}");
@@ -853,31 +871,41 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
 
     core.processes()
         .start(
-            process.start_request(process_id),
+            process.start_request(&ProcessId::from(process_id)),
             runtime_operation_scope(&core, "repeated-waits-start"),
         )
         .await?;
 
-    let first_wait = wait_for_waiting_signal(&core, process_id, "ready").await;
+    let first_wait = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     let lash_core::WaitKind::Signal { ordinal, .. } =
         first_wait.wait.expect("first wait facet").kind;
     assert_eq!(ordinal, 1, "first wait must use ordinal 1");
     core.processes()
         .signal(
-            process_id,
+            &ProcessId::from(process_id),
             "ready",
             "order-1",
-            signal_request(process_id, "ready", "order-1", serde_json::json!(1)),
+            signal_request(
+                &ProcessId::from(process_id),
+                "ready",
+                "order-1",
+                serde_json::json!(1),
+            ),
             runtime_operation_scope(&core, "repeated-waits-signal-1"),
         )
         .await?;
 
-    let second_wait = wait_for_process(&core, process_id, "second signal wait", |process| {
-        matches!(
-            process.wait.as_ref().map(|wait| &wait.kind),
-            Some(lash_core::WaitKind::Signal { ordinal, .. }) if *ordinal == 2
-        )
-    })
+    let second_wait = wait_for_process(
+        &core,
+        &ProcessId::from(process_id),
+        "second signal wait",
+        |process| {
+            matches!(
+                process.wait.as_ref().map(|wait| &wait.kind),
+                Some(lash_core::WaitKind::Signal { ordinal, .. }) if *ordinal == 2
+            )
+        },
+    )
     .await;
     let lash_core::WaitKind::Signal {
         key: second_key, ..
@@ -888,15 +916,23 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     );
     core.processes()
         .signal(
-            process_id,
+            &ProcessId::from(process_id),
             "ready",
             "order-2",
-            signal_request(process_id, "ready", "order-2", serde_json::json!(2)),
+            signal_request(
+                &ProcessId::from(process_id),
+                "ready",
+                "order-2",
+                serde_json::json!(2),
+            ),
             runtime_operation_scope(&core, "repeated-waits-signal-2"),
         )
         .await?;
 
-    let output = core.processes().await_output(process_id).await?;
+    let output = core
+        .processes()
+        .await_output(&ProcessId::from(process_id))
+        .await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("process did not succeed: {output:#?}");
@@ -907,7 +943,10 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     );
 
     // The suspension history is on the event log: two waits, two resumes.
-    let events = core.processes().events(process_id, 0).await?;
+    let events = core
+        .processes()
+        .events(&ProcessId::from(process_id), 0)
+        .await?;
     let waiting = events
         .iter()
         .filter(|event| event.event_type == "process.waiting")
@@ -954,11 +993,14 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
 
     core.processes()
         .start(
-            process.start_request(process_id),
+            process.start_request(&ProcessId::from(process_id)),
             runtime_operation_scope(&core, "parent-joins-child-start"),
         )
         .await?;
-    let output = core.processes().await_output(process_id).await?;
+    let output = core
+        .processes()
+        .await_output(&ProcessId::from(process_id))
+        .await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("parent process did not succeed: {output:#?}");
@@ -1034,17 +1076,22 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
         .processes()
         .start(
             {
-                let mut request = process.start_request(process_id);
+                let mut request = process.start_request(&ProcessId::from(process_id));
                 request.originator =
                     lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id));
                 request
             }
-            .with_wake_session_id(Some(session_id.to_string()))
+            .with_wake_session_id(Some(SessionId::from(session_id.to_string())))
             .with_observers([session_id.to_string()]),
             runtime_operation_scope(&core, "chain-parent-start"),
         )
         .await?;
-    wait_for_terminal(&core, process_id, lash_core::ProcessStatus::Completed).await;
+    wait_for_terminal(
+        &core,
+        &ProcessId::from(process_id),
+        lash_core::ProcessStatus::Completed,
+    )
+    .await;
 
     // The child inherited the session originator and indexed wake target. Under
     // FIG-2346, session-originated descendants propagate the root-session
@@ -1124,16 +1171,19 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         .processes()
         .start(
             process
-                .start_request(process_id)
+                .start_request(&ProcessId::from(process_id))
                 .with_observers([session_id.to_string()]),
             runtime_operation_scope(&core, "outliving-process-start"),
         )
         .await?;
-    wait_for_waiting_signal(&core, process_id, "ready").await;
+    wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     drop(session);
 
     let report = core
-        .delete_session(session_id, session_delete_scope(&core, session_id).await)
+        .delete_session(
+            session_id,
+            session_delete_scope(&core, &SessionId::from(session_id)).await,
+        )
         .await?;
     let process_report = report.process.expect("process delete report");
     assert_eq!(process_report.removed_observer_count, 1);
@@ -1145,12 +1195,12 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
             .items
             .is_empty()
     );
-    let still_waiting = wait_for_waiting_signal(&core, process_id, "ready").await;
+    let still_waiting = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     assert!(still_waiting.env_ref.is_some());
 
     let wake_after_delete = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::ProcessEventAppendRequest::new(
                 "process.wake",
                 serde_json::json!({ "text": "wake after deleted session" }),
@@ -1160,7 +1210,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     assert_eq!(wake_after_delete.event.event_type, "process.wake");
     assert!(
         core.processes()
-            .events(process_id, 0)
+            .events(&ProcessId::from(process_id), 0)
             .await?
             .iter()
             .any(|event| event.payload["text"] == "wake after deleted session")
@@ -1175,11 +1225,11 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
 
     core.processes()
         .signal(
-            process_id,
+            &ProcessId::from(process_id),
             "ready",
             "outliving-host-signal",
             signal_request(
-                process_id,
+                &ProcessId::from(process_id),
                 "ready",
                 "outliving-host-signal",
                 serde_json::json!({ "after_delete": true }),
@@ -1187,7 +1237,10 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
             runtime_operation_scope(&core, "outliving-process-signal"),
         )
         .await?;
-    let output = core.processes().await_output(process_id).await?;
+    let output = core
+        .processes()
+        .await_output(&ProcessId::from(process_id))
+        .await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("outliving process did not succeed: {output:#?}");
@@ -1197,7 +1250,12 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         value,
         serde_json::json!({ "resumed": { "after_delete": true } })
     );
-    wait_for_terminal(&core, process_id, lash_core::ProcessStatus::Completed).await;
+    wait_for_terminal(
+        &core,
+        &ProcessId::from(process_id),
+        lash_core::ProcessStatus::Completed,
+    )
+    .await;
     Ok(())
 }
 
@@ -1299,26 +1357,36 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let process_id = "e2e-await-sink-prune";
     core.processes()
         .start(
-            process.start_request(process_id),
+            process.start_request(&ProcessId::from(process_id)),
             runtime_operation_scope(&core, "e2e-start"),
         )
         .await?;
-    wait_for_waiting_signal(&core, process_id, "ready").await;
+    wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
 
     // Hold the terminal await while the process is still running; it must resolve
     // only once the signal drives the process to finish.
     let await_core = core.clone();
     let await_id = process_id.to_string();
     let started = std::time::Instant::now();
-    let waiter = tokio::spawn(async move { await_core.processes().await_output(&await_id).await });
+    let waiter = tokio::spawn(async move {
+        await_core
+            .processes()
+            .await_output(&ProcessId::from(await_id))
+            .await
+    });
 
     let payload = serde_json::json!({ "ok": true, "answer": 42 });
     core.processes()
         .signal(
-            process_id,
+            &ProcessId::from(process_id),
             "ready",
             "e2e-signal-1",
-            signal_request(process_id, "ready", "e2e-signal-1", payload.clone()),
+            signal_request(
+                &ProcessId::from(process_id),
+                "ready",
+                "e2e-signal-1",
+                payload.clone(),
+            ),
             runtime_operation_scope(&core, "e2e-signal"),
         )
         .await?;
@@ -1365,7 +1433,12 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
         "the sink observed the terminal append; got {collected:?}"
     );
 
-    wait_for_terminal(&core, process_id, lash_core::ProcessStatus::Completed).await;
+    wait_for_terminal(
+        &core,
+        &ProcessId::from(process_id),
+        lash_core::ProcessStatus::Completed,
+    )
+    .await;
 
     // Retention: prune the terminal registry rows. The registry forgets the
     // process, but the host's projected copies (the sink log) remain intact.
@@ -1385,7 +1458,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     );
     assert!(
         matches!(
-            registry.get_process(process_id).await,
+            registry.get_process(&ProcessId::from(process_id)).await,
             Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
         ),
         "the pruned process returns the typed retained-history miss"
@@ -1486,7 +1559,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
         .await?;
     registry
         .record_first_started(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::ProcessStarted {
                 owner: drain_owner.clone(),
                 fencing_token: 0,
@@ -1500,7 +1573,12 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     // seam — it must resolve only once drain terminalizes the work.
     let await_core = core.clone();
     let await_id = process_id.to_string();
-    let waiter = tokio::spawn(async move { await_core.processes().await_output(&await_id).await });
+    let waiter = tokio::spawn(async move {
+        await_core
+            .processes()
+            .await_output(&ProcessId::from(await_id))
+            .await
+    });
 
     // The host drains its own started OwnerBound work natively at close.
     let report = worker.drain_owner_bound_work().await?;
@@ -1527,7 +1605,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     // The Abandoned terminal is model-visible read-side (a fourth terminal peer).
     let observed = core
         .processes()
-        .get(process_id)
+        .get(&ProcessId::from(process_id))
         .await?
         .expect("abandoned row observed through the facade");
     assert_eq!(observed.lifecycle, lash_core::ProcessStatus::Abandoned);
@@ -1551,7 +1629,10 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
             .is_empty(),
         "a foreign sweep must not resurrect the abandoned row onto the worklist"
     );
-    let re_awaited = core.processes().await_output(process_id).await?;
+    let re_awaited = core
+        .processes()
+        .await_output(&ProcessId::from(process_id))
+        .await?;
     let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = re_awaited else {
         panic!("the abandoned terminal was mutated by a foreign sweep: {re_awaited:#?}");
     };
@@ -1574,7 +1655,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     assert_eq!(prune.pruned_processes, 1);
     assert!(
         matches!(
-            core.processes().get(process_id).await,
+            core.processes().get(&ProcessId::from(process_id)).await,
             Err(crate::EmbedError::Plugin(
                 lash_core::PluginError::ProcessNoLongerRetained { .. }
             ))
@@ -1620,7 +1701,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
         .await?;
     registry
         .record_first_started(
-            process_id,
+            &ProcessId::from(process_id),
             lash_core::ProcessStarted {
                 owner: silent_owner.clone(),
                 fencing_token: 0,
@@ -1630,7 +1711,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
         )
         .await?;
     let silent_lease = registry
-        .claim_process_lease(process_id, &silent_owner, 60_000)
+        .claim_process_lease(&ProcessId::from(process_id), &silent_owner, 60_000)
         .await?
         .acquired()
         .expect("silent holder claims its lease");
@@ -1640,7 +1721,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     let _ = worker.drive_pending_processes().await?;
     let observed = core
         .processes()
-        .get(process_id)
+        .get(&ProcessId::from(process_id))
         .await?
         .expect("silent row observed");
     assert_eq!(
@@ -1672,7 +1753,11 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     // observers while pending.
     let after_request = core
         .processes()
-        .request_abandon(process_id, "operator", Some("host retired".to_string()))
+        .request_abandon(
+            &ProcessId::from(process_id),
+            "operator",
+            Some("host retired".to_string()),
+        )
         .await?;
     let request = after_request
         .abandon_request
@@ -1686,7 +1771,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     );
     assert!(
         core.processes()
-            .get(process_id)
+            .get(&ProcessId::from(process_id))
             .await?
             .and_then(|process| process.abandon_request)
             .is_some(),
@@ -1704,7 +1789,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
 
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        core.processes().await_output(process_id),
+        core.processes().await_output(&ProcessId::from(process_id)),
     )
     .await
     .expect("reconciled terminal resolves within bound")?;
@@ -1759,11 +1844,13 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
             )
             .await?;
     }
-    registry.record_caller_departure(departed).await?;
+    registry
+        .record_caller_departure(&ProcessId::from(departed))
+        .await?;
 
     let observed = core
         .processes()
-        .get(departed)
+        .get(&ProcessId::from(departed))
         .await?
         .expect("the caller-departed row is observable");
     assert_eq!(
@@ -1775,7 +1862,7 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     // Awaiting it is refused with a typed error rather than parking forever.
     let refusal = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        core.processes().await_output(departed),
+        core.processes().await_output(&ProcessId::from(departed)),
     )
     .await
     .expect("an await on a caller-departed row must be bounded, not parked")
@@ -1805,7 +1892,7 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     );
     assert_eq!(
         registry
-            .get_process(live)
+            .get_process(&ProcessId::from(live))
             .await?
             .expect("the running sibling survives retention")
             .status,

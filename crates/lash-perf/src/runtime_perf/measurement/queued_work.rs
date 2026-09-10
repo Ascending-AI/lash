@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 const QUEUED_WORK_JOIN_BATCHES_PER_TURN: usize = 32;
 const QUEUED_WORK_SEED_OTHER_SESSION_BATCHES: usize = 64;
@@ -11,7 +13,7 @@ pub(super) async fn run_once_queued_work_claim_stress(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::QueuedWorkClaimStress;
-    let session_id = format!("runtime-perf-{}", scenario.name());
+    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-queued-work-other";
     let owner = lash_core::LeaseOwnerIdentity::opaque("runtime-perf", "queued-work-stress");
     let total_started = Instant::now();
@@ -296,7 +298,10 @@ pub(super) async fn run_once_queued_work_claim_stress(
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
     let remaining_measured = store.list_queued_work(&session_id).await?.len();
-    let remaining_other = store.list_queued_work(other_session_id).await?.len();
+    let remaining_other = store
+        .list_queued_work(&SessionId::from(other_session_id))
+        .await?
+        .len();
     let _export_shape = serde_json::json!({
         "enqueued_batches": enqueued_batches,
         "completed_batches": completed_batches,
@@ -377,7 +382,7 @@ pub(super) async fn run_once_queued_work_claim_stress(
 
 async fn enqueue_queued_work_stress_turn(
     store: &RuntimePerfStore,
-    session_id: &str,
+    session_id: &SessionId,
     turn_index: usize,
 ) -> anyhow::Result<()> {
     store
@@ -416,15 +421,15 @@ async fn enqueue_queued_work_stress_turn(
 }
 
 pub(super) fn queued_work_stress_wake(
-    session_id: &str,
+    session_id: &SessionId,
     input: &str,
     sequence: u64,
 ) -> lash_core::ProcessWakeDelivery {
-    let process_id = format!("runtime-perf-process-{sequence}");
+    let process_id = ProcessId::from(format!("runtime-perf-process-{sequence}"));
     lash_core::ProcessWakeDelivery {
         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{session_id}:{sequence}"),
-        target_session_id: session_id.to_string(),
+        target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),
         process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(sequence),
         sequence,
@@ -450,7 +455,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::TurnInputIngressInterrupt;
-    let session_id = format!("runtime-perf-{}", scenario.name());
+    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-turn-input-other";
     let owner = lash_core::LeaseOwnerIdentity::opaque("runtime-perf", "turn-input-ingress");
     let total_started = Instant::now();
@@ -806,7 +811,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let export_started = Instant::now();
     let remaining_measured = store.list_pending_turn_inputs(&session_id).await?.len();
     let remaining_other = store
-        .list_pending_turn_inputs(other_session_id)
+        .list_pending_turn_inputs(&SessionId::from(other_session_id))
         .await?
         .len();
     let _export_shape = serde_json::json!({
@@ -901,10 +906,10 @@ fn queued_work_stress_commit(
 
 async fn runtime_perf_commit_state(
     store: &RuntimePerfStore,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> anyhow::Result<RuntimeSessionState> {
     let state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))

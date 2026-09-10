@@ -3,6 +3,8 @@ use lash_core::{
     ProcessEventLog as _, ProcessObserverRegistry as _, ProcessRetention as _,
     ProcessWakeOutbox as _,
 };
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 // =============================================================================
 // Explicit runtime dependency wiring
@@ -204,13 +206,13 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
                     ..lash_core::ProcessEventSemanticsSpec::default()
                 },
             }])
-            .with_wake_session_id(Some("builder-clock-target".to_string())),
+            .with_wake_session_id(Some(SessionId::from("builder-clock-target"))),
         )
         .await
         .expect("register clock-wiring process");
     registry
         .append_event(
-            "builder-clock-process",
+            &ProcessId::from("builder-clock-process"),
             lash_core::ProcessEventAppendRequest::new(
                 "builder.clock.wake",
                 serde_json::json!({"wake_input": "wake"}),
@@ -527,7 +529,7 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
     // lease-protected execution of out-of-turn processes is covered in lash-core
     // (`concurrent_workers_run_a_directly_registered_process_exactly_once`).
     let state = RuntimeSessionState {
-        session_id: "main".to_string(),
+        session_id: SessionId::from("main"),
         policy: lash_core::SessionPolicy {
             provider_id: mock_provider().kind().to_string(),
             model: mock_model_spec(),
@@ -573,7 +575,7 @@ async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
         .process_registry
         .expect("native wiring process registry");
     let process_id = "facade-native-same-hub";
-    let mut worker_changes = worker_hub.subscribe(process_id);
+    let mut worker_changes = worker_hub.subscribe(&ProcessId::from(process_id));
 
     wiring_registry
         .register_process(lash_core::ProcessRegistration::new(
@@ -673,12 +675,12 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     let source_policy = lash_core::SessionPolicy {
         provider_id: "orphaned-source-provider".to_string(),
         model: source_model,
-        session_id: Some("orphaned-fork-source".to_string()),
+        session_id: Some(SessionId::from("orphaned-fork-source")),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_request = lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "orphaned-fork-source".to_string(),
+        session_id: SessionId::from("orphaned-fork-source"),
         relation: lash_core::SessionRelation::Root,
         policy: source_policy.clone(),
     };
@@ -724,7 +726,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     let branch = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "orphaned-fork-branch".to_string(),
+            session_id: SessionId::from("orphaned-fork-branch"),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -764,20 +766,20 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     let policy = lash_core::SessionPolicy {
         provider_id: "fork-source-provider".to_string(),
         model: source_model,
-        session_id: Some("fork-observer-source".to_string()),
+        session_id: Some(SessionId::from("fork-observer-source")),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "fork-observer-source".to_string(),
+            session_id: SessionId::from("fork-observer-source"),
             relation: lash_core::SessionRelation::Root,
             policy: policy.clone(),
         })
         .await
         .expect("create fork observer source");
     let mut source_state = lash_core::RuntimeSessionState {
-        session_id: "fork-observer-source".to_string(),
+        session_id: SessionId::from("fork-observer-source"),
         policy,
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -821,14 +823,14 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
                     ..lash_core::ProcessEventSemanticsSpec::default()
                 },
             }])
-            .with_wake_session_id(Some("fork-observer-source".to_string())),
+            .with_wake_session_id(Some(SessionId::from("fork-observer-source"))),
         )
         .await
         .expect("register fork-visible process");
     registry
         .add_observer(
-            "fork-observer-source",
-            "fork-visible-process",
+            &SessionId::from("fork-observer-source"),
+            &ProcessId::from("fork-visible-process"),
             lash_core::ProcessObserverBy::host("fork-test-source"),
         )
         .await
@@ -847,7 +849,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     let branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "fork-observer-branch".to_string(),
+            session_id: SessionId::from("fork-observer-branch"),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -864,7 +866,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
 
     let inherited = registry
         .list_observed_by(
-            "fork-observer-branch",
+            &SessionId::from("fork-observer-branch"),
             &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..Default::default()
@@ -887,7 +889,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     assert!(
         registry
             .list_observed_by(
-                "fork-transient-branch",
+                &SessionId::from("fork-transient-branch"),
                 &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -901,7 +903,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     let transient_branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "fork-transient-branch".to_string(),
+            session_id: SessionId::from("fork-transient-branch"),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -949,7 +951,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .expect("register process that will be pruned during fork publication");
     let pruned_terminal = registry
         .complete_process(
-            "fork-pruned-process",
+            &ProcessId::from("fork-pruned-process"),
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -974,15 +976,15 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .expect("simulate a crash before observer intent consumption");
     registry
         .remove_observer(
-            "fork-observer-branch",
-            "fork-visible-process",
+            &SessionId::from("fork-observer-branch"),
+            &ProcessId::from("fork-visible-process"),
             lash_core::ProcessObserverBy::host("fork-test-crash"),
         )
         .await
         .expect("remove the partially published observer");
     core.session("fork-observer-branch")
         .open_with_state(lash_core::RuntimeSessionState {
-            session_id: "fork-observer-branch".to_string(),
+            session_id: SessionId::from("fork-observer-branch"),
             ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
             ))
@@ -991,7 +993,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     assert_eq!(
         registry
             .list_observed_by(
-                "fork-observer-branch",
+                &SessionId::from("fork-observer-branch"),
                 &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -1014,8 +1016,8 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     );
     registry
         .remove_observer(
-            "fork-observer-branch",
-            "fork-visible-process",
+            &SessionId::from("fork-observer-branch"),
+            &ProcessId::from("fork-visible-process"),
             lash_core::ProcessObserverBy::host("fork-test-revoke"),
         )
         .await
@@ -1024,7 +1026,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     assert!(
         registry
             .list_observed_by(
-                "fork-observer-branch",
+                &SessionId::from("fork-observer-branch"),
                 &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -1046,19 +1048,19 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             ),
-            &["fork-observer-source".to_string()],
+            &[SessionId::from("fork-observer-source")],
         )
         .await
         .expect("register second observed process");
     core.fork_at_with_observer_inheritance(
         &fork_node_id,
         "fork-only-branch",
-        lash_core::ObserverInheritance::Only(vec!["fork-selective-process".to_string()]),
+        lash_core::ObserverInheritance::Only(vec![ProcessId::from("fork-selective-process")]),
     )
     .await?;
     let only = registry
         .list_observed_by(
-            "fork-only-branch",
+            &SessionId::from("fork-only-branch"),
             &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..Default::default()
@@ -1073,21 +1075,21 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         vec!["fork-selective-process"]
     );
     let event_count_before = registry
-        .events_after("fork-selective-process", 0)
+        .events_after(&ProcessId::from("fork-selective-process"), 0)
         .await
         .expect("read observer audit before duplicate apply")
         .len();
     registry
         .add_observer(
-            "fork-only-branch",
-            "fork-selective-process",
+            &SessionId::from("fork-only-branch"),
+            &ProcessId::from("fork-selective-process"),
             lash_core::ProcessObserverBy::ForkInheritance,
         )
         .await
         .expect("reapply fork observer");
     assert_eq!(
         registry
-            .events_after("fork-selective-process", 0)
+            .events_after(&ProcessId::from("fork-selective-process"), 0)
             .await
             .expect("read observer audit after duplicate apply")
             .len(),
@@ -1104,7 +1106,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     assert!(
         registry
             .list_observed_by(
-                "fork-none-branch",
+                &SessionId::from("fork-none-branch"),
                 &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
                     ..Default::default()
@@ -1117,7 +1119,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
 
     registry
         .append_event(
-            "fork-visible-process",
+            &ProcessId::from("fork-visible-process"),
             lash_core::ProcessEventAppendRequest::new(
                 "fork.wake",
                 serde_json::json!({"wake_input": "source-only"}),
@@ -1144,9 +1146,9 @@ async fn duplicate_only_fork_intents_are_canonical(
     case: &str,
     factory: Arc<dyn lash_core::SessionStoreFactory>,
 ) -> Result<()> {
-    let source_session_id = format!("duplicate-only-source-{case}");
-    let branch_session_id = format!("duplicate-only-branch-{case}");
-    let process_id = format!("duplicate-only-process-{case}");
+    let source_session_id = SessionId::from(format!("duplicate-only-source-{case}"));
+    let branch_session_id = SessionId::from(format!("duplicate-only-branch-{case}"));
+    let process_id = ProcessId::from(format!("duplicate-only-process-{case}"));
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
@@ -1271,7 +1273,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             pending_observer_intents: vec![
                 lash_core::facade_support::SessionObserverIntent::host_requested(process_id),
             ],
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -1284,16 +1286,20 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         .build(crate::testing::runtime_lease_owner())?;
 
     assert!(
-        !registry.is_observer(session_id, process_id).await?,
+        !registry
+            .is_observer(&SessionId::from(session_id), &ProcessId::from(process_id))
+            .await?,
         "the fixture must preserve the real crash gap before publication"
     );
     core.session(session_id).open().await?;
     assert!(
-        registry.is_observer(session_id, process_id).await?,
+        registry
+            .is_observer(&SessionId::from(session_id), &ProcessId::from(process_id))
+            .await?,
         "open must publish the observer edge left pending by a create crash"
     );
     let observer_event_count = registry
-        .events_after(process_id, 0)
+        .events_after(&ProcessId::from(process_id), 0)
         .await?
         .into_iter()
         .filter(|event| event.event_type == "process.observer_added")
@@ -1305,7 +1311,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     core.session(session_id).open().await?;
     assert_eq!(
         registry
-            .events_after(process_id, 0)
+            .events_after(&ProcessId::from(process_id), 0)
             .await?
             .into_iter()
             .filter(|event| event.event_type == "process.observer_added")
@@ -1324,14 +1330,16 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 
     registry
         .remove_observer(
-            session_id,
-            process_id,
+            &SessionId::from(session_id),
+            &ProcessId::from(process_id),
             lash_core::ProcessObserverBy::host("post-recovery-removal"),
         )
         .await?;
     core.session(session_id).open().await?;
     assert!(
-        !registry.is_observer(session_id, process_id).await?,
+        !registry
+            .is_observer(&SessionId::from(session_id), &ProcessId::from(process_id))
+            .await?,
         "consumed create intent must not recreate a deliberately removed edge"
     );
     Ok(())
@@ -1352,9 +1360,9 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
         .build(crate::testing::runtime_lease_owner())?;
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
-        let session_id = format!("nested-observer-intent-{case}");
-        let create_process_id = format!("nested-create-process-{case}");
-        let fork_process_id = format!("nested-fork-process-{case}");
+        let session_id = SessionId::from(format!("nested-observer-intent-{case}"));
+        let create_process_id = ProcessId::from(format!("nested-create-process-{case}"));
+        let fork_process_id = ProcessId::from(format!("nested-fork-process-{case}"));
         for process_id in [&create_process_id, &fork_process_id] {
             registry
                 .register_process(lash_core::ProcessRegistration::new(
@@ -1379,7 +1387,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
                 ],
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Fork {
-                    source_session_id: format!("nested-source-{case}"),
+                    source_session_id: SessionId::from(format!("nested-source-{case}")),
                     source_node_id: format!("nested-source-node-{case}"),
                     observer_inheritance: lash_core::ObserverInheritance::All,
                 },
@@ -1688,7 +1696,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     let source_policy = lash_core::SessionPolicy {
         provider_id: "fork-source-provider".to_string(),
         model: source_model,
-        session_id: Some("generation-fork-source".to_string()),
+        session_id: Some(SessionId::from("generation-fork-source")),
         // The branch point ran with sampling of its own. It is not a second
         // source of truth for the branch.
         generation: lash_core::GenerationOptions {
@@ -1700,14 +1708,14 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: "generation-fork-source".to_string(),
+            session_id: SessionId::from("generation-fork-source"),
             relation: lash_core::SessionRelation::Root,
             policy: source_policy.clone(),
         })
         .await
         .expect("create fork source");
     let mut source_state = lash_core::RuntimeSessionState {
-        session_id: "generation-fork-source".to_string(),
+        session_id: SessionId::from("generation-fork-source"),
         policy: source_policy,
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,

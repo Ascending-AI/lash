@@ -1,8 +1,9 @@
 use super::*;
+use lash_sansio::ProcessId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessCancelRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -25,7 +26,7 @@ impl RemoteProcessCancelRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessCancelReceipt {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     pub status: RemoteProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,7 +50,7 @@ impl RemoteProcessCancelReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessSignalRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     pub signal_name: String,
     pub signal_id: String,
@@ -93,7 +94,7 @@ impl RemoteProcessSignalReceipt {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessAwaitRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
 }
 
@@ -109,7 +110,7 @@ impl RemoteProcessAwaitRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessAwaitOutcome {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     pub output: RemoteProcessAwaitOutput,
 }
@@ -128,7 +129,7 @@ impl RemoteProcessAwaitOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessEventsRequest {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     #[serde(default)]
     pub after_sequence: u64,
@@ -146,7 +147,7 @@ impl RemoteProcessEventsRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessEventsResponse {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     #[serde(default)]
     pub events: Vec<RemoteProcessEvent>,

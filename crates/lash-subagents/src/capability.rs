@@ -7,6 +7,7 @@
 //! (different model lookup, dynamic inheritance, config-driven surfaces, ...)
 //! without touching the spawn pipeline.
 
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -35,7 +36,7 @@ pub trait Capability: Send + Sync {
 
 /// State exposed to a `Capability` while it resolves a spawn.
 pub struct SubagentSpawnContext<'a> {
-    pub parent_session_id: &'a str,
+    pub parent_session_id: &'a SessionId,
     pub parent_snapshot: &'a SessionSnapshot,
     pub session_spec: &'a SessionSpec,
     pub base_tool_access: &'a SessionToolAccess,
@@ -134,7 +135,7 @@ impl SubagentSpawnContext<'_> {
         Ok(request
             .with_tool_access(tool_access)
             .with_subagent_context(SubagentSessionContext {
-                parent_session_id: self.parent_session_id.to_string(),
+                parent_session_id: self.parent_session_id.clone(),
                 capability: capability_name.to_string(),
                 depth: child_depth,
                 max_depth: MAX_SUBAGENT_DEPTH,

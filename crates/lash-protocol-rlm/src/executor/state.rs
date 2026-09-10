@@ -293,7 +293,7 @@ pub(super) fn measure_snapshot(
     snapshot: &lash_core::plugin::ExecutionStateSnapshot,
 ) -> lash_core::testing::RuntimeCommitBudgetMeasurement {
     let state = lash_core::RuntimeSessionState {
-        session_id: "fig-1257-snapshot-budget".to_string(),
+        session_id: lash_sansio::SessionId::from("fig-1257-snapshot-budget"),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))

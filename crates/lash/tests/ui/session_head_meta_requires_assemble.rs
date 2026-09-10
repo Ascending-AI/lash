@@ -3,7 +3,7 @@ use lash::persistence::{PersistedSessionConfig, SessionHeadMeta};
 fn main() {
     let _ = SessionHeadMeta {
         schema_version: 1,
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         head_revision: 1,
         config: PersistedSessionConfig::new(lash_core::TurnBudget::Unbounded),
         current_frame_node_id: None,

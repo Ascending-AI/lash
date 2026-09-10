@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use lash_core::plugin::{
@@ -371,13 +372,13 @@ impl PluginFactory for RlmProtocolPluginFactory {
 
 /// Request for [`RlmProtocolPluginFactory::lashlang_compile_surface`].
 pub struct LashlangCompileSurfaceRequest {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub execution_env_spec: lash_core::ProcessExecutionEnvSpec,
 }
 
 impl LashlangCompileSurfaceRequest {
     pub fn new(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         execution_env_spec: lash_core::ProcessExecutionEnvSpec,
     ) -> Self {
         Self {
@@ -389,14 +390,14 @@ impl LashlangCompileSurfaceRequest {
 
 /// Request for [`RlmProtocolPluginFactory::compile_lashlang_module`].
 pub struct LashlangModuleCompileRequest {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub source: String,
     pub execution_env_spec: lash_core::ProcessExecutionEnvSpec,
 }
 
 impl LashlangModuleCompileRequest {
     pub fn new(
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         source: impl Into<String>,
         execution_env_spec: lash_core::ProcessExecutionEnvSpec,
     ) -> Self {

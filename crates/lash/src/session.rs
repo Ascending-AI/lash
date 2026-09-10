@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
@@ -36,9 +37,9 @@ use lash_remote_protocol::{
 /// [`EmbedError::EphemeralSessionIdReused`].
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) spec: SessionSpec,
-    pub(crate) parent_session_id: Option<String>,
+    pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) store: Option<Arc<dyn RuntimePersistence>>,
     pub(crate) provider: Option<ProviderHandle>,
     pub(crate) active_plugins: Vec<ActivePluginBinding>,
@@ -51,7 +52,7 @@ pub struct SessionBuilder {
 }
 
 fn empty_runtime_session_state(
-    session_id: impl Into<String>,
+    session_id: impl Into<SessionId>,
     policy: SessionPolicy,
 ) -> RuntimeSessionState {
     RuntimeSessionState {
@@ -94,7 +95,7 @@ impl SessionBuilder {
     }
 
     /// Configures the parent and returns the updated builder.
-    pub fn parent(mut self, parent_session_id: impl Into<String>) -> Self {
+    pub fn parent(mut self, parent_session_id: impl Into<SessionId>) -> Self {
         self.parent_session_id = Some(parent_session_id.into());
         self
     }
@@ -374,7 +375,7 @@ async fn drive_process_on_open(
 }
 
 pub(crate) async fn load_state_from_store(
-    session_id: &str,
+    session_id: &SessionId,
     policy: &SessionPolicy,
     store: &dyn RuntimePersistence,
     owner: &lash_core::LeaseOwnerIdentity,
@@ -398,7 +399,7 @@ pub(crate) async fn load_state_from_store(
     if state.session_id != session_id {
         return Err(EmbedError::StoreSessionMismatch {
             loaded: state.session_id,
-            requested: session_id.to_string(),
+            requested: session_id.clone(),
         });
     }
     reconcile_loaded_state_policy(
@@ -471,7 +472,7 @@ fn reconcile_loaded_state_policy(
 
 async fn load_persisted_state_admitted(
     store: &dyn RuntimePersistence,
-    session_id: &str,
+    session_id: &SessionId,
     owner: &lash_core::LeaseOwnerIdentity,
     executor_id: &str,
     lease_ttl_ms: u64,
@@ -501,7 +502,7 @@ impl PromptLayerSink for SessionBuilder {
 pub struct LashSession {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) effect_host: Arc<dyn EffectHost>,
-    pub(crate) parent_session_id: Option<String>,
+    pub(crate) parent_session_id: Option<SessionId>,
     pub(crate) active_plugins: Vec<ActivePluginBinding>,
     pub(crate) process_work: Option<Arc<dyn lash_core::ProcessWorkSubstrate>>,
     pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
@@ -880,7 +881,7 @@ impl LashSession {
             ))
         })?;
         store
-            .list_pending_queued_work(observation.session_id())
+            .list_pending_queued_work(&SessionId::from(observation.session_id()))
             .await
             .map_err(|err| {
                 EmbedError::Runtime(lash_core::RuntimeError::new(
@@ -900,7 +901,7 @@ impl LashSession {
             ))
         })?;
         store
-            .list_pending_turn_inputs(observation.session_id())
+            .list_pending_turn_inputs(&SessionId::from(observation.session_id()))
             .await
             .map_err(|err| {
                 EmbedError::Runtime(lash_core::RuntimeError::new(
@@ -923,7 +924,7 @@ impl LashSession {
             ))
         })?;
         store
-            .list_turn_input_applications(observation.session_id())
+            .list_turn_input_applications(&SessionId::from(observation.session_id()))
             .await
             .map_err(|err| {
                 EmbedError::Runtime(lash_core::RuntimeError::new(
@@ -950,7 +951,7 @@ impl LashSession {
         &self,
         input_id: &str,
     ) -> Result<PendingTurnInputCancelOutcome> {
-        let session_id = self.session_id();
+        let session_id = SessionId::from(self.session_id());
         self.runtime
             .cancel_pending_turn_input(&session_id, input_id)
             .await
@@ -968,7 +969,7 @@ impl LashSession {
         &self,
         targets: impl IntoIterator<Item = PendingTurnInputCancelTarget>,
     ) -> Result<Vec<PendingTurnInputCancelReceipt>> {
-        let session_id = self.session_id();
+        let session_id = SessionId::from(self.session_id());
         let targets = targets.into_iter().collect::<Vec<_>>();
         self.runtime
             .cancel_pending_turn_inputs(&session_id, &targets)
@@ -988,7 +989,7 @@ impl LashSession {
         &self,
         anchor: PendingTurnInputCancelTarget,
     ) -> Result<PendingTurnInputSuffixCancelOutcome> {
-        let session_id = self.session_id();
+        let session_id = SessionId::from(self.session_id());
         self.runtime
             .cancel_pending_turn_input_suffix(&session_id, &anchor)
             .await
@@ -1000,7 +1001,7 @@ impl LashSession {
         &self,
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>> {
-        let session_id = self.session_id();
+        let session_id = SessionId::from(self.session_id());
         self.runtime
             .cancel_queued_work_batch(&session_id, batch_id)
             .await
@@ -1040,7 +1041,7 @@ impl LashSession {
     /// tombstoning revocation [`LashCore::delete_session`](crate::LashCore::delete_session)
     /// performs.
     pub async fn revoke_durable_waits(&self) -> Result<()> {
-        let session_id = self.session_id();
+        let session_id = SessionId::from(self.session_id());
         self.effect_host
             .cancel_await_events_for_session(&session_id)
             .await
@@ -1066,7 +1067,7 @@ impl LashSession {
                 "queued work inspection requires a persistent runtime store",
             ))
         })?;
-        let session_id = observation.session_id().to_string();
+        let session_id = SessionId::from(observation.session_id());
         drop(observation);
         let mut delay = std::time::Duration::from_millis(25);
         loop {
@@ -1608,7 +1609,7 @@ mod reconcile_tests {
             lash_core::PromptContribution::guidance("Persisted", "persisted prompt"),
         );
         let mut state = RuntimeSessionState {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             policy: SessionPolicy {
                 provider_id: "recorded-provider".to_string(),
                 model: model("recorded-model"),
@@ -1668,7 +1669,7 @@ mod reconcile_tests {
     #[test]
     fn absent_host_spec_fields_keep_the_durable_head_values() {
         let mut state = RuntimeSessionState {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             policy: SessionPolicy {
                 provider_id: "recorded-provider".to_string(),
                 model: model("recorded-model"),
@@ -1714,7 +1715,7 @@ mod reconcile_tests {
         let mut unrecorded = RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ));
-        unrecorded.session_id = "session".to_string();
+        unrecorded.session_id = SessionId::from("session");
         let empty_model = lash_core::ModelSpec::default();
         reconcile_loaded_state_policy(
             &mut unrecorded,
@@ -1732,7 +1733,7 @@ mod reconcile_tests {
     #[test]
     fn host_provider_wins_when_the_durable_config_has_not_recorded_one() {
         let mut state = RuntimeSessionState {
-            session_id: "session".to_string(),
+            session_id: SessionId::from("session"),
             policy: SessionPolicy {
                 provider_id: String::new(),
                 model: model("uncommitted-model"),
@@ -1759,7 +1760,10 @@ mod reconcile_tests {
         use lash_core::LiveReplayStore;
 
         let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
-        let cursor = store.current_cursor("session-seq-test", lash_core::SessionRevision::new(0));
+        let cursor = store.current_cursor(
+            &SessionId::from("session-seq-test"),
+            lash_core::SessionRevision::new(0),
+        );
         let activity1 = lash_core::TurnActivity {
             id: lash_core::TurnActivityId::new("act-1"),
             correlation_id: lash_core::TurnActivityId::new("corr-1"),
@@ -1777,7 +1781,7 @@ mod reconcile_tests {
         for (revision, activity) in [(1, activity1), (2, activity2)] {
             let prepared = store
                 .prepare_publication(
-                    "session-seq-test",
+                    &SessionId::from("session-seq-test"),
                     lash_core::SessionRevision::new(revision),
                     vec![lash_core::LiveReplayEventDraft::new(
                         Some("turn-1"),

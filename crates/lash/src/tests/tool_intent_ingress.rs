@@ -1,5 +1,7 @@
 use super::*;
 use lash_core::{ProcessEventLog as _, ProcessQuery as _};
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 
 const SESSION: &str = "intent-ingress-session";
 const SCOPE: &str = "intent-ingress-turn";
@@ -40,7 +42,7 @@ async fn ingress_core_with_effect_host_and_env_store(
                 payload_schema: lash_core::LashSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[SESSION.to_string()],
+            &[SessionId::from(SESSION.to_string())],
         )
         .await?;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -121,9 +123,9 @@ async fn ingress_core_with_trigger_store(
     Ok((core, store, subscription))
 }
 
-fn trigger_intent(session_id: &str) -> lash_core::ToolIntent {
+fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         request: lash_core::TriggerOccurrenceRequest::new(
             "intent.ingress.trigger",
             "intent-ingress-source",
@@ -144,7 +146,9 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-trigger-call", 0);
 
-    let first = ingress.submit(key.clone(), trigger_intent(SESSION)).await;
+    let first = ingress
+        .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
+        .await;
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             lash_core::ToolIntentExecutionOutcome::Executed {
@@ -184,7 +188,9 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     // re-ingests the same occurrence rather than creating a second one. The
     // reservation reads back as already reserved on that second pass, which is
     // exactly the live-state read a recorded outcome may not expose.
-    let duplicate = ingress.submit(key, trigger_intent(SESSION)).await;
+    let duplicate = ingress
+        .submit(key, trigger_intent(&SessionId::from(SESSION)))
+        .await;
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             lash_core::ToolIntentExecutionOutcome::Executed {
@@ -231,7 +237,9 @@ async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<(
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-owned-trigger-call", 0);
 
-    let first = ingress.submit(key.clone(), trigger_intent(SESSION)).await;
+    let first = ingress
+        .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
+        .await;
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             lash_core::ToolIntentExecutionOutcome::Executed {
@@ -244,7 +252,9 @@ async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<(
         panic!("a runtime-owned host realizes the trigger declaration: {first:?}")
     };
 
-    let duplicate = ingress.submit(key, trigger_intent(SESSION)).await;
+    let duplicate = ingress
+        .submit(key, trigger_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(
         matches!(
             duplicate,
@@ -546,18 +556,18 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
     }
 }
 
-fn emit_intent(session_id: &str) -> lash_core::ToolIntent {
+fn emit_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
-        session_id: session_id.to_string(),
-        process_id: PROCESS.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
+        process_id: ProcessId::from(PROCESS.to_string()),
         event_type: EVENT.to_string(),
         payload: serde_json::json!({"law": "duplicate-submit"}),
     })
 }
 
-fn start_intent(session_id: &str) -> lash_core::ToolIntent {
+fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         request: lash_core::ProcessStartRequest::external(
             "ingress-start",
             lash_core::ProcessOriginator::host(),
@@ -567,9 +577,9 @@ fn start_intent(session_id: &str) -> lash_core::ToolIntent {
     }))
 }
 
-fn start_intent_with_env(session_id: &str) -> lash_core::ToolIntent {
+fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         request: lash_core::ProcessStartRequest::new(
             "ingress-env-start",
             lash_core::ProcessInput::ToolCall {
@@ -596,14 +606,14 @@ fn start_intent_with_env(session_id: &str) -> lash_core::ToolIntent {
     }))
 }
 
-fn cancel_intent(session_id: &str) -> lash_core::ToolIntent {
+fn cancel_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     cancel_intent_with_reason(session_id, "kind-swap probe")
 }
 
-fn cancel_intent_with_reason(session_id: &str, reason: &str) -> lash_core::ToolIntent {
+fn cancel_intent_with_reason(session_id: &SessionId, reason: &str) -> lash_core::ToolIntent {
     lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
-        session_id: session_id.to_string(),
-        process_id: PROCESS.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
+        process_id: ProcessId::from(PROCESS.to_string()),
         reason: Some(reason.to_string()),
     })
 }
@@ -614,8 +624,10 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-call", 0);
 
-    let first = ingress.submit(key.clone(), emit_intent(SESSION)).await;
-    let mut conflicting_duplicate = emit_intent(SESSION);
+    let first = ingress
+        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
+        .await;
+    let mut conflicting_duplicate = emit_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting_duplicate else {
         unreachable!("fixture is an event intent")
     };
@@ -649,7 +661,7 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
         first_outcome,
         lash_core::ToolIntentExecutionOutcome::Executed { .. }
     ));
-    let events = registry.events_after(PROCESS, 0).await?;
+    let events = registry.events_after(&ProcessId::from(PROCESS), 0).await?;
     assert_eq!(
         events
             .iter()
@@ -667,7 +679,9 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("kind-swap-start-emit", 0);
 
-    let first = ingress.submit(key.clone(), start_intent(SESSION)).await;
+    let first = ingress
+        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         first,
         crate::tools::ToolIntentIngressOutcome::Admitted {
@@ -679,7 +693,9 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
         }
     ));
 
-    let second = ingress.submit(key, emit_intent(SESSION)).await;
+    let second = ingress
+        .submit(key, emit_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         second,
         crate::tools::ToolIntentIngressOutcome::Refused {
@@ -691,7 +707,7 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
     ));
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -708,7 +724,9 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("kind-swap-emit-cancel", 0);
 
-    let first = ingress.submit(key.clone(), emit_intent(SESSION)).await;
+    let first = ingress
+        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         first,
         crate::tools::ToolIntentIngressOutcome::Admitted {
@@ -720,7 +738,9 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
         }
     ));
 
-    let second = ingress.submit(key, cancel_intent(SESSION)).await;
+    let second = ingress
+        .submit(key, cancel_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         second,
         crate::tools::ToolIntentIngressOutcome::Refused {
@@ -732,7 +752,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     ));
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -742,7 +762,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     );
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
@@ -774,7 +794,9 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
             },
         );
 
-    let outcome = ingress.submit(key, emit_intent(SESSION)).await;
+    let outcome = ingress
+        .submit(key, emit_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         outcome,
         crate::tools::ToolIntentIngressOutcome::Refused {
@@ -786,7 +808,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
     ));
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -805,7 +827,9 @@ async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-owned-duplicate", 0);
 
-    let first = ingress.submit(key.clone(), emit_intent(SESSION)).await;
+    let first = ingress
+        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         first,
         crate::tools::ToolIntentIngressOutcome::Admitted {
@@ -813,7 +837,7 @@ async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result
             ..
         }
     ));
-    let mut conflicting = emit_intent(SESSION);
+    let mut conflicting = emit_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting else {
         unreachable!("fixture is an emit intent")
     };
@@ -829,7 +853,7 @@ async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result
     ));
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -854,7 +878,7 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
         let first = ingress
             .submit(
                 key.clone(),
-                cancel_intent_with_reason(SESSION, first_reason),
+                cancel_intent_with_reason(&SessionId::from(SESSION), first_reason),
             )
             .await;
         assert!(matches!(
@@ -868,7 +892,10 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
             }
         ));
         let duplicate = ingress
-            .submit(key, cancel_intent_with_reason(SESSION, duplicate_reason))
+            .submit(
+                key,
+                cancel_intent_with_reason(&SessionId::from(SESSION), duplicate_reason),
+            )
             .await;
         assert!(matches!(
             duplicate,
@@ -884,11 +911,11 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
     let (left, right) = tokio::join!(
         ingress.submit(
             concurrent_key.clone(),
-            cancel_intent_with_reason(SESSION, "concurrent"),
+            cancel_intent_with_reason(&SessionId::from(SESSION), "concurrent"),
         ),
         ingress.submit(
             concurrent_key,
-            cancel_intent_with_reason(SESSION, "concurrent"),
+            cancel_intent_with_reason(&SessionId::from(SESSION), "concurrent"),
         ),
     );
     let concurrent_outcomes = [left, right];
@@ -927,7 +954,7 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
 
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
@@ -946,7 +973,9 @@ async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted(
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-cross-target-kind", 0);
 
-    let started = ingress.submit(key.clone(), start_intent(SESSION)).await;
+    let started = ingress
+        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         started,
         crate::tools::ToolIntentIngressOutcome::Admitted {
@@ -958,7 +987,9 @@ async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted(
         }
     ));
 
-    let refused = ingress.submit(key, emit_intent(SESSION)).await;
+    let refused = ingress
+        .submit(key, emit_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         refused,
         crate::tools::ToolIntentIngressOutcome::Refused {
@@ -970,7 +1001,7 @@ async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted(
     ));
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -993,9 +1024,12 @@ async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handle
     let (left_outcome, right_outcome) = tokio::join!(
         left.submit(
             key.clone(),
-            cancel_intent_with_reason(SESSION, "cross-handle"),
+            cancel_intent_with_reason(&SessionId::from(SESSION), "cross-handle"),
         ),
-        right.submit(key, cancel_intent_with_reason(SESSION, "cross-handle"),),
+        right.submit(
+            key,
+            cancel_intent_with_reason(&SessionId::from(SESSION), "cross-handle"),
+        ),
     );
     let outcomes = [left_outcome, right_outcome];
     assert_eq!(
@@ -1027,7 +1061,7 @@ async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handle
     );
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
@@ -1048,20 +1082,24 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
         crate::tools::ToolIntentIngressKey::derive(SESSION, "foreign-turn", "host-call", 0);
 
     assert!(matches!(
-        ingress.submit(foreign_session, emit_intent(SESSION)).await,
+        ingress
+            .submit(foreign_session, emit_intent(&SessionId::from(SESSION)))
+            .await,
         crate::tools::ToolIntentIngressOutcome::Refused {
             refusal: crate::tools::ToolIntentIngressRefusal::ForeignSession { .. }
         }
     ));
     assert!(matches!(
-        ingress.submit(foreign_turn, emit_intent(SESSION)).await,
+        ingress
+            .submit(foreign_turn, emit_intent(&SessionId::from(SESSION)))
+            .await,
         crate::tools::ToolIntentIngressOutcome::Refused {
             refusal: crate::tools::ToolIntentIngressRefusal::ForeignExecutionScope { .. }
         }
     ));
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1077,7 +1115,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let malformed =
         crate::tools::ToolIntentIngressKey::from_identity(lash_core::ToolIntentIdentity {
-            session_id: SESSION.to_string(),
+            session_id: SessionId::from(SESSION.to_string()),
             execution_scope_id: SCOPE.to_string(),
             tool_call_id: "host-call".to_string(),
             intent_index: 0,
@@ -1086,14 +1124,16 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
         });
 
     assert!(matches!(
-        ingress.submit(malformed, emit_intent(SESSION)).await,
+        ingress
+            .submit(malformed, emit_intent(&SessionId::from(SESSION)))
+            .await,
         crate::tools::ToolIntentIngressOutcome::Refused {
             refusal: crate::tools::ToolIntentIngressRefusal::MalformedKey { .. }
         }
     ));
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1235,7 +1275,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     let crashed_key = key.clone();
     let crashed = tokio::spawn(async move {
         crashed_ingress
-            .submit(crashed_key, emit_intent(SESSION))
+            .submit(crashed_key, emit_intent(&SessionId::from(SESSION)))
             .await
     });
     controller.admitted.notified().await;
@@ -1258,7 +1298,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     );
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
 
-    let mut conflicting_redrive = emit_intent(SESSION);
+    let mut conflicting_redrive = emit_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting_redrive else {
         unreachable!("fixture is an event intent")
     };
@@ -1284,7 +1324,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1293,7 +1333,9 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
         "the redrive cannot replace the admitted command"
     );
 
-    let matching_redrive = ingress.submit(key, emit_intent(SESSION)).await;
+    let matching_redrive = ingress
+        .submit(key, emit_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(
         matches!(
             &matching_redrive,
@@ -1307,7 +1349,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 1);
     assert_eq!(
         registry
-            .events_after(PROCESS, 0)
+            .events_after(&ProcessId::from(PROCESS), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1335,7 +1377,10 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     let crashed_key = key.clone();
     let crashed = tokio::spawn(async move {
         crashed_ingress
-            .submit(crashed_key, start_intent_with_env(SESSION))
+            .submit(
+                crashed_key,
+                start_intent_with_env(&SessionId::from(SESSION)),
+            )
             .await
     });
     controller.admitted.notified().await;
@@ -1347,7 +1392,9 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     crashed.abort();
     assert!(crashed.await.expect_err("injected crash").is_cancelled());
 
-    let redriven = ingress.submit(key, start_intent_with_env(SESSION)).await;
+    let redriven = ingress
+        .submit(key, start_intent_with_env(&SessionId::from(SESSION)))
+        .await;
     assert!(
         matches!(
             &redriven,
@@ -1363,7 +1410,7 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     );
     assert_eq!(env_store.puts.load(Ordering::SeqCst), 1);
     let process = registry
-        .get_process(&process_id)
+        .get_process(&ProcessId::from(process_id))
         .await?
         .expect("redrive registers the process");
     let env_ref = process
@@ -1393,7 +1440,10 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     let process_id = key.identity().replay_key.clone();
 
     let outcome = ingress
-        .submit(key.clone(), start_intent_with_env(SESSION))
+        .submit(
+            key.clone(),
+            start_intent_with_env(&SessionId::from(SESSION)),
+        )
         .await;
     assert!(matches!(
         outcome,
@@ -1406,9 +1456,16 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
             replayed: false,
         }
     ));
-    assert!(registry.get_process(&process_id).await?.is_none());
+    assert!(
+        registry
+            .get_process(&ProcessId::from(process_id))
+            .await?
+            .is_none()
+    );
     assert!(matches!(
-        ingress.submit(key, start_intent_with_env(SESSION)).await,
+        ingress
+            .submit(key, start_intent_with_env(&SessionId::from(SESSION)))
+            .await,
         crate::tools::ToolIntentIngressOutcome::Refused {
             refusal: crate::tools::ToolIntentIngressRefusal::DuplicateIdentity {
                 kind: lash_core::ToolIntentKind::StartProcess,
@@ -1425,7 +1482,9 @@ async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind
     let key = ingress.key("parent-end-retention", 0);
     let child_id = key.identity().replay_key.clone();
 
-    let started = ingress.submit(key, start_intent(SESSION)).await;
+    let started = ingress
+        .submit(key, start_intent(&SessionId::from(SESSION)))
+        .await;
     assert!(matches!(
         started,
         crate::tools::ToolIntentIngressOutcome::Admitted {
@@ -1450,7 +1509,7 @@ async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind
     ));
     assert!(
         registry
-            .events_after(&child_id, 0)
+            .events_after(&ProcessId::from(child_id), 0)
             .await?
             .iter()
             .any(|event| event.event_type == "process.cancel_requested"),
@@ -1550,7 +1609,7 @@ async fn ingress_engine_core() -> Result<(LashCore, Arc<TestLocalProcessRegistry
 
 fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-        session_id: SESSION.to_string(),
+        session_id: SessionId::from(SESSION.to_string()),
         request: lash_core::ProcessStartRequest::new(
             "ingress-engine-start",
             lash_core::ProcessInput::Engine {
@@ -1604,7 +1663,10 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         other => panic!("unregistered engine kind must be refused, got {other:?}"),
     }
     assert!(
-        registry.get_process(&unregistered_id).await?.is_none(),
+        registry
+            .get_process(&ProcessId::from(unregistered_id))
+            .await?
+            .is_none(),
         "a refused start must register nothing"
     );
 
@@ -1631,7 +1693,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         "a registered engine kind must still be admitted: {admitted:?}"
     );
     let started = registry
-        .get_process(&admitted_id)
+        .get_process(&ProcessId::from(admitted_id))
         .await?
         .expect("admitted start registers its row");
     assert_eq!(

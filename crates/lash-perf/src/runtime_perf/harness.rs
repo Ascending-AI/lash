@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::{
@@ -93,7 +94,10 @@ impl BenchmarkCore {
         }
     }
 
-    pub(crate) async fn open_session(&self, session_id: String) -> lash::Result<lash::LashSession> {
+    pub(crate) async fn open_session(
+        &self,
+        session_id: SessionId,
+    ) -> lash::Result<lash::LashSession> {
         match self {
             Self::Standard(core) => core.session(session_id).open().await,
             Self::Rlm(core) => core.session(session_id).open().await,
@@ -102,8 +106,8 @@ impl BenchmarkCore {
 
     pub(crate) async fn open_child_session(
         &self,
-        session_id: String,
-        parent_session_id: String,
+        session_id: SessionId,
+        parent_session_id: SessionId,
     ) -> lash::Result<lash::LashSession> {
         match self {
             Self::Standard(core) => {
@@ -123,7 +127,7 @@ impl BenchmarkCore {
 
     async fn open_session_with_state(
         &self,
-        session_id: String,
+        session_id: SessionId,
         store: Arc<dyn lash::persistence::RuntimePersistence>,
         state: lash::persistence::RuntimeSessionState,
     ) -> lash::Result<lash::LashSession> {
@@ -196,11 +200,11 @@ impl BenchmarkRuntime {
 
     pub(crate) async fn open_child_session(
         &self,
-        session_id: String,
+        session_id: SessionId,
     ) -> anyhow::Result<lash::LashSession> {
         let parent_session_id = self.session().session_id();
         self.core
-            .open_child_session(session_id, parent_session_id)
+            .open_child_session(session_id, SessionId::from(parent_session_id))
             .await
             .map_err(anyhow::Error::from)
     }
@@ -228,7 +232,11 @@ impl BenchmarkRuntime {
         let store = self.store() as Arc<dyn lash::persistence::RuntimePersistence>;
         self.session = Some(
             self.core
-                .open_session_with_state(format!("runtime-perf-{}", scenario.name()), store, state)
+                .open_session_with_state(
+                    SessionId::from(format!("runtime-perf-{}", scenario.name())),
+                    store,
+                    state,
+                )
                 .await?,
         );
         Ok(())
@@ -243,7 +251,7 @@ impl BenchmarkRuntime {
         }
         self.session = Some(
             self.core
-                .open_session(format!("runtime-perf-{}", scenario.name()))
+                .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
                 .await?,
         );
         Ok(())
@@ -920,7 +928,7 @@ pub(crate) async fn build_runtime_with_store(
         }
     };
     let session = core
-        .open_session(format!("runtime-perf-{}", scenario.name()))
+        .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
         .await?;
     Ok(BenchmarkRuntime {
         store_metrics: store.metrics(),
@@ -996,7 +1004,7 @@ impl lash_core::AwaitEventResolver for RetryingStartGateController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.delegate
             .revoke_await_events_for_session(session_id)
@@ -1005,7 +1013,7 @@ impl lash_core::AwaitEventResolver for RetryingStartGateController {
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.delegate
             .cancel_await_events_for_session(session_id)
@@ -1348,7 +1356,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             )
         }
     };
-    let session_id = format!("runtime-perf-{}", scenario.name());
+    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core.open_session(session_id.clone()).await?;
     let persistence = if scenario.is_queued_work_contention() {
         Some(
@@ -1465,7 +1473,11 @@ pub(crate) async fn build_runtime_with_postgres_store(
             )
         }
     };
-    let session_id = format!("runtime-perf-{}-{}", scenario.name(), uuid::Uuid::new_v4());
+    let session_id = SessionId::from(format!(
+        "runtime-perf-{}-{}",
+        scenario.name(),
+        uuid::Uuid::new_v4()
+    ));
     let session = core.open_session(session_id.clone()).await?;
     let persistence = if scenario.is_queued_work_contention() {
         Some(

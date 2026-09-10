@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 #[tokio::test]
 async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() -> Result<()> {
@@ -8,11 +9,11 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
         .build(crate::testing::runtime_lease_owner())?;
     let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
     let mut policy = core.policy.clone();
-    policy.session_id = Some("generation-merge".to_string());
+    policy.session_id = Some(SessionId::from("generation-merge"));
     let store = lash_core::SessionStoreFactory::create_store(
         &factory,
         &lash_core::SessionStoreCreateRequest {
-            session_id: "generation-merge".to_string(),
+            session_id: SessionId::from("generation-merge"),
             relation: lash_core::SessionRelation::Root,
             policy,
             pending_observer_intents: Vec::new(),

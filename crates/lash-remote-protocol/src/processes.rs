@@ -2,6 +2,8 @@
 //! results, process records and summaries, event semantics, execution
 //! environments, and runtime invocation provenance.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 
@@ -19,13 +21,13 @@ pub use operations::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionScope {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_frame_id: Option<String>,
 }
 
 impl RemoteSessionScope {
-    pub fn new(session_id: impl Into<String>) -> Self {
+    pub fn new(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
             agent_frame_id: None,
@@ -120,7 +122,7 @@ pub enum RemoteProcessOriginator {
         scope: Option<String>,
     },
     Session {
-        session_id: String,
+        session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_frame_id: Option<String>,
     },
@@ -476,7 +478,7 @@ impl RemoteProcessWaitState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessRef {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
 }
 
@@ -497,8 +499,8 @@ impl RemoteProcessRef {
 pub struct RemoteProcessHandleView {
     #[serde(rename = "__handle__")]
     pub handle_type: String,
-    pub id: String,
-    pub process_id: String,
+    pub id: ProcessId,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -528,7 +530,7 @@ impl RemoteProcessHandleView {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessRecord {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     pub last_event_sequence: u64,
     pub input: RemoteProcessInput,
@@ -620,7 +622,7 @@ impl RemoteProcessRecord {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessWorkSnapshot {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default)]
     pub visible_processes: Vec<RemoteProcessRef>,
     #[serde(default)]
@@ -698,7 +700,7 @@ impl RemoteProcessWorkItem {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteObservedProcess {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub incarnation: u64,
     pub last_event_sequence: u64,
     pub graph_key: String,
@@ -731,7 +733,7 @@ pub struct RemoteObservedProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<RemoteProcessWaitState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_session_id: Option<String>,
+    pub child_session_id: Option<SessionId>,
     pub label: String,
 }
 
@@ -845,7 +847,7 @@ impl RemoteObservedProcessEvent {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessEvent {
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub process_incarnation: u64,
     pub sequence: u64,
     pub event_type: String,
@@ -1123,7 +1125,7 @@ impl RemoteRuntimeInvocation {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteRuntimeScope {
-    pub session_id: String,
+    pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1163,10 +1165,10 @@ pub enum RemoteRuntimeSubject {
         kind: RemoteRuntimeEffectKind,
     },
     Process {
-        process_id: String,
+        process_id: ProcessId,
     },
     ProcessEvent {
-        process_id: String,
+        process_id: ProcessId,
         sequence: u64,
         event_type: String,
     },
@@ -1287,7 +1289,7 @@ pub struct RemoteProcessExecutionPolicy {
     #[serde(default)]
     pub provider_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default)]
     pub autonomous: bool,
     pub turn_budget: RemoteTurnBudget,
@@ -1412,7 +1414,7 @@ impl RemoteProcessObserverBy {
 pub enum RemoteObserverInheritance {
     All,
     None,
-    Only(Vec<String>),
+    Only(Vec<ProcessId>),
 }
 
 impl RemoteObserverInheritance {
@@ -1428,7 +1430,7 @@ impl RemoteObserverInheritance {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStartRequest {
-    pub id: String,
+    pub id: ProcessId,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1439,9 +1441,9 @@ pub struct RemoteProcessStartRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<RemoteProcessIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_session_id: Option<String>,
+    pub wake_session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub observers: Vec<String>,
+    pub observers: Vec<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_types: Vec<RemoteProcessEventType>,
 }

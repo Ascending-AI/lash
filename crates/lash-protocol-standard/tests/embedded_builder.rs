@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::{
@@ -26,7 +27,7 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 async fn embedded_runtime_builder_loads_state_from_store() {
     let store = Arc::new(Store::memory().await.expect("store"));
     let mut state = RuntimeSessionState {
-        session_id: "stored-session".to_string(),
+        session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
             provider_id: "openai-compatible".into(),
             model: test_model_spec(),
@@ -84,7 +85,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
 async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() {
     let store = Arc::new(Store::memory().await.expect("store"));
     let state = RuntimeSessionState {
-        session_id: "alpha".to_string(),
+        session_id: SessionId::from("alpha"),
         policy: SessionPolicy {
             provider_id: "openai-compatible".into(),
             model: test_model_spec(),

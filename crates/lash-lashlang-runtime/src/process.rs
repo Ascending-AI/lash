@@ -1,3 +1,5 @@
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -76,7 +78,7 @@ struct LashlangSegmentState {
     signal_send_sequence: u64,
     signal_wait_ordinals: BTreeMap<String, u64>,
     parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
-    started_process_ids: Vec<String>,
+    started_process_ids: Vec<ProcessId>,
 }
 
 fn decode_lashlang_segment_state(
@@ -293,7 +295,7 @@ pub async fn run_lashlang_process(
         None => None,
     };
     let process_id = context.registration().id.clone();
-    let session_id = context.session_id().to_string();
+    let session_id = lash_sansio::SessionId::from(context.session_id());
     let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
         engine.execution_sink.clone(),
         engine.trace_context.clone(),
@@ -528,7 +530,7 @@ struct LashlangProcessHost<'run> {
     host_environment: lashlang::LashlangHostEnvironment,
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
     processes: lash_core::facade_support::ProcessEngineProcessContext,
-    process_id: String,
+    process_id: ProcessId,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
     sleep_sequence: AtomicU64,
     event_sequence: AtomicU64,
@@ -930,7 +932,7 @@ impl LashlangProcessHost<'_> {
             self.process_id, signal.name
         );
         self.ctx
-            .signal_process_by_id(&target, &signal.name, signal_id, payload)
+            .signal_process_by_id(&ProcessId::from(target), &signal.name, signal_id, payload)
             .await
             .map_err(|error| LashlangHostError::SignalProcess {
                 message: error.to_string(),
@@ -1021,8 +1023,8 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
 struct LashlangProcessExecutionTrace {
     sink: Option<Arc<dyn TraceSink>>,
     base_context: TraceContext,
-    session_id: String,
-    process_id: String,
+    session_id: SessionId,
+    process_id: ProcessId,
     module_ref: lashlang::ModuleRef,
     process_ref: lashlang::ProcessRef,
     process_name: String,
@@ -1032,8 +1034,8 @@ impl LashlangProcessExecutionTrace {
     fn new(
         sink: Option<Arc<dyn TraceSink>>,
         base_context: TraceContext,
-        session_id: String,
-        process_id: String,
+        session_id: SessionId,
+        process_id: ProcessId,
         module_ref: lashlang::ModuleRef,
         process_ref: lashlang::ProcessRef,
         process_name: String,

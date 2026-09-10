@@ -4,7 +4,7 @@ use lash_core::facade_support::PluginHost;
 
 fn tool_names(session: &lash_core::facade_support::PluginSession) -> Vec<String> {
     session
-        .resolved_tool_catalog("root")
+        .resolved_tool_catalog(&lash_core::SessionId::from("root"))
         .expect("tool catalog")
         .tool_names()
         .as_ref()

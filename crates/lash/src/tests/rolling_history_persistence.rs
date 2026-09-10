@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::SessionId;
 
 fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {
     LlmResponse {
@@ -36,21 +37,21 @@ fn rolling_history_provider(responses: Vec<LlmResponse>) -> ProviderHandle {
 
 fn sqlite_head_and_max_generation(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> (String, i64) {
     let conn = rusqlite::Connection::open(store_factory.catalog_path())
         .expect("open SQLite session catalog");
     let leaf = conn
         .query_row(
             "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
-            [session_id],
+            [session_id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .expect("read durable session leaf");
     let max_generation = conn
         .query_row(
             "SELECT MAX(generation) FROM graph_nodes WHERE session_id = ?1",
-            [session_id],
+            [session_id.as_str()],
             |row| row.get::<_, Option<i64>>(0),
         )
         .expect("read durable graph generation")
@@ -60,7 +61,7 @@ fn sqlite_head_and_max_generation(
 
 fn sqlite_nodes(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Vec<lash_core::SessionNodeRecord> {
     let conn = rusqlite::Connection::open(store_factory.catalog_path())
         .expect("open SQLite session catalog");
@@ -70,7 +71,7 @@ fn sqlite_nodes(
              WHERE session_id = ?1 ORDER BY generation ASC",
         )
         .expect("prepare graph-node read");
-    stmt.query_map([session_id], |row| {
+    stmt.query_map([session_id.as_str()], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Option<String>>(1)?,
@@ -88,7 +89,7 @@ fn sqlite_nodes(
 
 fn sqlite_messages(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Vec<lash_core::Message> {
     sqlite_nodes(store_factory, session_id)
         .iter()
@@ -127,7 +128,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
         .run()
         .await?;
     let (durable_leaf_before_threshold, max_generation_before_threshold) =
-        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+        sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
 
     session
         .turn(TurnInput::text("threshold request"))
@@ -173,7 +174,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
         "rolling-history compaction should open a summary frame after the threshold turn commits"
     );
     let (post_compaction_leaf, post_compaction_max_generation) =
-        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+        sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
     core.flush_trace_sink()?;
 
     let trace = std::fs::read_to_string(trace_path).expect("read rolling-history trace");
@@ -298,16 +299,17 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     // The turn's input is admitted durably before it drives (ADR 0069), so its
     // committed message is addressed by the acceptance it came from rather than
     // by a turn-shaped id.
-    let original_durable_message = sqlite_messages(store_factory.as_ref(), session_id)
-        .into_iter()
-        .find(|message| {
-            matches!(
-                &message.origin,
-                Some(lash_core::MessageOrigin::TurnInput { turn_id, .. })
-                    if turn_id == "attachment-prune-first"
-            )
-        })
-        .expect("first turn input is durable");
+    let original_durable_message =
+        sqlite_messages(store_factory.as_ref(), &SessionId::from(session_id))
+            .into_iter()
+            .find(|message| {
+                matches!(
+                    &message.origin,
+                    Some(lash_core::MessageOrigin::TurnInput { turn_id, .. })
+                        if turn_id == "attachment-prune-first"
+                )
+            })
+            .expect("first turn input is durable");
     let first_input_message_id = original_durable_message.id.clone();
     session
         .turn(TurnInput::text("trigger ephemeral pruning"))
@@ -315,7 +317,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         .run()
         .await?;
 
-    let durable_message = sqlite_messages(store_factory.as_ref(), session_id)
+    let durable_message = sqlite_messages(store_factory.as_ref(), &SessionId::from(session_id))
         .into_iter()
         .find(|message| message.id == first_input_message_id)
         .expect("first turn input remains durable");
@@ -404,7 +406,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
             .await?;
     }
 
-    let plugin_messages = sqlite_messages(store_factory.as_ref(), session_id)
+    let plugin_messages = sqlite_messages(store_factory.as_ref(), &SessionId::from(session_id))
         .into_iter()
         .filter(|message| {
             matches!(
@@ -464,7 +466,7 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
         .await?;
     assert_eq!(primed.final_value(), Some(&serde_json::json!("primed")));
     let (durable_leaf_before_switch, max_generation_before_switch) =
-        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+        sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
 
     let continued = session
         .turn(TurnInput::text("cross the threshold and continue"))
@@ -496,7 +498,7 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
 
 fn sqlite_node_rows(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Vec<(String, Option<String>, i64)> {
     let conn = rusqlite::Connection::open(store_factory.catalog_path())
         .expect("open SQLite session catalog");
@@ -506,7 +508,7 @@ fn sqlite_node_rows(
              WHERE session_id = ?1 ORDER BY generation ASC",
         )
         .expect("prepare graph-node read");
-    stmt.query_map([session_id], |row| {
+    stmt.query_map([session_id.as_str()], |row| {
         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     })
     .expect("read graph nodes")
@@ -586,7 +588,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
             .any(|message| message_text(message) == "enqueued after turn")
     );
 
-    let turn_one_rows = sqlite_node_rows(store_factory.as_ref(), session_id);
+    let turn_one_rows = sqlite_node_rows(store_factory.as_ref(), &SessionId::from(session_id));
     let persisted_ids = turn_one_rows
         .iter()
         .map(|(id, _, _)| id.clone())
@@ -601,7 +603,8 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         persisted_synthetic.is_empty(),
         "projection-namespaced `unscoped-replacement:*` nodes must never be persisted, found {persisted_synthetic:?}"
     );
-    let (leaf, generation) = sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+    let (leaf, generation) =
+        sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
     let real_leaf = turn_one_rows
         .iter()
         .rev()
@@ -618,7 +621,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         .turn_id("enqueue-second")
         .run()
         .await?;
-    let next = sqlite_node_rows(store_factory.as_ref(), session_id)
+    let next = sqlite_node_rows(store_factory.as_ref(), &SessionId::from(session_id))
         .into_iter()
         .find(|(_, _, node_generation)| *node_generation > generation)
         .expect("turn two committed nodes");
@@ -708,7 +711,7 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
         .run()
         .await?;
     let (durable_leaf_before_second, _) =
-        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+        sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
     // Second turn: the checkpoint hook appends through the in-turn graph service while the
     // durable read tail already holds two messages.
     session
@@ -720,8 +723,8 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
         appended.load(std::sync::atomic::Ordering::SeqCst),
         "hook ran"
     );
-    let rows = sqlite_node_rows(store_factory.as_ref(), session_id);
-    let texts = sqlite_messages(store_factory.as_ref(), session_id)
+    let rows = sqlite_node_rows(store_factory.as_ref(), &SessionId::from(session_id));
+    let texts = sqlite_messages(store_factory.as_ref(), &SessionId::from(session_id))
         .iter()
         .map(message_text)
         .collect::<Vec<_>>();
@@ -847,7 +850,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         "the in-turn read snapshot must show the appended node immediately"
     );
 
-    let nodes = sqlite_nodes(store_factory.as_ref(), session_id);
+    let nodes = sqlite_nodes(store_factory.as_ref(), &SessionId::from(session_id));
     for pair in nodes.windows(2) {
         assert_eq!(
             pair[1].parent_node_id.as_deref(),
@@ -886,7 +889,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         "the in-turn append follows the messages the next boundary carried"
     );
     let (durable_leaf, max_generation) =
-        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
+        sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
     assert_eq!(
         durable_leaf, appended.node_id,
         "the durable head is the appended node"
@@ -904,7 +907,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         .turn_id("same-turn-second")
         .run()
         .await?;
-    let next = sqlite_node_rows(store_factory.as_ref(), session_id)
+    let next = sqlite_node_rows(store_factory.as_ref(), &SessionId::from(session_id))
         .into_iter()
         .find(|(_, _, generation)| *generation > max_generation)
         .expect("turn two committed nodes");
@@ -961,7 +964,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         .run()
         .await?;
 
-    let durable = sqlite_messages(store_factory.as_ref(), session_id);
+    let durable = sqlite_messages(store_factory.as_ref(), &SessionId::from(session_id));
     let described = durable
         .iter()
         .map(|message| {

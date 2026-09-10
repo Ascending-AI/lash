@@ -39,7 +39,7 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
     // A version 43 report is refused before its removed status value reaches
     // the current body decoder.
     let mut payload = serde_json::to_value(RemoteTurnReport {
-        session_id: "session".to_string(),
+        session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {

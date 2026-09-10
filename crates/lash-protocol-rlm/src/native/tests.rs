@@ -1,6 +1,7 @@
 use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
 use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
@@ -24,7 +25,9 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {
-            tool_catalog: session.resolved_tool_catalog("parity").unwrap(),
+            tool_catalog: session
+                .resolved_tool_catalog(&SessionId::from("parity"))
+                .unwrap(),
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
             extra_prompt_contributions: Vec::new(),
@@ -43,7 +46,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         autonomous: false,
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from(""),
-        session_id: "parity".to_string(),
+        session_id: SessionId::from("parity"),
         turn_id: TurnId::from("parity-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
@@ -379,7 +382,9 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     .with_process_lifecycle(false);
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
     let session = host.build_session("native-plugin").unwrap();
-    let catalog = session.resolved_tool_catalog("native-plugin").unwrap();
+    let catalog = session
+        .resolved_tool_catalog(&SessionId::from("native-plugin"))
+        .unwrap();
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {
@@ -400,7 +405,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
         ..Default::default()
     };
     let transforms = session
-        .transform_assistant_response("native-plugin", response)
+        .transform_assistant_response(&SessionId::from("native-plugin"), response)
         .await
         .unwrap();
     let names = transforms

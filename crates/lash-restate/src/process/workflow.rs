@@ -10,6 +10,7 @@
 //! the execution authority, drive the runner against a live cancellation
 //! observer, and deliver either a terminal outcome or a segment successor.
 
+use lash_sansio::ProcessId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -151,7 +152,7 @@ impl<R> LashProcessWorkflowImpl<R> {
 
     pub(crate) fn cancellation_signal(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         segment_ordinal: u64,
     ) -> Pin<Box<dyn Future<Output = Result<(), HandlerError>> + Send>> {
         let Some(ingress) = self.cancel_ingress.clone() else {
@@ -159,7 +160,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         };
         let workflow_key = process_segment_workflow_key(process_id, segment_ordinal);
         let request = RestateProcessAwaitRequest {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
         };
         Box::pin(async move {
             loop {
@@ -214,7 +215,7 @@ where
 {
     async fn finish_terminal_with_parent_end(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         output: Box<ProcessAwaitOutput>,
         actions: Vec<lash_core::ToolIntentParentEndAction>,
         parent_end_controller: ScopedEffectController<'_>,
@@ -231,7 +232,7 @@ where
             self.runner
                 .finish_process_parent_end(
                     lash_core::ProcessParentEndPlan {
-                        process_id: process_id.to_string(),
+                        process_id: ProcessId::from(process_id.to_string()),
                         actions,
                     },
                     parent_end_controller,
@@ -247,7 +248,7 @@ where
 
     pub(crate) async fn complete_with_stored_outcome(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         proposed: ProcessAwaitOutput,
     ) -> Result<ProcessAwaitOutput, PluginError> {
         self.complete_with_stored_outcome_and_parent_end(process_id, proposed, Vec::new())
@@ -256,7 +257,7 @@ where
 
     pub(crate) async fn complete_with_stored_outcome_and_parent_end(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         proposed: ProcessAwaitOutput,
         actions: Vec<lash_core::ToolIntentParentEndAction>,
     ) -> Result<ProcessAwaitOutput, PluginError> {
@@ -436,7 +437,7 @@ where
 
     pub(crate) async fn process_cancel_requested(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<bool, PluginError> {
         #[cfg(test)]
         if self
@@ -460,7 +461,10 @@ where
             > 0)
     }
 
-    async fn confirm_process_cancel_requested(&self, process_id: &str) -> Result<(), HandlerError> {
+    async fn confirm_process_cancel_requested(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(), HandlerError> {
         let mut attempt = 0;
         loop {
             match self.process_cancel_requested(process_id).await {
@@ -489,7 +493,7 @@ where
     #[cfg(test)]
     pub(crate) async fn confirm_process_cancel_requested_for_test(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<(), HandlerError> {
         self.confirm_process_cancel_requested(process_id).await
     }
@@ -593,7 +597,7 @@ where
                         )))
                     })?;
                     tracing::debug!(
-                        process_id,
+                        process_id = %process_id,
                         segment_ordinal = input.segment_ordinal,
                         latest_segment_ordinal = latest.segment_ordinal,
                         "ignoring retried superseded process segment"
@@ -611,7 +615,7 @@ where
         };
         if input.segment_ordinal == 0 && input.execution_id.is_some() {
             tracing::warn!(
-                process_id,
+                process_id = %process_id,
                 presented_execution_id = input.execution_id.as_deref(),
                 invocation_id = %ctx.invocation_id(),
                 verdict = "ignored",

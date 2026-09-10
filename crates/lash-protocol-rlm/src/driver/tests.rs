@@ -1,4 +1,6 @@
 use lash_core::llm::types::LlmRole;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 /// These fixtures cover the Lashlang wording; the cross-dialect walker in
 /// `dialect::prompt_walker_tests` covers both.
@@ -170,7 +172,7 @@ pub(super) fn projection_test_config(
         autonomous: false,
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from("stable RLM system prompt"),
-        session_id: "prefix-stability".to_string(),
+        session_id: SessionId::from("prefix-stability"),
         turn_id: TurnId::from("prefix-stability-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions::default())
@@ -610,7 +612,7 @@ fn process_wake_history_renders_as_chronological_event_context() {
             parts: vec![Part::text("wake:abc.p0".to_string(), "Background process wake\nProcess: process-1\nEvent: process.wake #7\nWake input:\nblue button pressed".to_string(), None)]
             .into(),
             origin: Some(lash_core::MessageOrigin::Process {
-                process_id: "process-1".to_string(),
+                process_id: ProcessId::from("process-1"),
                 event_type: "process.wake".to_string(),
                 sequence: 7,
                 wake_id: Some("wake:abc".to_string()),
@@ -649,7 +651,7 @@ fn active_turn_causes_render_in_current_turn_events_without_history_duplication(
             id: "wake:abc".to_string(),
             event_type: "process.wake".to_string(),
             origin: lash_core::MessageOrigin::Process {
-                process_id: "process-1".to_string(),
+                process_id: ProcessId::from("process-1"),
                 event_type: "process.wake".to_string(),
                 sequence: 7,
                 wake_id: Some("wake:abc".to_string()),

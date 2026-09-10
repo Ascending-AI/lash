@@ -15,6 +15,7 @@ use lash_core::runtime::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimeScope,
 };
+use lash_sansio::SessionId;
 use std::collections::HashSet;
 
 mod advanced_builder;
@@ -56,20 +57,30 @@ pub struct LashCore {
     /// decorator emits events on.
     pub(crate) process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     /// Store-less session ids rejected for reuse by this core.
-    pub(crate) ephemeral_session_ids: Arc<std::sync::Mutex<HashSet<String>>>,
+    pub(crate) ephemeral_session_ids: Arc<std::sync::Mutex<HashSet<SessionId>>>,
     pub(crate) tool_intent_submission_gates:
         Arc<crate::tool_intent_ingress::RuntimeSubmissionGates>,
 }
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 /// Report produced by session delete.
 pub struct SessionDeleteReport {
     /// Identifier of the deleted session.
-    pub session_id: String,
+    pub session_id: SessionId,
     /// Storage reclaimed while deleting the session.
     pub storage: lash_core::SessionBlobReclaimReport,
     /// Process-state deletion report, when a process registry was configured.
     pub process: Option<lash_core::ProcessSessionDeleteReport>,
+}
+
+impl Default for SessionDeleteReport {
+    fn default() -> Self {
+        Self {
+            session_id: SessionId::from(String::default()),
+            storage: lash_core::SessionBlobReclaimReport::default(),
+            process: None,
+        }
+    }
 }
 
 impl LashCore {
@@ -126,7 +137,7 @@ impl LashCore {
     }
 
     /// Creates a builder for the identified session.
-    pub fn session(&self, session_id: impl Into<String>) -> SessionBuilder {
+    pub fn session(&self, session_id: impl Into<SessionId>) -> SessionBuilder {
         SessionBuilder {
             core: self.clone(),
             session_id: session_id.into(),
@@ -200,13 +211,13 @@ impl LashCore {
     /// session. A permanently deleted session returns `false`; callers that try
     /// to recreate the id still receive the store's typed deletion error.
     pub async fn session_exists(&self, session_id: impl AsRef<str>) -> Result<bool> {
-        let session_id = session_id.as_ref();
+        let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
         let request = lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             policy: self.policy.clone(),
         };
@@ -214,7 +225,7 @@ impl LashCore {
             .open_existing_store(&request)
             .await
             .map_err(|message| EmbedError::StoreFactory {
-                session_id: session_id.to_string(),
+                session_id: session_id.clone(),
                 message,
             })?
         else {
@@ -234,12 +245,12 @@ impl LashCore {
         &self,
         session_id: impl AsRef<str>,
     ) -> Result<Option<crate::persistence::SessionReadView>> {
-        let session_id = session_id.as_ref();
+        let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
         store_factory
-            .read_session(session_id)
+            .read_session(&session_id)
             .await
             .map_err(EmbedError::Store)
     }
@@ -249,15 +260,15 @@ impl LashCore {
     /// Tombstones are monotonic: once this returns `true`, the session id cannot become live again.
     /// Compose this read with [`Self::session_exists`] when deciding live/retired/unknown disposition.
     pub async fn session_was_deleted(&self, session_id: impl AsRef<str>) -> Result<bool> {
-        let session_id = session_id.as_ref();
+        let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
         store_factory
-            .session_was_deleted(session_id)
+            .session_was_deleted(&session_id)
             .await
             .map_err(|message| EmbedError::StoreFactory {
-                session_id: session_id.to_string(),
+                session_id: session_id.clone(),
                 message,
             })
     }
@@ -267,14 +278,14 @@ impl LashCore {
         &self,
         session_id: impl AsRef<str>,
     ) -> Result<lash_core::ExecutionScope> {
-        let session_id = session_id.as_ref();
-        if !self.session_exists(session_id).await? {
+        let session_id = SessionId::from(session_id.as_ref());
+        if !self.session_exists(&session_id).await? {
             return Err(EmbedError::StoreFactory {
-                session_id: session_id.to_string(),
+                session_id: session_id.clone(),
                 message: "session does not exist".to_string(),
             });
         }
-        Ok(lash_core::ExecutionScope::session_delete(session_id))
+        Ok(lash_core::ExecutionScope::session_delete(&session_id))
     }
 
     /// Rebuild a live session from a [`ParkedSession`](crate::ParkedSession)
@@ -385,7 +396,7 @@ impl LashCore {
     /// separate best-effort wake and is reconciled from the pending row.
     pub async fn enqueue_turn_input(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         input: lash_core::TurnInput,
         ingress: lash_core::TurnInputIngress,
         id: Option<String>,
@@ -482,7 +493,7 @@ impl LashCore {
     pub async fn fork_at(
         &self,
         node_id: impl Into<String>,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
     ) -> Result<lash_core::ForkSessionReceipt> {
         self.fork_at_with_observer_inheritance(
             node_id,
@@ -496,7 +507,7 @@ impl LashCore {
     pub async fn fork_at_with_observer_inheritance(
         &self,
         node_id: impl Into<String>,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         observer_inheritance: lash_core::ObserverInheritance,
     ) -> Result<lash_core::ForkSessionReceipt> {
         let Some(store_factory) = self.store_factory.as_ref() else {
@@ -608,7 +619,7 @@ impl LashCore {
         session_id: impl AsRef<str>,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<SessionDeleteReport> {
-        let session_id = session_id.as_ref().to_string();
+        let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };

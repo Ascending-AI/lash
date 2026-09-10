@@ -25,6 +25,7 @@
 //! UUID's first hex digit. Groups are therefore ordered root-first and then by the
 //! *shape* of what each session committed, which contains no identifier at all.
 
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 
 #[cfg(feature = "rlm")]
@@ -78,7 +79,7 @@ pub(super) fn agent_scenario_transcript(run: &AgentScenarioRun, root: &str) -> S
 }
 
 #[cfg(feature = "rlm")]
-fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entry> {
+fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Option<Entry> {
     let actor = || Actor::session(session_id.to_string());
     Some(match event {
         lash_core::TurnEvent::ModelRequestStarted { protocol_iteration } => {
@@ -216,7 +217,7 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entr
 /// cannot move a block.
 fn ordered_checkpoint_writes<'writes>(
     writes: &'writes [CheckpointWriteEvent],
-    root_session_id: &str,
+    root_session_id: &SessionId,
 ) -> Vec<&'writes CheckpointWriteEvent> {
     let mut grouped = BTreeMap::<&str, Vec<&CheckpointWriteEvent>>::new();
     for write in writes {
@@ -310,13 +311,13 @@ mod tests {
     };
 
     fn write(
-        session_id: &str,
+        session_id: &SessionId,
         revision_before: u64,
         component: CheckpointComponent,
     ) -> CheckpointWriteEvent {
         CheckpointWriteEvent {
             schema: CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             attributed_session_id: None,
             cause_boundary_id: None,
             commit_index: revision_before as usize + 1,
@@ -344,13 +345,13 @@ mod tests {
             .into_iter()
             .map(|child| {
                 let mut writes = vec![
-                    write(child, 0, CheckpointComponent::ToolState),
-                    write(root, 0, CheckpointComponent::TurnState),
+                    write(&SessionId::from(child), 0, CheckpointComponent::ToolState),
+                    write(&SessionId::from(root), 0, CheckpointComponent::TurnState),
                 ];
                 // The observer hands commits back sorted by raw session id; mimic
                 // both possible orders it can produce.
                 writes.sort_by(|left, right| left.session_id.cmp(&right.session_id));
-                ordered_checkpoint_writes(&writes, root)
+                ordered_checkpoint_writes(&writes, &SessionId::from(root))
                     .into_iter()
                     .map(|write| {
                         format!(

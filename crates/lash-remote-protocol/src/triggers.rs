@@ -1,5 +1,7 @@
 //! Trigger envelopes: occurrence emission, subscriptions, and registrations.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
@@ -37,7 +39,7 @@ pub struct RemoteTriggerOccurrenceRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(
         default,
         skip_serializing_if = "RemoteTriggerOccurrenceOutcome::is_fired"
@@ -68,7 +70,7 @@ impl RemoteTriggerOccurrenceRequest {
         self
     }
 
-    pub fn for_session(mut self, session_id: impl Into<String>) -> Self {
+    pub fn for_session(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
     }
@@ -118,7 +120,7 @@ pub struct RemoteTriggerOccurrenceRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(
         default,
         skip_serializing_if = "RemoteTriggerOccurrenceOutcome::is_fired"
@@ -139,7 +141,7 @@ pub enum RemoteTriggerDeliveryEmitOutcome {
 pub struct RemoteTriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
-    pub process_id: String,
+    pub process_id: ProcessId,
     pub outcome: RemoteTriggerDeliveryEmitOutcome,
 }
 
@@ -163,7 +165,7 @@ pub struct RemoteTriggerSubscriptionFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrant_scope_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -179,7 +181,7 @@ pub struct RemoteTriggerSubscriptionFilter {
 }
 
 impl RemoteTriggerSubscriptionFilter {
-    pub fn for_session(session_id: impl Into<String>) -> Self {
+    pub fn for_session(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: Some(session_id.into()),
             ..Self::default()
@@ -276,7 +278,7 @@ pub enum RemoteTriggerInputBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTriggerOwnerScope {
-    Session { session_id: String },
+    Session { session_id: SessionId },
     Host { binding_id: String },
     Platform,
 }

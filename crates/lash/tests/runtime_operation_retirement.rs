@@ -4,6 +4,7 @@
 //! journals (FIG-2499, FIG-2500). A runtime operation the facade did not mint
 //! is left alone.
 
+use lash_sansio::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash::durability::{EffectHost, EffectJournalRetirement};
@@ -645,14 +646,14 @@ impl lash_core::AwaitEventResolver for RetirementFailsHost {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
@@ -960,7 +961,7 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
     let _postgres = postgres.take();
     store_factory.bind_effect_host(&host);
     let core = core_with_host_and_store(Arc::clone(&host), Some(Arc::clone(&store_factory)));
-    let session_id = format!("caller-sweep-{label}");
+    let session_id = SessionId::from(format!("caller-sweep-{label}"));
     // The catalog the sweep reads receipts from exists once a session does.
     let session = core
         .session(session_id.clone())
@@ -1009,7 +1010,7 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
                         .expect("open the catalog")
                         .execute(
                             "INSERT INTO runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES (?1, ?2, 'witness', '{}', 0)",
-                            rusqlite::params![session_id, receipt],
+                            rusqlite::params![session_id.as_str(), receipt],
                         )
                         .expect("record the receipt");
                 }
@@ -1017,7 +1018,7 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
                     sqlx::query(
                         "INSERT INTO lash_runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES ($1, $2, 'witness', '{}', 0)",
                     )
-                    .bind(session_id)
+                    .bind(session_id.as_str())
                     .bind(receipt)
                     .execute(pool)
                     .await

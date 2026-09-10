@@ -6,6 +6,8 @@
 //! suspension protocol — including the one-shot fusing of a context future that
 //! wakes synchronously and then returns `Pending`.
 
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -429,7 +431,7 @@ where
 /// in-flight invocation is unchanged.
 async fn race_turn_cancel_gate<'run, 'ctx, C, T>(
     context: &C,
-    session_id: &str,
+    session_id: &SessionId,
     turn_cancel: RestateDurableWaitAwaitRequest,
     awakeable: impl Fn() -> (String, GateWait<'run, Json<RestateTurnCancelWake>>),
     guarded: impl FnOnce() -> GateWait<'run, T>,
@@ -445,7 +447,7 @@ where
         RestateTurnCancelGate::Registered(gate) => gate,
         RestateTurnCancelGate::Revoked => {
             return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
             });
         }
     };
@@ -465,7 +467,7 @@ where
         }
         RestateTurnCancelWake::SessionRevoked => {
             return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
             });
         }
         RestateTurnCancelWake::TurnCancelDeferred => {}
@@ -477,7 +479,7 @@ where
     tracing::debug!(
         target: "lash::restate",
         event = "restate.turn_cancel_deferred",
-        session_id,
+        session_id = %session_id,
         "after-step stop observed by a parked durable wait; composing to the step boundary"
     );
     let escalation_key =
@@ -495,7 +497,7 @@ where
         RestateTurnCancelGate::Registered(gate) => gate,
         RestateTurnCancelGate::Revoked => {
             return Ok(RestateTurnCancelRaceOutcome::SessionRevoked {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
             });
         }
     };
@@ -526,7 +528,7 @@ where
                 }
                 RestateTurnCancelWake::SessionRevoked => {
                     RestateTurnCancelRaceOutcome::SessionRevoked {
-                        session_id: session_id.to_string(),
+                        session_id: SessionId::from(session_id.to_string()),
                     }
                 }
             })
@@ -605,7 +607,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn await_process_terminal<'run>(
         &'run self,
-        process_id: String,
+        process_id: ProcessId,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run;
@@ -613,7 +615,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// Race a process terminal wait against durable turn cancellation.
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
-        process_id: String,
+        process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
     ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
@@ -628,7 +630,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn update_session_waits<'run>(
         &'run self,
-        session_id: String,
+        session_id: SessionId,
         revoke: bool,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
@@ -636,7 +638,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
 
     fn session_is_revoked<'run>(
         &'run self,
-        _session_id: String,
+        _session_id: SessionId,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -875,8 +877,7 @@ macro_rules! impl_restate_controller_context {
                             .await;
                         };
 
-                        let Some(session_id) =
-                            turn_cancel.key.scope.session_id().map(str::to_string)
+                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
                         else {
                             return Err(TerminalError::new(
                                 "turn cancellation gate is missing its session id",
@@ -888,7 +889,7 @@ macro_rules! impl_restate_controller_context {
                         // keeps the timer behind the registration verdict.
                         race_turn_cancel_gate(
                             self,
-                            &session_id,
+                            &SessionId::from(session_id),
                             turn_cancel,
                             || gate_awakeable(self),
                             || erase_gate_wait(restate_sdk::context::ContextTimers::sleep(
@@ -1040,8 +1041,7 @@ macro_rules! impl_restate_controller_context {
                                 .map(RestateTurnCancelRaceOutcome::Completed);
                         };
 
-                        let Some(session_id) =
-                            turn_cancel.key.scope.session_id().map(str::to_string)
+                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
                         else {
                             return Err(TerminalError::new(
                                 "turn cancellation gate is missing its session id",
@@ -1060,7 +1060,7 @@ macro_rules! impl_restate_controller_context {
                         let event = erase_gate_wait(event.call());
                         match race_turn_cancel_gate(
                             self,
-                            &session_id,
+                            &SessionId::from(session_id),
                             turn_cancel,
                             || gate_awakeable(self),
                             move || event,
@@ -1112,7 +1112,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn await_process_terminal<'run>(
                     &'run self,
-                    process_id: String,
+                    process_id: ProcessId,
                 ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
                 where
                     'ctx: 'run,
@@ -1129,7 +1129,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn await_process_terminal_or_turn_cancel<'run>(
                     &'run self,
-                    process_id: String,
+                    process_id: ProcessId,
                     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
                 ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
                 where
@@ -1143,8 +1143,7 @@ macro_rules! impl_restate_controller_context {
                                 .map(Box::new)
                                 .map(RestateTurnCancelRaceOutcome::Completed);
                         };
-                        let Some(session_id) =
-                            turn_cancel.key.scope.session_id().map(str::to_string)
+                        let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
                         else {
                             return Err(TerminalError::new(
                                 "turn cancellation gate is missing its session id",
@@ -1162,7 +1161,7 @@ macro_rules! impl_restate_controller_context {
                         let process = erase_gate_wait(process.call());
                         let outcome = race_turn_cancel_gate(
                             self,
-                            &session_id,
+                            &SessionId::from(session_id),
                             turn_cancel,
                             || gate_awakeable(self),
                             move || process,
@@ -1217,7 +1216,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn update_session_waits<'run>(
                     &'run self,
-                    session_id: String,
+                    session_id: SessionId,
                     revoke: bool,
                 ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
                 where
@@ -1238,7 +1237,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn session_is_revoked<'run>(
                     &'run self,
-                    session_id: String,
+                    session_id: SessionId,
                 ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
                 where
                     'ctx: 'run,
