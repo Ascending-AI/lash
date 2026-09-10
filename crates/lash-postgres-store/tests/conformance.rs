@@ -12,6 +12,8 @@ async fn postgres_cross_owner_attachment_adoption_conformance() {
 }
 
 use std::future::Future;
+#[path = "conformance/attachment_owner_kind.rs"]
+mod attachment_owner_kind;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 
@@ -1254,40 +1256,6 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
             } if message == "unknown attachment owner kind `unknown`"
         ),
         "Postgres must return the canonical attachment-owner corruption refusal, got {error:?}"
-    );
-}
-
-#[test]
-fn postgres_attachment_owner_kind_sql_derives_from_the_enum() {
-    let sources = [
-        (
-            "attachments.rs",
-            include_str!("../src/postgres/attachments.rs"),
-        ),
-        (
-            "runtime_persistence.rs",
-            include_str!("../src/postgres/runtime_persistence.rs"),
-        ),
-        (
-            "session_factory.rs",
-            include_str!("../src/postgres/session_factory.rs"),
-        ),
-    ];
-    let raw_sites = sources
-        .into_iter()
-        .flat_map(|(name, source)| {
-            ["turn", "process"].into_iter().flat_map(move |value| {
-                source
-                    .match_indices(&format!("owner_kind = '{value}'"))
-                    .map(move |(offset, _)| format!("{name}:{offset}:{value}"))
-                    .collect::<Vec<_>>()
-            })
-        })
-        .collect::<Vec<_>>();
-
-    assert!(
-        raw_sites.is_empty(),
-        "Postgres owner-kind SQL literals must derive from AttachmentOwnerKind::as_str; found {raw_sites:?}"
     );
 }
 

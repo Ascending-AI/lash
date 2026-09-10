@@ -292,14 +292,33 @@ mod tests {
     // Architecture lint: lexical cutover guard, not behavior proof. The table
     // above proves the name-independent runtime behavior.
     fn lint_projection_policy_cutover_has_no_name_based_projection_checks() {
+        fn read_rust_tree(path: &std::path::Path) -> String {
+            if path.is_file() {
+                return std::fs::read_to_string(path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            }
+            let mut children = std::fs::read_dir(path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+                .map(|entry| entry.expect("read Rust source entry").path())
+                .filter(|child| {
+                    child.is_dir() || child.extension().is_some_and(|extension| extension == "rs")
+                })
+                .collect::<Vec<_>>();
+            children.sort();
+            children
+                .iter()
+                .map(|child| read_rust_tree(child))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let registration_src =
             std::fs::read_to_string(manifest_dir.join("src/plugin/registration.rs"))
                 .expect("read registration source");
         let tool_args_src = std::fs::read_to_string(manifest_dir.join("src/plugin/tool_args.rs"))
             .expect("read tool args source");
-        let executor_src = std::fs::read_to_string(manifest_dir.join("src/executor.rs"))
-            .expect("read executor source");
+        let executor_src = read_rust_tree(&manifest_dir.join("src/executor"));
         let host_bridge_src =
             std::fs::read_to_string(manifest_dir.join("src/executor/host_bridge.rs"))
                 .expect("read host bridge source");

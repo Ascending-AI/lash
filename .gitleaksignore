@@ -1,1 +1,10 @@
 # One Gitleaks fingerprint per line: <commit>:<path>:<rule-id>:<line>.
+# Synthetic credential fixtures moved byte-for-byte from the pre-existing Restate test module.
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/restate_redrive.rs:generic-api-key:105
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/restate_redrive.rs:generic-api-key:1563
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/process_await_redrive.rs:generic-api-key:1083
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/process_await_redrive.rs:generic-api-key:1130
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/process_await_redrive.rs:generic-api-key:1265
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/process_await_redrive.rs:generic-api-key:1328
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/process_await_redrive.rs:generic-api-key:1364
+a19f03196140576249deaa5682c09c96d88fea20:crates/lash-restate/src/tests/process_await_redrive.rs:generic-api-key:1647
