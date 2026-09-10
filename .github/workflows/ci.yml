@@ -386,6 +386,7 @@ jobs:
           python3 scripts/test_perfreport.py
           python3 scripts/test_ci_plan.py
           python3 scripts/test_ci_plan_hygiene.py
+          python3 scripts/test_ci_workspace_cache.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
           bash scripts/test-ci-reclaim-disk.sh
@@ -768,6 +769,16 @@ jobs:
           free -h
           df -h /
 
+      - name: Resolve workspace test cache inputs
+        id: workspace-test-cache-inputs
+        run: |
+          compiler_digest="$(rustc -vV | sha256sum | cut -d ' ' -f 1)"
+          settings_digest="$(printf '%s\0%s\0' "${RUSTFLAGS}" "${LASH_CI_FEATURES}" | sha256sum | cut -d ' ' -f 1)"
+          source_digest="$(python3 scripts/ci_workspace_cache.py digest)"
+          echo "compiler=${compiler_digest}" >> "${GITHUB_OUTPUT}"
+          echo "settings=${settings_digest}" >> "${GITHUB_OUTPUT}"
+          echo "source=${source_digest}" >> "${GITHUB_OUTPUT}"
+
       - name: Restore cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -792,12 +803,22 @@ jobs:
             target/debug/build
             target/debug/deps
             target/debug/examples
+            target/workspace-test-cache/source-mtimes.json
           key: >-
-            workspace-tests-v1-${{ runner.os }}-${{ runner.arch }}-${{
-            hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*')
-            }}-${{ hashFiles('crates/**', 'examples/**', 'fixtures/**', '.config/nextest.toml') }}
+            workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.workspace-test-cache-inputs.outputs.compiler }}-${{
+            steps.workspace-test-cache-inputs.outputs.settings }}-${{
+            hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*', '.github/actions/rust-toolchain/**', '.github/actions/setup-mold/**', '.github/actions/install-tools/**')
+            }}-${{ steps.workspace-test-cache-inputs.outputs.source }}
           restore-keys: |
-            workspace-tests-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*') }}-
+            workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.workspace-test-cache-inputs.outputs.compiler }}-${{ steps.workspace-test-cache-inputs.outputs.settings }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*', '.github/actions/rust-toolchain/**', '.github/actions/setup-mold/**', '.github/actions/install-tools/**') }}-
+
+      - name: Restore unchanged source mtimes
+        continue-on-error: true
+        run: python3 scripts/ci_workspace_cache.py restore target/workspace-test-cache/source-mtimes.json
+
+      - name: Snapshot source mtimes
+        run: python3 scripts/ci_workspace_cache.py snapshot target/workspace-test-cache/source-mtimes.json
 
       - name: Install protoc and nextest
         uses: ./.github/actions/install-tools
@@ -832,10 +853,13 @@ jobs:
             target/debug/build
             target/debug/deps
             target/debug/examples
+            target/workspace-test-cache/source-mtimes.json
           key: >-
-            workspace-tests-v1-${{ runner.os }}-${{ runner.arch }}-${{
-            hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*')
-            }}-${{ hashFiles('crates/**', 'examples/**', 'fixtures/**', '.config/nextest.toml') }}
+            workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.workspace-test-cache-inputs.outputs.compiler }}-${{
+            steps.workspace-test-cache-inputs.outputs.settings }}-${{
+            hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*', '.github/actions/rust-toolchain/**', '.github/actions/setup-mold/**', '.github/actions/install-tools/**')
+            }}-${{ steps.workspace-test-cache-inputs.outputs.source }}
 
       - name: Report cache disk capacity
         if: always()

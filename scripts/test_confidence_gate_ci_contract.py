@@ -2165,8 +2165,14 @@ derive_mutation_jobs() {{
         self.assertIn("cache-targets: false", workspace_tests)
         self.assertIn("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workspace_tests)
         self.assertIn("actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workspace_tests)
-        self.assertIn("workspace-tests-v1-${{ runner.os }}-${{ runner.arch }}", workspace_tests)
-        self.assertIn("hashFiles('crates/**', 'examples/**', 'fixtures/**'", workspace_tests)
+        self.assertIn("workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}", workspace_tests)
+        self.assertIn("rustc -vV", workspace_tests)
+        self.assertIn("outputs.compiler", workspace_tests)
+        self.assertIn("outputs.settings", workspace_tests)
+        self.assertIn("outputs.source", workspace_tests)
+        self.assertIn("ci_workspace_cache.py restore", workspace_tests)
+        self.assertIn("ci_workspace_cache.py snapshot", workspace_tests)
+        self.assertIn("target/workspace-test-cache/source-mtimes.json", workspace_tests)
         self.assertIn("restore-keys:", workspace_tests)
         for path in (
             "target/debug/.fingerprint",
