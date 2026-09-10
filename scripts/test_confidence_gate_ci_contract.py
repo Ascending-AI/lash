@@ -20,6 +20,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+RELEASE_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "release-cache.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
@@ -416,10 +417,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 f"execution area predicate drifted for {selector}",
             )
 
-    def test_heavy_suites_are_split_between_shard_and_heavy_profiles(self) -> None:
-        """The shard/heavy split lives in nextest profiles, not job scripts.
+    def test_heavy_suites_are_split_between_ci_and_heavy_profiles(self) -> None:
+        """The ordinary/heavy split lives in nextest profiles, not job scripts.
 
-        `profile.ci` (the shards) must exclude the heavy suites its comment
+        `profile.ci` (the workspace test job) must exclude the heavy suites its comment
         promises, `profile.ci-heavy` (the trunk-only heavy-tests job) must run
         them, and each job must name its profile — otherwise a rename on one
         side silently drops the suites from CI entirely.
@@ -427,8 +428,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         nextest = (ROOT / ".config" / "nextest.toml").read_text(encoding="utf-8")
 
-        shard = workflow_job_block(workflow, "test-shard")
-        self.assertIn("--profile ci --workspace", shard)
+        workspace_tests = workflow_job_block(workflow, "workspace-tests")
+        self.assertIn("--profile ci --workspace", workspace_tests)
         heavy = workflow_job_block(workflow, "heavy-tests")
         self.assertIn("--profile ci-heavy --workspace", heavy)
 
@@ -442,7 +443,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn(heavy_filter, ci_profile)
         self.assertIn("default-filter", ci_heavy_profile)
         self.assertIn(heavy_filter, ci_heavy_profile)
-        # The trybuild ui binary leaves the shards without a heavy-side run;
+        # The trybuild ui binary leaves the workspace job without a heavy-side run;
         # its per-push gate is test-doc's seal step.
         self.assertIn("binary(ui)", ci_profile)
         self.assertNotIn("binary(ui)", ci_heavy_profile)
@@ -1177,10 +1178,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
 
     def test_full_perf_is_release_gated_and_only_manually_dispatchable(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
+        release_cache_workflow = RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8")
         perf = PERF_WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        release_cache = workflow_job_block(workflow, "linux-release-cache")
+        release_cache = workflow_job_block(release_cache_workflow, "linux-release-cache")
 
         self.assertIn("workflow_dispatch:", perf)
         self.assertNotIn("schedule:", perf)
@@ -1799,6 +1800,53 @@ derive_mutation_jobs() {{
                 feature_checks,
             )
 
+    def test_queue_feature_graphs_are_parallel_and_independently_cached(self) -> None:
+        jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+        package = jobs["package-feature-checks"]
+        package_lanes = {
+            row["lane"] for row in package["strategy"]["matrix"]["include"]
+        }
+        self.assertEqual(
+            {
+                "protocol-rlm-testing",
+                "agent-workbench",
+                "slack-clone-e2e",
+                "agent-service-restate",
+                "remote-protocol-conversions",
+                "plugin-mcp-lashlang",
+                "llm-transport-conformance",
+                "provider-openai-conformance",
+                "provider-anthropic-conformance",
+                "provider-google-conformance",
+            },
+            package_lanes,
+        )
+        self.assertFalse(package["strategy"]["fail-fast"])
+
+        runtime = jobs["runtime-feature-boundary"]
+        runtime_lanes = {
+            row["lane"] for row in runtime["strategy"]["matrix"]["include"]
+        }
+        self.assertEqual(
+            {
+                "default-off-check",
+                "testing-check",
+                "default-off-tests",
+                "dependency-boundary",
+            },
+            runtime_lanes,
+        )
+        self.assertFalse(runtime["strategy"]["fail-fast"])
+
+        for job_id, prefix in (
+            ("package-feature-checks", "queue-package-${{ matrix.lane }}"),
+            ("runtime-feature-boundary", "queue-runtime-${{ matrix.lane }}"),
+        ):
+            block = workflow_job_block(WORKFLOW.read_text(encoding="utf-8"), job_id)
+            self.assertIn(f"shared-key: {prefix}", block)
+            self.assertIn("save-if: ${{ github.event_name != 'merge_group' }}", block)
+
     def test_lash_runtime_default_tests_are_pinned_to_the_feature_boundary_lane(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         boundary_job = workflow_job_block(workflow, "runtime-feature-boundary")
@@ -1856,19 +1904,37 @@ derive_mutation_jobs() {{
         publish = workflow_job_block(release, "publish")
         self.assertIn("permissions:\n      contents: write", publish)
 
-    def test_workspace_tests_are_sharded_off_the_critical_path(self) -> None:
+    def test_workspace_tests_build_and_run_without_archive_transport(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 
-        # The monolithic `test:` job is gone; a doctest/build-cache writer plus
-        # the nextest partition shards replace it.
+        # The workspace suite builds and runs on one runner. This keeps its
+        # feature graph and profile while removing multi-gigabyte archive
+        # transport and four repeated runner setup paths.
         self.assertNotIn("  test:\n", workflow)
         self.assertIn("  test-doc:\n", workflow)
-        self.assertIn("  test-shard:\n", workflow)
-        self.assertIn("--partition count:${{ matrix.shard }}/4", workflow)
-        self.assertIn("shard: [1, 2, 3, 4]", workflow)
-        self.assertIn("Test shard ${{ matrix.shard }}/4", workflow)
+        self.assertIn("  workspace-tests:\n", workflow)
+        self.assertNotIn("  nextest-archive:\n", workflow)
+        self.assertNotIn("  test-shard:\n", workflow)
+        self.assertNotIn("cargo nextest archive", workflow)
+        self.assertNotIn("--archive-file", workflow)
+        workspace_tests = workflow_job_block(workflow, "workspace-tests")
+        self.assertIn("Install Node for browser projection gates", workspace_tests)
+        self.assertIn("node-version: 24", workspace_tests)
+        self.assertIn(
+            "cargo build --workspace --locked ${LASH_CI_FEATURES}",
+            workspace_tests,
+        )
+        self.assertIn(
+            "--example sqlite-await-event-helper --example postgres-await-event-helper",
+            workspace_tests,
+        )
+        self.assertIn(
+            "cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES}",
+            workspace_tests,
+        )
+        self.assertIn("Logical CPUs: $(nproc)", workspace_tests)
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
-        self.assertIn("--no-fail-fast", workflow)
+        self.assertIn("--no-fail-fast", workspace_tests)
 
         # test-doc is the cache writer and the doctest gate, nothing else. Gates
         # that neither warm nor consume that superset are sibling jobs, not
@@ -1994,11 +2060,13 @@ derive_mutation_jobs() {{
         # Cache warming is not a queue gate: a cache written from a queue ref is
         # scoped to that ref and discarded with it, so warming it there would
         # only add the longest job on the board to every queue entry.
-        release_cache = workflow_job_block(workflow, "linux-release-cache")
-        self.assertIn(
-            "if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'",
-            release_cache,
-        )
+        release_cache_workflow = RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotIn("  linux-release-cache:\n", workflow)
+        self.assertIn("  push:\n    branches: [main]", release_cache_workflow)
+        self.assertIn("  workflow_dispatch:\n", release_cache_workflow)
+        self.assertIn("group: linux-release-cache-main", release_cache_workflow)
+        self.assertIn("cancel-in-progress: false", release_cache_workflow)
+        self.assertIn("if: github.ref == 'refs/heads/main'", release_cache_workflow)
 
         # A queue head carries a whole PR — often several commits — on top of the
         # base the queue chose, so HEAD~1 checks only its last commit: the gate
@@ -2064,7 +2132,9 @@ derive_mutation_jobs() {{
                 )
 
     def test_linux_release_cache_stays_mold_free_across_workflows(self) -> None:
-        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        release_cache_workflow = yaml.safe_load(
+            RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8")
+        )
         perf = PERF_WORKFLOW.read_text(encoding="utf-8")
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
@@ -2073,27 +2143,39 @@ derive_mutation_jobs() {{
         # the workflow-level flag, or those two workflows rebuild everything
         # they restore. Empty and unset are the same value to cargo.
         self.assertEqual(
-            workflow["jobs"]["linux-release-cache"]["env"]["RUSTFLAGS"], ""
+            release_cache_workflow["env"]["RUSTFLAGS"], ""
         )
         for name, text in (("perf.yml", perf), ("release.yml", release)):
             with self.subTest(workflow=name):
                 self.assertNotIn("mold", text)
                 self.assertNotIn("RUSTFLAGS", text)
 
-    def test_shared_debug_cache_has_one_action_and_key(self) -> None:
+    def test_workspace_test_cache_keeps_the_test_build_key(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        writer = workflow_job_block(workflow, "test-doc")
-        reader = workflow_job_block(workflow, "test-shard")
+        workspace_tests = workflow_job_block(workflow, "workspace-tests")
 
-        # Writer and readers must use the same action and shared key so they
-        # address the same GitHub cache namespace.
+        # Keep the dependency cache used by the former archive producer. It is
+        # smaller than linux-debug and is already keyed for this feature graph.
         cache_action = (
             "uses: Swatinem/rust-cache@"
             "6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2"
         )
-        for block in (writer, reader):
-            self.assertIn(cache_action, block)
-            self.assertIn("shared-key: linux-debug", block)
+        self.assertIn(cache_action, workspace_tests)
+        self.assertIn("shared-key: linux-tests", workspace_tests)
+        self.assertIn("cache-targets: false", workspace_tests)
+        self.assertIn("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workspace_tests)
+        self.assertIn("actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workspace_tests)
+        self.assertIn("workspace-tests-v1-${{ runner.os }}-${{ runner.arch }}", workspace_tests)
+        self.assertIn("hashFiles('crates/**', 'examples/**', 'fixtures/**'", workspace_tests)
+        self.assertIn("restore-keys:", workspace_tests)
+        for path in (
+            "target/debug/.fingerprint",
+            "target/debug/build",
+            "target/debug/deps",
+            "target/debug/examples",
+        ):
+            self.assertIn(path, workspace_tests)
+        self.assertNotIn("target/debug/incremental", workspace_tests)
 
     def test_heavy_compile_jobs_install_mold(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -2101,16 +2183,20 @@ derive_mutation_jobs() {{
 
         for job_id in (
             "test-doc",
-            "test-shard",
+            "workspace-tests",
             "facade-gates",
             "package-feature-checks",
             "runtime-feature-boundary",
             "lint",
             "confidence-fast",
-            "linux-release-cache",
         ):
             block = workflow_job_block(workflow, job_id)
             self.assertIn("./.github/actions/setup-mold", block)
+        release_cache = workflow_job_block(
+            RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8"),
+            "linux-release-cache",
+        )
+        self.assertIn("./.github/actions/setup-mold", release_cache)
         self.assertNotIn("cargo build", release)
 
     def test_ci_has_no_staging_or_automatic_release_path(self) -> None:

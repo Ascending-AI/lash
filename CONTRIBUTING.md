@@ -60,10 +60,10 @@ including workspace tests, lint and repository gates, public API checks,
 feature checks, confidence shards, store backends, functional E2E, and worker
 E2E. The single `CI conclusion` job rejects failed, cancelled, missing, or
 incorrectly skipped correctness jobs and is the aggregate merge context.
-`Build Linux release cache` is deliberately outside that conclusion: it warms a
-cache for release.yml and perf.yml on `main` and is skipped for pull requests
-and queue entries, where the cache it writes is scoped to a ref nothing else can
-read.
+The separate `Release cache` workflow warms the cache consumed by release.yml
+and perf.yml on trusted `main` pushes. It is independently serialized so its
+non-gating release build cannot hold required CI or the next main push behind
+it; workflow dispatch supplies the manual recovery path.
 
 The workers E2E family runs when selected on `main` pushes and full-profile
 (`workflow_dispatch`) runs, and on pull requests carrying the `ci:workers`

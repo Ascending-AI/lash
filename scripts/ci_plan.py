@@ -40,12 +40,11 @@ IDENTITY_VERSION_DEFINITION = re.compile(
 )
 
 GATED_JOBS = {
-    "nextest-archive": "rust",
     "facade-gates": "rust",
     "lashlang-git-consumer": "rust",
     "package-feature-checks": "rust",
     "runtime-feature-boundary": "rust",
-    "test-shard": "rust",
+    "workspace-tests": "rust",
     "heavy-tests": "rust",
     "stack-budget": "rust",
     "confidence-fast": "confidence",
