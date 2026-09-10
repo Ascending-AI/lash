@@ -39,6 +39,31 @@ cargo run -p lash-sim -- run --out target/lash-sim/search \
   --shard 1/9 --mode search
 ```
 
+### Multi-arm SQLite fault witness
+
+The SQLite transaction wrapper declares `AfterBegin`, `BeforeCommit`, and
+`CommitIo` through a `sim_fault!` macro that expands away when the store's
+`testing` feature is disabled. The testing injector accepts an ordered plan of
+one-shot arms, each targeting a one-based occurrence of one declared point.
+
+Run the bounded composition witness with:
+
+```sh
+cargo run -p lash-sim -- sqlite-faults \
+  --out /tmp/lash-sim-sqlite-faults --seed 140050432
+```
+
+Expect `/tmp/lash-sim-sqlite-faults/sqlite-faults.json` to use
+`lash.sim.sqlite-substrate-faults.v2`. Its `composition_witness.plan` records
+the generated workload seed and ID, the two source boundary IDs, arm order,
+point occurrences, and the two-attempt policy. The zero-arm control commits on
+its first attempt. Each single-arm control returns one injected storage failure
+and commits on retry. The paired run fails first at `after_begin`, then at
+`commit_io`, exhausts the two-attempt policy, and leaves the reopened head at
+the prefix revision. `repeated_paired` must record the same arm identities,
+order, attempt outcomes, and final head. This is an injected operation failure
+under the recorded retry bound, not a discovered runtime invariant violation.
+
 ## Current executable evidence
 
 - OpenAI-compatible, direct OpenAI Responses, Anthropic, and Google Provider
@@ -59,7 +84,9 @@ cargo run -p lash-sim -- run --out target/lash-sim/search \
   `SQLITE_IOERR`, and a mid-sequence close/reopen. Each seed checks typed error
   return, retention of the preceding committed head, rollback of failed work,
   and idempotent operation-receipt replay; oracle failures persist an exact-seed
-  reproduction package before the command exits.
+  reproduction package before the command exits. The same command derives an
+  explicit two-arm plan from the generated workload and records zero-, single-,
+  paired-, and repeat-run evidence for its bounded composition oracle.
 - Full-lane Postgres trace replay is implemented as `lash-sim replay-postgres
   <trace> --out <artifact-root>`, gated by `LASH_POSTGRES_DATABASE_URL` or the
   confidence gate's Docker bootstrap, and writes replay/divergence artifacts.
