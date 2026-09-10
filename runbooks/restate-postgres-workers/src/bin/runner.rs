@@ -113,7 +113,7 @@ struct WorkflowSpec {
 // - e2e-suspended-sleep-cancel
 // - e2e-engine-restart-{cancel,suspended-sleep,complete}, including the complete
 //   engine-restart-ready/engine-restart-complete shell handshake
-// - the four ordered turn-control workflows, then the durable-wait index gates
+// - the five ordered turn-control workflows, then the durable-wait index gates
 //   and e2e-turn-break-glass (last because it strands a shared lease); the
 //   index gates and break-glass ride segment 2 but are NOT inventory members —
 //   they produce no terminal-result row and are covered by their own driver
@@ -127,7 +127,7 @@ struct WorkflowSpec {
 // manifests, so shrinking the workflow set would otherwise pass the CI
 // coverage summary silently. Removing or adding a workflow must touch this
 // pin, forcing the change into reviewer view.
-const EXPECTED_WORKFLOW_INVENTORY_LEN: usize = 28;
+const EXPECTED_WORKFLOW_INVENTORY_LEN: usize = 29;
 const _: () = assert!(WORKFLOW_INVENTORY.len() == EXPECTED_WORKFLOW_INVENTORY_LEN);
 
 const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
@@ -225,6 +225,10 @@ const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
     },
     WorkflowSpec {
         id: "e2e-engine-restart-complete",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-turn-cancel-late-normal",
         segment: WorkflowSegment::Two,
     },
     WorkflowSpec {
@@ -374,6 +378,15 @@ async fn async_main() -> Result<()> {
         admin_url.clone(),
         runner_stall_timeout()?,
     ));
+
+    if std::env::var("LASH_E2E_TURN_CONTROL_ONLY").as_deref() == Ok("1") {
+        drive_turn_control_scenarios(&storage, &ingress_url).await?;
+        assert_no_active_lash_restate_invocations(&admin_url).await?;
+        assert_no_problem_lash_restate_invocations(&admin_url).await?;
+        watchdog.abort();
+        println!("focused turn-control E2E passed");
+        return Ok(());
+    }
 
     let selection = SegmentSelection::from_env()?;
     let segment_one = if selection.includes(WorkflowSegment::One) {

@@ -339,6 +339,28 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
     );
     assert!(durable.outcome.is_none());
 
+    let stale_base = crate::TurnCancellationEvidence {
+        request_id: "turn-cancel-escalation:stale-base".to_string(),
+        origin: Some("conformance-host".to_string()),
+        reason: Some("delayed base-gate projection".to_string()),
+        undelivered: abort.undelivered,
+        mode: crate::TurnCancelMode::AfterStep,
+        honoured_after_step: None,
+    };
+    store
+        .reconcile_turn_cancel_winner(&address, &stale_base)
+        .await
+        .expect("reconcile a delayed base-gate projection");
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read durable request after stale projection")
+        .expect("request persists");
+    assert_eq!(
+        durable.request, abort,
+        "a delayed base-gate projection cannot downgrade an accepted escalation"
+    );
+
     let downgrade = crate::TurnCancelRequest::new(
         address.clone(),
         "turn-cancel-escalation:late-stop",

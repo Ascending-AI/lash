@@ -312,7 +312,7 @@ impl LashRuntime {
                             .as_ref()
                             .map(|lease| lease.fence())
                             .as_ref(),
-                        teardown_effect_controller.controller(),
+                        &teardown_effect_controller,
                     )
                     .await;
                     self.invalidate_resident_session_state();
@@ -325,7 +325,7 @@ impl LashRuntime {
                             .as_ref()
                             .map(|lease| lease.fence())
                             .as_ref(),
-                        teardown_effect_controller.controller(),
+                        &teardown_effect_controller,
                     )
                     .await;
                     self.record_follow_on_failure(&mut turns, err);

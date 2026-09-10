@@ -302,7 +302,7 @@ impl LashRuntime {
                         &store,
                         &fence,
                         &TurnId::from(opts.execution_scope_id()),
-                        drain_effect_controller.controller(),
+                        &drain_effect_controller,
                     )
                     .await
                     > 0

@@ -271,6 +271,34 @@ fn intent_hash_golden_vector() {
 }
 
 #[test]
+fn cancellation_evidence_changes_intent_hash_without_changing_absent_legacy_hash() {
+    let baseline = intent_fixture();
+    let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
+    assert_eq!(
+        baseline_hash, "a6f3ac26d0455096293da3d24c0c52ee41ee6f5259872a212b327189cee9a3fd",
+        "an absent cancellation field must preserve the legacy plain-commit preimage"
+    );
+
+    let mut cancelled = baseline;
+    cancelled.interrupted_turn_input_turn_id = Some(TurnId::from("turn-42"));
+    cancelled.interrupted_turn_input_cancellation = Some(crate::TurnCancellationEvidence {
+        request_id: "cancel-turn-42".to_string(),
+        origin: Some("operator".to_string()),
+        reason: Some("stop".to_string()),
+        undelivered: crate::TurnCancelDisposition::Drop,
+        mode: crate::TurnCancelMode::Immediate,
+        honoured_after_step: None,
+    });
+    assert_ne!(
+        cancelled
+            .turn_commit_hash()
+            .expect("cancellation-bearing intent"),
+        baseline_hash,
+        "accepted cancellation evidence is identity-relevant"
+    );
+}
+
+#[test]
 fn failure_evidence_changes_intent_hash_without_changing_empty_legacy_hash() {
     let baseline = intent_fixture();
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");

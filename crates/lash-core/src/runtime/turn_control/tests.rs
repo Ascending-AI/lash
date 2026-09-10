@@ -987,6 +987,79 @@ async fn after_step_request_is_deferred_until_immediate_escalates_it() {
 }
 
 #[tokio::test]
+async fn weaker_repeat_and_recovery_preserve_the_accepted_escalation() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("effective-escalation");
+    let store = Arc::new(InMemorySessionStore::default());
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+
+    let base = request(address.clone(), "after-step-a").mode(TurnCancelMode::AfterStep);
+    assert!(matches!(
+        driver
+            .request_cancel(base)
+            .await
+            .expect("accept base request")
+            .outcome,
+        TurnCancelOutcome::Requested(_)
+    ));
+    let escalation = request(address.clone(), "immediate-b");
+    let escalated = driver
+        .request_cancel(escalation.clone())
+        .await
+        .expect("accept escalation");
+    assert!(matches!(
+        escalated.outcome,
+        TurnCancelOutcome::Escalated(ref evidence)
+            if evidence.request_id == escalation.request_id
+    ));
+
+    let weaker = request(address.clone(), "after-step-c").mode(TurnCancelMode::AfterStep);
+    let repeated = driver
+        .request_cancel(weaker)
+        .await
+        .expect("repeat weaker request after escalation");
+    assert!(matches!(
+        repeated.outcome,
+        TurnCancelOutcome::AlreadyRequested(ref evidence)
+            if evidence.request_id == escalation.request_id
+                && evidence.mode == TurnCancelMode::Immediate
+    ));
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .expect("read projected winner")
+            .expect("winner remains durable")
+            .request,
+        escalation
+    );
+
+    let recovered = ActiveTurnControl::reconcile_orphan_cancel_intent(
+        host.as_ref(),
+        &address,
+        escalation.evidence(),
+    )
+    .await
+    .expect("reconcile after owner recovery")
+    .expect("gate pair remains addressable");
+    assert!(matches!(
+        recovered,
+        crate::TurnCancelRepairDecision::CancellationWon(ref evidence)
+            if evidence.request_id == escalation.request_id
+                && evidence.mode == TurnCancelMode::Immediate
+    ));
+    assert!(matches!(
+        ActiveTurnControl::peek_orphan_repair_decision(host.as_ref(), &address)
+            .await
+            .expect("peek effective cancellation after recovery"),
+        Some(crate::TurnCancelRepairDecision::CancellationWon(ref evidence))
+            if evidence.request_id == escalation.request_id
+                && evidence.mode == TurnCancelMode::Immediate
+    ));
+}
+
+#[tokio::test]
 async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("boundary");

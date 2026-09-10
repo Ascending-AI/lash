@@ -59,9 +59,10 @@ quality. This runbook is authored for a deliberate token-spending browser run.
    wall-clock harness busy-waiting). Both shallow and deep cancellation must commit
    `Cancelled` promptly (<10s from request) without waiting for the remainder of the
    durable sleep timer. A judge cannot credit the deep claim from the shallow arm.
-8. **Late Stop is a no-op.** Repeating the exact cancellation request after the turn has
-   committed must report `completion_won_race`; it must not add another affected input,
-   change the accepted disposition, or make the completed address active again.
+8. **Late Stop is a no-op.** After the turn leaves the workbench's active-turn index,
+   another UI Stop finds no address and reports no accepted cancellation. The separate
+   exact-address controller probe must report `completion_won_race` without changing
+   affected inputs, disposition, terminal evidence, or active-address state.
 
 ## Working material
 
@@ -114,10 +115,12 @@ Press **stop turn** while capturing the `POST /api/turn/cancel` response. Gates:
    interrupted terminal.
 
 Screenshot `01-cancelled.png`; save the cancel response as `01-cancel-receipt.json`.
-Repeat `POST /api/turn/cancel` for the exact completed address and save
-`01-late-cancel-noop.json`. Require `completion_won_race`, then compare `/api/state`
-before and after: the address remains absent and the committed terminal/evidence is
-unchanged.
+After `/api/state` no longer lists the address, another workbench Stop must return
+`accepted:false` with an empty `cancellations` list. This session-level route cannot
+address an inactive turn. Run `LASH_E2E_TURN_CONTROL_ONLY=1 just
+restate-postgres-workers-e2e` for the exact-address late-cancel proof; it requires
+`completion_won_race` and unchanged terminal, durable evidence, disposition, and
+active-address state after both normal completion and owner-crash recovery.
 
 ## Phase 2 — Restart the web process mid-turn, then Stop
 

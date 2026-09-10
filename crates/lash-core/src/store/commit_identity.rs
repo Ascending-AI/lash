@@ -1341,6 +1341,7 @@ struct RuntimeCommitIntent<'a> {
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,
     interrupted_turn_input_turn_id: Option<&'a TurnId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     interrupted_turn_input_cancellation: Option<&'a crate::TurnCancellationEvidence>,
     committed_attachment_ids: &'a [crate::AttachmentId],
 }

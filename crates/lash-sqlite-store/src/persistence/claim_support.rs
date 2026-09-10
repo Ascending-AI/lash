@@ -790,6 +790,11 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
             outcome: None,
         },
     );
+    if record.request.mode.is_stronger_than(evidence.mode) {
+        // Reconciliation candidates come from the gate pair. Preserve a
+        // stronger escalation when a delayed base-gate projection arrives.
+        return Ok(());
+    }
     record.request = lash_core::facade_support::TurnCancelRequest {
         address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
         request_id: evidence.request_id.clone(),

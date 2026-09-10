@@ -123,6 +123,29 @@ pub(super) async fn drive_turn_control_scenarios(
     let deployment = RestateTurnDeployment::new(ingress_url.to_string());
     let driver = deployment.turn_work_driver(Arc::new(storage.session_store_factory()));
 
+    let completed = TurnRequest {
+        workflow_id: "e2e-turn-cancel-late-normal".to_string(),
+        fail_once: false,
+        scenario: TurnScenario::TurnControlComplete,
+        signal: None,
+    };
+    submit_workflow(ingress_url, &completed).await?;
+    let _ = wait_for_terminal_result(storage.pool(), &completed.workflow_id).await?;
+    let completed_address = turn_address(&completed).await?;
+    let completed_terminal = driver
+        .await_terminal(&completed_address)
+        .await
+        .context("attach to normally completed turn")?;
+    assert_non_cancel_terminal(&completed_terminal)?;
+    assert_late_cancel_is_noop(
+        storage,
+        &driver,
+        &completed_address,
+        &completed_terminal,
+        "e2e-cancel-late-normal",
+    )
+    .await?;
+
     // A remote host can durably win the gate before any worker owns the turn.
     let before = turn_control_request("e2e-turn-cancel-before-start", false);
     let before_evidence_id = "e2e-cancel-before-start";
@@ -231,6 +254,14 @@ pub(super) async fn drive_turn_control_scenarios(
     assert_cancelled_terminal(&recovery_terminal, recovery_evidence_id)?;
     let recovery_response = wait_for_terminal_result(storage.pool(), &recovery.workflow_id).await?;
     assert_cancelled_response(&recovery_response, recovery_evidence_id)?;
+    assert_late_cancel_is_noop(
+        storage,
+        &driver,
+        &turn_address(&recovery).await?,
+        &recovery_terminal,
+        "e2e-cancel-late-after-recovery",
+    )
+    .await?;
     // FIG-1671 cede semantics (ADR 0069 §5(d)): the witness here is convergence,
     // not migration. This gate used to require a *different* worker to finish the
     // recovered turn, which encoded the pre-acceptance failover model where the
@@ -250,7 +281,82 @@ pub(super) async fn drive_turn_control_scenarios(
     assert_recovered_turn_converged(storage.pool(), &TurnId::from(recovery.workflow_id)).await?;
 
     println!(
-        "turn-control gates passed: cross-process; cancel-before-start; seal-vs-cancel; owner-crash-recovery; terminal-attach-evidence"
+        "turn-control gates passed: cross-process; cancel-before-start; seal-vs-cancel; owner-crash-recovery; terminal-attach-evidence; exact-address-late-noop"
+    );
+    Ok(())
+}
+
+async fn assert_late_cancel_is_noop(
+    storage: &PostgresStorage,
+    driver: &TurnWorkDriver,
+    address: &TurnAddress,
+    terminal: &TurnTerminal,
+    request_id: &str,
+) -> Result<()> {
+    use lash_core::SessionStoreFactory as _;
+
+    let store = storage
+        .session_store_factory()
+        .open_existing_store_by_id(&address.session_id)
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("open exact session for late-cancel proof")?
+        .context("late-cancel session disappeared")?;
+    let record_before = store
+        .turn_cancel_request(address)
+        .await
+        .context("read cancellation record before late request")?;
+    let active_before = store
+        .list_pending_turn_inputs(&address.session_id)
+        .await
+        .context("list active inputs before late request")?
+        .into_iter()
+        .filter(|input| input.ingress.active_turn_id() == Some(&address.turn_id))
+        .count();
+    anyhow::ensure!(
+        active_before == 0,
+        "completed address was active before late request: {address:?}"
+    );
+
+    let late = driver
+        .request_cancel(cancel_request(address.clone(), request_id))
+        .await
+        .context("repeat exact-address cancellation after terminal")?;
+    anyhow::ensure!(
+        matches!(late.outcome, TurnCancelOutcome::CompletionWonRace),
+        "late exact-address cancellation was not a typed no-op: {:?}",
+        late.outcome
+    );
+    anyhow::ensure!(
+        late.record.is_none(),
+        "late no-op returned a mutable record"
+    );
+    let terminal_after = driver
+        .await_terminal(address)
+        .await
+        .context("reattach terminal after late request")?;
+    anyhow::ensure!(
+        serde_json::to_value(&terminal_after)? == serde_json::to_value(terminal)?,
+        "late request changed the published terminal"
+    );
+    anyhow::ensure!(
+        store
+            .turn_cancel_request(address)
+            .await
+            .context("read cancellation record after late request")?
+            == record_before,
+        "late request changed durable cancellation evidence or disposition"
+    );
+    let active_after = store
+        .list_pending_turn_inputs(&address.session_id)
+        .await
+        .context("list active inputs after late request")?
+        .into_iter()
+        .filter(|input| input.ingress.active_turn_id() == Some(&address.turn_id))
+        .count();
+    anyhow::ensure!(
+        active_after == 0,
+        "late request reopened the completed address: {address:?}"
     );
     Ok(())
 }

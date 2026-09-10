@@ -157,6 +157,15 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&address.session_id)?;
         let mut requests = self.turn_cancel_requests.lock_recover();
+        if requests
+            .get(&address.turn_id)
+            .is_some_and(|record| record.request.mode.is_stronger_than(evidence.mode))
+        {
+            // Both candidates were already derived from the gate pair. A
+            // delayed base-gate projection must not overwrite an accepted
+            // escalation that another caller projected first.
+            return Ok(());
+        }
         let outcome = requests
             .get(&address.turn_id)
             .and_then(|record| record.outcome.clone());

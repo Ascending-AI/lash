@@ -530,7 +530,14 @@ impl TurnWorkDriver {
                     self.escalate(&request.address, evidence, existing).await
                 }
                 TurnGateTerminal::CancelRequested(existing) => {
-                    Ok(TurnCancelOutcome::AlreadyRequested(existing))
+                    Ok(TurnCancelOutcome::AlreadyRequested(
+                        effective_cancel_evidence(
+                            self.effect_host.as_ref(),
+                            &request.address,
+                            existing,
+                        )
+                        .await?,
+                    ))
                 }
                 TurnGateTerminal::CompletionSealed => Ok(TurnCancelOutcome::CompletionWonRace),
             },
@@ -777,6 +784,40 @@ async fn escalation_key(
         .await
 }
 
+/// Return the cancellation evidence that the immutable gate pair has accepted.
+///
+/// An after-step request owns the base gate. A later immediate request can own
+/// the escalation gate, so readers must inspect both before projecting the
+/// winner. Durable request rows are deliberately not consulted here: they are
+/// only a projection of this authority.
+async fn effective_cancel_evidence(
+    resolver: &dyn AwaitEventResolver,
+    address: &TurnAddress,
+    base: TurnCancellationEvidence,
+) -> Result<TurnCancellationEvidence, RuntimeError> {
+    if base.mode.is_immediate() {
+        return Ok(base);
+    }
+    let key = match escalation_key(resolver, address).await {
+        Ok(key) => key,
+        Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+            return Ok(base);
+        }
+        Err(err) => return Err(err),
+    };
+    let terminal = match resolver.peek_await_event(&key).await {
+        Ok(terminal) => terminal,
+        Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+            return Ok(base);
+        }
+        Err(err) => return Err(err),
+    };
+    match terminal.map(decode_gate).transpose()? {
+        Some(TurnGateTerminal::CancelRequested(escalated)) => Ok(escalated),
+        Some(TurnGateTerminal::CompletionSealed) | None => Ok(base),
+    }
+}
+
 /// Per-execution bridge between the durable gate and the turn's internal
 /// cancellation token.
 ///
@@ -819,8 +860,11 @@ impl ActiveTurnControl {
     }
 
     /// Observe an already-settled cancellation gate for teardown repair.
-    /// Pending gates remain untouched because the same turn id may be resumed
-    /// by a successor after this owner loses its lease.
+    ///
+    /// A pending gate proves there is no accepted cancellation yet. The store
+    /// still rechecks durable intent atomically before applying the returned
+    /// ordinary repair, so a concurrent request vetoes it. Unknown or revoked
+    /// gates remain `None` and never authorize repair.
     pub(crate) async fn peek_orphan_repair_decision(
         resolver: &dyn AwaitEventResolver,
         address: &TurnAddress,
@@ -839,16 +883,19 @@ impl ActiveTurnControl {
             }
             Err(err) => return Err(err),
         };
-        resolution.map(decode_gate).transpose().map(|terminal| {
-            terminal.map(|terminal| match terminal {
-                TurnGateTerminal::CancelRequested(evidence) => {
-                    crate::TurnCancelRepairDecision::CancellationWon(evidence)
-                }
-                TurnGateTerminal::CompletionSealed => {
-                    crate::TurnCancelRepairDecision::CancellationDidNotWin
-                }
-            })
-        })
+        let Some(terminal) = resolution.map(decode_gate).transpose()? else {
+            return Ok(Some(crate::TurnCancelRepairDecision::NoCancellationIntent));
+        };
+        Ok(Some(match terminal {
+            TurnGateTerminal::CancelRequested(evidence) => {
+                crate::TurnCancelRepairDecision::CancellationWon(
+                    effective_cancel_evidence(resolver, address, evidence).await?,
+                )
+            }
+            TurnGateTerminal::CompletionSealed => {
+                crate::TurnCancelRepairDecision::CancellationDidNotWin
+            }
+        }))
     }
 
     /// Reconcile durable request intent through the existing keyed gate.
@@ -877,8 +924,31 @@ impl ActiveTurnControl {
             ResolveOutcome::UnknownOrRevoked => return Ok(None),
         };
         Ok(Some(match decode_gate(terminal)? {
-            TurnGateTerminal::CancelRequested(evidence) => {
-                crate::TurnCancelRepairDecision::CancellationWon(evidence)
+            TurnGateTerminal::CancelRequested(existing)
+                if evidence.mode.is_stronger_than(existing.mode) =>
+            {
+                let key = escalation_key(resolver, address).await?;
+                let proposed =
+                    gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
+                match resolver.resolve_await_event(&key, proposed).await? {
+                    ResolveOutcome::Accepted => {
+                        crate::TurnCancelRepairDecision::CancellationWon(evidence)
+                    }
+                    ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+                        TurnGateTerminal::CancelRequested(escalated) => {
+                            crate::TurnCancelRepairDecision::CancellationWon(escalated)
+                        }
+                        TurnGateTerminal::CompletionSealed => {
+                            crate::TurnCancelRepairDecision::CancellationWon(existing)
+                        }
+                    },
+                    ResolveOutcome::UnknownOrRevoked => return Ok(None),
+                }
+            }
+            TurnGateTerminal::CancelRequested(existing) => {
+                crate::TurnCancelRepairDecision::CancellationWon(
+                    effective_cancel_evidence(resolver, address, existing).await?,
+                )
             }
             TurnGateTerminal::CompletionSealed => {
                 crate::TurnCancelRepairDecision::CancellationDidNotWin

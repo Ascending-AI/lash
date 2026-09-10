@@ -606,7 +606,11 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
              origin = EXCLUDED.origin,
              reason = EXCLUDED.reason,
              disposition = EXCLUDED.disposition,
-             mode = EXCLUDED.mode",
+             mode = EXCLUDED.mode
+         WHERE NOT (
+             lash_turn_cancel_requests.mode = 'immediate'
+             AND EXCLUDED.mode = 'after_step'
+         )",
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())

@@ -376,8 +376,26 @@ impl LashRuntime {
         store: &Arc<dyn crate::store::RuntimePersistence>,
         fence: &crate::SessionExecutionLeaseAuthority,
         resumable_turn_id: &TurnId,
-        turn_control_resolver: &dyn crate::AwaitEventResolver,
+        scoped_effect_controller: &crate::ScopedEffectController<'_>,
     ) -> usize {
+        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
+        let turn_control_binding = match turn_control_host
+            .turn_control_binding(scoped_effect_controller)
+            .await
+        {
+            Ok(binding) => binding,
+            Err(err) => {
+                tracing::warn!(session_id = %self.state.session_id, error = %err, event = "turn_input.cancel_gate_binding_failed");
+                return 0;
+            }
+        };
+        let turn_control_resolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            | crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
+        };
         let turn_ids = match store
             .orphaned_active_turn_ids(
                 &self.state.session_id,
@@ -478,7 +496,7 @@ impl LashRuntime {
         &self,
         trace_turn_id: &TurnId,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
-        turn_control_resolver: &dyn crate::AwaitEventResolver,
+        scoped_effect_controller: &crate::ScopedEffectController<'_>,
     ) {
         let Some(store) = self
             .session
@@ -495,6 +513,24 @@ impl LashRuntime {
                 "a lane-less turn leaves its orphaned inputs to the drain backstop"
             );
             return;
+        };
+        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
+        let turn_control_binding = match turn_control_host
+            .turn_control_binding(scoped_effect_controller)
+            .await
+        {
+            Ok(binding) => binding,
+            Err(err) => {
+                tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_gate_binding_failed");
+                return;
+            }
+        };
+        let turn_control_resolver: &dyn crate::AwaitEventResolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver: _, peek } => peek.controller(),
+            crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
         };
         let address = crate::TurnAddress::new(&self.state.session_id, trace_turn_id);
         let decision =

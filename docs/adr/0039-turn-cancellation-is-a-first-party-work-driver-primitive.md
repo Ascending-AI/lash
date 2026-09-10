@@ -65,10 +65,13 @@ We rejected the store as a *coordination* mechanism for cancellation — a lease
 marker, or a row that a waiter polls — because that adds store coordination,
 polling, and recovery races. A durable turn-cancel request row does exist
 (`record_turn_cancel_request` / `turn_cancel_request`), and it is load-bearing
-in two places: the disposition it carries selects the evidence the gate is
-resolved with, and teardown and orphan repair read it to decide the policy for
-active-turn input the cancelled turn never delivered. It is a durable record of
-the request, not a stop signal and not a channel any waiter observes. We
+as an intent and receipt projection. The keyed gate pair alone decides whether
+cancellation won and which base or escalated evidence the turn honours. Only
+that settled evidence may select the policy for active-turn input the cancelled
+turn never delivered. Teardown and orphan repair read durable intent so they
+know which unresolved gate to reconcile, then project the gate's effective
+winner back into the row. The row is not a stop signal, arbitration result, or
+channel any waiter observes. We
 rejected invocation-id cancellation because it leaks engine identity and can
 destroy an owner without a Lash result; turns-as-processes because ADR 0003 keeps foreground turns
 session-owned; and session-wide cancel-all because it needs an active-turn index and can touch the
