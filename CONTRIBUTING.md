@@ -190,11 +190,43 @@ merged product state lives on `main`.
 
 Merging to `main` does not release. A maintainer manually runs the GitHub
 `Release` workflow after selecting a green commit on `main`; leaving
-`release_sha` blank selects the current head. The workflow verifies a green
-full-profile CI run on that commit (dispatch `ci.yml` on it first), computes
-the next version, tags the exact commit, builds assets, and publishes with
-the auto-generated commit list; release notes are written manually on the
-GitHub release afterward.
+`release_sha` blank selects the current head. The workflow accepts only a
+completed, successful full-profile `workflow_dispatch` run whose `headSha`
+equals that release commit. A successful push, merge-queue run, neighboring
+commit, or cancelled run is not release evidence.
+
+For the current `main` tip, dispatch `ci.yml` with `--ref main`. To certify an
+older commit that is still an ancestor of `origin/main`, use a fresh temporary
+branch pinned to that exact commit because GitHub dispatches a branch or tag,
+not an arbitrary SHA:
+
+```sh
+set -euo pipefail
+git fetch origin main
+target="$(git rev-parse '<commit>^{commit}')"
+git merge-base --is-ancestor "$target" origin/main
+cert_branch="release-certification/${target}-$(date -u +%Y%m%dT%H%M%SZ)"
+git push --force-with-lease="refs/heads/${cert_branch}:" \
+  origin "${target}:refs/heads/${cert_branch}"
+gh workflow run ci.yml --ref "$cert_branch"
+gh run list --workflow ci.yml --branch "$cert_branch" --event workflow_dispatch \
+  --limit 1 --json databaseId,headSha,status,conclusion,url
+```
+
+The empty `--force-with-lease` expectation makes branch creation fail if that
+name already exists. Before relying on the listed run, verify its `headSha`
+equals `target`, then wait for that exact run with
+`gh run watch <databaseId> --exit-status`. Keep the branch pinned and dedicated
+while it runs. Moving it makes subsequent branch inspection misleading; opening
+a pull request from it or dispatching it again creates an event in the same
+concurrency group and can visibly cancel the certification run. Delete the
+temporary branch after the run completes. Then dispatch `release.yml` with the
+same full SHA in `release_sha`; the release workflow independently verifies
+that the commit is on `main` and that its exact full-profile CI run succeeded.
+
+After those checks, the release workflow computes the next version, tags the
+exact commit, builds assets, and publishes with the auto-generated commit list;
+release notes are written manually on the GitHub release afterward.
 
 Never create release tags or publish crates and artifacts by hand. See
 `docs/PUBLISHING.md` for the complete release contract.

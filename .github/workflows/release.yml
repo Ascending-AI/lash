@@ -93,8 +93,8 @@ jobs:
           if not matching:
               raise SystemExit(
                   "release refused: no full-profile (workflow_dispatch) CI "
-                  f"run found for target {sha}; dispatch the CI workflow on "
-                  "main at that commit and rerun once it is green"
+                  f"run found for target {sha}; dispatch the CI workflow for "
+                  "that exact commit (see CONTRIBUTING.md) and rerun once it is green"
               )
           run = matching[0]
           if (

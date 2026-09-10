@@ -2020,12 +2020,12 @@ derive_mutation_jobs() {{
         self.assertIn("|| github.head_ref", group)
         self.assertIn("|| github.ref_name", group)
 
-        # Trunk runs are the release evidence — release.yml will not release a
-        # commit without its own green main CI run — so no cancellable event may
-        # ever key into a trunk run's group. Both trunk keys carry a colon, which
-        # `git check-ref-format` forbids in a ref name: that is what makes them
-        # unforgeable by any branch, in this repository or a fork, rather than
-        # merely unlikely to collide.
+        # Automatic trunk runs share one newest-wins group. Full-profile release
+        # certification uses a distinct dispatch group, so a newer push cannot
+        # cancel the exact-SHA evidence release.yml requires. Both trunk keys
+        # carry a colon, which `git check-ref-format` forbids in a ref name: that
+        # is what makes them unforgeable by any branch, in this repository or a
+        # fork, rather than merely unlikely to collide.
         self.assertIn("github.event_name == 'push' && 'trunk:push'", group)
         self.assertIn(
             "(github.event_name == 'workflow_dispatch' && github.ref_name == 'main')"
@@ -2044,7 +2044,8 @@ derive_mutation_jobs() {{
                 self.assertIn(":", key, "an unforgeable key needs the forbidden colon")
 
         self.assertIn(
-            "cancel-in-progress: ${{ github.event_name == 'pull_request' || "
+            "cancel-in-progress: ${{ github.event_name == 'push' || "
+            "github.event_name == 'pull_request' || "
             "(github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}",
             group,
         )
