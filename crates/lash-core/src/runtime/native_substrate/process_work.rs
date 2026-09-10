@@ -1,10 +1,9 @@
-use crate::ProcessId;
 use std::sync::Arc;
 
 use crate::{PluginError, ProcessAdmissionReport, WatchedRegistry};
 
 #[cfg(any(test, feature = "testing"))]
-use crate::{ProcessAwaitOutput, ProcessEvent, ProcessRegistry};
+use crate::{ProcessAwaitOutput, ProcessEvent, ProcessId, ProcessRegistry};
 
 use super::{NativeProcessAwaiter, ProcessTerminalWait, ProcessWorkSubstrate};
 use crate::runtime::DurableProcessWorker;

@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
     AttachmentRootSet, InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,

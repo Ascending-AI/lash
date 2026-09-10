@@ -8,6 +8,7 @@ use lash::direct::{
 };
 use lash::durability::RuntimeHostConfig;
 use lash::TurnId;
+use lash::SessionId;
 use lash::messages::MessageRole;
 use lash::persistence::{
     CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity,
@@ -122,7 +123,7 @@ impl SessionExecutionLeaseStore for FacadeStore {
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         Ok(SessionExecutionLeaseClaimOutcome::Acquired(
             SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
-                session_id: session_id.to_string(),
+                session_id: session_id.clone(),
                 owner: owner.clone(),
                 executor_id: executor_id.to_string(),
                 lease_token: claim_nonce.as_str().to_string(),

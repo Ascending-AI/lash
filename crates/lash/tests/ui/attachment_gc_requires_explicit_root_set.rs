@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use lash::SessionId;
 use lash::persistence::{
     AttachmentReclamationPolicy, EmptyRootSetPolicy, InMemoryAttachmentStore,
     InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,

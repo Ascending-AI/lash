@@ -376,7 +376,7 @@ macro_rules! impl_noop_attachment_manifest {
 
             fn commit_refs(
                 &self,
-                _session_id: &SessionId,
+                _session_id: &$crate::SessionId,
                 _attachment_ids: &[$crate::AttachmentId],
             ) -> ::std::result::Result<(), $crate::StoreError> {
                 Ok(())
@@ -392,7 +392,7 @@ macro_rules! impl_noop_attachment_manifest {
 
             fn forget(
                 &self,
-                _session_id: &SessionId,
+                _session_id: &$crate::SessionId,
                 _attachment_id: &$crate::AttachmentId,
             ) -> ::std::result::Result<(), $crate::StoreError> {
                 Ok(())

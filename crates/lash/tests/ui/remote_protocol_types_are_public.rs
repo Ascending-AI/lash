@@ -1,4 +1,5 @@
 use lash::TurnId;
+use lash::{ProcessId, SessionId};
 
 fn main() {
     let input = lash::remote::turn_input::RemoteTurnInput::text("hello");
@@ -81,11 +82,11 @@ fn main() {
     let _process =
         lash::remote::observations::RemoteSessionObservationEventPayload::ProcessChanged {
             kind: lash::remote::observations::RemoteSessionProcessEventKind::Started,
-            process_ids: vec!["process".to_string()],
+            process_ids: vec![ProcessId::from("process")],
         };
 
     let process_start = lash::remote::processes::RemoteProcessStartRequest {
-        id: "process".to_string(),
+        id: ProcessId::from("process"),
         input: lash::remote::processes::RemoteProcessInput::External {
             metadata: serde_json::json!({}),
         },
