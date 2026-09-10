@@ -50,6 +50,8 @@ use tempfile::TempDir;
 mod direct_turn_acceptance;
 #[path = "conformance/pre_frame_key.rs"]
 mod pre_frame_key;
+#[path = "conformance/schema_refusal.rs"]
+mod schema_refusal;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "conformance/trigger_occurrence_retention.rs"]
@@ -1032,25 +1034,6 @@ async fn sqlite_process_continuation_store_satisfies_conformance() {
 }
 
 #[tokio::test]
-async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_serving() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-unit-external-owner-processes.db");
-    let conn = rusqlite::Connection::open(&path).expect("open legacy process db");
-    conn.pragma_update(None, "user_version", 12)
-        .expect("stamp legacy process schema");
-    drop(conn);
-
-    let error = match SqliteProcessRegistry::open(&path, dir.path().join("sessions")).await {
-        Ok(_) => panic!("pre-unit-external-owner process stores must be recreated"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 32"));
-    assert!(message.contains("delete the process registry database and start fresh"));
-}
-
-#[tokio::test]
 async fn sqlite_session_store_factory_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let unbound = Store::memory().await.expect("unbound durable-core store");
@@ -1210,25 +1193,6 @@ async fn sqlite_trigger_store_satisfies_conformance() {
         }
     })
     .await;
-}
-
-#[tokio::test]
-async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-keyed-triggers.db");
-    let conn = rusqlite::Connection::open(&path).expect("open legacy trigger db");
-    conn.pragma_update(None, "user_version", 1)
-        .expect("stamp legacy trigger schema");
-    drop(conn);
-
-    let error = match SqliteTriggerStore::open(&path).await {
-        Ok(_) => panic!("pre-keyed trigger stores must be recreated"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash trigger store schema"));
-    assert!(message.contains("supports schema version 8"));
-    assert!(message.contains("delete the trigger store database and start fresh"));
 }
 
 #[tokio::test]

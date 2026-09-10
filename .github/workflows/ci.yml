@@ -988,6 +988,8 @@ jobs:
       # queue states the base it built on, so use it.
       # The PR guarantee requires a current merge ref, enforced by an up-to-date
       # branch rule or merge queue; a stale merge ref has a stale merge-base.
+      # Manual recovery runs skip this gate and immediately emit a warning summary
+      # so their green conclusion cannot be mistaken for version-surface proof.
       - name: Check versioned surface bumps
         if: github.event_name != 'workflow_dispatch'
         env:
@@ -1002,6 +1004,10 @@ jobs:
             base="HEAD~1"
           fi
           python3 scripts/check_version_bumps.py --base "$base"
+
+      - name: Explain skipped versioned surface bump gate
+        if: github.event_name == 'workflow_dispatch'
+        run: bash scripts/ci/report-manual-dispatch-skips.sh
 
       # A service-backed suite that skips itself reports green having compared
       # nothing. This pins both mechanisms that stop it: the LASH_REQUIRE_*
