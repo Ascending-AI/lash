@@ -66,9 +66,13 @@ class ConfidenceConclusionTests(unittest.TestCase):
 
 
 class ClassifyTests(unittest.TestCase):
+    # A docs-only verdict is a statement about content as well as paths, so
+    # these fixtures state the diff content they were classified from. An
+    # absent diff carries no content signal and deliberately widens instead.
     def test_docs_only_skips_every_expensive_family(self) -> None:
         plan = ci_plan.classify(
-            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")]
+            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")],
+            "+A paragraph about the operator runbook.",
         )
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
@@ -80,13 +84,13 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_addition_and_modification_preserve_docs_only_skip(self) -> None:
-        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")])
+        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")], "+A new sentence.")
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual("docs-only diff", plan["reason"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_markdown_file_stays_docs_only(self) -> None:
-        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")])
+        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")], "+A revised decision.")
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
@@ -142,7 +146,9 @@ class ClassifyTests(unittest.TestCase):
 
 def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
-    plan_outputs.update({"docs_only": "false", "fail_open": "false"})
+    plan_outputs.update(
+        {"docs_only": "false", "fail_open": "false", "identity_versions": "false"}
+    )
     needs = {job: {"result": "success", "outputs": {}} for job in ci_plan.UNGATED_JOBS | set(ci_plan.GATED_JOBS)}
     # Full-profile jobs are skipped on every event but workflow_dispatch,
     # which is what these event-less fixtures exercise.
@@ -299,6 +305,142 @@ class ProducerConclusionTests(unittest.TestCase):
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             self.assertEqual("skipped", needs[job]["result"])
         self.assertEqual([], self.evaluate(needs, "merge_group", False))
+
+
+# Built at runtime rather than spelled out, so this file's own diff never
+# carries an identity-constant definition line and never widens its own CI.
+def identity_definition_line(sign: str, name: str, value: str) -> str:
+    return f"{sign}pub const {name}: u32 = {value};"
+
+
+def diff_around(*lines: str) -> str:
+    return "\n".join(
+        ("diff --git a/crates/x/src/lib.rs b/crates/x/src/lib.rs",
+         "--- a/crates/x/src/lib.rs",
+         "+++ b/crates/x/src/lib.rs",
+         "@@ -1 +1 @@",
+         *lines)
+    )
+
+
+def conclusion_needs_for(plan: dict[str, str], event: str) -> dict[str, dict[str, object]]:
+    """A wholly successful board carrying `plan`'s real outputs."""
+
+    needs = successful_needs()
+    needs["plan"]["outputs"] = dict(plan)
+    for job in ci_plan.TRUNK_ONLY_JOBS:
+        needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
+    return needs
+
+
+class IdentityVersionTests(unittest.TestCase):
+    """A semantic-hash or bytecode-format bump must buy the full PG matrix."""
+
+    def test_moving_either_constant_is_detected(self) -> None:
+        for name in ci_plan.IDENTITY_VERSION_CONSTANTS:
+            with self.subTest(constant=name):
+                diff = diff_around(
+                    identity_definition_line("-", name, "11"),
+                    identity_definition_line("+", name, "12"),
+                )
+                self.assertTrue(ci_plan.detect_identity_version_change(diff))
+                plan = ci_plan.classify([("M", "crates/x/src/lib.rs")], diff)
+                self.assertEqual("true", plan["identity_versions"])
+
+    def test_removing_a_definition_is_detected_so_a_relocation_still_fires(self) -> None:
+        diff = diff_around(identity_definition_line("-", "BYTECODE_FORMAT_VERSION", "12"))
+        self.assertTrue(ci_plan.detect_identity_version_change(diff))
+
+    def test_ordinary_diffs_do_not_widen_the_matrix(self) -> None:
+        name = "LASHLANG_SEMANTIC_HASH_VERSION"
+        for line in (
+            "+    let x = 1;",
+            # A re-export or a mere mention is not a move of the definition.
+            f"+pub use lash_sansio::{name};",
+            f"+/// See [`{name}`] for the identity contract.",
+            f"+        writer.atom({name});",
+        ):
+            with self.subTest(line=line):
+                self.assertFalse(ci_plan.detect_identity_version_change(diff_around(line)))
+        plan = ci_plan.classify(
+            [("M", "crates/lash-core/src/lib.rs")], diff_around("+    let x = 1;")
+        )
+        self.assertEqual("false", plan["identity_versions"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_file_headers_naming_a_constant_are_not_definition_lines(self) -> None:
+        name = "BYTECODE_FORMAT_VERSION"
+        diff = "\n".join(
+            (
+                f"--- a/crates/x/{name}.rs",
+                f"+++ b/crates/x/{name}.rs",
+                "@@ -1 +1 @@",
+                "+// unrelated",
+            )
+        )
+        self.assertFalse(ci_plan.detect_identity_version_change(diff))
+
+    def test_a_docs_diff_quoting_a_definition_line_is_not_docs_only(self) -> None:
+        # An ADR code fence naming a constant is enough to set the signal.
+        # postgres-store gates its own `if` on the stores family, so a plan
+        # that widened the matrix while permitting that job to skip would
+        # demand, on a trunk push, a job that never ran.
+        diff = diff_around(identity_definition_line("+", "BYTECODE_FORMAT_VERSION", "13"))
+        plan = ci_plan.classify([("M", "docs/adr/0086-lashlang-identity.md")], diff)
+        self.assertEqual("true", plan["identity_versions"])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+        self.assertEqual("Lashlang identity version moved", plan["reason"])
+        self.assertEqual([], ci_plan.evaluate_conclusion(
+            conclusion_needs_for(plan, "push"), event_name="push", ref="refs/heads/main"
+        ))
+
+    def test_absent_diff_content_falls_open_to_the_full_matrix(self) -> None:
+        self.assertEqual(
+            "true", ci_plan.classify([("M", "crates/x/src/lib.rs")])["identity_versions"]
+        )
+        self.assertEqual("true", ci_plan.fail_open("no exact diff")["identity_versions"])
+
+    def test_conclusion_refuses_a_bump_whose_postgres_matrix_did_not_run(self) -> None:
+        for result in ("skipped", "failure", "cancelled"):
+            for event in ("pull_request", "merge_group", "push"):
+                with self.subTest(result=result, event=event):
+                    needs = successful_needs()
+                    needs["plan"]["outputs"]["identity_versions"] = "true"
+                    needs["postgres-store"]["result"] = result
+                    for job in ci_plan.TRUNK_ONLY_JOBS:
+                        needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
+                    problems = ci_plan.evaluate_conclusion(needs, event_name=event)
+                    self.assertTrue(any("postgres-store" in problem for problem in problems))
+                    self.assertTrue(
+                        any("identity version" in problem for problem in problems),
+                        problems,
+                    )
+
+    def test_conclusion_requires_the_identity_output_to_be_stated(self) -> None:
+        needs = successful_needs()
+        del needs["plan"]["outputs"]["identity_versions"]
+        problems = ci_plan.evaluate_conclusion(needs, event_name="pull_request")
+        self.assertTrue(any("identity_versions" in problem for problem in problems))
+
+    def test_workflow_wires_the_output_into_the_postgres_matrix_and_steps(self) -> None:
+        workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        self.assertIn(
+            "steps.classify.outputs.identity_versions", workflow["plan"]["outputs"]["identity_versions"]
+        )
+        job = workflow["postgres-store"]
+        matrix = job["strategy"]["matrix"]["postgres"]
+        self.assertIn("needs.plan.outputs.identity_versions == 'true'", matrix)
+        self.assertIn('"14", "16", "18"', matrix)
+        gated = {
+            step["name"]: step["if"]
+            for step in job["steps"]
+            if "if" in step and "github.event_name != 'pull_request'" in step["if"]
+        }
+        self.assertTrue(gated, "postgres-store must still defer heavy steps off pull requests")
+        for name, condition in gated.items():
+            with self.subTest(step=name):
+                self.assertIn("needs.plan.outputs.identity_versions == 'true'", condition)
 
 
 class FuzzSmokeTests(unittest.TestCase):

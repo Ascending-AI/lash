@@ -497,6 +497,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
             "docs_only": "false",
             "fail_open": "false",
+            "identity_versions": "false",
         }
         for job in trunk_only:
             needs[job] = {"result": "skipped", "outputs": {}}
@@ -568,12 +569,14 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             summary,
         )
 
-        # PR-class runs test the oldest supported major; main pushes and the
-        # full profile run the complete catalog byte-identity bracket.
+        # PR-class runs test the oldest supported major; main pushes, the full
+        # profile, and any diff that moves a Lashlang identity version run the
+        # complete catalog byte-identity bracket.
         postgres = workflow_job_block(workflow, "postgres-store")
         self.assertIn(
             "postgres: ${{ fromJSON((github.event_name == 'push'"
-            " && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')"
+            " && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'"
+            " || needs.plan.outputs.identity_versions == 'true')"
             " && '[\"14\", \"16\", \"18\"]' || '[\"14\"]') }}",
             postgres,
         )
@@ -588,6 +591,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         pr_needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "false") | {
             "docs_only": "true",
             "fail_open": "false",
+            "identity_versions": "false",
         }
         for job in trunk_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
