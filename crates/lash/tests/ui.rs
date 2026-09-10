@@ -1,6 +1,15 @@
 #[test]
-fn model_selection_requires_model_and_variant_together() {
+fn facade_compile_time_contracts() {
     let t = trybuild::TestCases::new();
+
+    register_facade_contracts(&t);
+    register_attachment_gc_contract(&t);
+    register_store_seam_contracts(&t);
+    register_rlm_execution_bound_contract(&t);
+    register_rlm_config_builder_contracts(&t);
+}
+
+fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/model_selection_requires_variant.rs");
     t.compile_fail("tests/ui/root_tool_provider_is_not_public.rs");
     t.compile_fail("tests/ui/session_admin_flat_methods_are_not_public.rs");
@@ -46,9 +55,7 @@ fn model_selection_requires_model_and_variant_together() {
     }
 }
 
-#[test]
-fn attachment_gc_requires_explicit_root_set() {
-    let t = trybuild::TestCases::new();
+fn register_attachment_gc_contract(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/attachment_gc_requires_explicit_root_set.rs");
 }
 
@@ -61,12 +68,10 @@ fn attachment_gc_requires_explicit_root_set() {
 /// qualified `Pin` path, so this diagnostic law is pinned to the isolated RLM
 /// feature-boundary graph; the workspace graph exercises the testing facade
 /// separately.
-#[test]
-fn store_seam_answers_have_no_defaults() {
+fn register_store_seam_contracts(t: &trybuild::TestCases) {
     if !cfg!(feature = "rlm") || cfg!(feature = "testing") {
         return;
     }
-    let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/attachment_store_head_has_no_default.rs");
     t.compile_fail("tests/ui/session_store_factory_requires_deletion_answer.rs");
 }
@@ -75,24 +80,20 @@ fn store_seam_answers_have_no_defaults() {
 /// memory limit to `.instruction_limit(..)` does not compile, so the swap that
 /// made `ExecutionBound::instructions(64 * 1024 * 1024)` mean "64 MiB of heap"
 /// is unrepresentable.
-#[test]
-fn rlm_execution_bounds_are_not_swappable() {
+fn register_rlm_execution_bound_contract(t: &trybuild::TestCases) {
     if !cfg!(feature = "rlm") {
         return;
     }
-    let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/rlm_execution_bounds_are_not_swappable.rs");
 }
 
 /// The RLM config builder has no silent defaults: `build()` is absent until
 /// every execution bound has been named, so a host that forgets one does not
 /// compile.
-#[test]
-fn rlm_config_builder_requires_every_bound() {
+fn register_rlm_config_builder_contracts(t: &trybuild::TestCases) {
     if !cfg!(feature = "rlm") {
         return;
     }
-    let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/rlm_config_builder_requires_every_bound.rs");
     t.compile_fail("tests/ui/rlm_config_builder_requires_channel.rs");
 }
