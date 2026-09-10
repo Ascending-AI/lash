@@ -130,7 +130,7 @@ async fn validate_created_session_store_binding(
         ))
     })?;
     if let Some(meta) = meta
-        && &meta.session_id != session_id
+        && meta.session_id != session_id
     {
         return Err(crate::PluginError::Session(format!(
             "configured session-creation store is already bound to session `{}` and cannot be used for session `{session_id}`. {}",

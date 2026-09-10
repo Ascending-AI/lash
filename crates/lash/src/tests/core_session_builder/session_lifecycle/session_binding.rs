@@ -193,7 +193,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
         .expect("source session store");
     let source_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         source_host,
-        &lash_core::SessionId::from("owner-preserved"),
+        lash_core::SessionId::from("owner-preserved"),
         store,
     );
     let duplicate = source_driver
