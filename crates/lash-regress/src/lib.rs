@@ -152,9 +152,6 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 )]
 // Clippy's manual_range_contains suggestion produces worse codegen.
 #![allow(clippy::manual_range_contains)]
-// Forked code is tested, not linted: silence upstream's clippy::all group so
-// toolchain bumps cannot fail the workspace gate inside upstream sources.
-#![allow(clippy::all)]
 
 #[cfg(not(feature = "std"))]
 #[macro_use]

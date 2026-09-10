@@ -125,7 +125,15 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         if cfg!(feature = "prohibit-unsafe") {
             self.bts.pop();
         } else {
-            unsafe { self.bts.set_len(self.bts.len() - 1) }
+            // SAFETY: the stack is non-empty by the invariant above, and the
+            // removed `BacktrackInsn` does not require drop.
+            #[expect(
+                unsafe_code,
+                reason = "the non-empty stack invariant permits removing its initialized tail"
+            )]
+            unsafe {
+                self.bts.set_len(self.bts.len() - 1)
+            }
         }
     }
 

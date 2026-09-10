@@ -2401,11 +2401,30 @@ fn turn_loop_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
 }
 
 fn rust_sources_in(dir: PathBuf) -> Vec<PathBuf> {
-    let mut paths = std::fs::read_dir(&dir)
-        .expect("read module directory")
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
-        .collect::<Vec<_>>();
+    let mut pending = vec![dir];
+    let mut paths = Vec::new();
+
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read module directory") {
+            let entry = entry.expect("read module directory entry");
+            let file_type = entry.file_type().expect("read module entry type");
+            let path = entry.path();
+
+            assert!(
+                !file_type.is_symlink(),
+                "module source traversal does not follow symlink {}",
+                path.display()
+            );
+            if file_type.is_dir() {
+                pending.push(path);
+            } else if file_type.is_file()
+                && path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+            {
+                paths.push(path);
+            }
+        }
+    }
+
     paths.sort();
     paths
 }

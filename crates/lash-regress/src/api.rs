@@ -871,6 +871,12 @@ mod pattern_impl {
         }
     }
 
+    // SAFETY: every returned range is ordered, lies on UTF-8 character
+    // boundaries in `haystack`, and advances or terminates the partition.
+    #[expect(
+        unsafe_code,
+        reason = "the searcher yields valid UTF-8 boundaries in monotonic order"
+    )]
     unsafe impl<'r, 't> Searcher<'t> for RegexSearcher<'r, 't> {
         fn haystack(&self) -> &'t str {
             self.haystack
@@ -933,6 +939,12 @@ mod pattern_impl {
         }
     }
 
+    // SAFETY: reverse steps use ranges produced for the same haystack and move
+    // monotonically toward its start without overlapping later steps.
+    #[expect(
+        unsafe_code,
+        reason = "the reverse searcher yields valid non-overlapping haystack ranges"
+    )]
     unsafe impl<'r, 't> ReverseSearcher<'t> for RegexSearcher<'r, 't> {
         fn next_back(&mut self) -> SearchStep {
             if self.reverse_done {

@@ -88,8 +88,7 @@ readme = "README.md"
 rust-version = "1.90"
 
 # Workspace lint table. Every member inherits it through `[lints] workspace =
-# true`; `crates/lash-regress` is the one deliberate abstention (maintained
-# third-party code whose upstream suite participates in workspace gates).
+# true`.
 #
 # The table is the codex-rs lint set filtered by one rule: a lint is adopted
 # only when the current tree needs at most 40 production edits to satisfy it.
@@ -97,10 +96,10 @@ rust-version = "1.90"
 # on this tree, in the "Deliberately not adopted" block below so the next round
 # starts from a number instead of a survey.
 [workspace.lints.rust]
-# New `unsafe` anywhere in the workspace fails the build. The 41 spans that
-# exist today are annotated at their site with `#[expect(unsafe_code, reason =
-# "...")]`, so each one states why it is allowed and the expectation goes stale
-# (and fails) the moment the unsafe block disappears.
+# New `unsafe` anywhere in the workspace fails the build. Existing spans are
+# annotated at their site with `#[expect(unsafe_code, reason = "...")]`, so each
+# one states why it is allowed and the expectation goes stale (and fails) the
+# moment the unsafe block disappears.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

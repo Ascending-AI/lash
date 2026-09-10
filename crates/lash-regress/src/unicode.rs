@@ -160,7 +160,14 @@ pub fn fold(cu: u32) -> u32 {
     });
     if let Ok(index) = searched {
         let fr: &FoldRange = if cfg!(feature = "prohibit-unsafe") {
-            unsafe { FOLDS.get_unchecked(index) }
+            // SAFETY: a successful binary search returns an index into `FOLDS`.
+            #[expect(
+                unsafe_code,
+                reason = "binary_search returned an in-bounds FOLDS index"
+            )]
+            unsafe {
+                FOLDS.get_unchecked(index)
+            }
         } else {
             FOLDS.get(index).expect("Invalid index")
         };
@@ -182,7 +189,15 @@ fn uppercase(cu: u32) -> u32 {
     });
     if let Ok(index) = searched {
         let fr: &FoldRange = if cfg!(feature = "prohibit-unsafe") {
-            unsafe { TO_UPPERCASE.get_unchecked(index) }
+            // SAFETY: a successful binary search returns an index into
+            // `TO_UPPERCASE`.
+            #[expect(
+                unsafe_code,
+                reason = "binary_search returned an in-bounds TO_UPPERCASE index"
+            )]
+            unsafe {
+                TO_UPPERCASE.get_unchecked(index)
+            }
         } else {
             TO_UPPERCASE.get(index).expect("Invalid index")
         };
