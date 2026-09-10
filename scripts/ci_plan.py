@@ -42,7 +42,6 @@ IDENTITY_VERSION_DEFINITION = re.compile(
 GATED_JOBS = {
     "nextest-archive": "rust",
     "facade-gates": "rust",
-    "semver-advisory": "rust",
     "lashlang-git-consumer": "rust",
     "package-feature-checks": "rust",
     "runtime-feature-boundary": "rust",
@@ -66,7 +65,6 @@ GATED_JOBS = {
 # runs on pull requests and merge groups while its heavier steps remain trunk-only.
 TRUNK_ONLY_JOBS = {
     "heavy-tests",
-    "semver-advisory",
     "lashlang-git-consumer",
     "package-feature-checks",
     "runtime-feature-boundary",

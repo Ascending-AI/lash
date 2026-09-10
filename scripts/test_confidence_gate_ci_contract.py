@@ -46,10 +46,6 @@ FAST_SHARDS = [
     "sim-generated",
     "minimizer-fixtures",
 ]
-OLD_BROAD_CI_STEP_NAME = "Run bounded broad " + "replay/backend confidence"
-OLD_BROAD_CI_JOB_ID = "bounded-" + "broad-replay-backend"
-OLD_BROAD_CI_ARTIFACT = "bounded-" + "broad-replay-backend-confidence"
-OLD_BROAD_CI_OUT_ROOT = "target/confidence-ci/" + OLD_BROAD_CI_JOB_ID
 VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
     "validate_manifest"
 ]
@@ -463,7 +459,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         trunk_only = {
             "heavy-tests",
-            "semver-advisory",
             "lashlang-git-consumer",
             "package-feature-checks",
             "runtime-feature-boundary",
@@ -644,11 +639,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for shard in FAST_SHARDS:
             self.assertIn(f"- {shard}", workflow)
             self.assertIn(shard, gate)
-        self.assertNotIn(OLD_BROAD_CI_JOB_ID, workflow)
-        self.assertNotIn("Bounded Broad " + "Replay/Backend", workflow)
-        self.assertNotIn(OLD_BROAD_CI_STEP_NAME, workflow)
-        self.assertNotIn(OLD_BROAD_CI_ARTIFACT, workflow)
-        self.assertNotIn(OLD_BROAD_CI_OUT_ROOT, workflow)
 
         min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
         min_boundaries = shell_int_constant(gate, "SIM_SEARCH_MIN_MAX_BOUNDARIES")
@@ -2104,31 +2094,6 @@ derive_mutation_jobs() {{
             block = workflow_job_block(workflow, job_id)
             self.assertIn("./.github/actions/setup-mold", block)
         self.assertNotIn("cargo build", release)
-
-    def test_api_surface_job_is_advisory_and_reports_snapshot_delta(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        block = workflow_job_block(workflow, "semver-advisory")
-
-        self.assertIn("continue-on-error: true", block)
-        self.assertIn("name: API surface advisory", block)
-        self.assertIn("snapshot=docs/api-surface.snapshot", block)
-        self.assertIn(
-            'baseline_rev="$(git rev-parse "${GITHUB_SHA}^")"',
-            block,
-        )
-        self.assertIn(
-            'git diff --no-ext-diff --unified=0 "${baseline_rev}" -- "${snapshot}"',
-            block,
-        )
-        self.assertIn("GITHUB_STEP_SUMMARY", block)
-        self.assertIn("FIG-2095", block)
-        self.assertNotIn("cargo-semver-checks", block)
-        self.assertNotIn(
-            "env",
-            yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"][
-                "semver-advisory"
-            ],
-        )
 
     def test_ci_has_no_staging_or_automatic_release_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

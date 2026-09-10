@@ -19,10 +19,15 @@ Planning, tracking, and everything in-flight live in **Linear** (team `figments`
 | A decision with lasting architectural weight | An ADR in `docs/adr/` (see ADR norms) |
 | A validation procedure for new or changed live behavior | `runbooks/<scenario>/runbook.md` (see Runbook norms) |
 | A new or sharpened domain term | Root `CONTEXT.md` glossary (honor its `_Avoid_` lines). One glossary, no per-crate shadow glossaries |
-| Reference documentation for people using Lash | A page on the published docs site: authored per `docs/STYLEGUIDE.md`, registered in `docs/docs.js`, gated by `python3 scripts/lint_docs.py` |
+| Reference documentation for people using Lash | **Nowhere, for now.** The operator doc site was removed by FIG-2364 along with `docs/STYLEGUIDE.md`, `docs/docs.js`, and `scripts/lint_docs.py`. There is no page to author and no gate to keep green until the freeze lifts. Keep writing doc comments on public items: the `lash` facade is `#![deny(missing_docs)]`, so on that crate they are still compiler-enforced |
 | Housekeeping / teardown / process chores | **Nowhere durable.** Linear is code-facing only; track chores in the session that owns them |
 
-`docs/` is a published website (lash.run), not a scratch directory. Anything you add there is public, must fit the site's structure, and must keep `scripts/lint_docs.py` green.
+`docs/` is not a published website and not a scratch directory. Since FIG-2364 it holds
+ADRs (`docs/adr/`), the agent runbook you are reading (`docs/agents/`), architecture
+notes, a small number of standing operational guides (`provider-recording.md`,
+`complexity-audit.md`), and the generated `api-surface.snapshot`. There are no `.html`
+pages left and nothing lints it. Anything else you want to write belongs on the Linear
+ticket per the table above.
 
 ## How a ticket reads
 
@@ -94,7 +99,7 @@ State the expected proof on the ticket. Defaults when unstated:
 - **Decisions:** the ADR is merged and the resolving ticket links it.
 - **Contract-asserting gates** (schema and drift gates, boundary gates, conformance suites and laws, simulation oracles, coverage and version gates): changes that create or modify one ship with a red-side mutation proof recorded in the PR—the mutation applied, the observed failure, and confirmation that it failed for the stated reason. Formatting and style checks are out of scope. A gate that cannot fail is indistinguishable from no gate; green is what everyone expects to see.
 
-Use focused local evidence for fast feedback, then gate merges on independent review and the aggregate `CI conclusion`, which verifies the correctness families configured for that diff and CI event. A permitted event-policy skip is not execution evidence; use targeted live evidence for a named risk those jobs do not exercise. Deterministic failure classes (docs lint, conformance, contract drift) must be fixed, never bypassed. Do not repeat broad local suites that CI already proves.
+Use focused local evidence for fast feedback, then gate merges on independent review and the aggregate `CI conclusion`, which verifies the correctness families configured for that diff and CI event. A permitted event-policy skip is not execution evidence; use targeted live evidence for a named risk those jobs do not exercise. Deterministic failure classes (conformance, contract drift) must be fixed, never bypassed. Do not repeat broad local suites that CI already proves.
 
 `just push-gate` and the confidence lanes are opt-in full diagnostics for unusual-risk changes, release work, or an explicit user request; they are not routine push, review, or merge prerequisites. When run, heavy gates are serial within a lane and capped across the box: build width comes from the environment the checkout was prepared with (`CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`), and the build-heavy legs of `push-gate.sh` run through the `heavy-slot` semaphore when the machine provides it, so concurrent lanes queue instead of thrashing. Both are feature-detected and inert on CI. Do not override either without a measured need; the mechanics are in `CONTRIBUTING.md` under "Concurrent local gates".
 
