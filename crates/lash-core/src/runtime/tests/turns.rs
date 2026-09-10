@@ -2965,9 +2965,9 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
         },
     ]);
     let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
-    runtime.host.core.clock = Arc::new(CancelWatchTestClock(
-        crate::testing::TestClock::new(1_700_000_000_123),
-    ));
+    runtime.host.core.clock = Arc::new(CancelWatchTestClock(crate::testing::TestClock::new(
+        1_700_000_000_123,
+    )));
 
     let turn = runtime
         .run_turn_assembled(
