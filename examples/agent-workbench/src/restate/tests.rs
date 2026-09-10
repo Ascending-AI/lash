@@ -344,7 +344,7 @@ fn nested_deleted_session_details_preserve_controller_store_context() {
 
     assert_eq!(
         crate::deleted_session_details(&error),
-        Some(("retired-nested-context", Some("runtime_store"),))
+        Some(("retired-nested-context", Some("session_deleted"),))
     );
 }
 

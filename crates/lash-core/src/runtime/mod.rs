@@ -177,8 +177,9 @@ pub use effect::{
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
+pub(crate) use error::runtime_error_from_store_commit;
+use error::session_commit_error;
 pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
-use error::{runtime_error_from_store_commit, session_commit_error};
 #[doc(hidden)]
 pub use event_pump::drive_with_event_pump;
 /// Embedded-host configuration and its public configuration sections.

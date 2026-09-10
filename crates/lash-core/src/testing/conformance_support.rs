@@ -19,6 +19,15 @@ pub use crate::runtime::{
     stage_token_ledger_shared,
 };
 
+/// Project a store commit refusal through the production runtime boundary.
+///
+/// Backend conformance uses this to prove that a real store refusal remains
+/// typed when it reaches a host; it deliberately does not expose the mapper in
+/// the ordinary runtime API.
+pub fn runtime_error_from_store_commit(error: crate::StoreError) -> crate::RuntimeError {
+    crate::runtime::runtime_error_from_store_commit(error)
+}
+
 /// Raw graph mutation for corruption fixtures, available only with test support.
 pub trait SessionGraphConformanceAccess {
     fn data_mut(&mut self) -> &mut crate::session_graph::SessionGraphData;
