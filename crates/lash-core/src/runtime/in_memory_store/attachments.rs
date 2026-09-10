@@ -280,9 +280,14 @@ impl crate::AttachmentManifest for InMemorySessionStore {
             _ => None,
         };
         if let Some(restored) = restored {
-            self.attachment_manifest
-                .lock_recover()
-                .remove(&(intent.session_id.clone(), intent.attachment_id.clone()));
+            let key = (intent.session_id.clone(), intent.attachment_id.clone());
+            let mut manifest = self.attachment_manifest.lock_recover();
+            if manifest
+                .get(&key)
+                .is_some_and(|entry| entry.committed_at_epoch_ms.is_none())
+            {
+                manifest.remove(&key);
+            }
             condemnations.insert(intent.attachment_id.clone(), restored);
         }
         Ok(())

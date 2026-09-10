@@ -7,6 +7,7 @@ use lash_core::facade_support::{
 use lash_core::testing::store_fixtures::session_store_request;
 use lash_core::*;
 use pretty_assertions::assert_eq;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -161,6 +162,163 @@ async fn create(f: &Arc<dyn SessionStoreFactory>, id: &str) -> Arc<dyn RuntimePe
     .await
     .unwrap()
 }
+
+/// Prove abandoned-writer recovery through destruction and reconstruction of
+/// the backend's factory authority. The caller's `reopen` must create a new
+/// factory over the same durable catalog after the initial factory and session
+/// handle have been dropped.
+pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
+    initial_factory: Arc<dyn SessionStoreFactory>,
+    reclaimed: bool,
+    reopen: R,
+) where
+    R: FnOnce() -> Fut,
+    Fut: Future<Output = Arc<dyn SessionStoreFactory>>,
+{
+    assert_eq!(
+        initial_factory.fence(),
+        AttachmentGcFence::Fenced,
+        "cold recovery requires a fenced durable authority"
+    );
+    let namespace = uuid::Uuid::new_v4();
+    let phase = if reclaimed { "reclaimed" } else { "condemned" };
+    let session_id = SessionId::from(format!("cold-{phase}-recovery-writer-{namespace}"));
+    let adopter_id = SessionId::from(format!("cold-recovery-adopter-{namespace}"));
+    let request = session_store_request(&session_id, "probe", SessionRelation::Root);
+    let store = initial_factory.create_store(&request).await.unwrap();
+    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let payload = format!("cold-recovery-payload-{namespace}").into_bytes();
+    let attachment_id = lash_core::attachments::content_id(&payload);
+    let survivor_id =
+        lash_core::attachments::content_id(format!("recovery-survivor-{namespace}").as_bytes());
+    let committed_id =
+        lash_core::attachments::content_id(format!("recovery-committed-{namespace}").as_bytes());
+    let survivor_intent = write_intent(&session_id, &survivor_id);
+    store
+        .record_intent(survivor_intent.clone())
+        .expect("record unrelated survivor intent");
+    store
+        .record_intent(write_intent(&session_id, &committed_id))
+        .expect("record unrelated intent that will become committed");
+    store
+        .commit_refs(&session_id, std::slice::from_ref(&committed_id))
+        .expect("commit unrelated attachment root");
+
+    assert_eq!(
+        initial_factory
+            .condemn_attachment(&attachment_id, 0)
+            .await
+            .unwrap(),
+        AttachmentCondemnation::Condemned
+    );
+    if reclaimed {
+        assert_eq!(
+            initial_factory
+                .arm_attachment_delete(&attachment_id)
+                .await
+                .unwrap(),
+            AttachmentDeleteArming::Armed
+        );
+        initial_factory
+            .reclaim_attachment_condemnation(&attachment_id)
+            .await
+            .unwrap();
+    } else {
+        backend.put(payload.clone(), image_meta()).await.unwrap();
+    }
+    let abandoned_intent = write_intent(&session_id, &attachment_id);
+    let stale_permit = match store
+        .begin_attachment_write(abandoned_intent.clone())
+        .expect("abandoned writer claims Reclaimed")
+    {
+        AttachmentWriteFence::Granted(permit) => permit,
+        AttachmentWriteFence::ReclamationInFlight => panic!("first restoring writer must win"),
+    };
+    let before_reopen = store.list_uncommitted(u64::MAX).unwrap();
+    assert!(
+        before_reopen.iter().any(|entry| {
+            entry.session_id == session_id && entry.attachment_id == attachment_id
+        }),
+        "the abandoned intent must be durable before factory closure"
+    );
+    assert!(
+        before_reopen
+            .iter()
+            .any(|entry| { entry.session_id == session_id && entry.attachment_id == survivor_id }),
+        "the unrelated intent must be durable before factory closure"
+    );
+
+    drop(store);
+    drop(initial_factory);
+    let reopened_factory = reopen().await;
+    let reopened = reopened_factory
+        .open_existing_store(&request)
+        .await
+        .expect("reopen session after factory reconstruction")
+        .expect("cold-reopened session exists");
+    let before_recovery = reopened.list_uncommitted(u64::MAX).unwrap();
+    assert!(
+        before_recovery.iter().any(|entry| {
+            entry.session_id == session_id && entry.attachment_id == attachment_id
+        }),
+        "cold reopen must retain the token-associated abandoned intent"
+    );
+
+    reopened_factory
+        .recover_abandoned_attachment_write(&attachment_id)
+        .await
+        .expect("recover abandoned writer after cold reopen");
+    let after_recovery = reopened.list_uncommitted(u64::MAX).unwrap();
+    assert!(
+        after_recovery.iter().all(|entry| {
+            entry.session_id != session_id || entry.attachment_id != attachment_id
+        }),
+        "recovery must delete the abandoned attempt's uncommitted intent"
+    );
+    assert!(
+        after_recovery
+            .iter()
+            .any(|entry| { entry.session_id == session_id && entry.attachment_id == survivor_id }),
+        "recovery must retain unrelated uncommitted intents"
+    );
+    assert!(
+        reopened_factory
+            .live_attachment_refs(u64::MAX)
+            .await
+            .unwrap()
+            .contains(&committed_id),
+        "recovery must retain unrelated committed roots"
+    );
+    reopened
+        .abort_attachment_write(&abandoned_intent, stale_permit)
+        .expect("the pre-reopen permit is stale after recovery");
+
+    let scoped =
+        SessionAttachmentStore::new(Arc::clone(&backend), reopened.clone(), session_id.clone());
+    let restored = scoped
+        .put(payload.clone(), image_meta())
+        .await
+        .expect("fresh re-put succeeds after recovery");
+    assert_eq!(restored.id, attachment_id);
+    assert_eq!(
+        scoped.get(&attachment_id).await.unwrap().bytes,
+        payload,
+        "the successful re-put is immediately readable"
+    );
+
+    let adopter = create(&reopened_factory, adopter_id.as_str()).await;
+    adopter
+        .commit_refs(&adopter_id, std::slice::from_ref(&attachment_id))
+        .expect("another session adopts the restored bytes");
+    assert!(
+        reopened_factory
+            .live_attachment_refs(u64::MAX)
+            .await
+            .unwrap()
+            .contains(&attachment_id),
+        "successful cross-session adoption is a live root"
+    );
+}
 async fn put(
     store: Arc<dyn RuntimePersistence>,
     bytes: Arc<dyn AttachmentStore>,
@@ -243,8 +401,9 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
     competing_writer_survives_failed_reput(f.clone()).await;
     sweep_cannot_overwrite_failed_reput_rollback(f.clone()).await;
     stale_sweep_release_cannot_revoke_restoring_writer(f.clone()).await;
-    abandoned_writer_recovery_is_reputtable_after_reopen(f.clone()).await;
+    abandoned_writer_recovery_preserves_phase_and_unstrands_reput(f.clone()).await;
     stale_writer_abort_cannot_clobber_newer_reclamation(f.clone()).await;
+    committed_restoring_abort_preserves_root(f.clone()).await;
     sweep_adoption_race(f.clone()).await;
     sweep_reput_race(f).await;
 }
@@ -552,14 +711,19 @@ async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionSt
         .unwrap();
 }
 
-async fn abandoned_writer_recovery_is_reputtable_after_reopen(f: Arc<dyn SessionStoreFactory>) {
+async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
+    f: Arc<dyn SessionStoreFactory>,
+) {
     for reclaimed in [false, true] {
         let namespace = uuid::Uuid::new_v4();
         let session_id = SessionId::from(format!(
             "abandoned-{}-writer-{namespace}",
             if reclaimed { "reclaimed" } else { "condemned" }
         ));
-        let attachment_id = lash_core::attachments::content_id(session_id.as_str().as_bytes());
+        let adopter_id = SessionId::from(format!("recovery-adopter-{namespace}"));
+        let payload = format!("recovery-payload-{namespace}").into_bytes();
+        let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+        let attachment_id = backend.put(payload.clone(), image_meta()).await.unwrap().id;
         assert_eq!(
             f.condemn_attachment(&attachment_id, 0).await.unwrap(),
             AttachmentCondemnation::Condemned
@@ -569,6 +733,7 @@ async fn abandoned_writer_recovery_is_reputtable_after_reopen(f: Arc<dyn Session
                 f.arm_attachment_delete(&attachment_id).await.unwrap(),
                 AttachmentDeleteArming::Armed
             );
+            backend.delete(&attachment_id).await.unwrap();
             f.reclaim_attachment_condemnation(&attachment_id)
                 .await
                 .unwrap();
@@ -584,6 +749,15 @@ async fn abandoned_writer_recovery_is_reputtable_after_reopen(f: Arc<dyn Session
             AttachmentWriteFence::ReclamationInFlight => panic!("first writer must win"),
         };
         assert!(stale_permit.rollback_token().is_some());
+        assert!(
+            crashed_store
+                .list_uncommitted(u64::MAX)
+                .unwrap()
+                .iter()
+                .any(|entry| entry.session_id == session_id
+                    && entry.attachment_id == attachment_id),
+            "the abandoned token must have an associated uncommitted intent"
+        );
         assert!(matches!(
             crashed_store
                 .begin_attachment_write(intent.clone())
@@ -592,13 +766,22 @@ async fn abandoned_writer_recovery_is_reputtable_after_reopen(f: Arc<dyn Session
         ));
         drop(crashed_store);
 
-        // The host has established quiescence after crash/cancellation. Recovery
-        // reopens the durable authority, clears the token-to-intent association,
-        // and leaves the exact phase available for a fresh re-put.
+        // The host has established quiescence after crash/cancellation. This
+        // shared case reopens the session handle; the backend-specific cold
+        // witness reconstructs the whole durable factory.
         f.recover_abandoned_attachment_write(&attachment_id)
             .await
             .expect("recover abandoned restoring writer");
         let reopened = create(&f, &session_id).await;
+        assert!(
+            reopened
+                .list_uncommitted(u64::MAX)
+                .unwrap()
+                .iter()
+                .all(|entry| entry.session_id != session_id
+                    || entry.attachment_id != attachment_id),
+            "recovery removes the abandoned attempt's uncommitted intent"
+        );
         let fresh_permit = match reopened
             .begin_attachment_write(intent.clone())
             .expect("fresh re-put claims the recovered phase")
@@ -641,7 +824,25 @@ async fn abandoned_writer_recovery_is_reputtable_after_reopen(f: Arc<dyn Session
             f.release_attachment_condemnation(&attachment_id)
                 .await
                 .unwrap();
+            assert_eq!(
+                f.condemn_attachment(&attachment_id, 0).await.unwrap(),
+                AttachmentCondemnation::Condemned,
+                "re-establish Condemned for the successful restoring put"
+            );
         }
+
+        let scoped =
+            SessionAttachmentStore::new(Arc::clone(&backend), reopened.clone(), session_id.clone());
+        let restored = scoped
+            .put(payload.clone(), image_meta())
+            .await
+            .expect("successful re-put after abandoned-writer recovery");
+        assert_eq!(restored.id, attachment_id);
+        assert_eq!(scoped.get(&attachment_id).await.unwrap().bytes, payload);
+        let adopter = create(&f, adopter_id.as_str()).await;
+        adopter
+            .commit_refs(&adopter_id, std::slice::from_ref(&attachment_id))
+            .expect("another session adopts the restored attachment");
     }
 }
 
@@ -690,6 +891,87 @@ async fn stale_writer_abort_cannot_clobber_newer_reclamation(f: Arc<dyn SessionS
         error,
         StoreError::AttachmentBytesReclaimed { ref digest } if digest == &attachment_id
     ));
+}
+
+/// A matching restoring permit can outlive the turn commit that stamps its
+/// owner-bound intent. A later abort may restore the condemnation phase, but it
+/// must not delete the manifest row after that row became a committed root.
+async fn committed_restoring_abort_preserves_root(factory: Arc<dyn SessionStoreFactory>) {
+    let session_id = SessionId::from(format!(
+        "attachment-committed-restoring-abort-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let turn_id = TurnId::from("attachment-committed-restoring-abort-turn");
+    let request = session_store_request(&session_id, "probe", SessionRelation::Root);
+    let store = factory.create_store(&request).await.unwrap();
+    let attachment_id = lash_core::attachments::content_id(b"committed restoring abort");
+    assert_eq!(
+        factory.condemn_attachment(&attachment_id, 0).await.unwrap(),
+        AttachmentCondemnation::Condemned
+    );
+    let intent = AttachmentIntent {
+        attachment_id: attachment_id.clone(),
+        session_id: session_id.clone(),
+        canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
+        intent_at_epoch_ms: 0,
+        owner_kind: Some(AttachmentOwnerKind::Turn),
+        owner_id: Some(turn_id.to_string()),
+    };
+    let permit = match store
+        .begin_attachment_write(intent.clone())
+        .expect("claim condemned digest for a turn-owned restoring write")
+    {
+        AttachmentWriteFence::Granted(permit) => permit,
+        AttachmentWriteFence::ReclamationInFlight => {
+            panic!("the first restoring writer must acquire the digest")
+        }
+    };
+
+    let mut state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(request.policy)
+    };
+    state.ensure_agent_frame_initialized();
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.turn_commit = lash_core::store::RuntimeTurnCommitStamp::new(OperationId::turn(
+        &session_id,
+        &turn_id,
+        "final",
+    ));
+    let lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &LeaseOwnerIdentity::opaque("attachment-conformance", "committed-restoring-abort"),
+            "attachment conformance",
+            60_000,
+        )
+        .await
+        .unwrap()
+        .acquired()
+        .expect("fresh session lease is acquired");
+    store
+        .commit_runtime_state(commit.releasing_session_execution_lease(lease.completion()))
+        .await
+        .expect("commit the turn-owned attachment intent");
+    assert!(
+        store
+            .list_uncommitted(u64::MAX)
+            .unwrap()
+            .iter()
+            .all(|entry| entry.attachment_id != attachment_id),
+        "the turn commit must stamp the restoring intent"
+    );
+    store
+        .abort_attachment_write(&intent, permit)
+        .expect("settle the late matching abort");
+    assert!(
+        factory
+            .live_attachment_refs(u64::MAX)
+            .await
+            .unwrap()
+            .contains(&attachment_id),
+        "a late abort must retain an intent that the turn already committed"
+    );
 }
 
 fn image_meta() -> AttachmentCreateMeta {

@@ -116,9 +116,9 @@ associated uncommitted intent while preserving the exact phase, but only after
 the host establishes that the writer is no longer running. A fresh re-put then
 claims the phase normally. lash expires neither state on a timer.
 
-The freshness re-check survives as what it always was, a cheap pre-filter, and it
-now runs while the digest is condemned, which is exactly the window a writer can
-still revoke.
+The freshness re-check survives as what it always was, a cheap pre-filter. It
+now runs only after the sweep arms the digest as `Deleting`; writers arriving in
+that window record no intent and retry after the sweep settles the phase.
 
 Answering `Fenced` is a claim about nine methods across two traits —
 `AttachmentManifest::begin_attachment_write`, `complete_attachment_write`, and

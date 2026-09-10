@@ -12,6 +12,24 @@ async fn sqlite_cross_owner_attachment_adoption_conformance() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_abandoned_attachment_write_recovery_survives_cold_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    for reclaimed in [false, true] {
+        let root = dir
+            .path()
+            .join(if reclaimed { "reclaimed" } else { "condemned" });
+        lash_conformance::abandoned_attachment_write_recovery_after_cold_reopen(
+            Arc::new(SqliteSessionStoreFactory::new(&root)),
+            reclaimed,
+            move || async move {
+                Arc::new(SqliteSessionStoreFactory::new(root)) as Arc<dyn SessionStoreFactory>
+            },
+        )
+        .await;
+    }
+}
+
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 

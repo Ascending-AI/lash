@@ -436,7 +436,8 @@ pub struct AttachmentReclamationReport {
     pub scanned_blob_count: usize,
     /// Blobs deleted: unreferenced by any session and past the grace window.
     pub reclaimed_count: usize,
-    /// Blobs the sweep tried but failed to delete. The sweep continues past
+    /// Blobs whose per-candidate handling failed: final `HEAD`, physical
+    /// delete, or condemnation-state settlement. The sweep continues past
     /// per-blob failures and reports them here rather than aborting.
     pub failed_ids: Vec<AttachmentId>,
     /// Why the live root set could not be enumerated. The sweep deleted
@@ -535,7 +536,7 @@ pub struct AttachmentReclamationPolicy {
 /// [`AttachmentReclamationFailure`] carrying
 /// [`MaintenanceRefusal::EmptyRootSetUnauthorized`](crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized)
 /// and the partial report accumulated before the first eligible blob.
-/// Per-blob delete failures are collected into
+/// Per-blob final-`HEAD`, delete, and condemnation-settlement failures are collected into
 /// [`AttachmentReclamationReport::failed_ids`]; the sweep does not abort on the
 /// first failure.
 ///
