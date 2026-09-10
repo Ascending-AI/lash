@@ -24,10 +24,13 @@ core. It does not substitute the receiving core's lifecycle services.
 
 An explicit store on `SessionBuilder` wins for that root session. Otherwise the
 core catalog creates or opens the store. With neither, open returns
-`MissingSessionStore` before admission or execution. Managed children resolve
-through the configured child catalog and never reuse a parent's exact store.
-An explicitly chosen in-memory factory is the ephemeral facade configuration;
-there is no hidden storeless facade mode.
+`MissingSessionStore` before admission or execution. Related sessions use the
+same admission and binding model; their relation may inform catalog selection,
+but never permits reusing a parent's exact store or publishing a storeless
+executable runtime. [ADR 0089](0089-parent-relationships-do-not-define-a-second-session-model.md)
+records that broader session-model invariant. An explicitly chosen in-memory
+factory is the ephemeral facade configuration; there is no hidden storeless
+facade mode.
 
 Exact-session work drivers accept one session id and one store handle.
 Arbitrary-session drivers accept a catalog and resolve the addressed store once
@@ -63,8 +66,8 @@ contract requires it.
 ## Consequences
 
 - A facade session cannot execute without a real store, including in memory.
-- Root sessions, managed children, and catalog administration have explicit,
-  different storage-selection rules.
+- Session relation may influence catalog selection, but every facade session
+  passes through the same admission and binding contract.
 - Parked sessions retain attachment, process-environment, trigger, process,
   queue, effect, and exact-store ownership across resume.
 - Deletion retries can finish effect-journal retirement after the catalog has
