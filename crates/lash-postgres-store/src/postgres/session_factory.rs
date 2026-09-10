@@ -1,5 +1,4 @@
 use crate::*;
-use lash_sansio::SessionId;
 
 pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "enqueue_seq",
@@ -132,7 +131,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
         lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
-        let store = self.store_for(SessionId::from(session_id.to_string()));
+        let store = self.store_for(session_id.clone());
         if store
             .load_session_meta()
             .await
@@ -587,7 +586,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         session_id: &SessionId,
     ) -> Result<Option<lash_core::SessionReadView>, StoreError> {
         lash_core::store::validate_session_id(session_id)?;
-        let store = self.store_for(SessionId::from(session_id.to_string()));
+        let store = self.store_for(session_id.clone());
         lash_core::store::load_persisted_session_read_view(&store).await
     }
 }
@@ -949,6 +948,7 @@ pub(crate) async fn delete_process_sessions_tx(
         return Ok(lash_core::SessionBlobReclaimReport::default());
     }
 
+    let session_id_texts: Vec<_> = session_ids.iter().map(SessionId::as_str).collect();
     let mut report = lash_core::SessionBlobReclaimReport::default();
     let outcome: Result<(), StoreError> = async {
         // Take every session-history mutation fence before deleting heads or
@@ -961,12 +961,7 @@ pub(crate) async fn delete_process_sessions_tx(
          WHERE session_id = ANY($1) AND checkpoint_ref IS NOT NULL
          ORDER BY checkpoint_ref",
         )
-        .bind(
-            session_ids
-                .iter()
-                .map(SessionId::as_str)
-                .collect::<Vec<_>>(),
-        )
+        .bind(&session_id_texts[..])
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -1007,12 +1002,7 @@ pub(crate) async fn delete_process_sessions_tx(
                )
          ON CONFLICT (session_id) DO NOTHING",
         )
-        .bind(
-            session_ids
-                .iter()
-                .map(SessionId::as_str)
-                .collect::<Vec<_>>(),
-        )
+        .bind(&session_id_texts[..])
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -1043,12 +1033,7 @@ pub(crate) async fn delete_process_sessions_tx(
                     )
              FROM deleted_sessions",
             )
-            .bind(
-                session_ids
-                    .iter()
-                    .map(SessionId::as_str)
-                    .collect::<Vec<_>>(),
-            )
+            .bind(&session_id_texts[..])
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1076,12 +1061,7 @@ pub(crate) async fn delete_process_sessions_tx(
                )
              ORDER BY graph.session_id, graph.generation DESC",
             )
-            .bind(
-                session_ids
-                    .iter()
-                    .map(SessionId::as_str)
-                    .collect::<Vec<_>>(),
-            )
+            .bind(&session_id_texts[..])
             .fetch_all(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1175,12 +1155,7 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_session_meta)
               + (SELECT count(*) FROM deleted_trigger_manifests)",
         )
-        .bind(
-            session_ids
-                .iter()
-                .map(SessionId::as_str)
-                .collect::<Vec<_>>(),
-        )
+        .bind(&session_id_texts[..])
         .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
         .bind(&trigger_owner_namespaces)
         .execute(&mut **tx)

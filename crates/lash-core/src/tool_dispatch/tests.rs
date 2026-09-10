@@ -1,9 +1,8 @@
 use super::*;
-use crate::ProcessId;
 use crate::ProcessRegistrar as _;
-use crate::SessionId;
 use crate::plugin::{PluginHost, PluginSession, StaticPluginFactory};
 use crate::runtime::RuntimeEffectControllerHandle;
+use crate::{ProcessId, SessionId};
 use crate::{
     ToolCall, ToolCallOutcome, ToolContext, ToolOutcome, ToolProvider, ToolRetryPolicy,
     ToolRetryStatus,

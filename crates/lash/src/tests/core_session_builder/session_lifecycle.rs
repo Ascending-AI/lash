@@ -1,5 +1,4 @@
 use super::*;
-use lash_sansio::SessionId;
 
 #[tokio::test]
 async fn store_less_session_ids_are_single_use_per_core_process() {
@@ -125,7 +124,7 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
         policy: historical_policy.clone(),
         agent_frames: Vec::new(),
         current_frame_node_id: None,
@@ -420,14 +419,14 @@ fn core_with_commit_budget(commit_budget: crate::CommitBudget) -> Result<LashCor
     .build(crate::testing::runtime_lease_owner())
 }
 
-fn pending_park_state(session_id: &SessionId, text: &str) -> RuntimeSessionState {
+fn pending_park_state(session_id: impl Into<SessionId>, text: &str) -> RuntimeSessionState {
     let policy = lash_core::SessionPolicy {
         provider_id: mock_provider().kind().to_string(),
         model: mock_model_spec(),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState::new(policy);
-    state.session_id = SessionId::from(session_id.to_string());
+    state.session_id = session_id.into();
     state.ensure_agent_frame_initialized();
     state.append_active_conversation_messages(&[text_message(lash_core::MessageRole::User, text)]);
     state
@@ -441,10 +440,7 @@ async fn testing_set_persisted_replaces_resident_state_for_park_fixture() -> Res
         crate::CommitBudgetLimit::Unbounded,
     ))?;
     let session = core.session("testing-set-persisted-park").open().await?;
-    let fixture = pending_park_state(
-        &SessionId::from("testing-set-persisted-park"),
-        "park fixture via testing",
-    );
+    let fixture = pending_park_state("testing-set-persisted-park", "park fixture via testing");
     let node_ids = |nodes: &[lash_core::SessionNodeRecord]| {
         nodes.iter().map(|n| n.node_id.clone()).collect::<Vec<_>>()
     };
@@ -561,7 +557,7 @@ async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<(
         .admin()
         .state()
         .set_persisted(pending_park_state(
-            &SessionId::from("park-byte-budget-surface"),
+            "park-byte-budget-surface",
             &"x".repeat(CONFIGURED_BYTE_LIMIT * 4),
         ))
         .await?;
@@ -587,7 +583,7 @@ async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<(
         .admin()
         .state()
         .set_persisted(pending_park_state(
-            &SessionId::from("park-node-budget-surface"),
+            "park-node-budget-surface",
             "one pending message plus the initial frame exceeds one node",
         ))
         .await?;
@@ -1395,7 +1391,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::from(session_id),
         policy,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1977,7 +1973,7 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
             format!(
                 "runtime session error: failed to persist runtime state: {}",
                 lash_core::StoreError::SessionDeleted {
-                    session_id: SessionId::from(session_id.to_string()),
+                    session_id: SessionId::from(session_id),
                 }
             )
         );
@@ -2295,7 +2291,7 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
     let policy = lash_core::SessionPolicy {
         provider_id: "builder-provider".to_string(),
         model: model_spec("builder-model", None, 77_777),
-        session_id: Some(SessionId::from(session_id.to_string())),
+        session_id: Some(SessionId::from(session_id)),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
 

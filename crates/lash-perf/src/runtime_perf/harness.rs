@@ -1,6 +1,4 @@
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
-use lash_sansio::sync::MutexExt;
+use lash_sansio::{SessionId, TurnId, sync::MutexExt};
 use std::{
     collections::HashMap,
     fmt::Write as _,

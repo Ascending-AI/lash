@@ -39,6 +39,13 @@ use usage_conservation::{
     replay_usage_receipt, stage_usage,
 };
 const SESSION_ID: &str = "runtime-persistence-property";
+
+/// The property session's identity where a typed one is wanted; the `&str`
+/// constant above stays the single source of the bytes.
+fn session_id() -> SessionId {
+    SessionId::from(SESSION_ID)
+}
+
 const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 857;
 const DEDICATED_LAW_SEED: u64 = 0x0ded_1ca7_e857;
@@ -561,7 +568,7 @@ async fn apply_operation(
                     .map(|_| session_snapshot(store));
                 let result = store
                     .claim_ready_queued_work_by_batch_ids(
-                        &SessionId::from(SESSION_ID),
+                        &session_id(),
                         &lease.fence(),
                         &lease.owner,
                         QueuedWorkClaimBoundary::Idle,
@@ -597,7 +604,7 @@ async fn apply_operation(
             } else {
                 store
                     .claim_ready_queued_work(
-                        &SessionId::from(SESSION_ID),
+                        &session_id(),
                         &lease.fence(),
                         &lease.owner,
                         QueuedWorkClaimBoundary::Idle,
@@ -634,7 +641,7 @@ async fn apply_operation(
             };
             let held = active_work_ids(model).contains(&work.batch.batch_id);
             let removed = store
-                .cancel_queued_work_batch(&SessionId::from(SESSION_ID), &work.batch.batch_id)
+                .cancel_queued_work_batch(&session_id(), &work.batch.batch_id)
                 .await
                 .map_err(|error| error.to_string())?;
             if held && removed.is_some() {
@@ -706,7 +713,7 @@ async fn apply_operation(
             }
             if let Some(claim) = store
                 .claim_next_turn_inputs(
-                    &SessionId::from(SESSION_ID),
+                    &session_id(),
                     &lease.fence(),
                     &lease.owner,
                     usize::from((*max_inputs).max(1)),
@@ -733,7 +740,7 @@ async fn apply_operation(
             };
             let held = active_input_ids(model).contains(&input.input.input_id);
             let outcome = store
-                .cancel_pending_turn_input(&SessionId::from(SESSION_ID), &input.input.input_id)
+                .cancel_pending_turn_input(&session_id(), &input.input.input_id)
                 .await
                 .map_err(|error| error.to_string())?;
             match outcome {
@@ -813,7 +820,7 @@ async fn claim_work_with_stale_lease(
     let before = session_snapshot(store).await?;
     let result = store
         .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &stale.fence(),
             &stale.owner,
             QueuedWorkClaimBoundary::Idle,
@@ -842,12 +849,7 @@ async fn claim_turn_inputs_with_stale_lease(
     let stale = model.stale_leases.last().expect("checked stale lease");
     let before = session_snapshot(store).await?;
     let result = store
-        .claim_next_turn_inputs(
-            &SessionId::from(SESSION_ID),
-            &stale.fence(),
-            &stale.owner,
-            1,
-        )
+        .claim_next_turn_inputs(&session_id(), &stale.fence(), &stale.owner, 1)
         .await;
     if !matches!(result, Err(StoreError::SessionExecutionLeaseExpired { .. })) {
         return Err(format!(
@@ -1419,7 +1421,7 @@ fn fresh_commit(
 
 fn modeled_state(model: &ReferenceModel) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: session_id(),
         head_revision: model.head_revision,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -1474,10 +1476,7 @@ fn queued_draft(slot: u8, value: u8, coalesce: bool) -> QueuedWorkBatchDraft {
         SESSION_ID,
         DeliveryPolicy::EarliestSafeBoundary,
         crate::TurnWorkPayload::agent_frame_task(
-            crate::session_graph::frame_node_id(
-                &SessionId::from(SESSION_ID),
-                &format!("property-frame-{value}"),
-            ),
+            crate::session_graph::frame_node_id(&session_id(), &format!("property-frame-{value}")),
             format!("property-work-{value}"),
             None,
         ),
@@ -1646,7 +1645,7 @@ async fn assert_model_agreement(
     model: &ReferenceModel,
 ) -> Result<(), String> {
     let mut actual_work = store
-        .list_queued_work(&SessionId::from(SESSION_ID))
+        .list_queued_work(&session_id())
         .await
         .map_err(|error| error.to_string())?;
     actual_work.sort_by_key(|batch| batch.enqueue_seq);
@@ -1661,7 +1660,7 @@ async fn assert_model_agreement(
     }
 
     let actual_pending = store
-        .list_pending_queued_work(&SessionId::from(SESSION_ID))
+        .list_pending_queued_work(&session_id())
         .await
         .map_err(|error| error.to_string())?;
     if json(&actual_pending)? != json(&pending_work(model))? {
@@ -1669,14 +1668,14 @@ async fn assert_model_agreement(
     }
 
     let actual_inputs = store
-        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
+        .list_pending_turn_inputs(&session_id())
         .await
         .map_err(|error| error.to_string())?;
     if json(&actual_inputs)? != json(&pending_inputs(model))? {
         return Err("pending turn-input projection differs from lifecycle model".to_string());
     }
     let applications = store
-        .list_turn_input_applications(&SessionId::from(SESSION_ID))
+        .list_turn_input_applications(&session_id())
         .await
         .map_err(|error| error.to_string())?;
     if applications != model.applications {
@@ -1769,10 +1768,10 @@ async fn session_snapshot(store: &dyn RuntimePersistence) -> Result<serde_json::
     });
     Ok(serde_json::json!({
         "head": head,
-        "work": store.list_queued_work(&SessionId::from(SESSION_ID)).await.map_err(|error| error.to_string())?,
-        "pending_work": store.list_pending_queued_work(&SessionId::from(SESSION_ID)).await.map_err(|error| error.to_string())?,
-        "pending_inputs": store.list_pending_turn_inputs(&SessionId::from(SESSION_ID)).await.map_err(|error| error.to_string())?,
-        "applications": store.list_turn_input_applications(&SessionId::from(SESSION_ID)).await.map_err(|error| error.to_string())?,
+        "work": store.list_queued_work(&session_id()).await.map_err(|error| error.to_string())?,
+        "pending_work": store.list_pending_queued_work(&session_id()).await.map_err(|error| error.to_string())?,
+        "pending_inputs": store.list_pending_turn_inputs(&session_id()).await.map_err(|error| error.to_string())?,
+        "applications": store.list_turn_input_applications(&session_id()).await.map_err(|error| error.to_string())?,
     }))
 }
 
@@ -1898,19 +1897,14 @@ async fn law_claimed_work_settles_exactly_once(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
-            &owner,
-            "claimed-work-executor",
-            60_000,
-        )
+        .try_claim_session_execution_lease(&session_id(), &owner, "claimed-work-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
         .ok_or_else(|| TestCaseError::fail("lease busy"))?;
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
@@ -1921,7 +1915,7 @@ async fn law_claimed_work_settles_exactly_once(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("selected work absent"))?;
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: session_id(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
@@ -1946,7 +1940,7 @@ async fn law_claimed_work_settles_exactly_once(
     );
     prop_assert!(
         store
-            .list_queued_work(&SessionId::from(SESSION_ID))
+            .list_queued_work(&session_id())
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .is_empty(),
@@ -1989,7 +1983,7 @@ async fn law_reclaim_mediates_supersession(
     let stale_owner = owner(0);
     let stale_lease = store
         .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &stale_owner,
             "reclaim-stale-executor",
             60_000,
@@ -2000,7 +1994,7 @@ async fn law_reclaim_mediates_supersession(
         .ok_or_else(|| TestCaseError::fail("stale-owner lease busy"))?;
     let stale_claim = store
         .claim_ready_queued_work(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -2019,7 +2013,7 @@ async fn law_reclaim_mediates_supersession(
     let successor_owner = owner(1);
     let successor_lease = store
         .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &successor_owner,
             "reclaim-successor-executor",
             60_000,
@@ -2033,7 +2027,7 @@ async fn law_reclaim_mediates_supersession(
         .map_err(TestCaseError::fail)?;
     let partial_selection = store
         .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -2059,7 +2053,7 @@ async fn law_reclaim_mediates_supersession(
     .map_err(TestCaseError::fail)?;
     let successor_claim = store
         .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &successor_lease.fence(),
             &successor_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -2071,7 +2065,7 @@ async fn law_reclaim_mediates_supersession(
         .ok_or_else(|| TestCaseError::fail("successor did not reclaim full composition"))?;
 
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: session_id(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.set_tool_state_snapshot(Some(
@@ -2101,7 +2095,7 @@ async fn law_reclaim_mediates_supersession(
     .await
     .map_err(TestCaseError::fail)?;
     let pending_while_successor_holds = store
-        .list_pending_queued_work(&SessionId::from(SESSION_ID))
+        .list_pending_queued_work(&session_id())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
@@ -2111,7 +2105,7 @@ async fn law_reclaim_mediates_supersession(
     prop_assert!(
         store
             .claim_ready_queued_work_by_batch_ids(
-                &SessionId::from(SESSION_ID),
+                &session_id(),
                 &successor_lease.fence(),
                 &successor_owner,
                 QueuedWorkClaimBoundary::Idle,
@@ -2128,7 +2122,7 @@ async fn law_reclaim_mediates_supersession(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let pending = store
-        .list_pending_queued_work(&SessionId::from(SESSION_ID))
+        .list_pending_queued_work(&session_id())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let pending_ids = pending
@@ -2158,7 +2152,7 @@ async fn law_head_cas_serializes_competing_commits(
     let stale_owner = owner(0);
     let stale_lease = store
         .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &stale_owner,
             "head-cas-stale-executor",
             60_000,
@@ -2169,7 +2163,7 @@ async fn law_head_cas_serializes_competing_commits(
         .ok_or_else(|| TestCaseError::fail("stale-owner lease busy"))?;
     let stale_work = store
         .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -2180,12 +2174,7 @@ async fn law_head_cas_serializes_competing_commits(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("queued work absent"))?;
     let stale_input = store
-        .claim_next_turn_inputs(
-            &SessionId::from(SESSION_ID),
-            &stale_lease.fence(),
-            &stale_owner,
-            1,
-        )
+        .claim_next_turn_inputs(&session_id(), &stale_lease.fence(), &stale_owner, 1)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("turn input absent"))?;
@@ -2196,7 +2185,7 @@ async fn law_head_cas_serializes_competing_commits(
     let successor_owner = owner(1);
     let _successor_lease = store
         .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &successor_owner,
             "head-cas-successor-executor",
             60_000,
@@ -2207,7 +2196,7 @@ async fn law_head_cas_serializes_competing_commits(
         .ok_or_else(|| TestCaseError::fail("successor lease busy"))?;
 
     let mut loser_state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: session_id(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     loser_state.set_tool_state_snapshot(Some(
@@ -2224,7 +2213,7 @@ async fn law_head_cas_serializes_competing_commits(
         .completing_queue_claim(stale_work.completion())
         .completing_turn_input_claim(stale_input.completion());
     let mut winner_state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: session_id(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     winner_state.set_tool_state_snapshot(Some(
@@ -2277,19 +2266,14 @@ async fn law_selected_batch_out_of_order_never_loses_work(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
-            &owner,
-            "selected-batch-executor",
-            60_000,
-        )
+        .try_claim_session_execution_lease(&session_id(), &owner, "selected-batch-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
         .ok_or_else(|| TestCaseError::fail("lease busy"))?;
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
@@ -2300,7 +2284,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("later batch absent"))?;
     let mut state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: session_id(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let result = store
@@ -2312,7 +2296,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     state.apply_persisted_commit_result(result);
     let remaining = store
-        .list_queued_work(&SessionId::from(SESSION_ID))
+        .list_queued_work(&session_id())
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert_eq!(remaining.len(), 1);
@@ -2323,7 +2307,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
     );
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
-            &SessionId::from(SESSION_ID),
+            &session_id(),
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
@@ -2342,7 +2326,7 @@ async fn law_selected_batch_out_of_order_never_loses_work(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
         store
-            .list_queued_work(&SessionId::from(SESSION_ID))
+            .list_queued_work(&session_id())
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .is_empty()
@@ -2363,18 +2347,13 @@ async fn law_turn_inputs_apply_once_in_order(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let owner = owner(0);
     let lease = store
-        .try_claim_session_execution_lease(
-            &SessionId::from(SESSION_ID),
-            &owner,
-            "turn-input-executor",
-            60_000,
-        )
+        .try_claim_session_execution_lease(&session_id(), &owner, "turn-input-executor", 60_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .acquired()
         .ok_or_else(|| TestCaseError::fail("lease busy"))?;
     let mut claim = store
-        .claim_next_turn_inputs(&SessionId::from(SESSION_ID), &lease.fence(), &owner, 10)
+        .claim_next_turn_inputs(&session_id(), &lease.fence(), &owner, 10)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .ok_or_else(|| TestCaseError::fail("turn inputs absent"))?;
@@ -2389,7 +2368,7 @@ async fn law_turn_inputs_apply_once_in_order(
     claim.record_initial_turn_application(&crate::TurnId::from("ordered-turn"), "ordered-message");
     let expected = claim.applications.clone();
     let state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: session_id(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
@@ -2404,7 +2383,7 @@ async fn law_turn_inputs_apply_once_in_order(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert_eq!(
         store
-            .list_turn_input_applications(&SessionId::from(SESSION_ID))
+            .list_turn_input_applications(&session_id())
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?,
         expected,

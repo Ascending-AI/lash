@@ -66,10 +66,7 @@ impl TestLocalProcessRegistry {
                 .wake_allocation_floors
                 .lock()
                 .await
-                .get(&(
-                    target_session_id.clone(),
-                    ProcessId::from(record.record.id.clone().to_string()),
-                ))
+                .get(&(target_session_id.clone(), record.record.id.clone()))
                 .copied(),
             None => None,
         };
@@ -157,13 +154,10 @@ impl TestLocalProcessRegistry {
         let Some(target_session_id) = target_session_id else {
             return;
         };
-        self.wake_allocation_floors.lock().await.insert(
-            (
-                SessionId::from(target_session_id.to_string()),
-                ProcessId::from(process_id.to_string()),
-            ),
-            sequence,
-        );
+        self.wake_allocation_floors
+            .lock()
+            .await
+            .insert((target_session_id.clone(), process_id.clone()), sequence);
     }
 }
 
@@ -405,9 +399,9 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
                 .observers
                 .lock()
                 .await
-                .entry(SessionId::from(session_id.to_string()))
+                .entry(session_id.clone())
                 .or_default()
-                .insert(ProcessId::from(process_id.to_string()));
+                .insert(process_id.clone());
             if inserted {
                 self.append_managed_event(
                     record,
@@ -488,7 +482,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
                     )));
                 }
                 observers
-                    .entry(SessionId::from(to_session_id.to_string()))
+                    .entry(to_session_id.clone())
                     .or_default()
                     .insert(ProcessId::from(process_id.clone().to_string()));
                 drop(observers);
@@ -576,10 +570,7 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         let mut wake_targets = self.wake_targets.lock().await;
         match target {
             Some(target) => {
-                wake_targets.insert(
-                    ProcessId::from(process_id.to_string()),
-                    SessionId::from(target.to_string()),
-                );
+                wake_targets.insert(process_id.clone(), SessionId::from(target));
             }
             None => {
                 wake_targets.remove(process_id);
@@ -782,10 +773,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
                 .wake_allocation_floors
                 .lock()
                 .await
-                .get(&(
-                    target_session_id.clone(),
-                    ProcessId::from(process_id.to_string()),
-                ))
+                .get(&(target_session_id.clone(), process_id.clone()))
                 .copied(),
             None => None,
         };
@@ -888,10 +876,7 @@ impl super::registry::ProcessLifecycle for TestLocalProcessRegistry {
                 .wake_allocation_floors
                 .lock()
                 .await
-                .get(&(
-                    target_session_id.clone(),
-                    ProcessId::from(lease.process_id.clone().to_string()),
-                ))
+                .get(&(target_session_id.clone(), lease.process_id.clone()))
                 .copied(),
             None => None,
         };
@@ -1604,10 +1589,7 @@ impl super::registry::ProcessRegistryTestSupport for TestLocalProcessRegistry {
             .wake_allocation_floors
             .lock()
             .await
-            .get(&(
-                SessionId::from(target_session_id.to_string()),
-                ProcessId::from(process_id.to_string()),
-            ))
+            .get(&(target_session_id.clone(), process_id.clone()))
             .copied())
     }
 }
