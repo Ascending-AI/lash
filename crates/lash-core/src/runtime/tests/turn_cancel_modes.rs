@@ -133,7 +133,13 @@ async fn native_harness(
     let config = super::effect::runtime_host_config_with_native_controller(Arc::new(
         crate::NativeRuntimeEffectController::default(),
     ));
-    let driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
+    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    crate::testing::store_fixtures::bind_conformance_session(&driver_store, "root").await;
+    let driver = crate::TurnWorkDriver::for_session(
+        Arc::clone(&config.control.effect_host),
+        "root",
+        driver_store,
+    );
     let host = EmbeddedRuntimeHost::new(config);
     let runtime = runtime_with_plugins_and_tools_and_host(Vec::new(), tools, transport, host).await;
     ModeHarness { runtime, driver }
@@ -437,10 +443,13 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             let transport = mock_provider(Vec::new());
             let (mut runtime, store) =
                 standard_runtime_with_transport_and_queue_store(transport).await;
-            let driver =
-                crate::TurnWorkDriver::new(Arc::clone(&runtime.host.core.control.effect_host));
             let persisted = runtime.export_persistence_state();
             let session_id = persisted.session_id.clone();
+            let driver = crate::TurnWorkDriver::for_session(
+                Arc::clone(&runtime.host.core.control.effect_host),
+                session_id.clone(),
+                Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+            );
             let turn_id = format!("matrix-{mode:?}-{disposition:?}").to_ascii_lowercase();
             let undelivered = crate::store::TurnInputStore::enqueue_pending_turn_input(
                 store.as_ref(),
@@ -528,7 +537,6 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         let config = super::effect::runtime_host_config_with_native_controller(Arc::new(
             crate::NativeRuntimeEffectController::default(),
         ));
-        let driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
         let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
             Vec::new(),
             Arc::new(tool.clone()),
@@ -539,6 +547,11 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         .await;
         let persisted = runtime.export_persistence_state();
         let session_id = persisted.session_id.clone();
+        let driver = crate::TurnWorkDriver::for_session(
+            Arc::clone(&runtime.host.core.control.effect_host),
+            session_id.clone(),
+            Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+        );
         let turn_id = format!("no-drain-{mode:?}").to_ascii_lowercase();
         let turn_scope = native_scope(persisted.turn_scope(&turn_id));
         let turn = crate::task::spawn(async move {
@@ -737,7 +750,13 @@ async fn sleeping_retry_harness(
         crate::NativeRuntimeEffectController::default(),
     ))
     .with_clock(host_clock);
-    let driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
+    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    crate::testing::store_fixtures::bind_conformance_session(&driver_store, "root").await;
+    let driver = crate::TurnWorkDriver::for_session(
+        Arc::clone(&config.control.effect_host),
+        "root",
+        driver_store,
+    );
     let host = EmbeddedRuntimeHost::new(config);
     let runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),

@@ -61,7 +61,13 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
     let config = super::effect::runtime_host_config_with_native_controller(controller.clone())
         .with_clock(host_clock);
-    let turn_driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
+    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    crate::testing::store_fixtures::bind_conformance_session(&driver_store, "root").await;
+    let turn_driver = crate::TurnWorkDriver::for_session(
+        Arc::clone(&config.control.effect_host),
+        "root",
+        driver_store,
+    );
     let host = EmbeddedRuntimeHost::new(config);
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),

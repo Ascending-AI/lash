@@ -2093,8 +2093,20 @@ async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
                 format!("cold-process-{nonce}-session"),
                 format!("cold-process-{nonce}-turn"),
             );
-            let receipt = lash_core::runtime::TurnWorkDriver::new(
-                Arc::clone(&resolver) as Arc<dyn EffectHost>
+            let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
+                Arc::new(lash_core::runtime::InMemorySessionStoreFactory::new());
+            store_factory
+                .create_store(&lash_core::SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
+                    session_id: address.session_id.clone(),
+                    relation: lash_core::SessionRelation::Root,
+                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                })
+                .await
+                .expect("create cold-process cancellation session");
+            let receipt = lash_core::runtime::TurnWorkDriver::for_catalog(
+                Arc::clone(&resolver) as Arc<dyn EffectHost>,
+                store_factory,
             )
             .request_cancel(lash_core::runtime::TurnCancelRequest::new(
                 address,

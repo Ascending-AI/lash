@@ -74,7 +74,13 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         crate::QueuedWorkBatchingConfig::new(1),
     );
     config.control.effect_host = Arc::new(DefaultBindingHost::default());
-    let driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
+    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    crate::testing::store_fixtures::bind_conformance_session(&driver_store, "root").await;
+    let driver = crate::TurnWorkDriver::for_session(
+        Arc::clone(&config.control.effect_host),
+        "root",
+        driver_store,
+    );
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -139,7 +145,9 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
         !matches!(result, Err(ref error) if error.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked),
         "host rejected active gate: {result:?}"
     );
-    crate::TurnWorkDriver::new(host.clone())
+    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    crate::testing::store_fixtures::bind_conformance_session(&driver_store, "active-session").await;
+    crate::TurnWorkDriver::for_session(host.clone(), "active-session", driver_store)
         .request_cancel(crate::TurnCancelRequest::new(address, "host-cancel", None))
         .await
         .unwrap();

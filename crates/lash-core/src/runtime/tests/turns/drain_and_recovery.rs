@@ -217,7 +217,6 @@ pub(super) async fn cancellation_sealed_before_renewal_failure_remains_evidence_
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         transport.clone().into_handle(),
     ));
-    let turn_driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
     let mut runtime = TestRuntime::new(transport)
         .tools(Arc::new(EmptyTools))
         .host(crate::EmbeddedRuntimeHost::new(config))
@@ -225,6 +224,11 @@ pub(super) async fn cancellation_sealed_before_renewal_failure_remains_evidence_
         .with_session_id(SESSION_ID)
         .build()
         .await;
+    let turn_driver = crate::TurnWorkDriver::for_session(
+        Arc::clone(&runtime.host.core.control.effect_host),
+        SESSION_ID,
+        Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+    );
     let effect_loop_ended = Arc::new(AtomicBool::new(false));
     let release_effect_loop = Arc::new(AtomicBool::new(false));
     runtime.set_turn_phase_probe(Arc::new(PauseAfterEffectLoop {
