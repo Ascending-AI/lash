@@ -5,6 +5,7 @@ use super::*;
 /// content-type, so this doubles as live regression coverage for the
 /// empty-body ingress encoding in `update_restate_session_waits_via_ingress`.
 pub(super) async fn drive_durable_wait_index_scenarios(
+    storage: &PostgresStorage,
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
@@ -96,7 +97,10 @@ pub(super) async fn drive_durable_wait_index_scenarios(
     // state. A containing turn cannot honestly commit after its session has
     // been deleted, so the old post-revoke turn-result assertion no longer
     // applies.
-    let control_driver = TurnWorkDriver::new(Arc::new(host.clone()));
+    let control_driver = TurnWorkDriver::for_catalog(
+        Arc::new(host.clone()),
+        Arc::new(storage.session_store_factory()),
+    );
     let control_address = TurnAddress::new(DEFAULT_SESSION_ID, "e2e-control-revoke");
     let initial = control_driver
         .request_cancel(TurnCancelRequest::new(

@@ -349,11 +349,15 @@ pub(crate) trait WorkbenchSessionDeleteWorkflow {
 
 pub(crate) struct WorkbenchSessionDeleteWorkflowImpl {
     state: AppState,
+    administration: tokio::sync::OnceCell<lash_restate::RestateSessionAdministration>,
 }
 
 impl WorkbenchSessionDeleteWorkflowImpl {
     pub(crate) fn new(state: AppState) -> Self {
-        Self { state }
+        Self {
+            state,
+            administration: tokio::sync::OnceCell::new(),
+        }
     }
 }
 
@@ -363,8 +367,27 @@ impl WorkbenchSessionDeleteWorkflow for WorkbenchSessionDeleteWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<WorkbenchSessionDeleteWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
-        run_session_delete(self.state.clone(), request, &controller)
+        let administration = self
+            .administration
+            .get_or_try_init(|| async {
+                let administration = self
+                    .state
+                    .core
+                    .session_administration()
+                    .await
+                    .map_err(AppError::internal)?;
+                Ok::<_, AppError>(lash_restate::RestateSessionAdministration::new(
+                    administration,
+                    lash_restate::RestateConnection::with_client(
+                        self.state.restate_ingress_url.clone(),
+                        self.state.restate_http.clone(),
+                    ),
+                ))
+            })
+            .await
+            .map_err(session_delete_handler_error)?;
+        let execution = administration.for_invocation(ctx);
+        run_session_delete(self.state.clone(), request, &execution)
             .await
             .map_err(session_delete_handler_error)?;
         Ok(Json(()))
@@ -959,7 +982,7 @@ async fn run_mail_received(
 async fn run_session_delete(
     state: AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+    execution: &lash_restate::RestateSessionDeleteExecution<'_, '_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
     // The workflow fences the session itself, so a delete submitted without
     // going through the route (or replayed after the route's process died)
@@ -967,7 +990,7 @@ async fn run_session_delete(
     // mark is process-local and idempotent.
     let session_id = request.session_id.clone();
     state.active_turns.begin_retirement(&session_id);
-    let outcome = run_session_delete_attempt(&state, request, controller).await;
+    let outcome = run_session_delete_attempt(&state, request, execution).await;
     state.settle_retirement_mark(&session_id, &outcome).await;
     outcome
 }
@@ -975,8 +998,9 @@ async fn run_session_delete(
 async fn run_session_delete_attempt(
     state: &AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+    execution: &lash_restate::RestateSessionDeleteExecution<'_, '_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
+    let controller = execution.controller();
     // Pin the first attempt's wait obligation in the journal. A prior attempt
     // may already have committed the durable session tombstone before failing
     // in retention; a redrive must neither change this snapshot nor change the
@@ -1020,13 +1044,16 @@ async fn run_session_delete_attempt(
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     }
-    let scoped_effect_controller = controller
-        .scoped_effect_controller(request.execution_scope)
-        // Audited: constructing this scope only validates the supplied execution-scope fields.
+    if request.execution_scope != lash::runtime::ExecutionScope::session_delete(&request.session_id)
+    {
+        return Err(AppError::internal(
+            "session deletion requires a matching SessionDelete scope",
+        ));
+    }
+    let context = execution
+        .delete_context(&request.session_id)
         .map_err(AppError::internal)?;
-    state
-        .delete_session_and_reclaim_processes(&request.session_id, scoped_effect_controller)
-        .await?;
+    state.delete_session_and_reclaim_processes(context).await?;
     Ok(())
 }
 

@@ -1086,18 +1086,15 @@ async fn materialize_cron_test_session(state: &crate::AppState, session_id: &Ses
 }
 
 async fn retire_cron_test_session(state: &crate::AppState, session_id: &SessionId) {
-    let scope = state
+    let administration = state
         .core
-        .session_delete_scope(session_id)
+        .session_administration()
         .await
-        .expect("build cron test session delete scope");
-    let effect_host = state.core.effect_host();
-    let scoped = effect_host
-        .scoped(scope)
-        .expect("scope cron test session deletion");
-    state
-        .core
-        .delete_session(session_id, scoped)
+        .expect("build cron test session administration");
+    let context = administration
+        .delete_context(session_id)
+        .expect("issue cron test session deletion");
+    lash::LashCore::delete_session(context)
         .await
         .expect("retire cron test session");
 }

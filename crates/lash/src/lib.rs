@@ -89,6 +89,7 @@ pub use lash_core::{
     facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
     facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
+pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
 /// embedders cancel turns without depending on `tokio-util` themselves.
@@ -788,9 +789,9 @@ pub mod runtime {
         RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
         RuntimeProviderConfig, RuntimeScope, RuntimeTracingConfig, RuntimeTurnPhase,
         RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkTarget, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-        TurnContext, TurnControlBinding, TurnControlParticipation, WorkCadencePolicy,
-        WorkerSweepPolicy,
+        SessionAdministration, SessionDeleteContext, SessionDeleteExecution, SessionWorkTarget,
+        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnContext,
+        TurnControlBinding, TurnControlParticipation, WorkCadencePolicy, WorkerSweepPolicy,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for

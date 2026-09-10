@@ -384,18 +384,15 @@ pub(crate) async fn retire_workbench_session(state: &AppState, session_id: &Sess
             .await
             .expect("open session before retirement"),
     );
-    let scope = state
+    let administration = state
         .core
-        .session_delete_scope(session_id)
+        .session_administration()
         .await
-        .expect("build session delete scope");
-    let effect_host = state.core.effect_host();
-    let scoped = effect_host
-        .scoped(scope)
-        .expect("scope inline session deletion");
-    state
-        .core
-        .delete_session(session_id, scoped)
+        .expect("build session administration");
+    let context = administration
+        .delete_context(session_id)
+        .expect("issue inline session deletion");
+    lash::LashCore::delete_session(context)
         .await
         .expect("retire session");
 }

@@ -1117,17 +1117,16 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         "every registered row is on the runtime-wide rail before the delete"
     );
 
-    let scope = state
+    let administration = state
         .core
-        .session_delete_scope(&deleted_session_id)
+        .session_administration()
         .await
-        .expect("build session delete scope");
-    let effect_host = state.core.effect_host();
-    let scoped = effect_host
-        .scoped(scope)
-        .expect("scope inline session deletion");
+        .expect("build session administration");
+    let context = administration
+        .delete_context(&deleted_session_id)
+        .expect("issue inline session deletion");
     let retention = state
-        .delete_session_and_reclaim_processes(&deleted_session_id, scoped)
+        .delete_session_and_reclaim_processes(context)
         .await
         .expect("delete the session and reclaim its finished work");
     assert_eq!(retention.pruned_processes, 1, "one finished row reclaimed");

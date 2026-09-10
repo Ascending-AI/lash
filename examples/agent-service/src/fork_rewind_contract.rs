@@ -165,16 +165,14 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .expect("read inherited branch observations");
     assert_eq!(inherited[0].id, "fork-contract-observed-process");
 
-    let delete_scope = core
-        .session_delete_scope(SOURCE_SESSION)
+    let administration = core
+        .session_administration()
         .await
-        .expect("source session delete scope");
-    let effect_host = core.effect_host();
-    let scoped_effects = effect_host
-        .scoped(delete_scope)
-        .expect("matching source session delete scope");
-    let deleted = core
-        .delete_session(SOURCE_SESSION, scoped_effects)
+        .expect("source session administration");
+    let context = administration
+        .delete_context(SOURCE_SESSION)
+        .expect("source session delete context");
+    let deleted = LashCore::delete_session(context)
         .await
         .expect("delete superseded source session");
     assert_eq!(deleted.session_id, SOURCE_SESSION);

@@ -121,7 +121,7 @@ pub(super) async fn drive_turn_control_scenarios(
     ingress_url: &str,
 ) -> Result<()> {
     let deployment = RestateTurnDeployment::new(ingress_url.to_string());
-    let driver = deployment.turn_work_driver();
+    let driver = deployment.turn_work_driver(Arc::new(storage.session_store_factory()));
 
     // A remote host can durably win the gate before any worker owns the turn.
     let before = turn_control_request("e2e-turn-cancel-before-start", false);
@@ -274,7 +274,8 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
     report_workflow_progress(&request.workflow_id, "durable-sleep-suspended");
 
     let evidence_id = "e2e-cancel-suspended-sleep";
-    let driver = RestateTurnDeployment::new(ingress_url.to_string()).turn_work_driver();
+    let driver = RestateTurnDeployment::new(ingress_url.to_string())
+        .turn_work_driver(Arc::new(storage.session_store_factory()));
     let started = Instant::now();
     let receipt = driver
         .request_cancel(cancel_request(turn_address(&request).await?, evidence_id))
@@ -307,7 +308,8 @@ pub(super) async fn drive_engine_restart_scenario(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
-    let driver = RestateTurnDeployment::new(ingress_url.to_string()).turn_work_driver();
+    let driver = RestateTurnDeployment::new(ingress_url.to_string())
+        .turn_work_driver(Arc::new(storage.session_store_factory()));
     let parked = turn_control_request("e2e-engine-restart-cancel", false);
     submit_workflow(ingress_url, &parked).await?;
     let sleeping = TurnRequest {
@@ -504,7 +506,10 @@ pub(super) async fn drive_break_glass_scenario(
     report_workflow_progress(&break_glass.workflow_id, "admin-kill-requested");
     wait_for_invocation_terminal(&admin, &invocation_id).await?;
 
-    let driver = TurnWorkDriver::new(Arc::new(RestateEffectHost::new(ingress_url.to_string())));
+    let driver = TurnWorkDriver::for_catalog(
+        Arc::new(RestateEffectHost::new(ingress_url.to_string())),
+        Arc::new(storage.session_store_factory()),
+    );
     if let Ok(Ok(terminal)) = tokio::time::timeout(
         Duration::from_secs(3),
         driver.await_terminal(&turn_address(&break_glass).await?),

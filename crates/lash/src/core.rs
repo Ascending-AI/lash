@@ -4,10 +4,10 @@ use crate::support::{
     NativeSubstrateConfig, NoQueuedWork, ParkedSession, PluginFactory, PluginHost, PluginOptions,
     PluginSpec, PluginStack, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
     PromptLayer, PromptLayerSink, ProviderHandle, QueuedWorkSubstrate, Result, RuntimeEnvironment,
-    RuntimeHandle, RuntimeHostConfig, ScopedEffectController, SessionBuilder, SessionListFilter,
-    SessionPolicy, SessionRelation, SessionSpec, SessionStoreCreateRequest, SessionStoreFactory,
-    SessionSummary, SessionWorkTarget, StaticPluginFactory, TerminationPolicy, ToolProvider,
-    WorkerProcessWork, WorkerSlotSupplier,
+    RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy,
+    SessionRelation, SessionSpec, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    SessionWorkTarget, StaticPluginFactory, TerminationPolicy, ToolProvider, WorkerProcessWork,
+    WorkerSlotSupplier,
 };
 use lash_core::facade_support;
 use lash_core::runtime::{
@@ -276,19 +276,30 @@ impl LashCore {
             })
     }
 
-    /// Build the effect scope required to delete the stored session.
-    pub async fn session_delete_scope(
-        &self,
-        session_id: impl AsRef<str>,
-    ) -> Result<lash_core::ExecutionScope> {
-        let session_id = SessionId::from(session_id.as_ref());
-        if !self.session_exists(&session_id).await? {
-            return Err(EmbedError::StoreFactory {
-                session_id: session_id.clone(),
-                message: "session does not exist".to_string(),
-            });
-        }
-        Ok(lash_core::ExecutionScope::session_delete(&session_id))
+    /// Select the lifecycle owner used by administrative session operations.
+    ///
+    /// The returned handle keeps the catalog, effect host, process services,
+    /// and trigger store chosen by this core together. Provider, plugin,
+    /// prompt, tracing, and other live turn policy are deliberately excluded.
+    pub async fn session_administration(&self) -> Result<lash_core::SessionAdministration> {
+        let store_factory =
+            self.store_factory
+                .as_ref()
+                .ok_or(EmbedError::SessionCatalogUnavailable {
+                    operation: "session_administration",
+                })?;
+        let ports = self.substrate_slot.ports().await;
+        let resolved_env = self
+            .env
+            .clone()
+            .with_work_ports(ports.process.clone(), ports.queued_port());
+        Ok(lash_core::SessionAdministration::new(
+            Arc::clone(store_factory),
+            Arc::clone(&resolved_env.core.control.effect_host),
+            resolved_env.process_registry.clone(),
+            resolved_env.process_work(),
+            resolved_env.trigger_store.clone(),
+        ))
     }
 
     /// Rebuild a live session from a [`ParkedSession`](crate::ParkedSession)
@@ -624,18 +635,12 @@ impl LashCore {
 
     /// Deletes the session and reports reclaimed storage and process state.
     pub async fn delete_session(
-        &self,
-        session_id: impl AsRef<str>,
-        scoped_effect_controller: ScopedEffectController<'_>,
+        context: lash_core::SessionDeleteContext<'_>,
     ) -> Result<SessionDeleteReport> {
-        let session_id = SessionId::from(session_id.as_ref());
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "delete_session",
-            });
-        };
+        let session_id = SessionId::from(context.session_id());
+        let administration = context.administration();
         match lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
-            &scoped_effect_controller,
+            context.controller(),
         ) {
             lash_core::ExecutionScope::SessionDelete {
                 session_id: scoped_session_id,
@@ -648,14 +653,9 @@ impl LashCore {
                 .into());
             }
         }
-        let ports = self.substrate_slot.ports().await;
-        let resolved_env = self
-            .env
-            .clone()
-            .with_work_ports(ports.process.clone(), ports.queued_port());
         let process = if let (Some(process_registry), Some(process_work)) = (
-            resolved_env.process_registry.as_ref(),
-            resolved_env.process_work(),
+            administration.process_registry(),
+            administration.process_work(),
         ) {
             let invocation = RuntimeInvocation::effect(
                 RuntimeScope::new(session_id.clone()),
@@ -663,7 +663,8 @@ impl LashCore {
                 RuntimeEffectKind::Process,
                 format!("{session_id}:delete-session"),
             );
-            let outcome = scoped_effect_controller
+            let outcome = context
+                .controller()
                 .controller()
                 .execute_effect(
                     RuntimeEffectEnvelope::new(
@@ -699,7 +700,7 @@ impl LashCore {
         } else {
             None
         };
-        if let Some(trigger_store) = self.env.trigger_store.as_ref() {
+        if let Some(trigger_store) = administration.trigger_store() {
             trigger_store
                 .delete_session_subscriptions(&session_id)
                 .await
@@ -708,27 +709,24 @@ impl LashCore {
                     message: err.to_string(),
                 })?;
         }
-        self.env
-            .core
-            .control
-            .effect_host
+        administration
+            .effect_host()
             .revoke_await_events_for_session(&session_id)
             .await
             .map_err(|err| EmbedError::SessionDeleteProcess {
                 session_id: session_id.clone(),
                 message: err.to_string(),
             })?;
-        let storage = store_factory
+        let storage = administration
+            .store_factory()
             .delete_session(&session_id)
             .await
             .map_err(|failure| EmbedError::SessionDeleteStorage {
                 session_id: session_id.clone(),
                 failure: Box::new(failure),
             })?;
-        self.env
-            .core
-            .control
-            .effect_host
+        administration
+            .effect_host()
             .retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))
             .await
             .map_err(|err| EmbedError::SessionDeleteProcess {

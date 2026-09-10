@@ -1,6 +1,5 @@
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -276,7 +275,6 @@ impl SessionBuilder {
             self.core.process_lifecycle_available,
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let effect_host = Arc::clone(&env.core.control.effect_host);
         let ports = self.core.substrate_slot.ports().await;
         env = env.with_work_ports(ports.process.clone(), ports.queued_port());
         let binding = Arc::new(BoundSession::new(
@@ -538,6 +536,18 @@ impl ParkedSession {
 }
 
 impl LashSession {
+    /// Return administration bound to this session's owning catalog.
+    ///
+    /// A root opened with an explicit store has no implied catalog authority;
+    /// callers must obtain administration from the owner that selected it.
+    pub fn session_administration(&self) -> Result<lash_core::SessionAdministration> {
+        self.binding
+            .administration()
+            .ok_or(EmbedError::SessionCatalogUnavailable {
+                operation: "session_administration",
+            })
+    }
+
     /// Durably close this session, then release its in-memory runtime.
     ///
     /// `close` is the honest teardown verb: a persistent session flushes its

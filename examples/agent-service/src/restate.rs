@@ -878,7 +878,7 @@ finish "done via Restate E2E"
                     .build()
                     .expect("valid mock model spec"),
             )
-            .store_factory(store_factory)
+            .store_factory(store_factory.clone())
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
             )))
@@ -903,7 +903,7 @@ finish "done via Restate E2E"
         .expect("valid test native substrate config");
         let state = AppStateData::from_shared_db(
             core,
-            turn_deployment.turn_work_driver(),
+            turn_deployment.turn_work_driver(store_factory),
             app_db,
             "mock-model".to_string(),
             None,

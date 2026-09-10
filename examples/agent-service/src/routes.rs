@@ -945,7 +945,9 @@ finish "done through route"
                 "test",
             ))
             .expect("core");
-        let turn_work_driver = core.turn_work_driver();
+        let turn_work_driver = core
+            .turn_work_driver()
+            .expect("test core has a session catalog");
         let db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         ));

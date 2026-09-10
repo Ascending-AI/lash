@@ -19,7 +19,7 @@ pub(crate) struct BoundSession {
     queued: Arc<dyn QueuedWorkSubstrate>,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
     child_store_provider: Option<Arc<dyn SessionStoreFactory>>,
-    attachment_store: Arc<lash_core::SessionAttachmentStore>,
+    attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     catalog: Option<Arc<dyn SessionStoreFactory>>,
 }
@@ -67,6 +67,20 @@ impl BoundSession {
 
     pub(crate) fn catalog(&self) -> Option<Arc<dyn SessionStoreFactory>> {
         self.catalog.clone()
+    }
+
+    pub(crate) fn administration(&self) -> Option<lash_core::SessionAdministration> {
+        self.catalog().map(|catalog| {
+            lash_core::SessionAdministration::new(
+                catalog,
+                self.effect_host(),
+                self.process
+                    .as_ref()
+                    .map(|wiring| Arc::clone(wiring.registry())),
+                self.process_work(),
+                self.trigger_store.clone(),
+            )
+        })
     }
 
     /// Apply only lifecycle-owner services to a destination core environment.

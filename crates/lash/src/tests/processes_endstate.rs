@@ -1179,12 +1179,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     drop(session);
 
-    let report = core
-        .delete_session(
-            session_id,
-            session_delete_scope(&core, &SessionId::from(session_id)).await,
-        )
-        .await?;
+    let report = delete_bound_session(&core, session_id).await?;
     let process_report = report.process.expect("process delete report");
     assert_eq!(process_report.removed_observer_count, 1);
     assert_eq!(process_report.discarded_wake_delivery_count, 0);

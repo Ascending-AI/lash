@@ -305,34 +305,32 @@ impl AppState {
     /// journal command sequence remains stable.
     pub(crate) async fn delete_session_and_reclaim_processes(
         &self,
-        session_id: &SessionId,
-        scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
+        context: lash::SessionDeleteContext<'_>,
     ) -> Result<lash::process::ProcessPruneReport, AppError> {
-        let report = self
-            .core
-            .delete_session(session_id, scoped_effect_controller)
+        let session_id = context.session_id().to_string();
+        let report = lash::LashCore::delete_session(context)
             .await
             // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.
             .map_err(AppError::internal)?;
         #[cfg(test)]
         if let Some(turn_id) = SESSION_DELETE_RETENTION_FAULTS
             .lock_recover()
-            .remove(session_id)
+            .remove(&session_id)
         {
             // Model a turn appearing after the first attempt's journaled
             // snapshot, then fail retention once. A correct redrive reuses the
             // snapshot instead of turning this post-tombstone retry terminal.
-            self.active_turns.insert(session_id, &turn_id);
+            self.active_turns.insert(&session_id, &turn_id);
             return Err(AppError::retryable_internal(
                 "injected post-tombstone process-retention failure",
             ));
         }
         let retention = self
-            .prune_processes_originated_by(session_id)
+            .prune_processes_originated_by(&session_id)
             .await
             .map_err(AppError::retryable_internal)?;
         self.trace_for_session(
-            session_id,
+            &session_id,
             "reset.restate.session_deleted",
             json!({
                 "session_id": session_id,
@@ -408,9 +406,10 @@ impl AppState {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
+        let driver = self.core.turn_work_driver().map_err(AppError::internal)?;
         self.cancel_turns_for_session_with_driver(
             session_id,
-            &self.core.turn_work_driver(),
+            &driver,
             WorkbenchTurnCancelMode::Abort,
         )
         .await

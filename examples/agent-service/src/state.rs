@@ -163,17 +163,15 @@ impl AppStateData {
     }
 
     pub(crate) async fn discard_pending_chat_fork(&self, chat_id: &str) -> AppResult<()> {
-        let effect_host = self.core.effect_host();
-        let execution_scope = self
+        let administration = self
             .core
-            .session_delete_scope(chat_id)
+            .session_administration()
             .await
             .map_err(|err| AppError::internal(err.to_string()))?;
-        let scope = effect_host
-            .scoped(execution_scope)
+        let context = administration
+            .delete_context(chat_id)
             .map_err(|err| AppError::internal(err.to_string()))?;
-        self.core
-            .delete_session(chat_id, scope)
+        LashCore::delete_session(context)
             .await
             .map_err(|err| AppError::internal(err.to_string()))?;
         let chat_id = chat_id.to_string();
@@ -415,7 +413,8 @@ mod dialect_pin_tests {
         {
             AppStateData::from_shared_db(
                 core.clone(),
-                core.turn_work_driver(),
+                core.turn_work_driver()
+                    .expect("test core has a session catalog"),
                 Arc::new(Mutex::new(db)),
                 "mock-model".to_string(),
                 None,
@@ -428,7 +427,8 @@ mod dialect_pin_tests {
         {
             AppStateData::new(
                 core.clone(),
-                core.turn_work_driver(),
+                core.turn_work_driver()
+                    .expect("test core has a session catalog"),
                 db,
                 "mock-model".to_string(),
                 None,

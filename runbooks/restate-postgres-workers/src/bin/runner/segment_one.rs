@@ -305,6 +305,6 @@ pub(super) async fn run_workflow_segment_two(
     drive_suspended_sleep_cancel_scenario(storage, ingress_url, admin_url).await?;
     drive_engine_restart_scenario(storage, ingress_url, admin_url).await?;
     drive_turn_control_scenarios(storage, ingress_url).await?;
-    drive_durable_wait_index_scenarios(ingress_url, admin_url).await?;
+    drive_durable_wait_index_scenarios(storage, ingress_url, admin_url).await?;
     Ok(())
 }

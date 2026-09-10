@@ -365,14 +365,16 @@ async fn async_main() -> anyhow_like::Result<()> {
     };
     #[cfg(feature = "restate")]
     let turn_work_driver = match durability {
-        AgentServiceDurability::Local => core.turn_work_driver(),
+        AgentServiceDurability::Local => core.turn_work_driver().map_err(|err| err.to_string())?,
         AgentServiceDurability::Restate => turn_deployment
             .as_ref()
             .expect("turn deployment configured for Restate")
-            .turn_work_driver(),
+            .turn_work_driver(
+                Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>
+            ),
     };
     #[cfg(not(feature = "restate"))]
-    let turn_work_driver = core.turn_work_driver();
+    let turn_work_driver = core.turn_work_driver().map_err(|err| err.to_string())?;
 
     #[cfg(feature = "restate")]
     let process_worker = if durability == AgentServiceDurability::Restate {

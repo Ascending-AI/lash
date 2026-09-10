@@ -213,6 +213,7 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
             .state
             .core
             .turn_work_driver()
+            .expect("workbench core has a session catalog")
             .await_terminal(&address),
     )
     .await
@@ -374,6 +375,7 @@ finish (await handle)?
             .state
             .core
             .turn_work_driver()
+            .expect("workbench core has a session catalog")
             .await_terminal(&address),
     )
     .await
@@ -501,6 +503,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         .state
         .core
         .turn_work_driver()
+        .expect("workbench core has a session catalog")
         .await_terminal_with_timeout(&failed_address, Duration::from_secs(20))
         .await
         .expect("auth failure must publish a turn terminal");
@@ -576,6 +579,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         .state
         .core
         .turn_work_driver()
+        .expect("workbench core has a session catalog")
         .await_terminal_with_timeout(&recovery_address, Duration::from_secs(20))
         .await
         .expect("recovery turn terminal");
@@ -720,6 +724,7 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
         .state
         .core
         .turn_work_driver()
+        .expect("workbench core has a session catalog")
         .await_terminal_with_timeout(&address, Duration::from_secs(20))
         .await
         .expect("retry turn terminal");
@@ -931,12 +936,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     // delete whose submitting process died leaves behind. The route would
     // first sweep the orphan claim through its cooperative cancel's liveness
     // probe; the workflow alone must reach its own bounded terminal failure.
-    let execution_scope = harness
-        .state
-        .core
-        .session_delete_scope(&session_id)
-        .await
-        .expect("resolve held session scope");
+    let execution_scope = lash::runtime::ExecutionScope::session_delete(&session_id);
     let delete_invocation_id = restate::submit_session_delete(
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
@@ -1100,12 +1100,7 @@ finish (await handle)?
     )
     .await;
 
-    let execution_scope = harness
-        .state
-        .core
-        .session_delete_scope(&deleted_session_id)
-        .await
-        .expect("resolve deleted session scope");
+    let execution_scope = lash::runtime::ExecutionScope::session_delete(&deleted_session_id);
     let delete_invocation_id = restate::submit_session_delete(
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
@@ -1287,12 +1282,7 @@ finish "started lifecycle gates"
     )
     .await;
 
-    let execution_scope = harness
-        .state
-        .core
-        .session_delete_scope(&deleted_session_id)
-        .await
-        .expect("resolve deleted session scope");
+    let execution_scope = lash::runtime::ExecutionScope::session_delete(&deleted_session_id);
     let delete_invocation_id = restate::submit_session_delete(
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
@@ -1944,7 +1934,13 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     );
 
     let address = lash::TurnAddress::new(&session_id, &turn_id);
-    let driver = lash_restate::RestateTurnDeployment::new(ingress_url).turn_work_driver();
+    let database_url = (backend == "postgres")
+        .then(|| std::env::var("AGENT_WORKBENCH_DATABASE_URL").expect("Postgres recovery URL"));
+    let stores = WorkbenchStores::open(&data_dir, database_url.as_deref())
+        .await
+        .expect("reopen recovery session catalog");
+    let driver = lash_restate::RestateTurnDeployment::new(ingress_url)
+        .turn_work_driver(stores.session_store_factory);
     let receipt = driver
         .request_cancel(
             lash::TurnCancelRequest::new(

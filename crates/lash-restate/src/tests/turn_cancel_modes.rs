@@ -25,7 +25,11 @@ where
     Arc<C>: RestateControllerContext<'static>,
     C: Send + Sync + 'static,
 {
-    TurnWorkDriver::new(Arc::new(RestateRuntimeEffectController::new(context)))
+    TurnWorkDriver::for_session(
+        Arc::new(RestateRuntimeEffectController::new(context)),
+        SESSION,
+        Arc::new(lash_core::facade_support::InMemorySessionStore::default()),
+    )
 }
 
 /// Waits (wall-clock bounded) until the gate holds a registration. The process

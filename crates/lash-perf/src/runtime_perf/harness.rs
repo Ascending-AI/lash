@@ -367,7 +367,7 @@ impl BenchmarkRuntime {
             .provider_control
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("cancel round-trip provider control missing"))?;
-        let driver = self.core().turn_work_driver();
+        let driver = self.core().turn_work_driver()?;
         let address = self
             .session
             .as_ref()

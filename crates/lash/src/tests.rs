@@ -2348,15 +2348,13 @@ fn runtime_operation_scope(
         .expect("effect host supplies an owned runtime operation scope")
 }
 
-async fn session_delete_scope(
+async fn delete_bound_session(
     core: &LashCore,
-    session_id: &SessionId,
-) -> lash_core::ScopedEffectController<'static> {
-    native_scope(
-        core.session_delete_scope(session_id)
-            .await
-            .expect("session delete execution scope"),
-    )
+    session_id: impl AsRef<str>,
+) -> Result<crate::SessionDeleteReport> {
+    let administration = core.session_administration().await?;
+    let context = administration.delete_context(session_id.as_ref())?;
+    LashCore::delete_session(context).await
 }
 
 fn explicit_ephemeral_facets(

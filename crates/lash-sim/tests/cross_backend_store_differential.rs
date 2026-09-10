@@ -1858,16 +1858,14 @@ impl BackendRunner {
             StoreOperation::ReclaimRetainedEvidence => self.reclaim_terminal_evidence().await,
             StoreOperation::DeleteSession => {
                 let core = self.build_lifecycle_core();
-                let scope = core
-                    .session_delete_scope(&self.session_id)
+                let administration = core
+                    .session_administration()
                     .await
-                    .expect("materialized session must produce a delete scope");
-                let effect_host = core.effect_host();
-                let scoped = effect_host
-                    .scoped_static(scope)
-                    .expect("scope the differential delete")
-                    .expect("native effect host must provide a static delete scope");
-                core.delete_session(&self.session_id, scoped)
+                    .expect("materialized session must have administration");
+                let context = administration
+                    .delete_context(&self.session_id)
+                    .expect("issue the differential delete context");
+                lash::LashCore::delete_session(context)
                     .await
                     .expect("delete the materialized session through LashCore");
                 self.lifecycle_core = Some(core);

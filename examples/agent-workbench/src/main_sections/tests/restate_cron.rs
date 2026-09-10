@@ -392,11 +392,7 @@ pub(crate) async fn retire_cron_session_and_assert_zombie(
     cron_session_id: &SessionId,
     job_key: &str,
 ) {
-    let execution_scope = state
-        .core
-        .session_delete_scope(cron_session_id)
-        .await
-        .expect("resolve cron session delete scope");
+    let execution_scope = lash::runtime::ExecutionScope::session_delete(cron_session_id);
     let delete_invocation_id = restate::submit_session_delete(
         state,
         restate::WorkbenchSessionDeleteWorkflowRequest {

@@ -36,8 +36,12 @@ mod queued_drain_policy;
 #[doc(hidden)]
 pub use native_substrate::bounded_multiplicative_jitter;
 pub mod scenario_contracts;
+mod session_administration;
 mod session_api;
 mod session_catalog;
+pub use session_administration::{
+    SessionAdministration, SessionDeleteContext, SessionDeleteExecution,
+};
 pub use session_catalog::*;
 pub(crate) mod session_execution_lease;
 mod session_manager;

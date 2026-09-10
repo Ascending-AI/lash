@@ -15,7 +15,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/session_admin_flat_methods_are_not_public.rs");
     t.compile_fail("tests/ui/effect_host_activation_methods_are_removed.rs");
     t.compile_fail("tests/ui/trigger_emit_requires_execution_scope.rs");
-    t.compile_fail("tests/ui/core_delete_session_requires_scope.rs");
+    t.compile_fail("tests/ui/core_delete_session_rejects_arbitrary_controller.rs");
     t.compile_fail("tests/ui/session_turn_run_requires_scope.rs");
     t.compile_fail("tests/ui/session_turn_stream_requires_scope.rs");
     t.compile_fail("tests/ui/queued_turn_run_requires_scope.rs");
