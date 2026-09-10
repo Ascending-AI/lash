@@ -1234,7 +1234,8 @@ pub use store::{
     SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
     SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreError,
     StoreMaintenance, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+    StoreSchemaVerdict, TurnCancelRepairDecision, TurnInputStore, VacuumReport, WorkClaim,
+    WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

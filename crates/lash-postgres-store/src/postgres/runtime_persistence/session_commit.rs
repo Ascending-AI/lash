@@ -635,10 +635,15 @@ impl SessionCommitStore for PostgresSessionStore {
         complete_turn_input_claims_tx(&mut tx, &commit.completed_turn_input_claims).await?;
         let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
         if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
-            let disposition = load_turn_cancel_request_tx(&mut tx, &commit.session_id, turn_id)
-                .await?
-                .map(|record| record.request.undelivered)
-                .unwrap_or_default();
+            let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
+            let disposition = cancellation
+                .map_or(lash_core::TurnCancelDisposition::Defer, |evidence| {
+                    evidence.undelivered
+                });
+            if let Some(evidence) = cancellation {
+                reconcile_turn_cancel_winner_tx(&mut tx, &commit.session_id, turn_id, evidence)
+                    .await?;
+            }
             let rows = sqlx::query(&format!(
                 "SELECT {PENDING_TURN_INPUT_COLUMNS}
                  FROM lash_pending_turn_inputs
@@ -698,14 +703,16 @@ impl SessionCommitStore for PostgresSessionStore {
                     payload,
                     disposition,
                 };
-                append_turn_cancel_outcome_tx(
-                    &mut tx,
-                    &commit.session_id,
-                    turn_id,
-                    affected.clone(),
-                )
-                .await?;
-                turn_cancel_input_outcome.affected_inputs.push(affected);
+                if cancellation.is_some() {
+                    append_turn_cancel_outcome_tx(
+                        &mut tx,
+                        &commit.session_id,
+                        turn_id,
+                        affected.clone(),
+                    )
+                    .await?;
+                    turn_cancel_input_outcome.affected_inputs.push(affected);
+                }
             }
         }
         commit_attachment_refs_tx(

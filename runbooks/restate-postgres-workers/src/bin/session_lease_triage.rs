@@ -838,6 +838,7 @@ async fn commit_cas_livelock(
             completed_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         };

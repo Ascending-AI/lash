@@ -327,6 +327,7 @@ impl TurnBoundary {
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<TurnId>,
+        interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
@@ -371,6 +372,7 @@ impl TurnBoundary {
                 current_session_lease_generation,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
+                interrupted_turn_input_cancellation,
                 recorded_attachment_intent_ids,
                 session_execution_lease_completion,
             })
@@ -449,6 +451,7 @@ impl TurnBoundary {
             current_session_lease_generation,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
+            interrupted_turn_input_cancellation,
             recorded_attachment_intent_ids,
             session_execution_lease_completion,
         } = input;
@@ -512,6 +515,7 @@ impl TurnBoundary {
                 current_session_lease_generation,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
+                interrupted_turn_input_cancellation,
                 committed_attachment_ids,
                 adopted_intent_rows,
                 session_execution_lease_completion,
@@ -544,6 +548,7 @@ impl TurnBoundary {
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<TurnId>,
+        interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
@@ -595,6 +600,7 @@ impl TurnBoundary {
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
+        commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
         let can_retry_recovered_settlement =
             claim_settlement.has_recovered(current_session_lease_generation);
         let result = if can_retry_recovered_settlement {

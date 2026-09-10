@@ -60,6 +60,7 @@ struct TurnCommitRequest<'commit> {
     release_session_execution_lease: bool,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
+    interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
 }
 
 /// The local commit-admission handles: only the head-advancing attempt uses
@@ -135,6 +136,7 @@ impl PreparedTurn {
             release_session_execution_lease,
             trace_turn_id,
             recorded_attachment_intent_ids,
+            interrupted_turn_input_cancellation,
         } = request;
         let accepted = self
             .turn_pipeline
@@ -148,6 +150,7 @@ impl PreparedTurn {
                 // Any active-turn input that missed the turn's final
                 // checkpoint must become the next ordinary user turn.
                 Some(trace_turn_id.clone()),
+                interrupted_turn_input_cancellation,
                 recorded_attachment_intent_ids,
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
@@ -416,7 +419,7 @@ impl LashRuntime {
         let assembled_state = turn_pipeline.export_state_for_assembly();
         let assembled = assembler.finish(
             assembled_state,
-            cancellation,
+            cancellation.clone(),
             None,
             &self.host.core.control.termination,
         );
@@ -531,6 +534,7 @@ impl LashRuntime {
                         .durability
                         .attachment_store
                         .recorded_turn_intent_ids(&trace_turn_id),
+                    interrupted_turn_input_cancellation: cancellation.clone(),
                 },
                 TurnCommitAdmission {
                     cancellation: cancel_state.clone(),

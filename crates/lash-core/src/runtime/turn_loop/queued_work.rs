@@ -342,6 +342,7 @@ impl LashRuntime {
             }
         }
         if selected_batch_ids.is_none() {
+            let drain_effect_controller = opts.scoped_effect_controller();
             let mut input_claim = store
                 .claim_next_turn_inputs(
                     &self.state.session_id,
@@ -361,6 +362,7 @@ impl LashRuntime {
                         &store,
                         &session_execution_fence,
                         &TurnId::from(opts.execution_scope_id()),
+                        drain_effect_controller.controller(),
                     )
                     .await
                     > 0

@@ -82,9 +82,9 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                     crate::TurnInputState::Cancelled | crate::TurnInputState::Completed
                 ))
         });
-        self.turn_cancel_requests
-            .lock_recover()
-            .retain(|_, record| record.request.address.session_id != session_id);
+        // Cancellation rows include unresolved recovery intent. They remain
+        // until session deletion, which is the only safe reclamation boundary
+        // without terminal correlation.
         Ok(crate::store::VacuumReport {
             removed_node_count,
             removed_pending_turn_input_tombstone_count: before.saturating_sub(pending.len()),

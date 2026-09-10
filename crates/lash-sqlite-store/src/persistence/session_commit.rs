@@ -809,9 +809,19 @@ impl SessionCommitStore for Store {
                     }
                     let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
                     if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
-                        let disposition = load_turn_cancel_request_conn(tx, &commit.session_id, turn_id)?
-                            .map(|record| record.request.undelivered)
-                            .unwrap_or_default();
+                        let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
+                        let disposition = cancellation.map_or(
+                            lash_core::TurnCancelDisposition::Defer,
+                            |evidence| evidence.undelivered,
+                        );
+                        if let Some(evidence) = cancellation {
+                            reconcile_turn_cancel_winner_conn(
+                                tx,
+                                &commit.session_id,
+                                turn_id,
+                                evidence,
+                            )?;
+                        }
                         let input_ids = {
                             let mut stmt = tx
                                 .prepare(
@@ -874,8 +884,10 @@ impl SessionCommitStore for Store {
                             ])
                             .map_err(sqlite_error)?;
                             let affected = lash_core::TurnCancelAffectedInput { input_id, payload, disposition };
-                            append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
-                            turn_cancel_input_outcome.affected_inputs.push(affected);
+                            if cancellation.is_some() {
+                                append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
+                                turn_cancel_input_outcome.affected_inputs.push(affected);
+                            }
                         }
                     }
                     crate::attachments::commit_attachment_refs_conn(

@@ -395,6 +395,14 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
         } => assert_eq!(text, "completion won"),
         other => panic!("attached terminal does not match the settled gate: {other:?}"),
     }
+    assert!(matches!(
+        driver
+            .request_cancel(request(address, "after-terminal"))
+            .await
+            .expect("late cancellation is a typed no-op")
+            .outcome,
+        TurnCancelOutcome::CompletionWonRace
+    ));
 }
 
 async fn exact_scope_and_session_sweep_isolation(host: Arc<dyn EffectHost>) {

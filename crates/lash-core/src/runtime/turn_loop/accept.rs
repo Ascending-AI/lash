@@ -278,6 +278,7 @@ impl LashRuntime {
         );
 
         let drive = {
+            let drain_effect_controller = opts.scoped_effect_controller();
             let fence = session_execution_lease
                 .as_ref()
                 .map(SessionExecutionLeaseGuard::fence)
@@ -301,6 +302,7 @@ impl LashRuntime {
                         &store,
                         &fence,
                         &TurnId::from(opts.execution_scope_id()),
+                        drain_effect_controller.controller(),
                     )
                     .await
                     > 0

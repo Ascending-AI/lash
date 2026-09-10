@@ -287,6 +287,37 @@ pub(super) async fn load_turn_cancel_request_pg(
     Ok(record)
 }
 
+/// Load only cancellation intent. Unlike the full receipt reader, this does
+/// not depend on retained payload tombstones from earlier repairs.
+pub(super) async fn load_turn_cancel_request_intent_pg(
+    pool: &sqlx::PgPool,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> Result<Option<lash_core::facade_support::TurnCancelRequest>, StoreError> {
+    let mut connection = acquire_runtime_connection(pool).await?;
+    let row: Option<(String, Option<String>, Option<String>, String, String)> = sqlx::query_as(
+        "SELECT request_id, origin, reason, disposition, mode
+         FROM lash_turn_cancel_requests
+         WHERE session_id = $1 AND turn_id = $2",
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(store_sqlx_error)?;
+    row.map(|(request_id, origin, reason, disposition, mode)| {
+        Ok(lash_core::facade_support::TurnCancelRequest {
+            address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+            request_id,
+            origin,
+            reason,
+            undelivered: turn_cancel_disposition_from_wire(&disposition)?,
+            mode: turn_cancel_mode_from_wire(&mode)?,
+        })
+    })
+    .transpose()
+}
+
 #[derive(Default)]
 pub struct TurnCancelReadPause {
     #[cfg(any(test, feature = "testing"))]
@@ -521,9 +552,29 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     turn_id: &TurnId,
     affected: lash_core::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
-    let Some(_) = load_turn_cancel_request_tx(tx, session_id, turn_id).await? else {
+    let arrays: Option<(Vec<String>, Vec<String>)> = sqlx::query_as(
+        "SELECT affected_input_ids, affected_dispositions
+         FROM lash_turn_cancel_requests
+         WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let Some((affected_input_ids, affected_dispositions)) = arrays else {
         return Ok(());
     };
+    if affected_input_ids.len() != affected_dispositions.len() {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "TurnCancelRequest",
+            message: format!(
+                "affected input/disposition cardinality differs: {} input ids, {} dispositions",
+                affected_input_ids.len(),
+                affected_dispositions.len()
+            ),
+        });
+    }
     sqlx::query(
         "UPDATE lash_turn_cancel_requests
          SET affected_input_ids = array_append(affected_input_ids, $3),
@@ -540,14 +591,44 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     Ok(())
 }
 
-pub(super) async fn defer_orphaned_active_turn_inputs_tx(
+pub(super) async fn reconcile_turn_cancel_winner_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    evidence: &lash_core::facade_support::TurnCancellationEvidence,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO lash_turn_cancel_requests (
+             session_id, turn_id, request_id, origin, reason, disposition, mode
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (session_id, turn_id) DO UPDATE
+         SET request_id = EXCLUDED.request_id,
+             origin = EXCLUDED.origin,
+             reason = EXCLUDED.reason,
+             disposition = EXCLUDED.disposition,
+             mode = EXCLUDED.mode",
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .bind(&evidence.request_id)
+    .bind(&evidence.origin)
+    .bind(&evidence.reason)
+    .bind(turn_cancel_disposition_wire(evidence.undelivered))
+    .bind(turn_cancel_mode_wire(evidence.mode))
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
+pub(super) async fn orphaned_active_turn_ids_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     live_generation: u64,
     scope: lash_core::OrphanedTurnInputScope<'_>,
-) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
-    let rows: Vec<(String, String, String, String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT input_id, state, ingress_json, input_json, claim_token, claim_session_lease_generation
+) -> Result<Vec<TurnId>, StoreError> {
+    let rows: Vec<(String, String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT state, ingress_json, claim_token, claim_session_lease_generation
          FROM lash_pending_turn_inputs
          WHERE session_id = $1 AND state = ANY($2) ORDER BY enqueue_seq ASC
          FOR UPDATE",
@@ -563,8 +644,8 @@ pub(super) async fn defer_orphaned_active_turn_inputs_tx(
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    let mut repairable = Vec::new();
-    for (input_id, state, ingress_json, input_json, claim_token, claim_generation) in rows {
+    let mut turn_ids = std::collections::BTreeSet::new();
+    for (state, ingress_json, claim_token, claim_generation) in rows {
         let state = lash_core::TurnInputState::from_wire_str(&state)
             .ok_or_else(|| StoreError::Backend(format!("unknown turn-input state `{state}`")))?;
         let ingress: lash_core::TurnInputIngress =
@@ -585,16 +666,80 @@ pub(super) async fn defer_orphaned_active_turn_inputs_tx(
             let turn_id = ingress.active_turn_id().ok_or_else(|| {
                 StoreError::Backend("active-turn input has no active turn id".to_string())
             })?;
-            let disposition = load_turn_cancel_request_tx(tx, session_id, turn_id)
-                .await?
-                .map(|record| record.request.undelivered)
-                .unwrap_or_default();
-            repairable.push((
-                input_id,
-                turn_id.to_string(),
-                store_decode_json(&input_json, "turn input")?,
-                disposition,
-            ));
+            turn_ids.insert(turn_id.clone());
+        }
+    }
+    Ok(turn_ids.into_iter().collect())
+}
+
+pub(super) async fn repair_orphaned_active_turn_inputs_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    live_generation: u64,
+    turn_id: &TurnId,
+    decision: &lash_core::TurnCancelRepairDecision,
+) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
+    if matches!(
+        decision,
+        lash_core::TurnCancelRepairDecision::NoCancellationIntent
+    ) {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1 FROM lash_turn_cancel_requests
+                 WHERE session_id = $1 AND turn_id = $2
+             )",
+        )
+        .bind(session_id.as_str())
+        .bind(turn_id.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if exists {
+            return Ok(Default::default());
+        }
+    }
+    if let lash_core::TurnCancelRepairDecision::CancellationWon(evidence) = decision {
+        reconcile_turn_cancel_winner_tx(tx, session_id, turn_id, evidence).await?;
+    }
+    let rows: Vec<(String, String, String, String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT input_id, state, ingress_json, input_json, claim_token, claim_session_lease_generation
+         FROM lash_pending_turn_inputs
+         WHERE session_id = $1 AND state = ANY($2) ORDER BY enqueue_seq ASC
+         FOR UPDATE",
+    )
+    .bind(session_id.as_str())
+    .bind(
+        [
+            lash_core::TurnInputState::PendingActive.as_str(),
+            lash_core::TurnInputState::Accepted.as_str(),
+        ]
+        .as_slice(),
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let scope = lash_core::OrphanedTurnInputScope::Turn(turn_id);
+    let disposition = decision.disposition();
+    let mut repairable = Vec::new();
+    for (input_id, state, ingress_json, input_json, claim_token, claim_generation) in rows {
+        let state = lash_core::TurnInputState::from_wire_str(&state)
+            .ok_or_else(|| StoreError::Backend(format!("unknown turn-input state `{state}`")))?;
+        let ingress: lash_core::TurnInputIngress =
+            store_decode_json(&ingress_json, "turn-input ingress")?;
+        let claim_generation = u64_from_sql(
+            "PendingTurnInput",
+            "claim_session_lease_generation",
+            claim_generation,
+        )?;
+        if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+            scope,
+            live_generation,
+            state,
+            &ingress,
+            claim_token.is_some(),
+            claim_generation,
+        ) {
+            repairable.push((input_id, store_decode_json(&input_json, "turn input")?));
         }
     }
     if repairable.is_empty() {
@@ -602,7 +747,7 @@ pub(super) async fn defer_orphaned_active_turn_inputs_tx(
     }
     let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn)?;
     let mut outcome = lash_core::TurnCancelInputOutcome::default();
-    for (input_id, turn_id, payload, disposition) in repairable {
+    for (input_id, payload) in repairable {
         sqlx::query(
             "UPDATE lash_pending_turn_inputs
          SET state = $3,
@@ -634,8 +779,12 @@ pub(super) async fn defer_orphaned_active_turn_inputs_tx(
             payload,
             disposition,
         };
-        append_turn_cancel_outcome_tx(tx, session_id, &TurnId::from(turn_id), affected.clone())
-            .await?;
+        if matches!(
+            decision,
+            lash_core::TurnCancelRepairDecision::CancellationWon(_)
+        ) {
+            append_turn_cancel_outcome_tx(tx, session_id, turn_id, affected.clone()).await?;
+        }
         outcome.affected_inputs.push(affected);
     }
     Ok(outcome)

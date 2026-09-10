@@ -583,6 +583,13 @@ fn validate_session_execution_lease_plan(commit: &RuntimeCommit) -> Result<(), S
             session_id: commit.session_id.clone(),
         });
     }
+    if commit.interrupted_turn_input_cancellation.is_some()
+        && commit.interrupted_turn_input_turn_id.is_none()
+    {
+        return Err(StoreError::Backend(
+            "runtime commit cancellation evidence requires an interrupted turn id".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -624,6 +631,35 @@ mod tests {
             error,
             StoreError::RuntimeCommitLeaseAuthorityConflict { session_id }
                 if session_id == "lease-plan-conflict"
+        ));
+    }
+
+    #[test]
+    fn commit_rejects_cancellation_evidence_without_an_interrupted_turn() {
+        let state = crate::RuntimeSessionState {
+            session_id: SessionId::from("orphan-cancellation-evidence"),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.interrupted_turn_input_cancellation = Some(crate::TurnCancellationEvidence {
+            request_id: "request".to_string(),
+            origin: None,
+            reason: None,
+            undelivered: crate::TurnCancelDisposition::Defer,
+            mode: crate::TurnCancelMode::Immediate,
+            honoured_after_step: None,
+        });
+
+        let error = match RuntimeCommitPlanner::prepare(commit) {
+            Ok(_) => panic!("cancellation evidence must name its interrupted turn"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            StoreError::Backend(message)
+                if message == "runtime commit cancellation evidence requires an interrupted turn id"
         ));
     }
 

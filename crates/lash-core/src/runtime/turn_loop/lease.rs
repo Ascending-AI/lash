@@ -376,9 +376,10 @@ impl LashRuntime {
         store: &Arc<dyn crate::store::RuntimePersistence>,
         fence: &crate::SessionExecutionLeaseAuthority,
         resumable_turn_id: &TurnId,
+        turn_control_resolver: &dyn crate::AwaitEventResolver,
     ) -> usize {
-        match store
-            .defer_orphaned_active_turn_inputs(
+        let turn_ids = match store
+            .orphaned_active_turn_ids(
                 &self.state.session_id,
                 fence,
                 crate::OrphanedTurnInputScope::LaneGeneration {
@@ -387,17 +388,7 @@ impl LashRuntime {
             )
             .await
         {
-            Ok(repaired) if repaired.is_empty() => 0,
-            Ok(repaired) => {
-                tracing::info!(
-                    session_id = %self.state.session_id,
-                    repaired = repaired.len(),
-                    live_generation = fence.fencing_token,
-                    event = "turn_input.deferred_before_drain",
-                    "re-deferred active-turn inputs pinned to turns that can no longer commit"
-                );
-                repaired.len()
-            }
+            Ok(turn_ids) => turn_ids,
             // The lane went out from under this drain; whoever holds it now owns
             // the repair, and the drain's own next store call reports the loss.
             Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
@@ -406,7 +397,7 @@ impl LashRuntime {
                     event = "turn_input.defer_before_drain_fenced",
                     "a superseded lane leaves the orphan repair to its successor"
                 );
-                0
+                return 0;
             }
             Err(err) => {
                 tracing::warn!(
@@ -415,9 +406,54 @@ impl LashRuntime {
                     event = "turn_input.defer_before_drain_failed",
                     "failed to re-defer orphaned active-turn inputs before a queued-work drain"
                 );
-                0
+                return 0;
+            }
+        };
+        let mut repaired_count = 0;
+        for turn_id in turn_ids {
+            let address = crate::TurnAddress::new(&self.state.session_id, &turn_id);
+            let decision = match store.turn_cancel_request_intent(&address).await {
+                Ok(Some(request)) => {
+                    match crate::runtime::turn_control::ActiveTurnControl::reconcile_orphan_cancel_intent(
+                        turn_control_resolver,
+                        &address,
+                        request.evidence(),
+                    )
+                    .await
+                    {
+                        Ok(Some(decision)) => decision,
+                        Ok(None) => continue,
+                        Err(err) => {
+                            tracing::warn!(session_id = %self.state.session_id, turn_id = %turn_id, error = %err, event = "turn_input.cancel_gate_reconcile_failed");
+                            continue;
+                        }
+                    }
+                }
+                Ok(None) => crate::TurnCancelRepairDecision::NoCancellationIntent,
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %turn_id, error = %err, event = "turn_input.cancel_intent_read_failed");
+                    continue;
+                }
+            };
+            match store
+                .repair_orphaned_active_turn_inputs(
+                    &self.state.session_id,
+                    fence,
+                    &turn_id,
+                    decision,
+                )
+                .await
+            {
+                Ok(outcome) => repaired_count += outcome.affected_inputs.len(),
+                Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                    return repaired_count;
+                }
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %turn_id, error = %err, event = "turn_input.defer_before_drain_failed")
+                }
             }
         }
+        repaired_count
     }
 
     /// Re-defer the inputs a torn-down turn can no longer deliver (FIG-1573).
@@ -442,6 +478,7 @@ impl LashRuntime {
         &self,
         trace_turn_id: &TurnId,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        turn_control_resolver: &dyn crate::AwaitEventResolver,
     ) {
         let Some(store) = self
             .session
@@ -459,11 +496,27 @@ impl LashRuntime {
             );
             return;
         };
+        let address = crate::TurnAddress::new(&self.state.session_id, trace_turn_id);
+        let decision =
+            match crate::runtime::turn_control::ActiveTurnControl::peek_orphan_repair_decision(
+                turn_control_resolver,
+                &address,
+            )
+            .await
+            {
+                Ok(Some(decision)) => decision,
+                Ok(None) => return,
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_gate_peek_failed");
+                    return;
+                }
+            };
         match store
-            .defer_orphaned_active_turn_inputs(
+            .repair_orphaned_active_turn_inputs(
                 &self.state.session_id,
                 fence,
-                crate::OrphanedTurnInputScope::Turn(trace_turn_id),
+                trace_turn_id,
+                decision,
             )
             .await
         {

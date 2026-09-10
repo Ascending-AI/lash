@@ -512,6 +512,7 @@ impl RuntimeCommit {
             completed_turn_input_claims,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
+            interrupted_turn_input_cancellation,
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
@@ -520,6 +521,7 @@ impl RuntimeCommit {
                 && completed_turn_input_claims.is_empty()
                 && enqueued_queue_batches.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
+                && interrupted_turn_input_cancellation.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && committed_attachment_ids.is_empty(),
@@ -691,6 +693,7 @@ impl RuntimeCommit {
             completed_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         })
@@ -771,10 +774,17 @@ impl RuntimeCommit {
         self
     }
 
-    /// Marks one interrupted turn so store implementors atomically defer its unsettled active-turn
-    /// inputs instead of losing or prematurely completing them.
-    pub fn deferring_interrupted_turn_inputs(mut self, turn_id: impl Into<TurnId>) -> Self {
+    /// Marks one interrupted turn so store implementors atomically settle its
+    /// undelivered active-turn inputs. `cancellation` is the exact evidence
+    /// returned by the authoritative keyed gate; absence explicitly selects
+    /// ordinary non-cancellation re-deferral.
+    pub fn deferring_interrupted_turn_inputs(
+        mut self,
+        turn_id: impl Into<TurnId>,
+        cancellation: Option<crate::TurnCancellationEvidence>,
+    ) -> Self {
         self.interrupted_turn_input_turn_id = Some(turn_id.into());
+        self.interrupted_turn_input_cancellation = cancellation;
         self
     }
 
@@ -1012,10 +1022,23 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
 /// completed atomically by [`SessionCommitStore::commit_runtime_state`].
 #[async_trait::async_trait]
 pub trait TurnInputStore: Send + Sync {
-    /// Persist the first cancellation request for one turn.
+    /// Whether this turn's final runtime commit receipt is already durable.
+    /// This closes the store-commit-to-terminal-publication window for late
+    /// cancellation requests.
+    async fn turn_is_committed(&self, _address: &crate::TurnAddress) -> Result<bool, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "turn_is_committed",
+        })
+    }
+
+    /// Persist cancellation intent for one turn.
     ///
-    /// Repeating the address returns the original request unchanged, making
-    /// its undelivered-input disposition first-writer-wins.
+    /// Repeating the address returns the original request unless the incoming
+    /// mode is stronger. This row is provisional evidence until
+    /// [`Self::reconcile_turn_cancel_winner`] projects the keyed-gate winner.
+    /// If the turn's final receipt is already durable, implementations perform
+    /// no write and may return the incoming request with no outcome rather than
+    /// decode retained historical outcome payloads.
     async fn record_turn_cancel_request(
         &self,
         _request: crate::TurnCancelRequest,
@@ -1033,6 +1056,30 @@ pub trait TurnInputStore: Send + Sync {
     ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "turn_cancel_request",
+        })
+    }
+
+    /// Read only durable cancellation intent, without reconstructing affected
+    /// input payloads. Recovery uses this after vacuum may have reclaimed
+    /// payload tombstones belonging to an earlier repair of the same turn id.
+    async fn turn_cancel_request_intent(
+        &self,
+        _address: &crate::TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRequest>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "turn_cancel_request_intent",
+        })
+    }
+
+    /// Project the authoritative keyed-gate winner into durable request
+    /// evidence without changing arbitration authority.
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        _address: &crate::TurnAddress,
+        _evidence: &crate::TurnCancellationEvidence,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "reconcile_turn_cancel_winner",
         })
     }
 
@@ -1142,8 +1189,8 @@ pub trait TurnInputStore: Send + Sync {
         Ok(())
     }
 
-    /// Apply the durable cancel disposition to every active-turn-scoped input
-    /// whose pinned turn can no longer commit, returning the affected payloads.
+    /// Discover distinct turn ids with active-turn-scoped inputs eligible for
+    /// recovery consideration under the caller's fence and scope.
     ///
     /// An input routed into a running turn is persisted `pending_active` (or
     /// `accepted` once that turn claims it) and addressed only by the turn id it
@@ -1151,64 +1198,80 @@ pub trait TurnInputStore: Send + Sync {
     /// did not deliver ([`RuntimeCommit::deferring_interrupted_turn_inputs`]),
     /// so a turn that stops without committing strands its inputs in a state no
     /// next-turn drain can claim and no later turn id can address. This is the
-    /// repair for that state, and [`OrphanedTurnInputScope`] carries the caller's
-    /// proof that the pinned turns are gone.
-    ///
-    /// Under [`crate::TurnCancelDisposition::Defer`], repaired rows become
-    /// `deferred_next_turn` with `NextTurn` ingress and cleared claim columns -
-    /// byte-identical to the commit-time re-defer. They remain undelivered and
-    /// redeliverable. Under [`crate::TurnCancelDisposition::Drop`], repaired rows become
-    /// `cancelled`, which is the settled transition that makes a dropped input
-    /// un-redeliverable. Its payload stays in place for the durable outcome
-    /// record; ADR 0010 leaves vacuum as the sole reclamation path. Rows the
-    /// scope does not cover are untouched.
-    ///
-    /// Like every other sibling that rewrites claim columns, the repair
-    /// re-validates `session_execution_lease` **inside its own transaction**.
-    /// A separate upstream check would leave a window in which the lane is
-    /// displaced between the check and this write, after which a stale-generation
-    /// repair would clear a live holder's claim columns and turn its commit into
-    /// a silent no-match. A displaced or expired fence is refused with
-    /// [`StoreError::SessionExecutionLeaseExpired`]; callers treat that as "not
-    /// mine to repair", never as a failure of the work they were doing.
-    async fn defer_orphaned_active_turn_inputs(
+    /// recovery candidate for that state. Discovery does not establish whether
+    /// a turn ended or whether cancellation won; the caller must consult
+    /// durable intent and the keyed gate before asking for exact-turn repair.
+    async fn orphaned_active_turn_ids(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        scope: OrphanedTurnInputScope<'_>,
-    ) -> Result<crate::TurnCancelInputOutcome, StoreError>;
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _scope: OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<crate::TurnId>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "orphaned_active_turn_ids",
+        })
+    }
+
+    /// Repair one orphan only after the caller has consulted the authoritative
+    /// cancellation gate.
+    ///
+    /// The store rechecks the execution fence and row eligibility in the same
+    /// transaction as the mutation. `NoCancellationIntent` additionally
+    /// rechecks that no request row exists, closing the request-versus-repair
+    /// race without resolving a gate for a pre-named turn that may start later.
+    /// A displaced or expired fence is refused with
+    /// [`StoreError::SessionExecutionLeaseExpired`].
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _turn_id: &crate::TurnId,
+        _decision: TurnCancelRepairDecision,
+    ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "repair_orphaned_active_turn_inputs",
+        })
+    }
 }
 
-/// The caller's proof that a pinned turn can no longer commit, and therefore
-/// which active-turn-scoped rows
-/// [`TurnInputStore::defer_orphaned_active_turn_inputs`] may repair.
-///
-/// Both variants deliberately exclude the one row class that must never be
-/// swept: an input pinned to a turn that is still able to deliver it.
+/// Explicit cancellation authority supplied to one orphan-input repair.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnCancelRepairDecision {
+    /// The keyed gate settled with this cancellation evidence.
+    CancellationWon(crate::TurnCancellationEvidence),
+    /// The keyed gate was already sealed by completion.
+    CancellationDidNotWin,
+    /// No request existed when recovery observed the turn. The store must
+    /// recheck absence transactionally and skip repair if intent appeared.
+    NoCancellationIntent,
+}
+
+impl TurnCancelRepairDecision {
+    pub fn disposition(&self) -> crate::TurnCancelDisposition {
+        match self {
+            Self::CancellationWon(evidence) => evidence.undelivered,
+            Self::CancellationDidNotWin | Self::NoCancellationIntent => {
+                crate::TurnCancelDisposition::Defer
+            }
+        }
+    }
+}
+
+/// Bounds which active-turn-scoped rows
+/// [`TurnInputStore::orphaned_active_turn_ids`] may consider for recovery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OrphanedTurnInputScope<'a> {
-    /// Exactly the rows pinned to one named turn, which the caller has just
-    /// torn down without a commit. The turn id is the proof: that turn will
-    /// never reach a final commit, so nothing it holds can be delivered.
+    /// Exactly the rows pinned to one named turn after its local execution
+    /// path tore down without a commit.
     Turn(&'a crate::TurnId),
-    /// Every row not pinned to the caller's own live lane generation, which the
-    /// repair reads from the fence the caller passes.
+    /// Rows not pinned to the caller's live lane generation, excluding the
+    /// caller-provided resumable turn and its agent-frame follow-ons.
     ///
-    /// The caller holds the session-execution lane and is running no turn under
-    /// it and resuming none, so any row pinned to another generation - or to
-    /// none at all - names a turn that cannot commit under this lane. A row
-    /// pinned to the fence's own generation is in flight for the caller itself
-    /// and is never swept. A turn running lane-lessly elsewhere is unprotected
-    /// by design (ADR 0029 makes the commit CAS, not the lane, the authority),
-    /// and re-deferring its undelivered input changes delivery timing only.
-    ///
-    /// "Running no turn under it, and resuming none" is the load-bearing half.
-    /// Merely *acquiring* the lane at a new generation does not qualify: cold
-    /// recovery resumes the interrupted turn under the same turn id at the new
-    /// generation, so the rows pinned to the displaced generation may still be
-    /// delivered by it. `resumable_turn_id` is how a caller that *might* resume
-    /// one names it: rows pinned to that turn id, or to one of its agent-frame
-    /// follow-ons, are excluded however dead their claim generation looks.
+    /// The resumable identity is a conservative exclusion, not lifecycle
+    /// authority. Other candidates can include a pre-named future turn, so
+    /// discovery alone must never resolve a cancellation gate. With no durable
+    /// request, exact repair may only perform the existing ordinary re-defer
+    /// after transactionally confirming request absence.
     LaneGeneration {
         resumable_turn_id: Option<&'a TurnId>,
     },

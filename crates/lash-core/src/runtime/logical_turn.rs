@@ -229,6 +229,7 @@ impl LashRuntime {
                     }
                 }
             };
+            let teardown_effect_controller = turn_effect_controller.clone();
             let frame_stopwatch = if turns.is_empty() {
                 stopwatch
             } else {
@@ -311,6 +312,7 @@ impl LashRuntime {
                             .as_ref()
                             .map(|lease| lease.fence())
                             .as_ref(),
+                        teardown_effect_controller.controller(),
                     )
                     .await;
                     self.invalidate_resident_session_state();
@@ -323,6 +325,7 @@ impl LashRuntime {
                             .as_ref()
                             .map(|lease| lease.fence())
                             .as_ref(),
+                        teardown_effect_controller.controller(),
                     )
                     .await;
                     self.record_follow_on_failure(&mut turns, err);

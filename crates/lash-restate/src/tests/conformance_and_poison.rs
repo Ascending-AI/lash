@@ -1774,14 +1774,31 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         self.inner.abandon_turn_input_claim(claim).await
     }
 
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<lash_core::TurnId>, lash_core::StoreError> {
+        self.inner
+            .orphaned_active_turn_ids(session_id, session_execution_lease, scope)
+            .await
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        turn_id: &lash_core::TurnId,
+        decision: lash_core::TurnCancelRepairDecision,
     ) -> Result<lash_core::TurnCancelInputOutcome, lash_core::StoreError> {
         self.inner
-            .defer_orphaned_active_turn_inputs(session_id, session_execution_lease, scope)
+            .repair_orphaned_active_turn_inputs(
+                session_id,
+                session_execution_lease,
+                turn_id,
+                decision,
+            )
             .await
     }
 }

@@ -594,20 +594,38 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
             .await
     }
 
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         scope: crate::OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<crate::TurnId>, StoreError> {
+        let operation = TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs);
+        self.control
+            .around(
+                operation,
+                self.inner
+                    .orphaned_active_turn_ids(session_id, session_execution_lease, scope),
+            )
+            .await
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        turn_id: &crate::TurnId,
+        decision: crate::TurnCancelRepairDecision,
     ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs);
         self.control
             .around(
                 operation,
-                self.inner.defer_orphaned_active_turn_inputs(
+                self.inner.repair_orphaned_active_turn_inputs(
                     session_id,
                     session_execution_lease,
-                    scope,
+                    turn_id,
+                    decision,
                 ),
             )
             .await

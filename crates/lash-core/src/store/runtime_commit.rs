@@ -129,6 +129,12 @@ pub struct RuntimeCommit {
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interrupted_turn_input_turn_id: Option<TurnId>,
+    /// Exact cancellation evidence returned by the authoritative turn gate.
+    ///
+    /// Absence explicitly selects ordinary non-cancellation re-deferral. Store
+    /// implementations must never infer this decision from a request row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins.

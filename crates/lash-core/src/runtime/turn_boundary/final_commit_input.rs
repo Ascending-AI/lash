@@ -20,6 +20,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) current_session_lease_generation: Option<u64>,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     pub(super) interrupted_turn_input_turn_id: Option<TurnId>,
+    pub(super) interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
     pub(super) recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     pub(super) session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
 }

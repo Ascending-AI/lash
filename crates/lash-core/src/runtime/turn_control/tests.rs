@@ -89,6 +89,209 @@ fn bound_driver(host: Arc<NativeEffectHost>, address: &TurnAddress) -> TurnWorkD
     )
 }
 
+#[tokio::test]
+async fn orphan_recovery_uses_only_the_existing_gate_terminal() {
+    let host = Arc::new(NativeEffectHost::default());
+    let cancel_address = address("orphan-cancel-winner");
+    let evidence = request(cancel_address.clone(), "durable-intent")
+        .undelivered(crate::TurnCancelDisposition::Drop)
+        .evidence();
+    let decision = ActiveTurnControl::reconcile_orphan_cancel_intent(
+        host.as_ref(),
+        &cancel_address,
+        evidence.clone(),
+    )
+    .await
+    .expect("reconcile durable intent")
+    .expect("gate remains addressable");
+    assert_eq!(
+        decision,
+        crate::TurnCancelRepairDecision::CancellationWon(evidence.clone())
+    );
+    assert_eq!(
+        ActiveTurnControl::peek_orphan_repair_decision(host.as_ref(), &cancel_address)
+            .await
+            .expect("peek settled cancellation gate"),
+        Some(crate::TurnCancelRepairDecision::CancellationWon(evidence))
+    );
+
+    let complete_address = address("orphan-completion-winner");
+    let active = ActiveTurnControl::new(host.as_ref(), complete_address.clone())
+        .await
+        .expect("create completion gate");
+    assert_eq!(
+        active
+            .settle_before_commit(host.as_ref(), false, None)
+            .await
+            .expect("seal completion"),
+        None
+    );
+    let losing = request(complete_address.clone(), "losing-intent").evidence();
+    assert_eq!(
+        ActiveTurnControl::reconcile_orphan_cancel_intent(
+            host.as_ref(),
+            &complete_address,
+            losing,
+        )
+        .await
+        .expect("observe completion winner"),
+        Some(crate::TurnCancelRepairDecision::CancellationDidNotWin)
+    );
+
+    let revoked_address = address("orphan-revoked");
+    host.revoke_await_events_for_session(&revoked_address.session_id)
+        .await
+        .expect("revoke orphan scope");
+    assert_eq!(
+        ActiveTurnControl::reconcile_orphan_cancel_intent(
+            host.as_ref(),
+            &revoked_address,
+            request(revoked_address.clone(), "unknown").evidence(),
+        )
+        .await
+        .expect("revoked is an explicit no-authority result"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn incoming_request_proposes_its_own_evidence_to_an_empty_gate() {
+    use crate::SessionCommitStore as _;
+
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("incoming-gate-candidate");
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("bind cancellation store");
+    let earlier =
+        request(address.clone(), "earlier-row").undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(earlier.clone())
+        .await
+        .expect("persist earlier intent without resolving the gate");
+    let incoming =
+        request(address.clone(), "incoming-gate").undelivered(crate::TurnCancelDisposition::Defer);
+    let outcome = TurnWorkDriver::for_session(host, address.session_id.clone(), store.clone())
+        .request_cancel(incoming.clone())
+        .await
+        .expect("resolve empty gate with incoming request");
+    assert!(matches!(
+        outcome.outcome,
+        TurnCancelOutcome::Requested(ref evidence)
+            if evidence.request_id == incoming.request_id
+                && evidence.undelivered == crate::TurnCancelDisposition::Defer
+    ));
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .expect("read intent projection")
+            .expect("earlier intent remains")
+            .request,
+        incoming,
+        "the durable projection reconciles to the gate winner"
+    );
+}
+
+#[tokio::test]
+async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() {
+    use crate::SessionCommitStore as _;
+
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("durably-ended");
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("bind cancellation store");
+    store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &address.session_id,
+            crate::TurnInputIngress::active_turn(
+                &address.turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("drop after cancellation"),
+        ))
+        .await
+        .expect("enqueue interrupted input");
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("active turn control");
+    let first = request(address.clone(), "before-commit")
+        .mode(TurnCancelMode::AfterStep)
+        .undelivered(crate::TurnCancelDisposition::Drop);
+    let receipt = driver
+        .request_cancel(first.clone())
+        .await
+        .expect("request before commit");
+    assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+    let winner = active
+        .settle_before_commit(host.as_ref(), false, None)
+        .await
+        .expect("settle cancellation gate")
+        .expect("request won the gate");
+
+    let mut state = crate::RuntimeSessionState {
+        session_id: address.session_id.clone(),
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.ensure_agent_frame_initialized();
+    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(crate::OperationId::turn(
+            &address.session_id,
+            &address.turn_id,
+            "final",
+        ))
+        .expect("stamp exact turn final operation");
+    commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
+    commit.interrupted_turn_input_cancellation = Some(winner);
+    let committed = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("durable final commit");
+    assert_eq!(committed.turn_cancel_input_outcome.len(), 1);
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read cancellation record before payload reclamation")
+        .expect("first request remains durable");
+    assert_eq!(durable.request, first);
+    assert_eq!(
+        durable
+            .outcome
+            .expect("committed cancellation outcome")
+            .len(),
+        1
+    );
+    crate::StoreMaintenance::vacuum(store.as_ref())
+        .await
+        .expect("vacuum cancelled input tombstone");
+    let after_vacuum = request(address.clone(), "direct-after-vacuum");
+    let no_op = store
+        .record_turn_cancel_request(after_vacuum.clone())
+        .await
+        .expect("committed request path does not decode reclaimed outcome payloads");
+    assert_eq!(no_op.request, after_vacuum);
+    assert!(no_op.outcome.is_none());
+
+    // Deliberately do not publish TurnTerminal: the receipt is the completion
+    // authority during this crash-sized window.
+    let late = driver
+        .request_cancel(request(address.clone(), "after-commit"))
+        .await
+        .expect("late cancellation returns a typed no-op");
+    assert!(matches!(late.outcome, TurnCancelOutcome::CompletionWonRace));
+    assert!(
+        late.record.is_none(),
+        "a terminal no-op does not decode retained cancellation payload references"
+    );
+}
+
 struct TurnAttachProbe {
     calls: AtomicUsize,
 }

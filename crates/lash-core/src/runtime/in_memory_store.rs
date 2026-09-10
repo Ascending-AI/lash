@@ -1365,6 +1365,30 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
             }
             if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
+                let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
+                let disposition = cancellation
+                    .map_or(crate::TurnCancelDisposition::Defer, |evidence| {
+                        evidence.undelivered
+                    });
+                if let Some(evidence) = cancellation {
+                    let existing_outcome = requests
+                        .get(turn_id)
+                        .and_then(|record| record.outcome.clone());
+                    requests.insert(
+                        TurnId::from(turn_id),
+                        crate::TurnCancelRequestRecord {
+                            request: crate::TurnCancelRequest {
+                                address: crate::TurnAddress::new(&commit.session_id, turn_id),
+                                request_id: evidence.request_id.clone(),
+                                origin: evidence.origin.clone(),
+                                reason: evidence.reason.clone(),
+                                undelivered: evidence.undelivered,
+                                mode: evidence.mode,
+                            },
+                            outcome: existing_outcome,
+                        },
+                    );
+                }
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == commit.session_id
                         && entry.input.state == crate::TurnInputState::PendingActive
@@ -1374,11 +1398,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                             .active_turn_id()
                             .is_some_and(|active| active == turn_id)
                     {
-                        let disposition = requests
-                            .get(turn_id)
-                            .map_or(crate::TurnCancelDisposition::Defer, |record| {
-                                record.request.undelivered
-                            });
                         let affected = crate::TurnCancelAffectedInput {
                             input_id: entry.input.input_id.clone(),
                             payload: entry.input.input.clone(),
@@ -1394,14 +1413,18 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                             }
                         }
                         entry.claim.release();
-                        if let Some(record) = requests.get_mut(turn_id) {
+                        if cancellation.is_some()
+                            && let Some(record) = requests.get_mut(turn_id)
+                        {
                             record
                                 .outcome
                                 .get_or_insert_with(crate::TurnCancelInputOutcome::default)
                                 .affected_inputs
                                 .push(affected.clone());
                         }
-                        outcome.affected_inputs.push(affected);
+                        if cancellation.is_some() {
+                            outcome.affected_inputs.push(affected);
+                        }
                     }
                 }
             }

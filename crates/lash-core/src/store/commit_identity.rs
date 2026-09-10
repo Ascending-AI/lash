@@ -1341,6 +1341,7 @@ struct RuntimeCommitIntent<'a> {
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,
     interrupted_turn_input_turn_id: Option<&'a TurnId>,
+    interrupted_turn_input_cancellation: Option<&'a crate::TurnCancellationEvidence>,
     committed_attachment_ids: &'a [crate::AttachmentId],
 }
 
@@ -1377,6 +1378,9 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 .map(QueuedBatchIntent::from)
                 .collect(),
             interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_ref(),
+            interrupted_turn_input_cancellation: commit
+                .interrupted_turn_input_cancellation
+                .as_ref(),
             committed_attachment_ids: &commit.committed_attachment_ids,
         }
     }

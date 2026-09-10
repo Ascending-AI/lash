@@ -43,6 +43,9 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
    top-level durable sleep with no process declaration, `start`, handle, or process
    `await`. Do not accept whichever shape the model happens to choose; these are
    different cancellation surfaces.
+7. **Recovery keeps one winner.** After the replayed turn commits, repeat Stop for the
+   exact address. Require `completion_won_race` and unchanged terminal evidence; a
+   second accepted cancellation or changed disposition fails the recovery proof.
 
 ## Working material
 
@@ -153,6 +156,9 @@ Press **stop turn** while capturing `POST /api/turn/cancel`. Gate:
 
 Save `04-cancel-receipt.json`, `04-cancelled-state.json`,
 `04-cancelled-work.json`, and screenshot `04-restarted-cancelled.png`.
+Repeat `POST /api/turn/cancel` for the same address and save
+`04-late-cancel-noop.json`. Require `completion_won_race`; the prior terminal,
+cancellation evidence, disposition, and cleared active-address state must remain exact.
 
 ## Phase 4 — Commit normally after restart
 

@@ -471,6 +471,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -540,6 +541,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -648,6 +650,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -762,6 +765,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -849,6 +853,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -955,6 +960,7 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1078,6 +1084,7 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
             current_session_lease_generation: Some(recovery_lease.fencing_token),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: Some(recovery_lease.completion()),
         })
@@ -1147,6 +1154,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1187,6 +1195,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1240,6 +1249,7 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })

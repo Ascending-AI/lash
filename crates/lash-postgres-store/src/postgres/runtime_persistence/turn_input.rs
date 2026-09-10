@@ -2,6 +2,24 @@ use super::*;
 
 #[async_trait::async_trait]
 impl TurnInputStore for PostgresSessionStore {
+    async fn turn_is_committed(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+    ) -> Result<bool, StoreError> {
+        let operation_key =
+            lash_core::OperationId::turn(&address.session_id, &address.turn_id, "final")
+                .storage_key()?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM lash_runtime_turn_commits WHERE session_id = $1 AND turn_id = $2)",
+        )
+        .bind(address.session_id.as_str())
+        .bind(operation_key)
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)
+    }
+
     async fn record_turn_cancel_request(
         &self,
         request: lash_core::facade_support::TurnCancelRequest,
@@ -14,6 +32,23 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        let operation_key =
+            lash_core::OperationId::turn(session_id, turn_id, "final").storage_key()?;
+        let committed: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM lash_runtime_turn_commits WHERE session_id = $1 AND turn_id = $2)",
+        )
+        .bind(session_id.as_str())
+        .bind(operation_key)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if committed {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core::TurnCancelRequestRecord {
+                request,
+                outcome: None,
+            });
+        }
         // First writer wins, except that a stronger mode escalates the durable
         // request in place; the repair outcome accumulated so far stays
         // attached because the affected-input arrays are untouched.
@@ -72,6 +107,26 @@ impl TurnInputStore for PostgresSessionStore {
         address: &lash_core::facade_support::TurnAddress,
     ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
         load_turn_cancel_request_pg(&self.pool, &address.session_id, &address.turn_id).await
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+    ) -> Result<Option<lash_core::facade_support::TurnCancelRequest>, StoreError> {
+        load_turn_cancel_request_intent_pg(&self.pool, &address.session_id, &address.turn_id).await
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+        evidence: &lash_core::facade_support::TurnCancellationEvidence,
+    ) -> Result<(), StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, &address.session_id).await?;
+        reconcile_turn_cancel_winner_tx(&mut tx, &address.session_id, &address.turn_id, evidence)
+            .await?;
+        tx.commit().await.map_err(store_sqlx_error)
     }
 
     async fn enqueue_pending_turn_input(
@@ -476,12 +531,12 @@ impl TurnInputStore for PostgresSessionStore {
         Ok(())
     }
 
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
+    ) -> Result<Vec<lash_core::TurnId>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -491,11 +546,37 @@ impl TurnInputStore for PostgresSessionStore {
         // displaced between an upstream check and this write, and a
         // stale-generation repair would clear the new holder's claim columns.
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-        let repaired = defer_orphaned_active_turn_inputs_tx(
+        let turn_ids = orphaned_active_turn_ids_tx(
             &mut tx,
             session_id,
             session_execution_lease.fencing_token,
             scope,
+        )
+        .await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(turn_ids)
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        turn_id: &lash_core::TurnId,
+        decision: lash_core::TurnCancelRepairDecision,
+    ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        #[cfg(any(test, feature = "testing"))]
+        self.set_transaction_lease_clock_for_testing(&mut tx)
+            .await?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        let repaired = repair_orphaned_active_turn_inputs_tx(
+            &mut tx,
+            session_id,
+            session_execution_lease.fencing_token,
+            turn_id,
+            &decision,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;

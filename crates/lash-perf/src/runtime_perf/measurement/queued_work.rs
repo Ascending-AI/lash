@@ -656,7 +656,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     .commit_runtime_state(
                         RuntimeCommit::persisted_state_for_test(&commit_state, &[])
                             .completing_turn_input_claim(active_claim.completion())
-                            .deferring_interrupted_turn_inputs(turn_id.clone()),
+                            .deferring_interrupted_turn_inputs(turn_id.clone(), None),
                     )
                     .await?;
                 commit_state.apply_persisted_commit_result(result);

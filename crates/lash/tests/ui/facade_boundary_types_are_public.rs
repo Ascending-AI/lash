@@ -174,6 +174,10 @@ impl SessionExecutionLeaseStore for FacadeStore {
 // (and its signature vocabulary) is nameable through the facade.
 #[async_trait]
 impl TurnInputStore for FacadeStore {
+    async fn turn_is_committed(&self, _address: &lash::TurnAddress) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         _input: PendingTurnInputDraft,
@@ -230,11 +234,21 @@ impl TurnInputStore for FacadeStore {
         Ok(())
     }
 
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _scope: OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<TurnId>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _turn_id: &TurnId,
+        _decision: lash::TurnCancelRepairDecision,
     ) -> Result<lash::TurnCancelInputOutcome, StoreError> {
         Ok(Default::default())
     }
@@ -388,6 +402,7 @@ fn persistence_types_are_nameable(
         completed_turn_input_claims: Vec::new(),
         enqueued_queue_batches: Vec::new(),
         interrupted_turn_input_turn_id: None,
+        interrupted_turn_input_cancellation: None,
         committed_attachment_ids: Vec::new(),
         commit_budget: lash::CommitBudget::bounded(1024 * 1024, 512),
     }

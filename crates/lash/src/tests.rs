@@ -888,11 +888,21 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
     // Nothing here holds an input, so the orphan sweep the drain runs finds
     // nothing to repair.
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> std::result::Result<Vec<lash_core::TurnId>, lash_core::store::StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _turn_id: &lash_core::TurnId,
+        _decision: lash_core::TurnCancelRepairDecision,
     ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
         Ok(Default::default())
     }
@@ -1161,11 +1171,21 @@ impl lash_core::TurnInputStore for BoundSessionStore {
 
     // Nothing here holds an input, so the orphan sweep the drain runs finds
     // nothing to repair.
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
+    ) -> std::result::Result<Vec<lash_core::TurnId>, lash_core::store::StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _turn_id: &lash_core::TurnId,
+        _decision: lash_core::TurnCancelRepairDecision,
     ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
         Ok(Default::default())
     }

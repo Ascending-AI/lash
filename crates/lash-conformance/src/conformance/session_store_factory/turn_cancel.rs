@@ -5,6 +5,17 @@ use std::sync::Arc;
 use super::session_store_request;
 use pretty_assertions::assert_eq;
 
+fn cancel_evidence(request: &crate::TurnCancelRequest) -> crate::TurnCancellationEvidence {
+    crate::TurnCancellationEvidence {
+        request_id: request.request_id.clone(),
+        origin: request.origin.clone(),
+        reason: request.reason.clone(),
+        undelivered: request.undelivered,
+        mode: request.mode,
+        honoured_after_step: None,
+    }
+}
+
 /// Every persisted disposition survives the owner crash that separates cancel
 /// observation from repair. The reopened repair applies the requested policy
 /// only to the undelivered active-turn row, records its payload in the durable
@@ -90,8 +101,15 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                 ..crate::RuntimeSessionState::new(request.policy.clone())
             };
             state.ensure_agent_frame_initialized();
-            let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+            let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+                .with_operation(crate::OperationId::turn(
+                    &request.session_id,
+                    &turn_id,
+                    "final",
+                ))
+                .expect("stamp exact turn final operation");
             commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
+            commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&cancel));
             let receipt = store
                 .commit_runtime_state(commit)
                 .await
@@ -106,6 +124,20 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             .await
             .expect("reopen cancellation store")
             .expect("cancel request admitted the session");
+        if matches!(path, RepairPath::CrashBeforeRepair) {
+            reopened
+                .vacuum()
+                .await
+                .expect("vacuum preserves unresolved cancellation intent");
+            assert!(
+                reopened
+                    .turn_cancel_request(&cancel.address)
+                    .await
+                    .expect("read request after vacuum")
+                    .is_some(),
+                "unresolved cancellation intent must survive vacuum"
+            );
+        }
         let lease = reopened
             .try_claim_session_execution_lease(
                 &request.session_id,
@@ -130,18 +162,11 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                 .expect("commit outcome")
         } else {
             reopened
-                .defer_orphaned_active_turn_inputs(
+                .repair_orphaned_active_turn_inputs(
                     &request.session_id,
                     &lease.fence(),
-                    match path {
-                        RepairPath::Teardown => crate::OrphanedTurnInputScope::Turn(&turn_id),
-                        RepairPath::CrashBeforeRepair => {
-                            crate::OrphanedTurnInputScope::LaneGeneration {
-                                resumable_turn_id: None,
-                            }
-                        }
-                        RepairPath::Commit => unreachable!(),
-                    },
+                    &turn_id,
+                    crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
                 )
                 .await
                 .expect("repair the dead turn")
@@ -182,6 +207,56 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             },
             "cancel repair applies disposition only to ActiveTurn and never touches NextTurn"
         );
+        if matches!(path, RepairPath::Commit) {
+            reopened
+                .vacuum()
+                .await
+                .expect("vacuum the committed input payload tombstone");
+            let late = crate::TurnCancelRequest::new(
+                cancel.address.clone(),
+                format!("turn-cancel-{suffix}:late"),
+                None,
+            );
+            let no_op = reopened
+                .record_turn_cancel_request(late.clone())
+                .await
+                .expect("committed request does not decode reclaimed outcome payloads");
+            assert_eq!(no_op.request, late);
+            assert!(no_op.outcome.is_none());
+
+            // A host can pre-name the same turn again after its prior affected
+            // payload tombstone was reclaimed. Recovery needs only intent to
+            // consult the existing gate; reconstructing the historical
+            // outcome here would fail on PostgreSQL by design.
+            let later = reopened
+                .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+                    &request.session_id,
+                    crate::TurnInputIngress::active_turn(
+                        &turn_id,
+                        crate::TurnInputCheckpointBoundary::AfterWork,
+                    ),
+                    crate::TurnInput::text("same turn id after prior repair vacuum"),
+                ))
+                .await
+                .expect("enqueue later active-turn input");
+            let intent = reopened
+                .turn_cancel_request_intent(&cancel.address)
+                .await
+                .expect("read intent without historical payload reconstruction")
+                .expect("winner intent remains retained");
+            assert_eq!(intent, cancel);
+            let repaired = reopened
+                .repair_orphaned_active_turn_inputs(
+                    &request.session_id,
+                    &lease.fence(),
+                    &turn_id,
+                    crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&intent)),
+                )
+                .await
+                .expect("repair later input from retained winner intent");
+            assert_eq!(repaired.affected_inputs[0].input_id, later.input_id);
+            assert_eq!(repaired.affected_inputs[0].disposition, disposition);
+        }
     }
 }
 
@@ -298,4 +373,210 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         .expect("read durable request after reopen")
         .expect("request survives reopen");
     assert_eq!(durable.request, abort);
+}
+
+/// Ordinary orphan repair and cancellation intent serialize in the store.
+/// A request committed first blocks no-intent repair until the gate decision
+/// arrives; a request committed after ordinary repair cannot retroactively
+/// dispose an input that no longer targets the turn.
+pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    async fn lease(
+        store: &Arc<dyn crate::RuntimePersistence>,
+        session_id: &SessionId,
+        owner: &str,
+    ) -> crate::SessionExecutionLeaseAuthority {
+        store
+            .try_claim_session_execution_lease(
+                session_id,
+                &crate::LeaseOwnerIdentity::opaque(owner, format!("{owner}:incarnation")),
+                &format!("{owner}:executor"),
+                60_000,
+            )
+            .await
+            .expect("claim repair lane")
+            .acquired()
+            .expect("repair lane is free")
+            .fence()
+    }
+
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-intent-first"),
+        "turn-cancel-repair-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let turn_id = TurnId::from("turn-cancel-intent-first:turn");
+    let row = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("intent wins before repair"),
+        ))
+        .await
+        .expect("enqueue active-turn input");
+    let cancel = crate::TurnCancelRequest::new(
+        crate::TurnAddress::new(&request.session_id, &turn_id),
+        "turn-cancel-intent-first:request",
+        None,
+    )
+    .undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(cancel.clone())
+        .await
+        .expect("persist request before repair");
+    let fence = lease(&store, &request.session_id, "intent-first-owner").await;
+    assert!(
+        store
+            .repair_orphaned_active_turn_inputs(
+                &request.session_id,
+                &fence,
+                &turn_id,
+                crate::TurnCancelRepairDecision::NoCancellationIntent,
+            )
+            .await
+            .expect("no-intent repair observes concurrent intent")
+            .is_empty(),
+        "durable intent must veto ordinary repair"
+    );
+    let pending = store
+        .list_pending_turn_inputs(&request.session_id)
+        .await
+        .expect("read input after veto");
+    assert_eq!(pending[0].state, crate::TurnInputState::PendingActive);
+    let cancelled = store
+        .repair_orphaned_active_turn_inputs(
+            &request.session_id,
+            &fence,
+            &turn_id,
+            crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+        )
+        .await
+        .expect("apply authoritative gate winner");
+    assert_eq!(cancelled.affected_inputs[0].input_id, row.input_id);
+    assert_eq!(
+        cancelled.affected_inputs[0].disposition,
+        crate::TurnCancelDisposition::Drop
+    );
+
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-repair-first"),
+        "turn-cancel-repair-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let turn_id = TurnId::from("turn-cancel-repair-first:turn");
+    let row = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("ordinary repair wins before intent"),
+        ))
+        .await
+        .expect("enqueue active-turn input");
+    let fence = lease(&store, &request.session_id, "repair-first-owner").await;
+    let repaired = store
+        .repair_orphaned_active_turn_inputs(
+            &request.session_id,
+            &fence,
+            &turn_id,
+            crate::TurnCancelRepairDecision::NoCancellationIntent,
+        )
+        .await
+        .expect("ordinary repair before request");
+    assert_eq!(repaired.affected_inputs[0].input_id, row.input_id);
+    assert_eq!(
+        repaired.affected_inputs[0].disposition,
+        crate::TurnCancelDisposition::Defer
+    );
+    let cancel = crate::TurnCancelRequest::new(
+        crate::TurnAddress::new(&request.session_id, &turn_id),
+        "turn-cancel-repair-first:request",
+        None,
+    )
+    .undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(cancel.clone())
+        .await
+        .expect("persist request after repair");
+    assert!(
+        store
+            .repair_orphaned_active_turn_inputs(
+                &request.session_id,
+                &fence,
+                &turn_id,
+                crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+            )
+            .await
+            .expect("late winner sees no targeted input")
+            .is_empty()
+    );
+    let durable = store
+        .turn_cancel_request(&cancel.address)
+        .await
+        .expect("read late request")
+        .expect("late request persisted");
+    assert!(durable.outcome.is_none());
+
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-completion-wins"),
+        "turn-cancel-repair-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let turn_id = TurnId::from("turn-cancel-completion-wins:turn");
+    let row = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("completion defeated a stale drop intent"),
+        ))
+        .await
+        .expect("enqueue active-turn input");
+    let stale_drop = crate::TurnCancelRequest::new(
+        crate::TurnAddress::new(&request.session_id, &turn_id),
+        "turn-cancel-completion-wins:request",
+        None,
+    )
+    .undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(stale_drop.clone())
+        .await
+        .expect("persist losing drop intent");
+    let fence = lease(&store, &request.session_id, "completion-owner").await;
+    let repaired = store
+        .repair_orphaned_active_turn_inputs(
+            &request.session_id,
+            &fence,
+            &turn_id,
+            crate::TurnCancelRepairDecision::CancellationDidNotWin,
+        )
+        .await
+        .expect("apply completion gate decision");
+    assert_eq!(repaired.affected_inputs[0].input_id, row.input_id);
+    assert_eq!(
+        repaired.affected_inputs[0].disposition,
+        crate::TurnCancelDisposition::Defer,
+        "a losing request row cannot select Drop"
+    );
+    assert!(
+        store
+            .turn_cancel_request(&stale_drop.address)
+            .await
+            .expect("read losing intent")
+            .expect("losing intent retained")
+            .outcome
+            .is_none(),
+        "a losing intent must not acquire a cancellation outcome"
+    );
 }

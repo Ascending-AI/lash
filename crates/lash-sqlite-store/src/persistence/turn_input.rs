@@ -2,6 +2,26 @@ use super::*;
 
 #[async_trait::async_trait]
 impl TurnInputStore for Store {
+    async fn turn_is_committed(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+    ) -> Result<bool, StoreError> {
+        let session_id = address.session_id.clone();
+        let operation_key =
+            lash_core::OperationId::turn(&address.session_id, &address.turn_id, "final")
+                .storage_key()?;
+        self.conn
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)",
+                    params![session_id.as_str(), operation_key],
+                    |row| row.get::<_, bool>(0),
+                )
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn record_turn_cancel_request(
         &self,
         request: lash_core::facade_support::TurnCancelRequest,
@@ -12,6 +32,25 @@ impl TurnInputStore for Store {
             .write_flow(move |tx| {
                 let outcome = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
+                    let operation_key = lash_core::OperationId::turn(
+                        &session_id,
+                        &turn_id,
+                        "final",
+                    )
+                    .storage_key()?;
+                    let committed = tx
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)",
+                            params![session_id.as_str(), operation_key],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .map_err(sqlite_error)?;
+                    if committed {
+                        return Ok(lash_core::TurnCancelRequestRecord {
+                            request,
+                            outcome: None,
+                        });
+                    }
                     // First writer wins, except that a stronger mode escalates
                     // the durable request; the repair outcome accumulated so
                     // far stays attached.
@@ -64,6 +103,39 @@ impl TurnInputStore for Store {
         let turn_id = address.turn_id.clone();
         self.conn
             .call(move |conn| Ok(load_turn_cancel_request_conn(conn, &session_id, &turn_id)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+    ) -> Result<Option<lash_core::facade_support::TurnCancelRequest>, StoreError> {
+        Ok(self
+            .turn_cancel_request(address)
+            .await?
+            .map(|record| record.request))
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+        evidence: &lash_core::facade_support::TurnCancellationEvidence,
+    ) -> Result<(), StoreError> {
+        let session_id = address.session_id.clone();
+        let turn_id = address.turn_id.clone();
+        let evidence = evidence.clone();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome = (|| {
+                    ensure_session_not_deleted_conn(tx, &session_id)?;
+                    reconcile_turn_cancel_winner_conn(tx, &session_id, &turn_id, &evidence)
+                })();
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
             .await
             .map_err(sqlite_error)?
     }
@@ -428,37 +500,69 @@ impl TurnInputStore for Store {
         Ok(())
     }
 
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
+    ) -> Result<Vec<lash_core::TurnId>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let session_execution_lease = session_execution_lease.clone();
         let scope = OwnedOrphanedScope::from(scope);
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core::TurnCancelInputOutcome, StoreError> = (|| {
-                    // The fence is re-read here, not upstream: between an
-                    // upstream check and this write the lane can be displaced,
-                    // and a stale-generation repair would clear the new
-                    // holder's claim columns.
+                let outcome: Result<Vec<lash_core::TurnId>, StoreError> = (|| {
                     ensure_session_execution_lease_conn(
                         tx,
                         &session_id,
                         &session_execution_lease,
                         now,
                     )?;
-                    defer_orphaned_active_turn_inputs_conn(
+                    orphaned_active_turn_ids_conn(
                         tx,
                         &session_id,
                         session_execution_lease.fencing_token,
                         scope.borrow(),
                     )
-                })(
-                );
+                })();
+                Ok(match outcome {
+                    Ok(repaired) => TxOutcome::Commit(Ok(repaired)),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        turn_id: &lash_core::TurnId,
+        decision: lash_core::TurnCancelRepairDecision,
+    ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
+        let session_id = session_id.clone();
+        let session_execution_lease = session_execution_lease.clone();
+        let turn_id = turn_id.clone();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome = (|| {
+                    ensure_session_execution_lease_conn(
+                        tx,
+                        &session_id,
+                        &session_execution_lease,
+                        now,
+                    )?;
+                    repair_orphaned_active_turn_inputs_conn(
+                        tx,
+                        &session_id,
+                        session_execution_lease.fencing_token,
+                        &turn_id,
+                        &decision,
+                    )
+                })();
                 Ok(match outcome {
                     Ok(repaired) => TxOutcome::Commit(Ok(repaired)),
                     Err(err) => TxOutcome::Rollback(Err(err)),
