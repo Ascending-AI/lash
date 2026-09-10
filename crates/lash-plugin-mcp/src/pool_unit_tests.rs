@@ -1193,16 +1193,45 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
         )
     }
 
+    fn expected_operation(native_tool_name: &str) -> String {
+        naming::build_prefixed_name("directory", native_tool_name)
+            .1
+            .operation
+            .expect("MCP tools have a Lashlang operation")
+    }
+
+    fn bound_operation(pool: &McpConnectionPool, native_tool_name: &str) -> String {
+        let tool_id = naming::durable_tool_id("directory", native_tool_name);
+        let definition = pool
+            .advertised_tools()
+            .into_iter()
+            .find(|definition| definition.manifest.id.as_str() == tool_id)
+            .expect("raw MCP identity is advertised");
+        lash_lashlang_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
+            .expect("valid Lashlang binding")
+            .expect("MCP tool has a Lashlang binding")
+            .operation
+            .expect("MCP tools have a Lashlang operation")
+    }
+
     let replacement = replacement_connection(&pool, "directory");
-    let first = dispatch(&pool, "get_user")
+    let hyphen_operation = expected_operation("get-user");
+    let underscore_operation = expected_operation("get_user");
+    assert_ne!(hyphen_operation, underscore_operation);
+    assert_eq!(bound_operation(&pool, "get-user"), hyphen_operation);
+    assert_eq!(bound_operation(&pool, "get_user"), underscore_operation);
+
+    let first = dispatch(&pool, &hyphen_operation)
         .await
-        .expect("base Lashlang operation is available before respawn");
+        .expect("hyphenated Lashlang operation is available before respawn");
     assert_eq!(first.value_for_projection(), json!("hyphen"));
 
     replacement.await;
-    let result = dispatch(&pool, "get_user_2")
+    assert_eq!(bound_operation(&pool, "get-user"), hyphen_operation);
+    assert_eq!(bound_operation(&pool, "get_user"), underscore_operation);
+    let result = dispatch(&pool, &underscore_operation)
         .await
-        .expect("uniquified Lashlang operation is available after respawn");
+        .expect("underscore Lashlang operation is available after respawn");
     assert!(result.is_success(), "replacement call succeeds: {result:?}");
     assert_eq!(result.value_for_projection(), json!("underscore"));
 
