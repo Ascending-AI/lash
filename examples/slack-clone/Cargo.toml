@@ -47,15 +47,15 @@ name = "slack-clone-live-e2e"
 path = "src/bin/live_e2e.rs"
 required-features = ["live-e2e"]
 
-# Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
-# artifact store. `LashCore::standard_builder(TurnBudget::Unbounded)` pre-seeds the standard protocol
-# plugin, and the bot's turns are native tool-loop turns.
 # cargo-shear resolves `use` statements per crate directory and cannot see
 # `examples/shared/ndjson.rs`, which `src/platform/human_api.rs` pulls in with
 # `#[path]`; that file is the only user of `bytes` here.
 [package.metadata.cargo-shear]
 ignored = ["bytes"]
 
+# Standard-mode host: no `rlm` feature, no `lash-protocol-rlm`, no Lashlang
+# artifact store. `LashCore::standard_builder(TurnBudget::Unbounded)` pre-seeds the standard protocol
+# plugin, and the bot's turns are native tool-loop turns.
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
