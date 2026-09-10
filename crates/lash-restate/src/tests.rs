@@ -47,6 +47,7 @@ use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+use lash_sansio::TurnId;
 use lash_sansio::sync::{MutexExt, RwLockExt};
 use restate_sdk::context::{ContextClient, RequestTarget, RunRetryPolicy, WorkflowContext};
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -215,7 +216,7 @@ fn is_process_cancellation(output: &ProcessAwaitOutput) -> bool {
     )
 }
 
-fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
+fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
 }
@@ -5768,7 +5769,7 @@ async fn journaled_cancel_peeks_replay_while_live_watcher_observes_later_cancel(
             RuntimeInvocation::effect(
                 RuntimeScope {
                     session_id: "journaled-peek-session".to_string(),
-                    turn_id: Some("journaled-peek-turn".to_string()),
+                    turn_id: Some(TurnId::from("journaled-peek-turn")),
                     turn_index: None,
                     protocol_iteration: None,
                 },
@@ -8542,7 +8543,7 @@ fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> RuntimeInvoca
 
 fn test_turn_cancel_wait_request(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> RestateDurableWaitAwaitRequest {
     let key = restate_await_event_key(
         &durable_turn_scope(session_id, turn_id),
@@ -8565,7 +8566,10 @@ async fn recording_context_propagates_revoked_session_from_turn_cancel_gate() {
     let outcome = RestateControllerContext::sleep_or_turn_cancel(
         &context,
         Duration::from_secs(60),
-        Some(test_turn_cancel_wait_request("recording-revoked", "turn")),
+        Some(test_turn_cancel_wait_request(
+            "recording-revoked",
+            &TurnId::from("turn"),
+        )),
         tokio_util::sync::CancellationToken::new(),
     )
     .await
@@ -8592,7 +8596,10 @@ async fn positional_replay_context_propagates_revoked_session_from_turn_cancel_g
     let outcome = RestateControllerContext::sleep_or_turn_cancel(
         &context,
         Duration::from_secs(60),
-        Some(test_turn_cancel_wait_request("positional-revoked", "turn")),
+        Some(test_turn_cancel_wait_request(
+            "positional-revoked",
+            &TurnId::from("turn"),
+        )),
         tokio_util::sync::CancellationToken::new(),
     )
     .await
@@ -8619,7 +8626,10 @@ async fn replayable_recording_context_propagates_revoked_session_from_turn_cance
     let outcome = RestateControllerContext::sleep_or_turn_cancel(
         &context,
         Duration::from_secs(60),
-        Some(test_turn_cancel_wait_request("replayable-revoked", "turn")),
+        Some(test_turn_cancel_wait_request(
+            "replayable-revoked",
+            &TurnId::from("turn"),
+        )),
         tokio_util::sync::CancellationToken::new(),
     )
     .await
@@ -8635,7 +8645,7 @@ async fn replayable_recording_context_propagates_revoked_session_from_turn_cance
 #[tokio::test]
 async fn recording_context_process_await_reports_turn_cancelled() {
     let context = Arc::new(RecordingContext::default());
-    let turn_cancel = test_turn_cancel_wait_request("recording-process", "turn");
+    let turn_cancel = test_turn_cancel_wait_request("recording-process", &TurnId::from("turn"));
     let task_context = Arc::clone(&context);
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
@@ -8646,7 +8656,7 @@ async fn recording_context_process_await_reports_turn_cancelled() {
         .await
     });
     wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request("recording-process", "turn");
+    let turn_cancel = test_turn_cancel_wait_request("recording-process", &TurnId::from("turn"));
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
@@ -8671,7 +8681,7 @@ async fn recording_context_process_await_reports_turn_cancelled() {
 #[tokio::test]
 async fn positional_replay_context_process_await_reports_turn_cancelled() {
     let context = Arc::new(PositionalReplayContext::default());
-    let turn_cancel = test_turn_cancel_wait_request("positional-process", "turn");
+    let turn_cancel = test_turn_cancel_wait_request("positional-process", &TurnId::from("turn"));
     let task_context = Arc::clone(&context);
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
@@ -8682,7 +8692,7 @@ async fn positional_replay_context_process_await_reports_turn_cancelled() {
         .await
     });
     wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request("positional-process", "turn");
+    let turn_cancel = test_turn_cancel_wait_request("positional-process", &TurnId::from("turn"));
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
@@ -8707,7 +8717,7 @@ async fn positional_replay_context_process_await_reports_turn_cancelled() {
 #[tokio::test]
 async fn replayable_recording_context_process_await_reports_turn_cancelled() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let turn_cancel = test_turn_cancel_wait_request("replayable-process", "turn");
+    let turn_cancel = test_turn_cancel_wait_request("replayable-process", &TurnId::from("turn"));
     let task_context = Arc::clone(&context);
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
@@ -8718,7 +8728,7 @@ async fn replayable_recording_context_process_await_reports_turn_cancelled() {
         .await
     });
     wait_for_test_turn_cancel_registration(&context.events.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request("replayable-process", "turn");
+    let turn_cancel = test_turn_cancel_wait_request("replayable-process", &TurnId::from("turn"));
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
@@ -8746,7 +8756,10 @@ async fn completed_waits_unregister_the_shared_test_turn_cancel_gate() {
     RestateControllerContext::sleep_or_turn_cancel(
         &recording,
         Duration::ZERO,
-        Some(test_turn_cancel_wait_request("recording-complete", "turn")),
+        Some(test_turn_cancel_wait_request(
+            "recording-complete",
+            &TurnId::from("turn"),
+        )),
         tokio_util::sync::CancellationToken::new(),
     )
     .await
@@ -8757,7 +8770,10 @@ async fn completed_waits_unregister_the_shared_test_turn_cancel_gate() {
     RestateControllerContext::sleep_or_turn_cancel(
         &positional,
         Duration::ZERO,
-        Some(test_turn_cancel_wait_request("positional-complete", "turn")),
+        Some(test_turn_cancel_wait_request(
+            "positional-complete",
+            &TurnId::from("turn"),
+        )),
         tokio_util::sync::CancellationToken::new(),
     )
     .await
@@ -8768,7 +8784,10 @@ async fn completed_waits_unregister_the_shared_test_turn_cancel_gate() {
     RestateControllerContext::sleep_or_turn_cancel(
         &replayable,
         Duration::ZERO,
-        Some(test_turn_cancel_wait_request("replayable-complete", "turn")),
+        Some(test_turn_cancel_wait_request(
+            "replayable-complete",
+            &TurnId::from("turn"),
+        )),
         tokio_util::sync::CancellationToken::new(),
     )
     .await
@@ -9646,9 +9665,9 @@ fn replay_test_state(
     }
 }
 
-fn replay_test_input(turn_id: &str) -> lash_core::TurnInput {
+fn replay_test_input(turn_id: &TurnId) -> lash_core::TurnInput {
     let mut input = lash_core::TurnInput::text("finish once");
-    input.trace_turn_id = Some(turn_id.to_string());
+    input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
     input
 }
 
@@ -10076,7 +10095,7 @@ async fn run_restate_replay_turn(
     runtime: &mut lash_core::facade_support::LashRuntime,
     context: Arc<ReplayableRecordingContext>,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> lash_core::facade_support::AssembledTurn {
     let controller = RestateRuntimeEffectController::new(context);
     let scoped_effect_controller = controller
@@ -10099,7 +10118,7 @@ async fn run_restate_replay_turn_with_parent_end_fault(
     context: Arc<ReplayableRecordingContext>,
     state: Arc<RestateParentEndFaultState>,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> lash_core::facade_support::AssembledTurn {
     let scope = durable_turn_scope(session_id, turn_id);
     let inner: RestateRuntimeEffectController<'static, Arc<ReplayableRecordingContext>> =
@@ -10267,7 +10286,13 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
     first.set_turn_phase_probe(Arc::new(PanicAtToolIntentParentEnd));
     let first_context = Arc::clone(&context);
     let crashed = tokio::spawn(async move {
-        run_restate_replay_turn(&mut first, first_context, session_id, turn_id).await
+        run_restate_replay_turn(
+            &mut first,
+            first_context,
+            session_id,
+            &TurnId::from(turn_id),
+        )
+        .await
     })
     .await
     .expect_err("FIG-1293 first turn must crash after its ToolBatch commit");
@@ -10378,8 +10403,13 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
         Some(process_registry),
     )
     .await;
-    let turn =
-        run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
+    let turn = run_restate_replay_turn(
+        &mut replay,
+        Arc::clone(&context),
+        session_id,
+        &TurnId::from(turn_id),
+    )
+    .await;
     assert!(matches!(
         turn.outcome,
         lash_core::facade_support::TurnOutcome::Finished(_)
@@ -10522,8 +10552,13 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         Arc::clone(&runtime_store),
     )
     .await;
-    let first_turn =
-        run_restate_replay_turn(&mut first, Arc::clone(&context), session_id, turn_id).await;
+    let first_turn = run_restate_replay_turn(
+        &mut first,
+        Arc::clone(&context),
+        session_id,
+        &TurnId::from(turn_id),
+    )
+    .await;
     assert!(matches!(
         first_turn.outcome,
         lash_core::facade_support::TurnOutcome::Finished(_)
@@ -10536,8 +10571,13 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay =
         replay_test_runtime(session_id, policy, initial_state, host, retry_store).await;
-    let replay_turn =
-        run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
+    let replay_turn = run_restate_replay_turn(
+        &mut replay,
+        Arc::clone(&context),
+        session_id,
+        &TurnId::from(turn_id),
+    )
+    .await;
     assert!(matches!(
         replay_turn.outcome,
         lash_core::facade_support::TurnOutcome::Finished(_)
@@ -10657,7 +10697,13 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
     first.set_turn_phase_probe(Arc::new(PanicAtToolIntentParentEnd));
     let first_context = Arc::clone(&context);
     let crashed = tokio::spawn(async move {
-        run_restate_replay_turn(&mut first, first_context, session_id, turn_id).await
+        run_restate_replay_turn(
+            &mut first,
+            first_context,
+            session_id,
+            &TurnId::from(turn_id),
+        )
+        .await
     })
     .await
     .expect_err("the phase probe crashes after the Restate ToolBatch commit");
@@ -10737,7 +10783,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             fault_context,
             task_fault_state,
             session_id,
-            turn_id,
+            &TurnId::from(turn_id),
         )
         .await
     })
@@ -10824,7 +10870,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             between_commands_context,
             task_between_commands_state,
             session_id,
-            turn_id,
+            &TurnId::from(turn_id),
         )
         .await
     })
@@ -10872,8 +10918,13 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
         Some(Arc::clone(&process_registry)),
     )
     .await;
-    let redriven =
-        run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
+    let redriven = run_restate_replay_turn(
+        &mut replay,
+        Arc::clone(&context),
+        session_id,
+        &TurnId::from(turn_id),
+    )
+    .await;
     assert!(matches!(
         redriven.outcome,
         lash_core::facade_support::TurnOutcome::Finished(_)
@@ -11122,7 +11173,13 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     .await;
     let suspended_context = Arc::clone(&context);
     let suspended_turn = tokio::spawn(async move {
-        run_restate_replay_turn(&mut suspended, suspended_context, session_id, turn_id).await
+        run_restate_replay_turn(
+            &mut suspended,
+            suspended_context,
+            session_id,
+            &TurnId::from(turn_id),
+        )
+        .await
     });
     tokio::time::timeout(
         std::time::Duration::from_secs(1),
@@ -11151,7 +11208,7 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         .expect("scoped replay controller");
     let replay_turn = fresh_worker
         .stream_turn(
-            replay_test_input(turn_id),
+            replay_test_input(&TurnId::from(turn_id)),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scoped_effect_controller,
@@ -11487,7 +11544,13 @@ finish (await handle)?
     .await;
     let first_context = Arc::clone(&context);
     let mut first_turn = tokio::spawn(async move {
-        run_restate_replay_turn(&mut first, first_context, session_id, turn_id).await
+        run_restate_replay_turn(
+            &mut first,
+            first_context,
+            session_id,
+            &TurnId::from(turn_id),
+        )
+        .await
     });
     let completion_key = tokio::select! {
         completion_key = completion_key_rx => completion_key
@@ -11616,8 +11679,13 @@ finish (await handle)?
         Some(Arc::clone(&process_registry)),
     ))
     .await;
-    let replay_turn =
-        run_restate_replay_turn(&mut replay, Arc::clone(&context), session_id, turn_id).await;
+    let replay_turn = run_restate_replay_turn(
+        &mut replay,
+        Arc::clone(&context),
+        session_id,
+        &TurnId::from(turn_id),
+    )
+    .await;
     assert!(matches!(
         replay_turn.outcome,
         lash_core::facade_support::TurnOutcome::Finished(_)

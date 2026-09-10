@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::sync::Arc;
 
 use super::session_store_request;
@@ -47,7 +48,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             "turn-cancel-drop-model",
             crate::SessionRelation::Root,
         );
-        let turn_id = format!("turn-cancel-{suffix}:turn");
+        let turn_id = TurnId::from(format!("turn-cancel-{suffix}:turn"));
         let store = factory
             .create_store(&request)
             .await

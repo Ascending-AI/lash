@@ -13,7 +13,7 @@
 //!
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct TurnRequest {
-//! #     turn_id: String,
+//! #     turn_id: TurnId,
 //! # }
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct TurnResponse;

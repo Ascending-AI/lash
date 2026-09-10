@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 pub(crate) async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "service": "agent-workbench", "status": "ok" }))
@@ -430,7 +431,7 @@ pub(crate) async fn send_turn(
             .await
             .map_err(|error| state.session_admission_error(&session_id, "api.turn", error))?,
     );
-    let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
+    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     let chat_attachments = attachment_id
         .iter()
         .cloned()
@@ -993,7 +994,7 @@ pub(crate) async fn run_queued_work_batch(
         )));
     }
 
-    let turn_id = format!("workbench-queued-{}", uuid::Uuid::new_v4());
+    let turn_id = TurnId::from(format!("workbench-queued-{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchQueuedTurnWorkflowRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),

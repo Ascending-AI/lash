@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_cross_owner_attachment_adoption_conformance() {
     let Some((_database_lock, storage)) = storage().await else {
@@ -275,7 +276,7 @@ async fn wait_for_session_lease_advisory_waiters(pool: &sqlx::PgPool, at_least: 
     .unwrap_or_else(|_| panic!("expected at least {at_least} session-lease advisory-lock waiters"));
 }
 
-fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
+fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
 }

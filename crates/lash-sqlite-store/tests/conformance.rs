@@ -1,5 +1,6 @@
 //! Runs the shared `ProcessRegistry` conformance suite against SQLite.
 
+use lash_sansio::TurnId;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_cross_owner_attachment_adoption_conformance() {
     let dir = tempfile::tempdir().unwrap();
@@ -236,7 +237,7 @@ fn fresh_db_path(dirs: &Arc<Mutex<Vec<TempDir>>>, file_name: &str) -> PathBuf {
     path
 }
 
-fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
+fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
 }

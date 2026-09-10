@@ -685,10 +685,11 @@ impl AwaitEventRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TurnId;
     use std::sync::Barrier;
     use std::time::Duration;
 
-    fn turn_scope(session_id: &str, turn_id: &str) -> ExecutionScope {
+    fn turn_scope(session_id: &str, turn_id: &TurnId) -> ExecutionScope {
         ExecutionScope::turn(session_id, turn_id)
     }
 
@@ -700,7 +701,7 @@ mod tests {
         let registry = Arc::new(AwaitEventRegistry::new());
         let key = registry
             .key_for(
-                &turn_scope("completion-gap", "turn"),
+                &turn_scope("completion-gap", &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("completion key");
@@ -722,7 +723,7 @@ mod tests {
     #[test]
     fn key_derivation_does_not_register_or_materialize_session_state() {
         let registry = AwaitEventRegistry::new();
-        let scope = turn_scope("pure-key", "turn");
+        let scope = turn_scope("pure-key", &TurnId::from("turn"));
 
         registry
             .key_for(&scope, AwaitEventWaitIdentity::tool_completion("tool-call"))
@@ -737,7 +738,7 @@ mod tests {
     #[tokio::test]
     async fn completed_turn_control_entries_leave_the_live_registry_and_are_bounded() {
         let registry = AwaitEventRegistry::with_limits(2, 2);
-        let scope = turn_scope("bounded-turn-control", "turn-1");
+        let scope = turn_scope("bounded-turn-control", &TurnId::from("turn-1"));
         let gate = registry
             .key_for(&scope, AwaitEventWaitIdentity::TurnCancelGate)
             .expect("gate key");
@@ -776,7 +777,10 @@ mod tests {
         ));
 
         for ordinal in 2..=3 {
-            let scope = turn_scope("bounded-turn-control", &format!("turn-{ordinal}"));
+            let scope = turn_scope(
+                "bounded-turn-control",
+                &TurnId::from(format!("turn-{ordinal}")),
+            );
             let gate = registry
                 .key_for(&scope, AwaitEventWaitIdentity::TurnCancelGate)
                 .expect("next gate key");
@@ -798,7 +802,7 @@ mod tests {
         let registry = AwaitEventRegistry::with_limits(2, 2);
         let gate = registry
             .key_for(
-                &turn_scope("waiter-cancel", "turn"),
+                &turn_scope("waiter-cancel", &TurnId::from("turn")),
                 AwaitEventWaitIdentity::TurnCancelGate,
             )
             .expect("gate key");
@@ -822,7 +826,7 @@ mod tests {
         let registry = AwaitEventRegistry::with_limits(2, 2);
         let key = registry
             .key_for(
-                &turn_scope("revoke-1", "turn"),
+                &turn_scope("revoke-1", &TurnId::from("turn")),
                 AwaitEventWaitIdentity::TurnTerminal,
             )
             .expect("terminal key");
@@ -847,7 +851,7 @@ mod tests {
         let registry = AwaitEventRegistry::new();
         let key = registry
             .key_for(
-                &turn_scope("signature-cache", "turn"),
+                &turn_scope("signature-cache", &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("await-event key");
@@ -894,13 +898,13 @@ mod tests {
         let registry = Arc::new(AwaitEventRegistry::new());
         let key_a = registry
             .key_for(
-                &turn_scope("shard-a", "turn"),
+                &turn_scope("shard-a", &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("session A key");
         let key_b = registry
             .key_for(
-                &turn_scope("shard-b", "turn"),
+                &turn_scope("shard-b", &TurnId::from("turn")),
                 AwaitEventWaitIdentity::tool_completion("tool"),
             )
             .expect("session B key");
@@ -931,7 +935,7 @@ mod tests {
             .map(|ordinal| {
                 let key = registry
                     .key_for(
-                        &turn_scope(&format!("perf-session-{ordinal}"), "turn"),
+                        &turn_scope(&format!("perf-session-{ordinal}"), &TurnId::from("turn")),
                         AwaitEventWaitIdentity::tool_completion("tool"),
                     )
                     .expect("perf key");

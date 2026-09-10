@@ -1,3 +1,4 @@
+use crate::TurnId;
 use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
 
 /// Mint a newly created pending turn-input ID from explicit deterministic facts.
@@ -65,9 +66,9 @@ impl TurnInputIngress {
 
     /// Exposes the target turn ID to turn-input store implementors for active-turn ingress,
     /// returning `None` for next-turn ingress.
-    pub fn active_turn_id(&self) -> Option<&str> {
+    pub fn active_turn_id(&self) -> Option<&TurnId> {
         match self {
-            Self::ActiveTurn { turn_id, .. } => Some(turn_id.as_str()),
+            Self::ActiveTurn { turn_id, .. } => Some(turn_id),
             Self::NextTurn => None,
         }
     }
@@ -872,7 +873,7 @@ async fn committed_message_from_pending_input(
         // Same typed provenance the turn's opening input carries: the absorbing
         // turn plus the durable input this message came from (FIG-972).
         origin: Some(crate::MessageOrigin::TurnInput {
-            turn_id: turn_id.to_string(),
+            turn_id: turn_id.clone(),
             input_id: Some(pending.input_id.clone()),
         }),
         parts: crate::shared_parts(parts),

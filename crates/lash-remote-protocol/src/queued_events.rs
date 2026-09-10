@@ -1,6 +1,7 @@
 //! Typed queued-work activity payloads.
 
 use crate::*;
+use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -37,12 +38,12 @@ pub enum RemoteMessageOrigin {
         caused_by: Option<RemoteCausalRef>,
     },
     TurnInput {
-        turn_id: String,
+        turn_id: TurnId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_id: Option<String>,
     },
     TurnOutput {
-        turn_id: String,
+        turn_id: TurnId,
         source: RemoteTurnOutputSource,
     },
 }

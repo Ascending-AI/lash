@@ -52,14 +52,14 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
     run_turn_through_the_workbench_open_path(
         &state,
         &created.session_id,
-        "created-session-turn",
+        &TurnId::from("created-session-turn"),
         "say the canonical answer",
     )
     .await;
     run_turn_through_the_workbench_open_path(
         &state,
         &ambient_session_id,
-        "ambient-session-turn",
+        &TurnId::from("ambient-session-turn"),
         "say the canonical answer",
     )
     .await;
@@ -139,7 +139,7 @@ async fn a_typescript_workbench_can_create_a_lashlang_session() {
     run_turn_through_the_workbench_open_path(
         &state,
         &created.session_id,
-        "lashlang-on-typescript-turn",
+        &TurnId::from("lashlang-on-typescript-turn"),
         "say the canonical answer",
     )
     .await;
@@ -332,7 +332,7 @@ async fn the_session_roster_survives_the_web_process() {
     run_turn_through_the_workbench_open_path(
         &state,
         &typescript_session_id,
-        "post-restart-turn",
+        &TurnId::from("post-restart-turn"),
         "say the canonical answer",
     )
     .await;

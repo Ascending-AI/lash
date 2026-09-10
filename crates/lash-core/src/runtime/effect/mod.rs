@@ -61,6 +61,7 @@ pub(crate) use outcome::{
 mod tests {
     use super::*;
     use crate::LlmRequest as CoreLlmRequest;
+    use crate::TurnId;
     use crate::llm::types::{
         AttachmentSource, LlmEventSender, LlmMessage, LlmProviderTraceSender, LlmToolChoice,
     };
@@ -216,7 +217,7 @@ mod tests {
             "session",
             "test",
             "request:direct".to_string(),
-            Some("turn"),
+            Some(&TurnId::from("turn")),
             None,
         );
         let envelope = RuntimeEffectEnvelope::new(

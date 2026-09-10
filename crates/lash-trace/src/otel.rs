@@ -1127,7 +1127,7 @@ fn language_execution_attributes(
     if let Some(turn_id) = &event.identity.scope.turn_id {
         attrs.push(KeyValue::new(
             attr::LASH_LANGUAGE_EXECUTION_TURN_ID,
-            turn_id.clone(),
+            turn_id.to_string(),
         ));
     }
     attrs.push(KeyValue::new(
@@ -1313,9 +1313,9 @@ fn usage_attributes(attrs: &mut Vec<KeyValue>, prefix: &str, usage: &TraceTokenU
     ));
 }
 
-fn push_opt(attrs: &mut Vec<KeyValue>, key: &'static str, value: &Option<String>) {
+fn push_opt<T: AsRef<str>>(attrs: &mut Vec<KeyValue>, key: &'static str, value: &Option<T>) {
     if let Some(value) = value {
-        attrs.push(KeyValue::new(key, value.clone()));
+        attrs.push(KeyValue::new(key, value.as_ref().to_string()));
     }
 }
 

@@ -703,7 +703,7 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
         role: MessageRole::User,
         parts: vec![part(PartKind::Text, "hello")].into(),
         origin: Some(MessageOrigin::TurnInput {
-            turn_id: "t1".to_string(),
+            turn_id: TurnId::from("t1"),
             input_id: None,
         }),
     };
@@ -718,7 +718,7 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
         role: MessageRole::User,
         parts: vec![part(PartKind::Text, "follow up")].into(),
         origin: Some(MessageOrigin::TurnInput {
-            turn_id: "t1".to_string(),
+            turn_id: TurnId::from("t1"),
             input_id: Some("in-7".to_string()),
         }),
     };
@@ -738,14 +738,14 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
     assert_eq!(
         decoded[0].origin,
         Some(MessageOrigin::TurnInput {
-            turn_id: "t1".to_string(),
+            turn_id: TurnId::from("t1"),
             input_id: None,
         })
     );
     assert_eq!(
         decoded[1].origin,
         Some(MessageOrigin::TurnInput {
-            turn_id: "t1".to_string(),
+            turn_id: TurnId::from("t1"),
             input_id: Some("in-7".to_string()),
         })
     );
@@ -754,7 +754,7 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
 #[test]
 fn turn_output_origin_wire_shape_preserves_typed_source() {
     let origin = MessageOrigin::TurnOutput {
-        turn_id: "queued-drain-1".to_string(),
+        turn_id: TurnId::from("queued-drain-1"),
         source: TurnOutputSource::Plugin {
             plugin_id: "lash.rlm".to_string(),
         },
@@ -773,7 +773,7 @@ fn turn_output_origin_wire_shape_preserves_typed_source() {
         )
         .expect("deserialize turn output origin"),
         MessageOrigin::TurnOutput {
-            turn_id: "queued-drain-1".to_string(),
+            turn_id: TurnId::from("queued-drain-1"),
             source: TurnOutputSource::Plugin {
                 plugin_id: "lash.rlm".to_string(),
             },

@@ -10,6 +10,7 @@ use super::*;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 use lash_core::testing::conformance_support::SessionGraphConformanceAccess;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 const CONTROLLED_LEASE_TTL_MS: u64 = 50;
@@ -2981,7 +2982,7 @@ async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersist
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            turn_id.as_str(),
+            &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "checkpoint input",
         ))
@@ -3060,7 +3061,7 @@ async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     let before_completion = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            turn_id.as_str(),
+            &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::BeforeCompletion,
             "withheld until before-completion",
         ))
@@ -3113,7 +3114,7 @@ async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     let after_work_first = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            turn_id.as_str(),
+            &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "admitted at after-work",
         ))
@@ -3122,7 +3123,7 @@ async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     let after_work_second = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            turn_id.as_str(),
+            &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "admitted through the direct claim path",
         ))
@@ -3131,7 +3132,7 @@ async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     let after_work_third = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            turn_id.as_str(),
+            &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "still pending at before-completion",
         ))
@@ -3223,7 +3224,7 @@ async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn Ru
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            turn_id.as_str(),
+            &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "input that must survive a queue budget refusal",
         ))
@@ -3493,7 +3494,7 @@ fn inline_png(bytes: Vec<u8>) -> crate::AttachmentSource {
 
 fn pending_active_turn_input_draft(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     min_boundary: crate::TurnInputCheckpointBoundary,
     text: &str,
 ) -> crate::PendingTurnInputDraft {
@@ -5524,7 +5525,7 @@ async fn pending_session_work_ordering_agrees_across_ingress_families(
     store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             session_id,
-            "active-turn",
+            &TurnId::from("active-turn"),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "ignored active input",
         ))
@@ -8627,7 +8628,7 @@ async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimeP
         .enqueue_pending_turn_input(
             pending_active_turn_input_draft(
                 "root",
-                "suffix-active-turn",
+                &TurnId::from("suffix-active-turn"),
                 crate::TurnInputCheckpointBoundary::AfterWork,
                 "suffix accepted active",
             )
@@ -9089,7 +9090,7 @@ async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     let active_keep = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            turn_id,
+            &TurnId::from(turn_id),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "active that defers",
         ))
@@ -9098,7 +9099,7 @@ async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     let active_cancel = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            turn_id,
+            &TurnId::from(turn_id),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "active cancelled before interrupt",
         ))
@@ -9204,7 +9205,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     let unaccepted = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            turn_id,
+            &TurnId::from(turn_id),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "unaccepted active",
         ))
@@ -9213,7 +9214,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     let before_completion = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            turn_id,
+            &TurnId::from(turn_id),
             crate::TurnInputCheckpointBoundary::BeforeCompletion,
             "before-completion active",
         ))
@@ -9222,7 +9223,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     let other_active = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            "other-turn",
+            &TurnId::from("other-turn"),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "other active",
         ))
@@ -9311,7 +9312,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     assert!(
         pending_after_interrupt
             .iter()
-            .any(|input| input.ingress.active_turn_id() == Some("other-turn")),
+            .any(|input| input.ingress.active_turn_id() == Some(&TurnId::from("other-turn"))),
         "inputs for other active turns must not be deferred by this interrupt"
     );
 
@@ -9350,7 +9351,7 @@ async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
             .await
             .expect("list after completing deferred input")
             .iter()
-            .all(|input| input.ingress.active_turn_id() == Some("other-turn")),
+            .all(|input| input.ingress.active_turn_id() == Some(&TurnId::from("other-turn"))),
         "inputs for other active turns must not be deferred by this interrupt"
     );
 }
@@ -9376,7 +9377,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     let orphaned = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            dead_turn_id,
+            &TurnId::from(dead_turn_id),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "pinned to a turn that cannot commit",
         ))
@@ -9385,7 +9386,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     let other = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            other_turn_id,
+            &TurnId::from(other_turn_id),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "pinned to a turn that can still deliver",
         ))
@@ -9396,7 +9397,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .defer_orphaned_active_turn_inputs(
             "root",
             &lease.fence(),
-            crate::OrphanedTurnInputScope::Turn(dead_turn_id),
+            crate::OrphanedTurnInputScope::Turn(&TurnId::from(dead_turn_id)),
         )
         .await
         .expect("re-defer inputs pinned to the dead turn");
@@ -9422,7 +9423,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     assert_eq!(untouched_row.state, crate::TurnInputState::PendingActive);
     assert_eq!(
         untouched_row.ingress.active_turn_id(),
-        Some(other_turn_id),
+        Some(&crate::TurnId::from(other_turn_id)),
         "a row pinned to a turn that can still deliver must never be swept"
     );
     assert_eq!(
@@ -9430,7 +9431,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             .defer_orphaned_active_turn_inputs(
                 "root",
                 &lease.fence(),
-                crate::OrphanedTurnInputScope::Turn(dead_turn_id)
+                crate::OrphanedTurnInputScope::Turn(&TurnId::from(dead_turn_id))
             )
             .await
             .expect("repeat the turn-scoped repair")
@@ -9460,7 +9461,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     let follow_on = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            &format!("{other_turn_id}:agent-frame:2"),
+            &crate::TurnId::from(format!("{other_turn_id}:agent-frame:2")),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "pinned to a follow-on frame of the resumable turn",
         ))
@@ -9472,7 +9473,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 "root",
                 &lease.fence(),
                 crate::OrphanedTurnInputScope::LaneGeneration {
-                    resumable_turn_id: Some(other_turn_id),
+                    resumable_turn_id: Some(&TurnId::from(other_turn_id)),
                 },
             )
             .await
@@ -9542,7 +9543,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     let stranded = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             "root",
-            "fig1573-superseded-turn",
+            &TurnId::from("fig1573-superseded-turn"),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "pinned while the lane changes hands",
         ))
@@ -9559,7 +9560,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .defer_orphaned_active_turn_inputs(
             "root",
             &stale_fence,
-            crate::OrphanedTurnInputScope::Turn("fig1573-superseded-turn"),
+            crate::OrphanedTurnInputScope::Turn(&TurnId::from("fig1573-superseded-turn")),
         )
         .await
         .expect_err("a superseded fence must be refused inside the repair");
@@ -9578,7 +9579,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     assert_eq!(untouched.state, crate::TurnInputState::PendingActive);
     assert_eq!(
         untouched.ingress.active_turn_id(),
-        Some("fig1573-superseded-turn"),
+        Some(&crate::TurnId::from("fig1573-superseded-turn")),
         "a refused repair must leave the row exactly as it found it"
     );
     // The successor's own fence repairs it.
@@ -9587,7 +9588,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             .defer_orphaned_active_turn_inputs(
                 "root",
                 &successor.fence(),
-                crate::OrphanedTurnInputScope::Turn("fig1573-superseded-turn"),
+                crate::OrphanedTurnInputScope::Turn(&TurnId::from("fig1573-superseded-turn")),
             )
             .await
             .expect("the live holder repairs the row the superseded caller could not")

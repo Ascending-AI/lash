@@ -1,5 +1,6 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
+use lash_sansio::TurnId;
 
 use lash_core::{ToolCall, ToolProvider};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -59,7 +60,7 @@ finish result
 struct ProductionToolCell {
     _dir: tempfile::TempDir,
     session_id: String,
-    turn_id: String,
+    turn_id: TurnId,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
@@ -82,7 +83,7 @@ impl ProductionToolCell {
             ControllerMode::Durable => "restate-durable",
         };
         let session_id = format!("tool-context-{context_name}-{tool_name}");
-        let turn_id = format!("{session_id}-turn");
+        let turn_id = TurnId::from(format!("{session_id}-turn"));
         let dir = tempfile::tempdir().expect("tool-context tempdir");
         let first_party: Arc<dyn ToolProvider> =
             Arc::new(lash_llm_tools::llm_query_provider(None, None, None));

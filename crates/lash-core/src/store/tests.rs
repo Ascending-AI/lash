@@ -352,7 +352,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
 fn operation_conflict_diagnostic_explains_identity_reuse() {
     let message = StoreError::RuntimeTurnCommitConflict {
         session_id: "root".to_string(),
-        turn_id: "operation-key".to_string(),
+        operation_key: "operation-key".to_string(),
     }
     .to_string();
 

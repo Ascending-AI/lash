@@ -4,6 +4,7 @@
 //! providing a configurable mock implementation plus a couple of small
 //! builders for common policy / turn fixtures.
 
+use crate::TurnId;
 use crate::{
     ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
     ProcessRegistrar as _,
@@ -681,7 +682,7 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
 /// Build the stable invocation installed around an `ExecCode` effect.
 pub fn exec_code_invocation(
     session_id: impl Into<String>,
-    turn_id: impl Into<String>,
+    turn_id: impl Into<TurnId>,
     turn_index: usize,
     protocol_iteration: usize,
     effect_id: impl Into<String>,
@@ -1364,7 +1365,7 @@ pub fn mock_assembled_turn(session_id: &str, summary: &str) -> AssembledTurn {
 /// the snapshot, tool catalog, and turn outcome via the builder
 /// methods; mutations (`create_session`, `close_session`)
 /// are recorded so tests can assert against them.
-pub type RecordedSessionTurn = (String, String, Option<String>, crate::ExecutionScope);
+pub type RecordedSessionTurn = (String, TurnId, Option<TurnId>, crate::ExecutionScope);
 
 pub struct MockSessionManager {
     pub snapshot: SessionSnapshot,
@@ -1430,7 +1431,7 @@ impl crate::plugin::SessionStateService for MockSessionManager {
     async fn turn_scope(
         &self,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, PluginError> {
         Ok(crate::ExecutionScope::turn(session_id, turn_id))
     }
@@ -1499,7 +1500,7 @@ impl crate::plugin::SessionLifecycleService for MockSessionManager {
         let (turn, scoped_effect_controller) = request.into_parts();
         self.turns.lock_recover().push((
             turn.session_id,
-            turn.turn_id.to_string(),
+            turn.turn_id.clone(),
             turn.input.trace_turn_id,
             scoped_effect_controller.execution_scope().clone(),
         ));

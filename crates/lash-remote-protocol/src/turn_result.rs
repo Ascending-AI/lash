@@ -2,6 +2,7 @@
 //! output, usage/execution summaries, tool-call summaries, issues, and causal
 //! references.
 
+use lash_sansio::TurnId;
 use std::collections::HashMap;
 
 use schemars::JsonSchema;
@@ -16,7 +17,7 @@ use crate::usage_activity::{RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteUs
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnReport {
     pub session_id: String,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub outcome: RemoteTurnOutcome,
     pub assistant_output: RemoteAssistantOutput,
     #[serde(default)]
@@ -128,12 +129,12 @@ impl RemoteTurnReport {
 pub enum RemoteCausalRef {
     Turn {
         session_id: String,
-        turn_id: String,
+        turn_id: TurnId,
     },
     Effect {
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
         effect_id: String,
     },
     ToolCall {

@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -132,7 +133,7 @@ fn turn_input_round_trips_remote_safe_fields() {
     .with_protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(
         serde_json::json!({ "mode": "remote" }),
     ));
-    input.trace_turn_id = Some("trace-1".to_string());
+    input.trace_turn_id = Some(TurnId::from("trace-1"));
     input.turn_context.set_prompt_layer(prompt.clone());
 
     let remote = RemoteTurnInput::try_from(input).expect("remote conversion");
@@ -1467,7 +1468,7 @@ fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
             applications: vec![RemoteTurnInputApplication {
                 input_id: "input-1".to_string(),
                 source_key: Some("host:source-1".to_string()),
-                turn_id: "turn-1".to_string(),
+                turn_id: TurnId::from("turn-1"),
                 committed_message_id: "message-1".to_string(),
                 checkpoint: Some(RemoteTurnInputCheckpoint::BeforeCompletion),
             }],
@@ -1777,7 +1778,7 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
 #[test]
 fn remote_session_observation_from_core_maps_all_payload_variants() {
     fn event(
-        turn_id: Option<&str>,
+        turn_id: Option<&TurnId>,
         payload: lash_core::SessionObservationEventPayload,
     ) -> Arc<lash_core::SessionObservationEvent> {
         let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
@@ -1800,7 +1801,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     let remote = RemoteSessionObservationEvent::from_core(
         7,
         event(
-            Some("activity-turn"),
+            Some(&TurnId::from("activity-turn")),
             lash_core::SessionObservationEventPayload::TurnActivity(activity),
         ),
     )
@@ -1824,7 +1825,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     let remote = RemoteSessionObservationEvent::from_core(
         8,
         event(
-            Some("committed-turn"),
+            Some(&TurnId::from("committed-turn")),
             lash_core::SessionObservationEventPayload::Committed { read_view },
         ),
     )

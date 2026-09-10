@@ -40,7 +40,7 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
     // the current body decoder.
     let mut payload = serde_json::to_value(RemoteTurnReport {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),

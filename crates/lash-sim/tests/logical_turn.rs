@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -497,7 +498,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     );
     assert!(
         frame_switch_outbox_is_atomic(&[FrameSwitchCommitObservation {
-            turn_id: "first".to_string(),
+            turn_id: TurnId::from("first"),
             inbound_claim_completed: inbound_completed,
             follow_on_enqueued,
         }])

@@ -1,5 +1,6 @@
 use super::session_store_factory::session_store_request;
 use super::*;
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tombstones(
@@ -25,7 +26,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
             parent_session_id: root_request.session_id.clone(),
             caused_by: Some(crate::CausalRef::Turn {
                 session_id: root_request.session_id.clone(),
-                turn_id: "enumeration-parent-turn".to_string(),
+                turn_id: TurnId::from("enumeration-parent-turn"),
             }),
         },
     );

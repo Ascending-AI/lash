@@ -1,3 +1,4 @@
+use crate::TurnId;
 use std::sync::Arc;
 
 use crate::plugin::{
@@ -106,7 +107,7 @@ impl<'run> ToolSessionAdmin<'run> {
     pub async fn start_turn(
         &self,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
         input: crate::TurnInput,
     ) -> Result<crate::AssembledTurn, PluginError> {
         let scope = self.sessions.turn_scope(session_id, turn_id).await?;

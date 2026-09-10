@@ -20,6 +20,7 @@
 //! and the schema-evolution policy that governs [`TRACE_SCHEMA_VERSION`], see
 //! `docs/reporting.html`; for the attach-a-sink how-to, see `docs/tracing.html`.
 
+use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
@@ -157,7 +158,7 @@ pub struct TraceContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     /// Stable id of the span this record represents (e.g. `turn:<session>:<turn>`,
     /// `llm:<call_id>`, `tool:<call_id>`). Populated by the runtime for turn /
     /// llm / tool / session records so a consumer can build a nested span tree
@@ -193,7 +194,7 @@ impl TraceContext {
         self
     }
 
-    pub fn for_turn(mut self, turn_id: impl Into<String>) -> Self {
+    pub fn for_turn(mut self, turn_id: impl Into<TurnId>) -> Self {
         self.turn_id = Some(turn_id.into());
         self
     }
@@ -1294,7 +1295,7 @@ impl TraceDurableTimerStatus {
 pub struct TraceRuntimeScope {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

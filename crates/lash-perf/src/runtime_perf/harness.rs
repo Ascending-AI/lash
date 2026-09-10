@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::{
     collections::HashMap,
@@ -270,7 +271,7 @@ impl BenchmarkRuntime {
             .await;
     }
 
-    pub(crate) fn turn_scope(&self, turn_id: impl Into<String>) -> lash::runtime::ExecutionScope {
+    pub(crate) fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash::runtime::ExecutionScope {
         self.session
             .as_ref()
             .expect("benchmark session")
@@ -308,7 +309,7 @@ impl BenchmarkRuntime {
     pub(crate) async fn run_turn_with_id(
         &self,
         input: lash::TurnInput,
-        turn_id: &str,
+        turn_id: &TurnId,
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<lash::TurnReport> {
         let session = self.session.as_ref().expect("benchmark session");
@@ -331,7 +332,7 @@ impl BenchmarkRuntime {
 
     pub(crate) async fn enqueue_active_turn_input(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         input: lash::TurnInput,
         source_id: &str,
     ) -> anyhow::Result<lash_core::facade_support::TurnInputAcceptanceReceipt> {
@@ -352,7 +353,7 @@ impl BenchmarkRuntime {
     pub(crate) async fn run_cancel_round_trip(
         &self,
         input: lash::TurnInput,
-        turn_id: &str,
+        turn_id: &TurnId,
         cancel: tokio_util::sync::CancellationToken,
         request_id: &str,
     ) -> anyhow::Result<(lash::TurnReport, std::time::Duration)> {
@@ -402,7 +403,7 @@ impl BenchmarkRuntime {
     pub(crate) async fn run_ingress_claim_projection(
         &self,
         input: lash::TurnInput,
-        turn_id: &str,
+        turn_id: &TurnId,
         cancel: tokio_util::sync::CancellationToken,
         source_id: &str,
     ) -> anyhow::Result<(lash::TurnReport, std::time::Duration)> {

@@ -406,7 +406,7 @@ async fn retain_boundary(
 fn committed_turn_boundary(
     session: &LashSession,
     applications: &[lash::TurnInputApplication],
-    turn_id: &lash::persistence::TurnId,
+    turn_id: &lash::TurnId,
 ) -> Result<Option<String>> {
     let graph = session.read_view().session_graph().clone();
     let nodes_by_id: std::collections::HashMap<&str, _> = graph

@@ -1,6 +1,7 @@
 use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
 use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
+use lash_sansio::TurnId;
 use std::sync::Arc;
 
 fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
@@ -43,7 +44,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from(""),
         session_id: "parity".to_string(),
-        turn_id: "parity-turn".to_string(),
+        turn_id: TurnId::from("parity-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
             termination: Some(termination),

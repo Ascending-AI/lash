@@ -76,7 +76,7 @@ pub use lash_core::{
     Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionListFilter,
     SessionRelationKind, SessionStartPoint, SessionSummary, TurnActivity, TurnActivityId,
     TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent, TurnFailureEvidence,
-    TurnFailurePartialOutput, TurnFailureSettlement, TurnInput, TurnInputApplication,
+    TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
     facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
     facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
@@ -343,7 +343,7 @@ pub mod persistence {
         SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
         SessionRelation, SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance,
         StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-        StoreSchemaVerdict, TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+        StoreSchemaVerdict, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
         facade_support::SessionNodeProjection,
     };
     /// Committed session history flattened into presentation order, as returned

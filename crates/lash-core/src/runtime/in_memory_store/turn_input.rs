@@ -371,7 +371,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 .ingress
                 .active_turn_id()
                 .expect("repairable input is active-turn scoped")
-                .to_string();
+                .clone();
             let disposition = requests
                 .get(&turn_id)
                 .map_or(crate::TurnCancelDisposition::Defer, |record| {

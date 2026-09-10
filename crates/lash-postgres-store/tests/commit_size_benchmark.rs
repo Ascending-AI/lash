@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -182,7 +183,7 @@ fn realistic_commit(
     }
     commit.committed_attachment_ids = attachment_ids;
     commit.adopted_intent_rows = row_shape.adoption as u64;
-    let turn_id = format!("commit-size-benchmark-{sample}");
+    let turn_id = TurnId::from(format!("commit-size-benchmark-{sample}"));
     let (mut commit, _) = commit
         .with_operation(lash_core::store::OperationId::new(
             lash_core::ExecutionScope::turn(session_id, turn_id),
@@ -246,7 +247,7 @@ fn sqlite_seed_attachment_intents(database_path: &std::path::Path, commit: &Runt
                     attachment_id.as_str(),
                     commit.session_id,
                     format!("lash-attachment://blake3/{attachment_id}"),
-                    turn_id,
+                    turn_id.as_str(),
                 ])
                 .expect("insert SQLite benchmark attachment intent");
         }
@@ -278,7 +279,7 @@ async fn postgres_seed_attachment_intents(pool: &sqlx::PgPool, commit: &RuntimeC
             .push_bind(1_i64)
             .push_bind(None::<i64>)
             .push_bind("turn")
-            .push_bind(turn_id);
+            .push_bind(turn_id.as_str());
     });
     query
         .build()

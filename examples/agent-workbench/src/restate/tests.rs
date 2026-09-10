@@ -3,6 +3,7 @@ use super::{
     cron_occurrence_key, cron_session_disposition, emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
+use lash::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -259,11 +260,11 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
     )
     .await;
     let session_id = state.current_session_id();
-    state.track_turn(&session_id, "replacement-aborted-turn");
+    state.track_turn(&session_id, &TurnId::from("replacement-aborted-turn"));
     let error = super::terminalize_turn_execution(
         &state,
         &session_id,
-        "replacement-aborted-turn",
+        &TurnId::from("replacement-aborted-turn"),
         "replacement.aborted",
         Ok(Err(AppError::runtime(lash::EmbedError::Plugin(
             lash::plugins::PluginError::RuntimeEffectController(
@@ -701,7 +702,7 @@ async fn counted_settlement_attempts(
         let error = super::terminalize_turn_execution(
             state,
             session_id,
-            "fig1058-settlement-turn",
+            &TurnId::from("fig1058-settlement-turn"),
             "fig1058.settlement",
             Ok(Err(AppError::runtime(lash::EmbedError::Runtime(
                 lash::runtime::RuntimeError::new(code.clone(), "injected settlement failure"),
@@ -782,7 +783,7 @@ async fn turn_body_reader_treats_ambiguous_errors_as_terminal() {
     let error = super::terminalize_turn_execution(
         &state,
         &session_id,
-        "fig1858-ambiguous-turn-body",
+        &TurnId::from("fig1858-ambiguous-turn-body"),
         "fig1858.ambiguous_turn_body",
         Ok(Err(AppError::internal("ambiguous turn failure"))),
     )

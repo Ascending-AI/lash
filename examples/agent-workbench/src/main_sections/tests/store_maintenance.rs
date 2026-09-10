@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 // Coverage for `/api/admin/store-maintenance`: the two levers that bound
 // session-store growth, and — the point of the route — the destruction it
@@ -388,7 +389,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
     .expect("upload the attachment a turn will reference");
     let referenced_id = uploaded.attachment.id.clone();
 
-    let turn_id = format!("store-maintenance-{}", uuid::Uuid::new_v4());
+    let turn_id = TurnId::from(format!("store-maintenance-{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),

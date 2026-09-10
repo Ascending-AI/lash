@@ -73,7 +73,7 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     crate::restate::record_turn_output(
         &state,
         &session,
-        "bare-prose-turn",
+        &TurnId::from("bare-prose-turn"),
         output,
         turn_state,
         "test.bare_prose.completed",
@@ -101,9 +101,13 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
         "the runtime's own terminal message is the committed copy on this path, \
          got {committed_agent_replies:?}"
     );
-    crate::restate::settle_workbench_turn(&state, &session.session_id(), "bare-prose-turn")
-        .await
-        .expect("settle bare prose turn");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &session.session_id(),
+        &TurnId::from("bare-prose-turn"),
+    )
+    .await
+    .expect("settle bare prose turn");
     drop(session);
     let (assistant_texts, _) = settled_assistant_rows(&state, &session_id).await;
     assert_eq!(
@@ -174,7 +178,7 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     crate::restate::record_turn_output(
         &state,
         &session,
-        "reasoned-prose-turn",
+        &TurnId::from("reasoned-prose-turn"),
         output,
         turn_state,
         "test.reasoned_prose.completed",
@@ -197,9 +201,13 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
         "a reasoned bare-prose termination must commit the agent reply exactly once, \
          got {committed_agent_replies:?}"
     );
-    crate::restate::settle_workbench_turn(&state, &session.session_id(), "reasoned-prose-turn")
-        .await
-        .expect("settle reasoned prose turn");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &session.session_id(),
+        &TurnId::from("reasoned-prose-turn"),
+    )
+    .await
+    .expect("settle reasoned prose turn");
     drop(session);
     let (assistant_texts, reasoning_rows) = settled_assistant_rows(&state, &session_id).await;
     assert_eq!(
@@ -277,16 +285,20 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     crate::restate::record_turn_output(
         &state,
         &session,
-        "mid-turn-prose-turn",
+        &TurnId::from("mid-turn-prose-turn"),
         output,
         turn_state,
         "test.mid_turn_prose.completed",
     )
     .await
     .expect("record mid-turn prose turn output");
-    crate::restate::settle_workbench_turn(&state, &session.session_id(), "mid-turn-prose-turn")
-        .await
-        .expect("settle mid-turn prose turn");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &session.session_id(),
+        &TurnId::from("mid-turn-prose-turn"),
+    )
+    .await
+    .expect("settle mid-turn prose turn");
     drop(session);
     let (assistant_texts, reasoning_rows) = settled_assistant_rows(&state, &session_id).await;
     assert_eq!(

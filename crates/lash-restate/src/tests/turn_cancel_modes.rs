@@ -453,7 +453,7 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
                 .expect("scoped restate controller");
             runtime
                 .stream_turn(
-                    replay_test_input(turn_id),
+                    replay_test_input(&TurnId::from(turn_id)),
                     lash_core::facade_support::TurnOptions::new(
                         tokio_util::sync::CancellationToken::new(),
                         scoped,

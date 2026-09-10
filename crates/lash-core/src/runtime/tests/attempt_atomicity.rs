@@ -17,6 +17,7 @@
 //! declaration and zero commands for refused batches.
 
 use crate::ProcessRegistrar as _;
+use crate::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -278,7 +279,10 @@ fn tool_context_with_provider<'run>(
         .runtime
         .runtime_session_services()
         .expect("attempt-atomicity session manager")
-        .direct_completion_client(effect_controller.clone(), Some(TURN.to_string()));
+        .direct_completion_client(
+            effect_controller.clone(),
+            Some(TurnId::from(TURN.to_string())),
+        );
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools,
@@ -1302,7 +1306,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
         .expect("attempt-atomicity session manager")
         .direct_completion_client(
             crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
-            Some(TURN.to_string()),
+            Some(TurnId::from(TURN.to_string())),
         )
         .with_parent_invocation(Some(attempt_invocation()));
 

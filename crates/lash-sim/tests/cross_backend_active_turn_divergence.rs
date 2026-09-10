@@ -7,6 +7,7 @@
 //! Notify gating — that gating is the harness artifact under test). Compares
 //! committed assistant message + cumulative provider exchange count per turn.
 
+use lash_sansio::TurnId;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -244,9 +245,9 @@ async fn drive_cancel_before_turn(
         .open()
         .await
         .expect("open fresh");
-    let t1 = format!("{session_id}:provider:001");
-    let t2 = format!("{session_id}:provider:002");
-    let t3 = format!("{session_id}:provider:003");
+    let t1 = TurnId::from(format!("{session_id}:provider:001"));
+    let t2 = TurnId::from(format!("{session_id}:provider:002"));
+    let t3 = TurnId::from(format!("{session_id}:provider:003"));
 
     let pending = session
         .enqueue(TurnInput::text("queued follow-up"))
@@ -283,9 +284,9 @@ async fn drive_cancel_after_turn(
         .open()
         .await
         .expect("open fresh");
-    let t1 = format!("{session_id}:provider:001");
-    let t2 = format!("{session_id}:provider:002");
-    let t3 = format!("{session_id}:provider:003");
+    let t1 = TurnId::from(format!("{session_id}:provider:001"));
+    let t2 = TurnId::from(format!("{session_id}:provider:002"));
+    let t3 = TurnId::from(format!("{session_id}:provider:003"));
 
     let mut obs = Vec::new();
     obs.push(run_turn(&session, transport, "turn-1", &t1).await);
@@ -324,8 +325,8 @@ async fn drive_no_cancel_control(
         .open()
         .await
         .expect("open fresh");
-    let t1 = format!("{session_id}:provider:001");
-    let t2 = format!("{session_id}:provider:002");
+    let t1 = TurnId::from(format!("{session_id}:provider:001"));
+    let t2 = TurnId::from(format!("{session_id}:provider:002"));
 
     session
         .enqueue(TurnInput::text("queued follow-up"))
@@ -357,8 +358,8 @@ async fn drive_claim_then_cancel(
         .open()
         .await
         .expect("open fresh");
-    let t1 = format!("{session_id}:provider:001");
-    let t2 = format!("{session_id}:provider:002");
+    let t1 = TurnId::from(format!("{session_id}:provider:001"));
+    let t2 = TurnId::from(format!("{session_id}:provider:002"));
 
     let pending = session
         .enqueue(TurnInput::text("queued follow-up"))
@@ -397,7 +398,7 @@ async fn run_turn(
     session: &lash::LashSession,
     transport: &Arc<ScriptedLlmHttpTransport>,
     label: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> TurnObs {
     let result = session
         .turn(TurnInput::text(format!("user prompt for {label}")))

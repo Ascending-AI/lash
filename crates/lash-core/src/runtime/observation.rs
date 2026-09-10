@@ -1,3 +1,4 @@
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 pub(crate) mod replay;
 
@@ -417,7 +418,7 @@ impl RuntimeHandle {
         }
     }
 
-    pub fn record_turn_activity(&self, turn_id: Option<&str>, activity: crate::TurnActivity) {
+    pub fn record_turn_activity(&self, turn_id: Option<&TurnId>, activity: crate::TurnActivity) {
         let observation = self.observe();
         self.publish_live_events(
             observation.session_id(),

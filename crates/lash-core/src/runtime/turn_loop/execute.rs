@@ -3,6 +3,7 @@
 //! alongside it.
 
 use super::*;
+use crate::TurnId;
 
 struct TurnDriverSessionLoan<'slot, 'run> {
     session: &'slot mut Option<Session>,
@@ -55,7 +56,7 @@ struct PreparedTurnAbortContext<'abort, 'run> {
     event_tx: mpsc::Sender<RuntimeStreamEvent>,
     assembler: TurnAssembler,
     turn_index: usize,
-    trace_turn_id: String,
+    trace_turn_id: TurnId,
     claims: &'abort LogicalTurnClaims,
     sinks: TurnSinks<'abort>,
     scoped_effect_controller: &'abort ScopedEffectController<'run>,

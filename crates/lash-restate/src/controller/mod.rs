@@ -193,7 +193,7 @@ fn restate_turn_cancel_wait_request(
     invocation: &RuntimeInvocation,
     turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
-    let Some(turn_id) = invocation.scope.turn_id.as_deref() else {
+    let Some(turn_id) = invocation.scope.turn_id.as_ref() else {
         return Ok(None);
     };
     let Some(scope) = turn_cancel_scope else {

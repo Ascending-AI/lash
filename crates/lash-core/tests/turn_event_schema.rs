@@ -12,6 +12,7 @@
 //! representative sample for the new variant is added to [`sample_events`], so
 //! the new shape actually gets pinned rather than silently skipped.
 
+use lash_core::TurnId;
 use std::collections::BTreeSet;
 
 use lash_core::runtime::QueuedWorkClaimBoundary;
@@ -93,7 +94,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "turn_started",
             TurnEvent::TurnStarted {
-                turn_id: "turn-1".to_string(),
+                turn_id: TurnId::from("turn-1"),
             },
             json!({
                 "type": "turn_started",

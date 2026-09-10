@@ -149,7 +149,8 @@ pub mod store_backend_support {
                 // request that replay reconstructs (FIG-1573).
                 if let Some(resumable) = resumable_turn_id
                     && pinned_turn_id
-                        .strip_prefix(resumable)
+                        .as_str()
+                        .strip_prefix(resumable.as_str())
                         .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
                 {
                     return false;
@@ -711,7 +712,8 @@ pub use lash_sansio::{
     ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
     ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
     ToolIntentParentEndAction, ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest,
-    ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause, TurnOutputSource,
+    ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause, TurnId,
+    TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -1229,7 +1231,7 @@ pub use store::{
     SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
     SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreError,
     StoreMaintenance, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+    StoreSchemaVerdict, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

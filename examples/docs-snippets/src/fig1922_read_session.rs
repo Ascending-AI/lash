@@ -1,3 +1,4 @@
+use lash::TurnId;
 async fn inspect_session(
     core: &lash::LashCore,
     session_id: &str,
@@ -55,7 +56,7 @@ mod tests {
             parent_session_id: "docs-read-session-parent".to_string(),
             caused_by: Some(lash::process::CausalRef::Turn {
                 session_id: "docs-read-session-parent".to_string(),
-                turn_id: "docs-read-session-parent-turn".to_string(),
+                turn_id: lash::TurnId::from("docs-read-session-parent-turn"),
             }),
         };
         let store = factory

@@ -852,7 +852,7 @@ async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
     let scoped_turn = host.scoped(turn_scope.clone()).expect("turn scope");
     assert_eq!(scoped_turn.execution_scope(), &turn_scope);
     assert_eq!(scoped_turn.scope_id(), "turn-1");
-    assert_eq!(scoped_turn.turn_id(), Some("turn-1"));
+    assert_eq!(scoped_turn.turn_id(), Some(&crate::TurnId::from("turn-1")));
 }
 
 async fn effect_host_rejects_missing_scope_ids(host: Arc<dyn EffectHost>) {

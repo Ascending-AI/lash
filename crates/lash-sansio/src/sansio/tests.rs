@@ -1,3 +1,4 @@
+use crate::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -35,7 +36,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         tool_specs: Vec::new().into(),
         system_prompt: Arc::from(""),
         session_id: "test".to_string(),
-        turn_id: "test-turn".to_string(),
+        turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination: (),
         turn_limit_final_message: Arc::new(test_turn_limit_final_message),

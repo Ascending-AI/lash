@@ -15,7 +15,7 @@ impl RuntimeScenarioContext {
         let mut commit = RuntimeCommit::persisted_state_for_test(&self.state, &[])
             .completing_queue_claims(self.command_claim.iter().map(QueuedWorkClaim::completion));
         if let Some(turn_id) = phase.defer_interrupted_turn_id {
-            commit = commit.deferring_interrupted_turn_inputs(turn_id);
+            commit = commit.deferring_interrupted_turn_inputs(TurnId::from(turn_id));
         }
         let result = self
             .store()

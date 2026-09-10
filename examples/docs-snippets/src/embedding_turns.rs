@@ -1,5 +1,6 @@
 //! Compiled sources for the Rust snippets on `docs/embedding-turns.html`.
 
+use lash::TurnId;
 use lash::{FrameKey, TurnFinish, TurnOutcome, TurnStop};
 use lash::{LashCore, LashSession, TurnInput, TurnReport};
 
@@ -236,7 +237,7 @@ async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<(
     // should return to the host instead of being deferred to the next turn.
     let receipt = session
         .request_turn_cancel_with_disposition(
-            turn_id,
+            &TurnId::from(turn_id),
             "stop-button-7",
             Some("user".to_string()),
             Some("operator pressed Stop".to_string()),
@@ -293,7 +294,7 @@ async fn stop_turn_after_step(core: &LashCore, session: &LashSession) -> anyhow:
     // token and drops uncommitted work back to the last checkpoint.
     let stop = session
         .request_turn_cancel_with_mode(
-            turn_id,
+            &TurnId::from(turn_id),
             "stop-button-8",
             Some("user".to_string()),
             Some("operator pressed Stop".to_string()),

@@ -3,6 +3,7 @@
     reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
 )]
 
+use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
@@ -47,7 +48,7 @@ const CRON_STATE_KEY: &str = "state";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchTurnWorkflowRequest {
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub session_id: String,
     pub text: String,
     pub model: ModelSelection,
@@ -57,7 +58,7 @@ pub(crate) struct WorkbenchTurnWorkflowRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchQueuedTurnWorkflowRequest {
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub session_id: String,
     pub reason: String,
     #[serde(default)]
@@ -72,7 +73,7 @@ impl WorkbenchQueuedTurnWorkflowRequest {
         session.queued_turn().drain_id(
             self.drain_id
                 .clone()
-                .unwrap_or_else(|| self.turn_id.clone()),
+                .unwrap_or_else(|| self.turn_id.clone().to_string()),
         )
     }
 
@@ -87,7 +88,7 @@ impl WorkbenchQueuedTurnWorkflowRequest {
             .drain_id(
                 self.drain_id
                     .clone()
-                    .unwrap_or_else(|| self.turn_id.clone()),
+                    .unwrap_or_else(|| self.turn_id.clone().to_string()),
             )
     }
 }
@@ -1072,7 +1073,7 @@ async fn run_queued_turn(
     let turn_output_turn_id = request
         .drain_id
         .clone()
-        .unwrap_or_else(|| request.turn_id.clone());
+        .unwrap_or_else(|| request.turn_id.clone().to_string());
     let session = state
         .open_session(&request.session_id)
         .await
@@ -1125,7 +1126,7 @@ async fn run_queued_turn(
         &session,
         TurnOutputIdentity {
             turn_id: &request.turn_id,
-            durable_turn_id: &turn_output_turn_id,
+            durable_turn_id: &TurnId::from(turn_output_turn_id),
         },
         output,
         turn_state,
@@ -1163,7 +1164,7 @@ async fn run_queued_turn_terminalized(
 pub(crate) async fn terminalize_turn_execution(
     state: &AppState,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     trace_name: &str,
     result: Result<Result<(), AppError>, Box<dyn std::any::Any + Send>>,
 ) -> HandlerResult<()> {
@@ -1260,7 +1261,7 @@ pub(crate) async fn terminalize_turn_execution(
 pub(crate) async fn settle_workbench_turn(
     state: &AppState,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> Result<(), AppError> {
     let session = match state.open_session(session_id).await {
         Ok(session) => session,
@@ -1324,7 +1325,7 @@ fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
 pub(crate) async fn record_turn_output(
     state: &AppState,
     session: &lash::LashSession,
-    turn_id: &str,
+    turn_id: &TurnId,
     output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
@@ -1349,8 +1350,8 @@ pub(crate) async fn record_turn_output(
 pub(crate) async fn record_turn_output_with_durable_turn_id(
     state: &AppState,
     session: &lash::LashSession,
-    turn_id: &str,
-    durable_turn_id: &str,
+    turn_id: &TurnId,
+    durable_turn_id: &TurnId,
     output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
@@ -1372,8 +1373,8 @@ pub(crate) async fn record_turn_output_with_durable_turn_id(
 }
 
 struct TurnOutputIdentity<'a> {
-    turn_id: &'a str,
-    durable_turn_id: &'a str,
+    turn_id: &'a TurnId,
+    durable_turn_id: &'a TurnId,
 }
 
 async fn record_turn_output_for_model(
@@ -1488,9 +1489,9 @@ async fn record_turn_output_for_model(
                             _ => None,
                         }
                     })
-                    .unwrap_or_else(|| identity.durable_turn_id.to_string())
+                    .unwrap_or_else(|| TurnId::from(identity.durable_turn_id.to_string()))
             } else {
-                identity.turn_id.to_string()
+                identity.turn_id.clone()
             };
             state.push_assistant_message_for_turn(
                 &session.session_id(),

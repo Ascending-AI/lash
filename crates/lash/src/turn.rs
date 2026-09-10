@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -224,7 +225,7 @@ pub struct TurnBuilder {
     pub(crate) cancels: TurnCancelRegistry,
     pub(crate) protocol_turn_options: Option<ProtocolTurnOptions>,
     pub(crate) provider: Option<ProviderHandle>,
-    pub(crate) turn_id: Option<String>,
+    pub(crate) turn_id: Option<TurnId>,
     pub(crate) cancel_origin_hint: TurnCancelOriginHint,
 }
 
@@ -272,7 +273,7 @@ impl TurnBuilder {
     /// the same trace, effects, and cancellation promises as the earlier turn;
     /// Lash does not mint or check uniqueness for host-supplied ids.
     pub fn turn_id(mut self, id: impl Into<String>) -> Self {
-        self.turn_id = Some(id.into());
+        self.turn_id = Some(TurnId::from(id.into()));
         self
     }
 
@@ -388,22 +389,22 @@ impl TurnBuilder {
     fn resolved_turn_id(
         &self,
         scoped_effect_controller: Option<&ScopedEffectController<'_>>,
-    ) -> Option<String> {
+    ) -> Option<TurnId> {
         self.turn_id.clone().or_else(|| {
             scoped_effect_controller
                 .filter(|controller| controller.execution_scope().validates_turn_trace_id())
-                .map(|controller| controller.scope_id().to_string())
+                .map(|controller| TurnId::from(controller.scope_id()))
         })
     }
 
-    fn turn_scope(&self, turn_id: &str) -> lash_core::ExecutionScope {
+    fn turn_scope(&self, turn_id: &TurnId) -> lash_core::ExecutionScope {
         let observation = self.runtime.observe();
         observation.persisted_state.turn_scope(turn_id)
     }
 
     pub(crate) fn prepare(
         mut self,
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
     ) -> Result<(RuntimeHandle, TurnInput, CancellationToken, TurnCancelGuard)> {
         if let Some(options) = self.protocol_turn_options {
             self.input.protocol_turn_options = Some(options);
@@ -449,7 +450,7 @@ impl TurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
     ) -> Result<TurnReport> {
         let (runtime, input, cancel, _cancel_guard) = self.prepare(turn_id)?;
         stream_prepared_turn(
@@ -473,7 +474,7 @@ impl TurnBuilder {
     fn stream_with_scope(
         self,
         scoped_effect_controller: ScopedEffectController<'static>,
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
     ) -> Result<TurnStream> {
         let (runtime, input, cancel, cancel_guard) = self.prepare(turn_id)?;
         let (tx, rx) = mpsc::channel(64);
@@ -646,7 +647,7 @@ pub struct QueuedTurnBuilder {
     pub(crate) cancel: CancellationToken,
     pub(crate) cancel_origin_hint: TurnCancelOriginHint,
     pub(crate) cancels: TurnCancelRegistry,
-    pub(crate) turn_id: Option<String>,
+    pub(crate) turn_id: Option<TurnId>,
     pub(crate) drain_id: Option<String>,
 }
 
@@ -678,7 +679,7 @@ impl QueuedTurnBuilder {
     /// host-minted physical turn identity, or use `drain_id` as the durable
     /// idempotency key for retried drains.
     pub fn turn_id(mut self, id: impl Into<String>) -> Self {
-        self.turn_id = Some(id.into());
+        self.turn_id = Some(TurnId::from(id.into()));
         self
     }
 
@@ -765,15 +766,15 @@ impl QueuedTurnBuilder {
     fn resolved_turn_id(
         &self,
         scoped_effect_controller: Option<&ScopedEffectController<'_>>,
-    ) -> Option<String> {
+    ) -> Option<TurnId> {
         self.turn_id.clone().or_else(|| {
             scoped_effect_controller
                 .filter(|controller| controller.execution_scope().validates_turn_trace_id())
-                .map(|controller| controller.scope_id().to_string())
+                .map(|controller| TurnId::from(controller.scope_id()))
         })
     }
 
-    fn turn_scope(&self, turn_id: &str) -> lash_core::ExecutionScope {
+    fn turn_scope(&self, turn_id: &TurnId) -> lash_core::ExecutionScope {
         let observation = self.runtime.observe();
         observation.persisted_state.turn_scope(turn_id)
     }
@@ -827,7 +828,7 @@ impl QueuedTurnBuilder {
         {
             let scoped_turn_controller = ScopedEffectController::borrowed(
                 scoped_effect_controller.controller(),
-                self.turn_scope(turn_id),
+                self.turn_scope(&TurnId::from(turn_id)),
             )?;
             return self
                 .stream_to_with_resolved_scope(events, scoped_turn_controller)
@@ -1011,7 +1012,7 @@ impl SelectedQueuedTurnBuilder {
         {
             let scoped_turn_controller = ScopedEffectController::borrowed(
                 scoped_effect_controller.controller(),
-                self.builder.turn_scope(turn_id),
+                self.builder.turn_scope(&TurnId::from(turn_id)),
             )?;
             return self
                 .stream_to_with_resolved_scope(events, scoped_turn_controller)
@@ -1107,10 +1108,12 @@ impl AdvancedQueuedTurn {
     }
 }
 
-fn fresh_turn_id() -> String {
-    lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-        .0
-        .to_string()
+fn fresh_turn_id() -> TurnId {
+    TurnId::from(
+        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
+            .0
+            .to_string(),
+    )
 }
 
 fn fresh_queue_drain_id() -> String {
@@ -1258,7 +1261,7 @@ impl TurnActivitySink for SessionObservationTurnActivitySink<'_> {
         }
     }
 
-    async fn emit_for_turn(&self, turn_id: &str, activity: TurnActivity) {
+    async fn emit_for_turn(&self, turn_id: &TurnId, activity: TurnActivity) {
         self.runtime
             .record_turn_activity(Some(turn_id), activity.clone());
         if let Some(live) = self.live {

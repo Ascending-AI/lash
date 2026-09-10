@@ -1,3 +1,4 @@
+use crate::TurnId;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay,
     ProviderReplayMeta, ResponseTextMeta,
@@ -136,7 +137,7 @@ pub enum MessageOrigin {
     /// or parsing a message id. Message ids stay runtime-minted.
     TurnInput {
         /// The turn whose input this message carries.
-        turn_id: String,
+        turn_id: TurnId,
         /// The durable turn input this message was materialized from, present
         /// when the input arrived through queued ingress and absent when the
         /// turn was driven with its input in hand.
@@ -148,7 +149,7 @@ pub enum MessageOrigin {
     /// still recognizing protocol-owned output.
     TurnOutput {
         /// The turn that produced this output.
-        turn_id: String,
+        turn_id: TurnId,
         /// The runtime or plugin that authored the output.
         source: TurnOutputSource,
     },

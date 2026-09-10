@@ -143,7 +143,7 @@ impl RuntimeScenarioContext {
                     .store()
                     .enqueue_pending_turn_input(pending_active_turn_input_draft(
                         self.session_id,
-                        turn_id,
+                        &TurnId::from(*turn_id),
                         *min_boundary,
                         text,
                     ))

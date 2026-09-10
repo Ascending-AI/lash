@@ -469,7 +469,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let scope = || {
         crate::ProcessOpScope::new(named_turn_scope(
             session_id,
-            &uuid::Uuid::new_v4().to_string(),
+            &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
     };
     let unknown_process_id = "host-unknown-process";
@@ -677,7 +677,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     let scope = || {
         crate::ProcessOpScope::new(named_turn_scope(
             session_id,
-            &uuid::Uuid::new_v4().to_string(),
+            &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
     };
     service
@@ -778,7 +778,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                 options,
                 crate::ProcessOpScope::new(named_turn_scope(
                     parent_session_id,
-                    &format!("{process_id}-turn"),
+                    &TurnId::from(format!("{process_id}-turn")),
                 )),
             )
             .await
@@ -1058,7 +1058,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .run_turn_assembled(
             TurnInput::text("commit the rebuilt surface"),
             CancellationToken::new(),
-            named_turn_scope("persisted-live-surface", "surface-commit"),
+            named_turn_scope("persisted-live-surface", &TurnId::from("surface-commit")),
         )
         .await
         .expect("commit after live rebuild");
@@ -1314,7 +1314,7 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
         .run_turn_assembled(
             TurnInput::text("use the newly composed tool"),
             CancellationToken::new(),
-            named_turn_scope("compose-child", "compose-boundary"),
+            named_turn_scope("compose-child", &TurnId::from("compose-boundary")),
         )
         .await
         .expect("turn through compose_session_catalog boundary");
@@ -1651,7 +1651,7 @@ async fn payload_gated_engine_runtime(
 fn payload_gated_scope(session_id: &str) -> crate::ProcessOpScope<'_> {
     crate::ProcessOpScope::new(named_turn_scope(
         session_id,
-        &uuid::Uuid::new_v4().to_string(),
+        &TurnId::from(uuid::Uuid::new_v4().to_string()),
     ))
 }
 

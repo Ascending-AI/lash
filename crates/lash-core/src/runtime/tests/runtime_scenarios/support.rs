@@ -632,7 +632,7 @@ pub(crate) fn pending_next_turn_input_draft(session_id: &str, text: &str) -> Pen
 
 pub(crate) fn pending_active_turn_input_draft(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     min_boundary: TurnInputCheckpointBoundary,
     text: &str,
 ) -> PendingTurnInputDraft {

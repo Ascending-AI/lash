@@ -53,7 +53,7 @@ async fn assert_immediate_successor(gate_release: bool) {
                 TurnInput::text("panic"),
                 TurnOptions::new(
                     CancellationToken::new(),
-                    named_turn_scope(&session_id, "panic"),
+                    named_turn_scope(&session_id, &TurnId::from("panic")),
                 ),
             )
             .await
@@ -97,7 +97,7 @@ async fn happy_turn_keeps_atomic_lease_release_without_extra_call() {
             TurnInput::text("complete"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&session_id, "happy"),
+                named_turn_scope(&session_id, &TurnId::from("happy")),
             ),
         )
         .await

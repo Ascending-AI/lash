@@ -141,7 +141,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             .sessions()
             .start_turn(
                 &child.session_id,
-                turn_id,
+                &TurnId::from(turn_id),
                 TurnInput::text("run nested child"),
             )
             .await;
@@ -823,7 +823,7 @@ async fn parent_turn_receives_live_child_token_usage_events() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "child-session-usage-parent"),
+                named_turn_scope("root", &TurnId::from("child-session-usage-parent")),
             )
             .with_events(&sink)
             .with_turn_events(&turn_events),
@@ -983,7 +983,7 @@ async fn nested_child_turns_use_independent_default_task_stacks() {
             TurnInput::text("run three levels"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "nested-parent-turn"),
+                named_turn_scope("root", &TurnId::from("nested-parent-turn")),
             ),
         )
         .await
@@ -1071,7 +1071,7 @@ async fn parent_turn_keeps_cached_only_child_usage_live() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "child-session-event-parent"),
+                named_turn_scope("root", &TurnId::from("child-session-event-parent")),
             )
             .with_events(&sink),
         )
@@ -1224,7 +1224,7 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         .expect("child session");
 
     let turn_id = "cancelled-child-turn";
-    let request = |session_id: &'static str, turn_id: &str| {
+    let request = |session_id: &'static str, turn_id: &TurnId| {
         crate::SessionTurnRequest::new(
             session_id,
             turn_id,
@@ -1233,7 +1233,8 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         )
         .expect("child turn request")
     };
-    let mut turn = Box::pin(lifecycle.start_turn(request("cancelled-child", turn_id)));
+    let mut turn =
+        Box::pin(lifecycle.start_turn(request("cancelled-child", &TurnId::from(turn_id))));
     tokio::select! {
         _ = started_rx.recv() => {}
         outcome = turn.as_mut() => panic!("parked child turn must not complete: {outcome:?}"),
@@ -1270,7 +1271,7 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         .await
         .expect("retry child session");
     let retried = lifecycle
-        .start_turn(request("retry-child", turn_id))
+        .start_turn(request("retry-child", &TurnId::from(turn_id)))
         .await
         .expect("retried child turn");
     assert!(matches!(
@@ -1284,7 +1285,10 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
     );
 
     let recovered = lifecycle
-        .start_turn(request("cancelled-child", "cancelled-child-turn-2"))
+        .start_turn(request(
+            "cancelled-child",
+            &TurnId::from("cancelled-child-turn-2"),
+        ))
         .await
         .expect("the dropped turn future returns the child runtime's session loan");
     assert_eq!(

@@ -5,6 +5,7 @@
 //! execution lane, and the input the claim actually materialized.
 
 use super::*;
+use crate::TurnId;
 
 impl LashRuntime {
     /// Run one logical turn and stream every physical frame to the host sink.
@@ -77,7 +78,7 @@ impl LashRuntime {
         }
         let turn_id = input
             .trace_turn_id
-            .get_or_insert_with(|| scoped_effect_controller.scope_id().to_string())
+            .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()))
             .clone();
         let scoped_effect_controller =
             scoped_effect_controller.rescope(self.state.turn_scope(&turn_id))?;
@@ -225,7 +226,7 @@ impl LashRuntime {
         let trace_turn_id = input
             .trace_turn_id
             .clone()
-            .unwrap_or_else(|| opts.execution_scope_id().to_owned());
+            .unwrap_or_else(|| TurnId::from(opts.execution_scope_id()));
         input.trace_turn_id = Some(trace_turn_id.clone());
         // Store-backed new turns acquire and admit the execution lane before
         // the acceptance effect writes mutable session payload (ADR 0077).
@@ -299,7 +300,7 @@ impl LashRuntime {
                     .defer_orphaned_turn_inputs_before_drain(
                         &store,
                         &fence,
-                        opts.execution_scope_id(),
+                        &TurnId::from(opts.execution_scope_id()),
                     )
                     .await
                     > 0
@@ -581,7 +582,7 @@ impl LashRuntime {
         protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
         turn_context: crate::TurnContext,
         initial_turn_causes: Vec<crate::TurnCause>,
-        trace_turn_id: String,
+        trace_turn_id: TurnId,
         turn_index: usize,
         events: &dyn EventSink,
         turn_events: &dyn TurnActivitySink,

@@ -4,6 +4,7 @@ use super::{
     BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
     SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
 };
+use crate::TurnId;
 
 const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
 pub(super) const USAGE_PAYLOAD_ENCODING_V4: u32 = USAGE_PAYLOAD_FAMILY_VERSION as u32;
@@ -126,7 +127,7 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interrupted_turn_input_turn_id: Option<String>,
+    pub interrupted_turn_input_turn_id: Option<TurnId>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins.

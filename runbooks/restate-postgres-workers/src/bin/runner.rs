@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use lash::TurnId;
 use lash::sync::MutexExt;
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use lash_core::AwaitEventResolver as _;
@@ -2404,7 +2405,7 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     // `LeaseTimings`. What must hold is stricter than
     // the old identity check: the turn completes exactly once, against exactly one
     // acceptance, with no duplicate or conflicting settlement anywhere.
-    assert_recovered_turn_converged(storage.pool(), &recovery.workflow_id).await?;
+    assert_recovered_turn_converged(storage.pool(), &TurnId::from(recovery.workflow_id)).await?;
 
     println!(
         "turn-control gates passed: cross-process; cancel-before-start; seal-vs-cancel; owner-crash-recovery; terminal-attach-evidence"
@@ -2827,7 +2828,7 @@ async fn wait_for_failover_marker(pool: &sqlx::PgPool, workflow_id: &str) -> Res
 /// would have to mint a fresh acceptance and commit it, which shows up here as
 /// a second commit row, a second applied `input_id`, the same `input_id`
 /// settled by another turn, or a row left unsettled in the pending queue.
-async fn assert_recovered_turn_converged(pool: &sqlx::PgPool, turn_id: &str) -> Result<()> {
+async fn assert_recovered_turn_converged(pool: &sqlx::PgPool, turn_id: &TurnId) -> Result<()> {
     // Scope every read to the session the workflow actually runs in, so the
     // helper stays correct for the scenarios that use their own session.
     let session_id = turn_session_id(turn_id);
@@ -2871,7 +2872,7 @@ async fn assert_recovered_turn_converged(pool: &sqlx::PgPool, turn_id: &str) -> 
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        if committed_turn_id == turn_id {
+        if committed_turn_id == turn_id.as_str() {
             commits_for_turn += 1;
             applied_here.extend(applied);
         } else {
@@ -3474,7 +3475,7 @@ async fn assert_failover(pool: &sqlx::PgPool, selection: SegmentSelection) -> Re
         .fetch_one(pool)
         .await
         .with_context(|| format!("load failover exit marker for `{workflow_id}`"))?;
-        assert_recovered_turn_converged(pool, workflow_id).await?;
+        assert_recovered_turn_converged(pool, &TurnId::from(*workflow_id)).await?;
         let final_rows: i64 = sqlx::query_scalar(
             "SELECT COUNT(*)
              FROM lash_e2e_terminal_results

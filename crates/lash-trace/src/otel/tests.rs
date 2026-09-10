@@ -2,6 +2,7 @@
 //!
 //! These live in their own file so `otel.rs` carries only the exporter itself.
 
+use lash_sansio::TurnId;
 use opentelemetry::trace::noop::NoopTracerProvider;
 
 use super::*;
@@ -147,7 +148,7 @@ fn otel_sink_accepts_turn_and_llm_lifecycle() {
         .for_session("session-1")
         .for_llm_call("llm-1");
     let turn_context = TraceContext {
-        turn_id: Some("turn-1".to_string()),
+        turn_id: Some(TurnId::from("turn-1")),
         ..context.clone()
     };
 

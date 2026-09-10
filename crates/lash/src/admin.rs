@@ -7,6 +7,7 @@ use crate::support::{
 };
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
+use lash_sansio::TurnId;
 // `PluginQuery` / `PluginCommand` / `PluginTask` bound the operation runners
 // below, but their home is `crate::plugins`: authoring surface a plugin
 // implements, not a name a host writes to invoke one (ADR 0051, FIG-1921).
@@ -859,7 +860,7 @@ impl SessionAdmin {
 
     async fn inject_turn_input(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         id: Option<String>,
         message: PluginMessage,
     ) -> Result<()> {
@@ -872,7 +873,7 @@ impl SessionAdmin {
 
     async fn inject_turn_inputs_for_turn(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         messages: Vec<lash_core::facade_support::InjectedTurnInput>,
     ) -> Result<()> {
         for input in messages {
@@ -1586,7 +1587,7 @@ impl InjectionAdmin {
     /// Injects input for the session's next turn.
     pub async fn inject_turn_input(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         id: Option<String>,
         message: PluginMessage,
     ) -> Result<()> {
@@ -1596,7 +1597,7 @@ impl InjectionAdmin {
     /// Injects inputs for a specific session turn.
     pub async fn inject_turn_inputs_for_turn(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         messages: Vec<lash_core::facade_support::InjectedTurnInput>,
     ) -> Result<()> {
         self.control

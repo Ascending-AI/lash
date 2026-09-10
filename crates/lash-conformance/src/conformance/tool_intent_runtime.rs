@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -59,7 +60,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
 ) {
     let session_id = format!("{prefix}-session");
-    let turn_id = format!("{prefix}-turn");
+    let turn_id = TurnId::from(format!("{prefix}-turn"));
     let process_id = format!("{prefix}-target");
     let registered = registry
         .register_process_with_observers(

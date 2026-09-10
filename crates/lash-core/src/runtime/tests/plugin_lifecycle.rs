@@ -79,7 +79,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "hook-error-surfacing"),
+            scoped_test_turn(&recorder, &TurnId::from("hook-error-surfacing")),
         )
         .await
         .expect("turn remains committed despite an observer-hook failure");

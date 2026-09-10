@@ -3,6 +3,7 @@ use super::tests::{
     spawn_restate_ingress_capture, text_response,
 };
 use super::*;
+use lash::TurnId;
 
 struct ExpiringTerminalAttach {
     started: tokio::sync::mpsc::UnboundedSender<lash::TurnAddress>,
@@ -172,7 +173,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
 
     state.track_turn_prompt(
         &session_id,
-        "running-turn",
+        &TurnId::from("running-turn"),
         "restored active prompt".to_string(),
         None,
     );
@@ -239,7 +240,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     .await
     .expect("load state snapshot");
     assert!(snapshot.messages.iter().any(|message| {
-        message.id == workbench_turn_user_message_id("running-turn")
+        message.id == workbench_turn_user_message_id(&TurnId::from("running-turn"))
             && message.role == "user"
             && message.text == "restored active prompt"
     }));
@@ -247,7 +248,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(snapshot.pending_turn_inputs[0].input_id, injected.input_id);
     assert_eq!(snapshot.pending_turn_inputs[1].input_id, queued.input_id);
 
-    crate::restate::settle_workbench_turn(&state, &session_id, "running-turn")
+    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("running-turn"))
         .await
         .expect("settle running turn");
     let session = state
@@ -264,12 +265,12 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(after_settle[0].input_id, queued.input_id);
     session.close().await.expect("close session after settle");
 
-    state.track_turn(&session_id, "settle-race-turn");
+    state.track_turn(&session_id, &TurnId::from("settle-race-turn"));
     let checked_ingress = lash::persistence::TurnInputIngress::active_turn(
         "settle-race-turn",
         lash::persistence::TurnInputCheckpointBoundary::AfterWork,
     );
-    crate::restate::settle_workbench_turn(&state, &session_id, "settle-race-turn")
+    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("settle-race-turn"))
         .await
         .expect("settle turn between route check and enqueue");
     let raced = state
@@ -421,7 +422,7 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     let state = turn_cancel_test_state(&data_dir, admin_url).await;
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
-    state.track_turn(&session_id, "dangling-turn");
+    state.track_turn(&session_id, &TurnId::from("dangling-turn"));
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);
     let receipts = tokio::time::timeout(Duration::from_secs(1), async {
@@ -476,7 +477,7 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
     let state = turn_cancel_test_state(&data_dir, admin_url).await;
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
-    state.track_turn(&session_id, "live-turn");
+    state.track_turn(&session_id, &TurnId::from("live-turn"));
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);
     let response = tokio::time::timeout(Duration::from_secs(1), async {
@@ -805,7 +806,7 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
         let trace_path = data_dir.path().join("cancel.jsonl");
         state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
         let session_id = state.current_session_id();
-        state.track_turn(&session_id, "concurrent-stop");
+        state.track_turn(&session_id, &TurnId::from("concurrent-stop"));
         let mut events = state.event_tx.subscribe(&session_id);
         let driver =
             state
@@ -936,7 +937,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     // Stop before the turn starts: the start gate honours the after-step
     // request; the route forwards the same strength and attaches to the
     // stopped terminal.
-    state.track_turn(&session_id, "stop-mode-turn");
+    state.track_turn(&session_id, &TurnId::from("stop-mode-turn"));
     let seeded = state
         .core
         .turn_work_driver()
@@ -1004,7 +1005,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
 
     // Escalate: a routed turn already holding an after-step request is
     // upgraded in place by the Abort control.
-    state.track_turn(&session_id, "escalate-turn");
+    state.track_turn(&session_id, &TurnId::from("escalate-turn"));
     let seeded = state
         .core
         .turn_work_driver()

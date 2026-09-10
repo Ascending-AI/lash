@@ -1,11 +1,12 @@
 use super::*;
+use lash::TurnId;
 
 /// The body of `restate::run_user_turn`, minus the Restate effect controller the
 /// in-process test host does not need.
 async fn run_workbench_turn_attempt(
     state: &AppState,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     text: &str,
 ) -> Result<(), AppError> {
     let session = state
@@ -40,7 +41,7 @@ async fn run_workbench_turn_attempt(
 async fn run_workbench_turn_attempt_with_error_evidence(
     state: &AppState,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     text: &str,
 ) -> (
     Result<(), AppError>,
@@ -260,7 +261,7 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
     crate::restate::record_turn_output(
         &state,
         &successor,
-        turn_id,
+        &TurnId::from(turn_id),
         output,
         turn_state,
         "test.fig1129.successor.completed",
@@ -1200,7 +1201,7 @@ fn active_turn_idle_claim_is_atomic_per_session() {
             move || {
                 start.wait();
                 active_turns
-                    .try_insert_for_idle_session("race-session", "left")
+                    .try_insert_for_idle_session("race-session", &TurnId::from("left"))
                     .is_claimed()
             }
         });
@@ -1210,7 +1211,7 @@ fn active_turn_idle_claim_is_atomic_per_session() {
             move || {
                 start.wait();
                 active_turns
-                    .try_insert_for_idle_session("race-session", "right")
+                    .try_insert_for_idle_session("race-session", &TurnId::from("right"))
                     .is_claimed()
             }
         });
@@ -1265,7 +1266,7 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
     assert!(
         state
             .active_turns
-            .try_insert_for_idle_session(&session_id, "queued-race-owner")
+            .try_insert_for_idle_session(&session_id, &TurnId::from("queued-race-owner"))
             .is_claimed()
     );
     let (released, condition) = &*release;
@@ -1284,7 +1285,9 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
         restate_requests.try_recv(),
         Err(mpsc::error::TryRecvError::Empty)
     ));
-    state.active_turns.remove(&session_id, "queued-race-owner");
+    state
+        .active_turns
+        .remove(&session_id, &TurnId::from("queued-race-owner"));
 }
 
 #[tokio::test]
@@ -1569,6 +1572,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
         .and_then(Value::as_str)
         .expect("committed turn id")
         .to_string();
+    let turn_id = TurnId::from(turn_id);
     let first = Box::pin(run_workbench_turn_attempt(
         &state,
         &session_id,
@@ -1658,6 +1662,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         .and_then(Value::as_str)
         .expect("first turn id")
         .to_string();
+    let first_turn_id = TurnId::from(first_turn_id);
 
     let running = tokio::spawn({
         let state = state.clone();
@@ -1812,20 +1817,24 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         .await
         .expect("drain the queued send")
         .expect("the queued send runs as a turn");
-    state.track_turn(&session_id, "test-drained-queued-turn");
+    state.track_turn(&session_id, &TurnId::from("test-drained-queued-turn"));
     crate::restate::record_turn_output(
         &state,
         &session,
-        "test-drained-queued-turn",
+        &TurnId::from("test-drained-queued-turn"),
         drained.result,
         Arc::new(Mutex::new(TurnStreamState::default())),
         "test.drained_queued_turn.completed",
     )
     .await
     .expect("record the drained turn");
-    crate::restate::settle_workbench_turn(&state, &session_id, "test-drained-queued-turn")
-        .await
-        .expect("settle the drained turn");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &session_id,
+        &TurnId::from("test-drained-queued-turn"),
+    )
+    .await
+    .expect("settle the drained turn");
     drop(session);
 
     let Json(drained_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
@@ -1881,6 +1890,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         .and_then(Value::as_str)
         .expect("turn id")
         .to_string();
+    let turn_id = TurnId::from(turn_id);
 
     let losing = tokio::spawn({
         let state = state.clone();

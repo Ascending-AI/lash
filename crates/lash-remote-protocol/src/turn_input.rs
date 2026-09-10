@@ -1,6 +1,7 @@
 //! Turn input envelopes: MIME-generic items, per-turn protocol options, and
 //! the turn request.
 
+use lash_sansio::TurnId;
 use std::collections::HashMap;
 
 use schemars::JsonSchema;
@@ -49,7 +50,7 @@ pub struct RemoteTurnInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_turn_options: Option<RemoteProtocolTurnOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_turn_id: Option<String>,
+    pub trace_turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_layer: Option<RemotePromptLayer>,
 }
@@ -97,7 +98,7 @@ pub enum RemoteInputItem {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnRequest {
     pub session_id: String,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
     pub input: RemoteTurnInput,

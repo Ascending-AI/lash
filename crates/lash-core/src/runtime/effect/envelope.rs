@@ -1,3 +1,4 @@
+use crate::TurnId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -202,7 +203,7 @@ impl RuntimeInvocation {
 pub struct RuntimeScope {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -225,7 +226,7 @@ impl RuntimeScope {
     /// including turn index and protocol iteration.
     pub fn for_turn(
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
         turn_index: usize,
         protocol_iteration: usize,
     ) -> Self {

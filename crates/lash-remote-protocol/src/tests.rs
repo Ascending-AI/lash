@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::collections::{BTreeMap, HashMap};
 
 use schemars::JsonSchema;
@@ -345,7 +346,7 @@ fn remote_llm_response_json_round_trips() {
 fn remote_turn_request_json_round_trips() {
     let request = RemoteTurnRequest {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         idempotency_key: Some("idem".to_string()),
         input: RemoteTurnInput {
             items: vec![
@@ -362,7 +363,7 @@ fn remote_turn_request_json_round_trips() {
             protocol_turn_options: Some(RemoteProtocolTurnOptions {
                 payload: serde_json::json!({ "answer": "raw" }),
             }),
-            trace_turn_id: Some("trace".to_string()),
+            trace_turn_id: Some(TurnId::from("trace")),
             prompt_layer: Some(RemotePromptLayer::new()),
         },
         tool_grants: vec![demo_grant("demo", "tools", "search")],
@@ -432,7 +433,7 @@ fn remote_turn_result_json_round_trips() {
     };
     let result = RemoteTurnReport {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -553,7 +554,7 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
 
     let mut result = RemoteTurnReport {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -642,7 +643,7 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
     };
     let result = RemoteTurnReport {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Finished {
             finish: RemoteTurnFinish::AssistantMessage {
                 text: "done".to_string(),
@@ -696,7 +697,7 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
         };
         RemoteTurnReport {
             session_id: "session".to_string(),
-            turn_id: "turn".to_string(),
+            turn_id: TurnId::from("turn"),
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
@@ -789,7 +790,7 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
 
         let result = RemoteTurnReport {
             session_id: "session".to_string(),
-            turn_id: "turn".to_string(),
+            turn_id: TurnId::from("turn"),
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
@@ -868,7 +869,7 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         .expect("valid ledger in activity envelope");
         RemoteTurnReport {
             session_id: "session".to_string(),
-            turn_id: "turn".to_string(),
+            turn_id: TurnId::from("turn"),
             outcome: RemoteTurnOutcome::Finished {
                 finish: RemoteTurnFinish::AssistantMessage {
                     text: "done".to_string(),
@@ -968,7 +969,7 @@ fn turn_started_has_pinned_wire_shape_and_non_empty_identity() {
         id: "turn-start-event".to_string(),
         correlation_id: "turn-start-correlation".to_string(),
         event: RemoteTurnEvent::TurnStarted {
-            turn_id: "physical-turn".to_string(),
+            turn_id: TurnId::from("physical-turn"),
         },
     };
 
@@ -987,7 +988,7 @@ fn turn_started_has_pinned_wire_shape_and_non_empty_identity() {
     let RemoteTurnEvent::TurnStarted { turn_id } = &mut activity.event else {
         unreachable!("constructed turn start activity")
     };
-    turn_id.clear();
+    *turn_id = TurnId::from("");
     assert!(activity.validate().is_err());
 }
 
@@ -1021,7 +1022,7 @@ fn model_attempt_reset_has_pinned_wire_shape() {
 fn remote_turn_result_derives_status_from_its_outcome() {
     let mut result = RemoteTurnReport {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         outcome: RemoteTurnOutcome::Stopped {
             stop: RemoteTurnStop::Cancelled {
                 evidence: RemoteTurnCancellationEvidence {
@@ -1091,7 +1092,7 @@ fn remote_cancelled_stop_requires_and_preserves_evidence() {
 fn remote_turn_cancel_envelopes_round_trip() {
     let request = RemoteTurnCancelRequest {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         request_id: "request-1".to_string(),
         origin: Some("test-host".to_string()),
         reason: Some("superseded by newer input".to_string()),
@@ -1347,7 +1348,7 @@ struct Protocol41ObservationEnvelope {
     session_id: String,
     replay_incarnation_id: String,
     #[serde(default)]
-    turn_id: Option<String>,
+    turn_id: Option<TurnId>,
     revision: u64,
     cursor: String,
     #[serde(flatten)]
@@ -2462,7 +2463,7 @@ fn remote_process_event() -> RemoteProcessEvent {
         invocation: Some(RemoteRuntimeInvocation {
             scope: RemoteRuntimeScope {
                 session_id: "session".to_string(),
-                turn_id: Some("turn".to_string()),
+                turn_id: Some(TurnId::from("turn")),
                 turn_index: Some(1),
                 protocol_iteration: Some(0),
             },

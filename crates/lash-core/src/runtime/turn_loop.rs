@@ -5,6 +5,7 @@ use super::logical_turn::{
 };
 use super::turn_control::ActiveTurnControl;
 use super::*;
+use crate::TurnId;
 use crate::facade_support::{
     ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
 };
@@ -213,14 +214,14 @@ impl TurnStopwatch {
     }
 }
 
-fn turn_phase_id(parent_turn_id: &str, phase: &str) -> String {
-    format!("{parent_turn_id}:{phase}")
+fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
+    TurnId::from(format!("{parent_turn_id}:{phase}"))
 }
 
 fn scoped_child_turn_controller<'run>(
     scoped_effect_controller: &ScopedEffectController<'run>,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> Result<ScopedEffectController<'run>, RuntimeError> {
     let scope = ExecutionScope::turn(session_id, turn_id);
     scoped_effect_controller.rescope(scope)
@@ -284,13 +285,13 @@ pub(in crate::runtime) fn turn_input_completion_trace_payload(
 
 pub(in crate::runtime) async fn emit_turn_started_to_sink(
     events: &dyn TurnActivitySink,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) {
     emit_turn_activity_to_sink_for_turn(
         events,
         turn_id,
         TurnActivity::independent(TurnEvent::TurnStarted {
-            turn_id: turn_id.to_string(),
+            turn_id: turn_id.clone(),
         }),
     )
     .await;
@@ -298,7 +299,7 @@ pub(in crate::runtime) async fn emit_turn_started_to_sink(
 
 pub(in crate::runtime) async fn emit_queued_work_started_to_sink(
     events: &dyn TurnActivitySink,
-    turn_id: &str,
+    turn_id: &TurnId,
     boundary: crate::QueuedWorkClaimBoundary,
     claim: &crate::QueuedWorkClaim,
     causes: Vec<crate::TurnCause>,
@@ -395,7 +396,7 @@ async fn emit_turn_activity_to_sink(events: &dyn TurnActivitySink, activity: Tur
 
 async fn emit_turn_activity_to_sink_for_turn(
     events: &dyn TurnActivitySink,
-    turn_id: &str,
+    turn_id: &TurnId,
     activity: TurnActivity,
 ) {
     if !events.is_noop() {
@@ -431,7 +432,7 @@ enum TerminalActivityTarget<'a> {
     /// The sink is unscoped, so the activity is addressed to `turn_id`.
     UnscopedSink {
         sink: &'a dyn TurnActivitySink,
-        turn_id: &'a str,
+        turn_id: &'a TurnId,
     },
 }
 
@@ -494,7 +495,7 @@ async fn emit_terminal_sequence(
 }
 
 struct TurnScopedActivitySink<'a> {
-    turn_id: String,
+    turn_id: TurnId,
     inner: &'a dyn TurnActivitySink,
 }
 
@@ -525,13 +526,13 @@ async fn publish_terminal_after_commit(
     resolver: &dyn AwaitEventResolver,
     terminal: &TurnTerminal,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) {
     if let Err(err) = turn_control.publish_terminal(resolver, terminal).await {
         tracing::warn!(
             error = %err,
             session_id,
-            turn_id,
+            turn_id = turn_id.as_str(),
             "turn committed but terminal publication failed"
         );
     }
@@ -569,6 +570,7 @@ async fn emit_runtime_stream_event_to_sinks(
 
 #[cfg(test)]
 mod tests {
+    use crate::TurnId;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -701,13 +703,16 @@ mod tests {
 
     #[test]
     fn agent_frame_follow_turn_ids_are_distinct_and_deterministic() {
-        assert_eq!(agent_frame_follow_turn_id("root-turn", 0), "root-turn");
         assert_eq!(
-            agent_frame_follow_turn_id("root-turn", 1),
+            agent_frame_follow_turn_id(&TurnId::from("root-turn"), 0),
+            "root-turn"
+        );
+        assert_eq!(
+            agent_frame_follow_turn_id(&TurnId::from("root-turn"), 1),
             "root-turn:agent-frame:1"
         );
         assert_eq!(
-            agent_frame_follow_turn_id("root-turn", 2),
+            agent_frame_follow_turn_id(&TurnId::from("root-turn"), 2),
             "root-turn:agent-frame:2"
         );
     }
@@ -830,7 +835,7 @@ mod tests {
                 session_revision: Some(1),
             },
             "committed-session",
-            "committed-turn",
+            &TurnId::from("committed-turn"),
         )
         .await;
         assert_eq!(resolver.attempts.load(Ordering::SeqCst), 1);

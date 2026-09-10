@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 /// One turn through the workbench's own session-opening path.
 ///
@@ -8,7 +9,7 @@ use super::*;
 pub(crate) async fn run_turn_through_the_workbench_open_path(
     state: &AppState,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     text: &str,
 ) {
     let session = state
@@ -347,7 +348,7 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
     run_turn_through_the_workbench_open_path(
         &state,
         &session_id,
-        "typescript-dialect-turn",
+        &TurnId::from("typescript-dialect-turn"),
         "say the canonical answer",
     )
     .await;
@@ -436,7 +437,7 @@ async fn a_lashlang_workbench_still_serves_lashlang_turns() {
     run_turn_through_the_workbench_open_path(
         &state,
         &session_id,
-        "lashlang-dialect-turn",
+        &TurnId::from("lashlang-dialect-turn"),
         "say the canonical answer",
     )
     .await;
@@ -644,7 +645,7 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
             run_turn_through_the_workbench_open_path(
                 &state,
                 &session_id,
-                "code-failure-turn",
+                &TurnId::from("code-failure-turn"),
                 "run the deterministic code failure",
             ),
         )
@@ -769,7 +770,7 @@ async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
             run_turn_through_the_workbench_open_path(
                 &state,
                 &session_id,
-                &format!("session-globals-{}-{index}", dialect.language_id()),
+                &TurnId::from(format!("session-globals-{}-{index}", dialect.language_id())),
                 prompt,
             )
             .await;
@@ -825,8 +826,13 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
             .await;
             state.rlm_dialect = dialect;
             let session_id = state.current_session_id();
-            run_turn_through_the_workbench_open_path(&state, &session_id, "bind it", "bind it")
-                .await;
+            run_turn_through_the_workbench_open_path(
+                &state,
+                &session_id,
+                &TurnId::from("bind it"),
+                "bind it",
+            )
+            .await;
             session_id
         };
 
@@ -840,7 +846,7 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
         run_turn_through_the_workbench_open_path(
             &state,
             &session_id,
-            "read after restart",
+            &TurnId::from("read after restart"),
             "read it back",
         )
         .await;
@@ -895,7 +901,7 @@ async fn a_name_no_one_has_is_still_refused_in_both_dialects() {
         run_turn_through_the_workbench_open_path(
             &state,
             &session_id,
-            "unknown-name-turn",
+            &TurnId::from("unknown-name-turn"),
             "read a name nobody has",
         )
         .await;

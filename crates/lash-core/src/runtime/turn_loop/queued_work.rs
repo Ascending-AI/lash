@@ -360,7 +360,7 @@ impl LashRuntime {
                     .defer_orphaned_turn_inputs_before_drain(
                         &store,
                         &session_execution_fence,
-                        opts.execution_scope_id(),
+                        &TurnId::from(opts.execution_scope_id()),
                     )
                     .await
                     > 0
@@ -383,7 +383,7 @@ impl LashRuntime {
                 let turn_id = input
                     .trace_turn_id
                     .clone()
-                    .unwrap_or_else(|| opts.execution_scope_id().to_owned());
+                    .unwrap_or_else(|| TurnId::from(opts.execution_scope_id()));
                 input.trace_turn_id = Some(turn_id.clone());
                 crate::trace::emit_trace(
                     &self.host.core.tracing.trace_sink,
@@ -657,7 +657,7 @@ impl LashRuntime {
             .input
             .trace_turn_id
             .clone()
-            .unwrap_or_else(|| opts.execution_scope_id().to_owned());
+            .unwrap_or_else(|| TurnId::from(opts.execution_scope_id()));
         work.input.trace_turn_id = Some(turn_id.clone());
         let causes = work.turn_causes.clone();
         crate::trace::emit_trace(

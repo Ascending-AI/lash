@@ -139,7 +139,7 @@ async fn native_harness(
     ModeHarness { runtime, driver }
 }
 
-fn request(turn_id: &str, request_id: &str, mode: TurnCancelMode) -> TurnCancelRequest {
+fn request(turn_id: &TurnId, request_id: &str, mode: TurnCancelMode) -> TurnCancelRequest {
     TurnCancelRequest::new(
         crate::TurnAddress::new("root", turn_id),
         request_id,
@@ -179,13 +179,20 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
         runtime
             .stream_turn(
                 TurnInput::text("stop after this step"),
-                TurnOptions::new(CancellationToken::new(), named_turn_scope("root", turn_id)),
+                TurnOptions::new(
+                    CancellationToken::new(),
+                    named_turn_scope("root", &TurnId::from(turn_id)),
+                ),
             )
             .await
     });
     started.notified().await;
     let receipt = driver
-        .request_cancel(request(turn_id, "stop-1", TurnCancelMode::AfterStep))
+        .request_cancel(request(
+            &TurnId::from(turn_id),
+            "stop-1",
+            TurnCancelMode::AfterStep,
+        ))
         .await
         .expect("request after-step stop");
     assert!(matches!(
@@ -245,13 +252,20 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
         runtime
             .stream_turn(
                 TurnInput::text("stop after this step"),
-                TurnOptions::new(CancellationToken::new(), named_turn_scope("root", turn_id)),
+                TurnOptions::new(
+                    CancellationToken::new(),
+                    named_turn_scope("root", &TurnId::from(turn_id)),
+                ),
             )
             .await
     });
     tool.entered.notified().await;
     let receipt = driver
-        .request_cancel(request(turn_id, "stop-mid-tool", TurnCancelMode::AfterStep))
+        .request_cancel(request(
+            &TurnId::from(turn_id),
+            "stop-mid-tool",
+            TurnCancelMode::AfterStep,
+        ))
         .await
         .expect("request after-step stop");
     assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
@@ -300,18 +314,29 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
         runtime
             .stream_turn(
                 TurnInput::text("stop, then abort"),
-                TurnOptions::new(CancellationToken::new(), named_turn_scope("root", turn_id)),
+                TurnOptions::new(
+                    CancellationToken::new(),
+                    named_turn_scope("root", &TurnId::from(turn_id)),
+                ),
             )
             .await
     });
     tool.entered.notified().await;
     let stop = driver
-        .request_cancel(request(turn_id, "stop-first", TurnCancelMode::AfterStep))
+        .request_cancel(request(
+            &TurnId::from(turn_id),
+            "stop-first",
+            TurnCancelMode::AfterStep,
+        ))
         .await
         .expect("request after-step stop");
     assert!(matches!(stop.outcome, TurnCancelOutcome::Requested(_)));
     let weaker_again = driver
-        .request_cancel(request(turn_id, "stop-again", TurnCancelMode::AfterStep))
+        .request_cancel(request(
+            &TurnId::from(turn_id),
+            "stop-again",
+            TurnCancelMode::AfterStep,
+        ))
         .await
         .expect("repeat after-step stop");
     assert!(matches!(
@@ -319,7 +344,11 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
         TurnCancelOutcome::AlreadyRequested(ref evidence) if evidence.request_id == "stop-first"
     ));
     let abort = driver
-        .request_cancel(request(turn_id, "abort-now", TurnCancelMode::Immediate))
+        .request_cancel(request(
+            &TurnId::from(turn_id),
+            "abort-now",
+            TurnCancelMode::Immediate,
+        ))
         .await
         .expect("escalate to abort");
     assert!(matches!(
@@ -343,7 +372,11 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
     );
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     let repeat = driver
-        .request_cancel(request(turn_id, "abort-late", TurnCancelMode::Immediate))
+        .request_cancel(request(
+            &TurnId::from(turn_id),
+            "abort-late",
+            TurnCancelMode::Immediate,
+        ))
         .await
         .expect("late abort");
     assert!(
@@ -371,14 +404,17 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
         } = native_harness(Arc::new(tool.clone()), transport).await;
         let turn_id = "refused-before-start";
         let receipt = driver
-            .request_cancel(request(turn_id, "before-start", mode))
+            .request_cancel(request(&TurnId::from(turn_id), "before-start", mode))
             .await
             .expect("request before the turn starts");
         assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
         let turn = runtime
             .stream_turn(
                 TurnInput::text("never runs"),
-                TurnOptions::new(CancellationToken::new(), named_turn_scope("root", turn_id)),
+                TurnOptions::new(
+                    CancellationToken::new(),
+                    named_turn_scope("root", &TurnId::from(turn_id)),
+                ),
             )
             .await
             .expect("refused turn assembles");
@@ -732,14 +768,21 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
         runtime
             .stream_turn(
                 TurnInput::text("retry then stop"),
-                TurnOptions::new(CancellationToken::new(), named_turn_scope("root", turn_id)),
+                TurnOptions::new(
+                    CancellationToken::new(),
+                    named_turn_scope("root", &TurnId::from(turn_id)),
+                ),
             )
             .await
     });
     clock.entered.notified().await;
     assert_eq!(tool.attempts.load(Ordering::SeqCst), 1);
     let receipt = driver
-        .request_cancel(request(turn_id, "stop-in-sleep", TurnCancelMode::AfterStep))
+        .request_cancel(request(
+            &TurnId::from(turn_id),
+            "stop-in-sleep",
+            TurnCancelMode::AfterStep,
+        ))
         .await
         .expect("request during the sleep");
     assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
@@ -791,14 +834,17 @@ async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
         runtime
             .stream_turn(
                 TurnInput::text("retry then abort"),
-                TurnOptions::new(CancellationToken::new(), named_turn_scope("root", turn_id)),
+                TurnOptions::new(
+                    CancellationToken::new(),
+                    named_turn_scope("root", &TurnId::from(turn_id)),
+                ),
             )
             .await
     });
     clock.entered.notified().await;
     let receipt = driver
         .request_cancel(request(
-            turn_id,
+            &TurnId::from(turn_id),
             "abort-in-sleep",
             TurnCancelMode::Immediate,
         ))

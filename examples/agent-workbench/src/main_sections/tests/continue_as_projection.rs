@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 #[tokio::test]
 async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
@@ -55,6 +56,7 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
         .and_then(Value::as_str)
         .expect("initial real-send turn id")
         .to_string();
+    let initial_turn_id = TurnId::from(initial_turn_id);
     let session = state
         .core
         .session(session_id.clone())
@@ -113,6 +115,7 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
         .and_then(Value::as_str)
         .expect("ordinary real-send turn id")
         .to_string();
+    let ordinary_turn_id = TurnId::from(ordinary_turn_id);
     let session = state
         .core
         .session(session_id.clone())
@@ -279,7 +282,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     let mut committed_inputs = Vec::new();
     let mut committed_turn_ids = BTreeSet::new();
     for index in 0..6 {
-        let turn_id = format!("committed-before-switch-{index}");
+        let turn_id = TurnId::from(format!("committed-before-switch-{index}"));
         let prompt = format!("committed prompt before switch {index}");
         committed_turn_ids.insert(turn_id.clone());
         state.push_message_with_id_for_session(
@@ -312,10 +315,15 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
 
     let switch_turn_id = "frame-switch-turn";
     let switch_prompt = "switch frames now";
-    state.track_turn_prompt(&session_id, switch_turn_id, switch_prompt.to_string(), None);
+    state.track_turn_prompt(
+        &session_id,
+        &TurnId::from(switch_turn_id),
+        switch_prompt.to_string(),
+        None,
+    );
     state.push_message_with_id_for_session(
         &session_id,
-        workbench_turn_user_message_id(switch_turn_id),
+        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
         "user",
         switch_prompt,
     );
@@ -335,7 +343,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     crate::restate::record_turn_output(
         &state,
         &session,
-        switch_turn_id,
+        &TurnId::from(switch_turn_id),
         output,
         turn_state,
         "test.frame_switch_committed_user_rows.completed",
@@ -350,7 +358,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         &session_id,
         &BTreeSet::new(),
         &BTreeSet::new(),
-        &BTreeSet::from([switch_turn_id.to_string()]),
+        &BTreeSet::from([TurnId::from(switch_turn_id)]),
     );
 
     let Json(boundary) = Box::pin(app_state(
@@ -392,7 +400,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         "product user rows were retired at the switch"
     );
 
-    crate::restate::settle_workbench_turn(&state, &session_id, switch_turn_id)
+    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(switch_turn_id))
         .await
         .expect("settle switched-frame turn");
     session.close().await.expect("close frame-switch session");

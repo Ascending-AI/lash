@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 pub(crate) async fn recoverable_chat_test_state(
     data_dir: &std::path::Path,
@@ -751,7 +752,7 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
         ];
 
         for (case, result) in cases {
-            let turn_id = format!("{case}-turn");
+            let turn_id = TurnId::from(format!("{case}-turn"));
             state.track_turn(&session_id, &turn_id);
             let error = crate::restate::terminalize_turn_execution(
                 &state,
@@ -1138,7 +1139,7 @@ fn session_event_registry_isolates_channels_and_recreates_after_removal() {
 fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     let registry = SessionEventRegistry::new(4);
     let session_id = "reconciled-session";
-    let committed_id = workbench_turn_user_message_id("reconciled-turn");
+    let committed_id = workbench_turn_user_message_id(&TurnId::from("reconciled-turn"));
     registry.publish_identified(
         session_id,
         "provisional-message",
@@ -1229,7 +1230,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
         session_id,
         "turn-done",
         StreamItem::Done {
-            turn_id: Some("reconciled-turn".to_string()),
+            turn_id: Some(TurnId::from("reconciled-turn")),
             outcome: TurnDoneOutcome::Completed,
         },
     );
@@ -1237,7 +1238,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     registry.reconcile_settled(
         session_id,
         &BTreeSet::new(),
-        &BTreeSet::from(["reconciled-turn".to_string()]),
+        &BTreeSet::from([TurnId::from("reconciled-turn")]),
         &BTreeSet::new(),
     );
     let reconciled = registry.snapshot(session_id);
@@ -1246,7 +1247,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
     assert!(matches!(
         &reconciled.events[0].item,
         StreamItem::Message { message }
-            if message.id == workbench_turn_user_message_id("reconciled-turn")
+            if message.id == workbench_turn_user_message_id(&TurnId::from("reconciled-turn"))
     ));
     let StreamItem::ModelCallRecorded { record } = &reconciled.events[1].item else {
         panic!("reconciliation must retain the model-call record");
@@ -1257,7 +1258,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
             session_id,
             "turn-done",
             StreamItem::Done {
-                turn_id: Some("reconciled-turn".to_string()),
+                turn_id: Some(TurnId::from("reconciled-turn")),
                 outcome: TurnDoneOutcome::Completed,
             },
         ),
@@ -1419,10 +1420,15 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
 
     // What `send_turn` publishes: the workbench's own optimistic row for a turn
     // it just submitted, in the workbench's id namespace.
-    state.track_turn_prompt(&session_id, turn_id, "one send".to_string(), None);
+    state.track_turn_prompt(
+        &session_id,
+        &TurnId::from(turn_id),
+        "one send".to_string(),
+        None,
+    );
     state.push_message_with_id_for_session(
         &session_id,
-        workbench_turn_user_message_id(turn_id),
+        workbench_turn_user_message_id(&TurnId::from(turn_id)),
         "user",
         "one send",
     );
@@ -1442,7 +1448,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
             lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "one send")
                 .with_id("m_ingress_workbench-input-1")
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
-                    turn_id: turn_id.to_string(),
+                    turn_id: TurnId::from(turn_id.to_string()),
                     input_id: Some("workbench-input-1".to_string()),
                 }),
         ])
@@ -1460,7 +1466,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
 
     let ui_row = (
-        workbench_turn_user_message_id(turn_id),
+        workbench_turn_user_message_id(&TurnId::from(turn_id)),
         "one send".to_string(),
     );
     let committed_row = (
@@ -1487,7 +1493,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
 
     // Settlement leaves the session-scoped UI-owned row in place. The runtime
     // copy remains typed provenance, not rendering authority.
-    crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
+    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(turn_id))
         .await
         .expect("settle the turn");
     let Json(settled) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
@@ -1609,7 +1615,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     let first_prompt = "first submitted row";
     state.push_message_with_id_for_session(
         &session_id,
-        workbench_turn_user_message_id(first_turn_id),
+        workbench_turn_user_message_id(&TurnId::from(first_turn_id)),
         "user",
         first_prompt,
     );
@@ -1626,24 +1632,31 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, first_prompt)
                 .with_id("runtime-first-user")
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
-                    turn_id: first_turn_id.to_string(),
+                    turn_id: TurnId::from(first_turn_id.to_string()),
                     input_id: Some("first-input".to_string()),
                 }),
             lash::plugins::PluginMessage::text(
                 lash::messages::MessageRole::Assistant,
                 "old frame answer",
             )
-            .with_id(workbench_turn_assistant_message_id(first_turn_id)),
+            .with_id(workbench_turn_assistant_message_id(&TurnId::from(
+                first_turn_id,
+            ))),
         ])
         .await
         .expect("seed the durable pre-switch conversation");
 
     let switch_turn_id = "workbench-turn-continue-as";
     let switch_prompt = "switch frames now";
-    state.track_turn_prompt(&session_id, switch_turn_id, switch_prompt.to_string(), None);
+    state.track_turn_prompt(
+        &session_id,
+        &TurnId::from(switch_turn_id),
+        switch_prompt.to_string(),
+        None,
+    );
     state.push_message_with_id_for_session(
         &session_id,
-        workbench_turn_user_message_id(switch_turn_id),
+        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
         "user",
         switch_prompt,
     );
@@ -1665,14 +1678,14 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     crate::restate::record_turn_output(
         &state,
         &session,
-        switch_turn_id,
+        &TurnId::from(switch_turn_id),
         switch_output,
         switch_turn_state,
         "test.continue_as.follow_frame.completed",
     )
     .await
     .expect("record follow-frame turn");
-    crate::restate::settle_workbench_turn(&state, &session_id, switch_turn_id)
+    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(switch_turn_id))
         .await
         .expect("settle continue_as turn");
 
@@ -1719,17 +1732,17 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     .expect("project continue_as boundary state");
     let expected_rows = vec![
         (
-            workbench_turn_user_message_id(first_turn_id),
+            workbench_turn_user_message_id(&TurnId::from(first_turn_id)),
             "user".to_string(),
             first_prompt.to_string(),
         ),
         (
-            workbench_turn_user_message_id(switch_turn_id),
+            workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
             "user".to_string(),
             switch_prompt.to_string(),
         ),
         (
-            workbench_turn_assistant_message_id(switch_turn_id),
+            workbench_turn_assistant_message_id(&TurnId::from(switch_turn_id)),
             "assistant".to_string(),
             "follow frame answer".to_string(),
         ),
@@ -1828,13 +1841,13 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
 
     state.track_turn_prompt(
         &session_id,
-        turn_id,
+        &TurnId::from(turn_id),
         "one attached send".to_string(),
         Some(attachment.id.to_string()),
     );
     state.push_message_with_id_and_attachments_for_session(
         &session_id,
-        workbench_turn_user_message_id(turn_id),
+        workbench_turn_user_message_id(&TurnId::from(turn_id)),
         "user",
         "one attached send",
         vec![ChatAttachment::from_id(attachment.id.to_string())],
@@ -1849,7 +1862,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&optimistic),
         vec![(
-            workbench_turn_user_message_id(turn_id),
+            workbench_turn_user_message_id(&TurnId::from(turn_id)),
             vec![expected_attachment.clone()],
         )],
         "the live UI-owned row carries the uploaded attachment reference once"
@@ -1859,7 +1872,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
         lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "one attached send")
             .with_id("m_ingress_workbench-input-fig994")
             .with_origin(lash::messages::MessageOrigin::TurnInput {
-                turn_id: turn_id.to_string(),
+                turn_id: TurnId::from(turn_id.to_string()),
                 input_id: Some("workbench-input-fig994".to_string()),
             });
     committed
@@ -1891,13 +1904,13 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&running),
         vec![(
-            workbench_turn_user_message_id(turn_id),
+            workbench_turn_user_message_id(&TurnId::from(turn_id)),
             vec![expected_attachment.clone()],
         )],
         "the committed copy stays suppressed while the attached UI row survives"
     );
 
-    crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
+    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(turn_id))
         .await
         .expect("settle attached workbench turn");
     let Json(settled) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
@@ -1906,7 +1919,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
     assert_eq!(
         user_row_attachments(&settled),
         vec![(
-            workbench_turn_user_message_id(turn_id),
+            workbench_turn_user_message_id(&TurnId::from(turn_id)),
             vec![expected_attachment],
         )],
         "the UI-owned attachment row remains session-scoped after settlement"
@@ -1941,7 +1954,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
 
     state.track_turn_prompt(
         &session_id,
-        turn_id,
+        &TurnId::from(turn_id),
         "one lost attached send".to_string(),
         Some(attachment.id.to_string()),
     );
@@ -1951,7 +1964,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     )
     .with_id("m_ingress_workbench-input-fig994-replay")
     .with_origin(lash::messages::MessageOrigin::TurnInput {
-        turn_id: turn_id.to_string(),
+        turn_id: TurnId::from(turn_id.to_string()),
         input_id: Some("workbench-input-fig994-replay".to_string()),
     });
     committed
@@ -1982,7 +1995,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     assert_eq!(
         user_row_attachments(&replayed),
         vec![(
-            workbench_turn_user_message_id(turn_id),
+            workbench_turn_user_message_id(&TurnId::from(turn_id)),
             vec![expected_attachment],
         )],
         "the lost-product-row replay must retain the uploaded attachment reference"
@@ -2160,6 +2173,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .and_then(Value::as_str)
         .expect("submitted turn id")
         .to_string();
+    let turn_id = TurnId::from(turn_id);
 
     let run_state = state.clone();
     let run_turn_id = turn_id.clone();
@@ -2343,8 +2357,8 @@ async fn workbench_settled_turn_cancels_preserve_execution_done() {
             .run()
             .await
             .expect("complete turn before stale cancel");
-        state.publish_turn_done(&session_id, turn_id);
-        state.track_turn(&session_id, turn_id);
+        state.publish_turn_done(&session_id, &TurnId::from(turn_id));
+        state.track_turn(&session_id, &TurnId::from(turn_id));
         let receipts = state
             .cancel_turns_for_session(&session_id)
             .await
@@ -2398,7 +2412,7 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
     crate::restate::record_turn_output(
         &state,
         &session,
-        "stable-turn",
+        &TurnId::from("stable-turn"),
         output,
         turn_state,
         "test.real_turn.completed",

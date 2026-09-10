@@ -58,7 +58,7 @@ impl InMemorySessionStore {
             let turn_id = completed.operation.turn_id();
             if entry.session_id == session_id
                 && entry.owner_kind == Some(crate::AttachmentOwnerKind::Turn)
-                && entry.owner_id.as_deref() == turn_id
+                && entry.owner_id.as_deref() == turn_id.map(crate::TurnId::as_str)
                 && entry.committed_at_epoch_ms.is_none()
             {
                 entry.committed_at_epoch_ms = Some(committed_at_epoch_ms);

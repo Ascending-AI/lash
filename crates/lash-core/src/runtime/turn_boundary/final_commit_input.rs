@@ -1,3 +1,4 @@
+use crate::TurnId;
 use crate::runtime::claim_settlement::TurnClaimSettlement;
 use crate::store::RuntimePersistence;
 use crate::{OmittedToolCalls, PluginSession, ToolCallRecord, TurnOutcome};
@@ -18,7 +19,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) claim_settlement: TurnClaimSettlement,
     pub(super) current_session_lease_generation: Option<u64>,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
-    pub(super) interrupted_turn_input_turn_id: Option<String>,
+    pub(super) interrupted_turn_input_turn_id: Option<TurnId>,
     pub(super) recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     pub(super) session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
 }

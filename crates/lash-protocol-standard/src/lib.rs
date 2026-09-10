@@ -12,6 +12,7 @@
 //! - The `batch` tool that composes parallel native tool calls (only
 //!   exposed when this protocol stack is installed).
 
+use lash_sansio::TurnId;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -746,7 +747,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     }
 }
 
-fn standard_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> String {
+fn standard_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &str) -> String {
     format!("m_standard_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
@@ -850,9 +851,9 @@ mod tests {
 
     #[test]
     fn protocol_message_ids_include_turn_identity() {
-        let first = standard_message_id("turn-1", 0, "assistant");
-        let replay = standard_message_id("turn-1", 0, "assistant");
-        let next_turn = standard_message_id("turn-2", 0, "assistant");
+        let first = standard_message_id(&TurnId::from("turn-1"), 0, "assistant");
+        let replay = standard_message_id(&TurnId::from("turn-1"), 0, "assistant");
+        let next_turn = standard_message_id(&TurnId::from("turn-2"), 0, "assistant");
 
         assert_eq!(first, replay);
         assert_ne!(first, next_turn);

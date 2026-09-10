@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::collections::BTreeSet;
 
 const SQLITE_SCHEMA_SOURCE: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
@@ -883,7 +884,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     let causal_kinds = [
         CausalRef::Turn {
             session_id: "session".to_string(),
-            turn_id: "turn".to_string(),
+            turn_id: TurnId::from("turn"),
         },
         CausalRef::Effect {
             session_id: "session".to_string(),

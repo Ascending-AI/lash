@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 // Projection of a chat snapshot from the two sources the workbench reads: the
 // durable session graph, which is authoritative, and the product-event log the
@@ -19,7 +20,7 @@ pub(crate) fn replayed_active_user_rows(
     let mut turn_ids = product_messages
         .iter()
         .filter_map(|message| workbench_turn_id_from_user_message_id(&message.id))
-        .map(str::to_owned)
+        .map(TurnId::from)
         .collect::<BTreeSet<_>>();
     let mut replayed_prompts = Vec::new();
     for address in active_turns {
@@ -62,7 +63,7 @@ pub(crate) fn replayed_active_user_rows(
 /// is what the transcript renders.
 pub(crate) fn ui_owned_turn_input_replacements(
     read_view: &lash::persistence::SessionReadView,
-    ui_user_rows: &BTreeMap<String, ChatMessage>,
+    ui_user_rows: &BTreeMap<TurnId, ChatMessage>,
 ) -> BTreeMap<String, ChatMessage> {
     let mut replacements = BTreeMap::new();
     let mut turns_already_covered = BTreeSet::new();
@@ -148,7 +149,7 @@ pub(crate) fn chat_message_from_committed(message: &lash::messages::Message) -> 
     }
 }
 
-pub(crate) fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeSet<String> {
+pub(crate) fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeSet<TurnId> {
     messages
         .iter()
         .filter_map(|message| {
@@ -166,7 +167,7 @@ pub(crate) fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeS
 
 pub(crate) fn is_committed_turn_output_copy(
     message: &ChatMessage,
-    committed_turn_output_turn_ids: &BTreeSet<String>,
+    committed_turn_output_turn_ids: &BTreeSet<TurnId>,
 ) -> bool {
     message.role == "assistant"
         && match message.provenance.as_ref() {
@@ -256,13 +257,13 @@ pub(crate) fn is_rlm_assistant_prose_message(message: &lash::messages::Message) 
 /// process died mid-turn.
 pub(crate) fn durable_rlm_reply_message_ids(
     messages: &[lash::messages::Message],
-    running_turn_ids: &BTreeSet<String>,
+    running_turn_ids: &BTreeSet<TurnId>,
 ) -> BTreeSet<String> {
     let mut replies = BTreeSet::new();
     let mut candidate: Option<String> = None;
     // The turn the walk is inside, when the transcript names it. A cause-only
     // turn never does, and its candidate is judged as an unnamed turn's.
-    let mut open_turn_id: Option<String> = None;
+    let mut open_turn_id: Option<TurnId> = None;
     for message in messages {
         match message.origin.as_ref() {
             Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => {
@@ -433,8 +434,8 @@ pub(crate) fn project_chat(
     read_view: &lash::persistence::SessionReadView,
     recorded_dialect: lash::rlm::RlmDialect,
     active_turns: &[lash::TurnAddress],
-    committed_input_turn_ids: &BTreeSet<String>,
-    current_frame_input_turn_ids: &BTreeSet<String>,
+    committed_input_turn_ids: &BTreeSet<TurnId>,
+    current_frame_input_turn_ids: &BTreeSet<TurnId>,
     product_messages: Vec<ChatMessage>,
 ) -> ChatProjection {
     let replayed_active_rows = replayed_active_user_rows(state, active_turns, &product_messages);
@@ -443,7 +444,7 @@ pub(crate) fn project_chat(
         .chain(replayed_active_rows.iter())
         .filter_map(|message| {
             workbench_turn_id_from_user_message_id(&message.id)
-                .map(|turn_id| (turn_id.to_string(), message.clone()))
+                .map(|turn_id| (TurnId::from(turn_id), message.clone()))
         })
         .collect::<BTreeMap<_, _>>();
     let user_replacements = ui_owned_turn_input_replacements(read_view, &ui_user_rows);

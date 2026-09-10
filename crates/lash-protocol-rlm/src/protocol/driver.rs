@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -1135,7 +1136,7 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 
 fn trajectory_entry(
     vocabulary: crate::dialect::DialectPromptVocabulary,
-    turn_id: &str,
+    turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
     validation_error: Option<String>,
@@ -1160,13 +1161,13 @@ fn trajectory_entry(
     }
 }
 
-fn rlm_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> String {
+fn rlm_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &str) -> String {
     format!("m_rlm_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
 fn trajectory_events(
     vocabulary: crate::dialect::DialectPromptVocabulary,
-    turn_id: &str,
+    turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
     validation_error: Option<String>,
@@ -1190,7 +1191,7 @@ fn trajectory_events(
 }
 
 fn assistant_content_event(
-    turn_id: &str,
+    turn_id: &TurnId,
     protocol_iteration: usize,
     reasoning: &[RlmReasoningPart],
     prose: &str,
@@ -1284,7 +1285,7 @@ fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
 /// in the diagnostic for the same reason the count does: the driver's only
 /// durable view of the turn is what the turn committed.
 fn llm_extraction_payload(
-    turn_id: &str,
+    turn_id: &TurnId,
     reply_fingerprint: &str,
     language_id: &str,
     decision: &str,
@@ -1343,9 +1344,9 @@ mod tests {
 
     #[test]
     fn protocol_message_ids_include_turn_identity() {
-        let first = rlm_message_id("turn-1", 0, "assistant_content");
-        let replay = rlm_message_id("turn-1", 0, "assistant_content");
-        let next_turn = rlm_message_id("turn-2", 0, "assistant_content");
+        let first = rlm_message_id(&TurnId::from("turn-1"), 0, "assistant_content");
+        let replay = rlm_message_id(&TurnId::from("turn-1"), 0, "assistant_content");
+        let next_turn = rlm_message_id(&TurnId::from("turn-2"), 0, "assistant_content");
 
         assert_eq!(first, replay);
         assert_ne!(first, next_turn);
@@ -1570,7 +1571,7 @@ mod tests {
         };
 
         let vocabulary = crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
-        let entry = trajectory_entry(vocabulary, "turn", 0, &state, None, None);
+        let entry = trajectory_entry(vocabulary, &TurnId::from("turn"), 0, &state, None, None);
         let error = entry.error.expect("captured public error");
 
         assert_eq!(entry.code, "read()");

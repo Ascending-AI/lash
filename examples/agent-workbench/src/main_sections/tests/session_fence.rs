@@ -68,7 +68,7 @@ fn a_retiring_mark_refuses_the_claim_until_the_delete_is_abandoned() {
     assert!(active_turns.begin_retirement("fenced"));
     assert!(!active_turns.begin_retirement("fenced"));
     assert_eq!(
-        active_turns.try_insert_for_idle_session("fenced", "late-turn"),
+        active_turns.try_insert_for_idle_session("fenced", &TurnId::from("late-turn")),
         ActiveTurnClaim::Refused(SessionRetirement::Retiring)
     );
     assert!(active_turns.for_session("fenced").is_empty());
@@ -76,11 +76,11 @@ fn a_retiring_mark_refuses_the_claim_until_the_delete_is_abandoned() {
     active_turns.abandon_retirement("fenced");
     assert_eq!(active_turns.retirement("fenced"), None);
     assert_eq!(
-        active_turns.try_insert_for_idle_session("fenced", "after-abandon"),
+        active_turns.try_insert_for_idle_session("fenced", &TurnId::from("after-abandon")),
         ActiveTurnClaim::Claimed
     );
     assert_eq!(
-        active_turns.try_insert_for_idle_session("fenced", "second"),
+        active_turns.try_insert_for_idle_session("fenced", &TurnId::from("second")),
         ActiveTurnClaim::Busy
     );
 }
@@ -96,7 +96,7 @@ fn a_confirmed_retirement_is_never_lifted() {
         Some(SessionRetirement::Retired)
     );
     assert_eq!(
-        active_turns.try_insert_for_idle_session("gone", "late-turn"),
+        active_turns.try_insert_for_idle_session("gone", &TurnId::from("late-turn")),
         ActiveTurnClaim::Refused(SessionRetirement::Retired)
     );
     // Confirming straight from the durable fact needs no prior mark.
@@ -336,6 +336,7 @@ finish (await handle)?
         .and_then(Value::as_str)
         .expect("submitted turn id")
         .to_string();
+    let turn_id = TurnId::from(turn_id);
     assert!(state.active_turns.contains(&old_session_id, &turn_id));
     let session = state
         .core

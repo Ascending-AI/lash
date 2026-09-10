@@ -1,5 +1,6 @@
 use super::super::*;
 use super::harness::AgentScenarioRun;
+use lash_sansio::TurnId;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
@@ -13,7 +14,7 @@ pub(super) struct GraphContract {
 struct GraphFact {
     graph_key: String,
     session_id: String,
-    turn_id: Option<String>,
+    turn_id: Option<TurnId>,
     subject_kind: String,
     subject_id: String,
     entry_kind: String,

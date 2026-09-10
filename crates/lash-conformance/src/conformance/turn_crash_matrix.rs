@@ -60,6 +60,7 @@
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
+use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -105,13 +106,13 @@ const CRASHED_EXECUTOR_OWNER_ID: &str = "lash-core-test-worker";
 #[derive(Clone, Debug)]
 struct ReferenceIdentity {
     session_id: String,
-    turn_id: String,
+    turn_id: TurnId,
 }
 
 impl ReferenceIdentity {
     fn for_scenario(scenario: &str) -> Self {
         let session_id = format!("trace-derived-real-turn:{scenario}");
-        let turn_id = format!("{session_id}:turn");
+        let turn_id = TurnId::from(format!("{session_id}:turn"));
         Self {
             session_id,
             turn_id,
@@ -2073,7 +2074,7 @@ async fn drive_drain_turn<F, I>(
     // with the history nodes that turn already committed.
     let identity = ReferenceIdentity {
         session_id: identity.session_id.clone(),
-        turn_id: format!("{}:drain", identity.turn_id),
+        turn_id: crate::TurnId::from(format!("{}:drain", identity.turn_id)),
     };
     let identity = &identity;
     let control = SeamControl::default();

@@ -276,7 +276,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
             .is_err(),
         "trigger wake must not submit a competing queued turn while the active turn owns ingress"
     );
-    active_turns.remove(&session_id, "mid-turn-trigger-contract");
+    active_turns.remove(&session_id, &TurnId::from("mid-turn-trigger-contract"));
     lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
         &submitter,
         Some(&session_id),

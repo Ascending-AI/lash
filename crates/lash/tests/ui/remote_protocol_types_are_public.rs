@@ -2,7 +2,7 @@ fn main() {
     let input = lash::remote::turn_input::RemoteTurnInput::text("hello");
     let request = lash::remote::Envelope::new(lash::remote::turn_input::RemoteTurnRequest {
         session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         idempotency_key: Some("session:turn".to_string()),
         input,
         tool_grants: Vec::new(),
@@ -53,7 +53,7 @@ fn main() {
     let _application = lash::remote::observations::RemoteTurnInputApplication {
         input_id: "input".to_string(),
         source_key: Some("source".to_string()),
-        turn_id: "turn".to_string(),
+        turn_id: TurnId::from("turn"),
         committed_message_id: "message".to_string(),
         checkpoint: Some(
             lash::remote::observations::RemoteTurnInputCheckpoint::BeforeCompletion,

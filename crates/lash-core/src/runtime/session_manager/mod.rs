@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 #[cfg(any(test, feature = "testing"))]
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::AtomicBool;
@@ -92,7 +93,7 @@ pub(in crate::runtime) struct CurrentSessionCapability {
 #[derive(Clone)]
 struct ManagedSessionCapability {
     registry: Arc<Mutex<HashMap<String, RuntimeHandle>>>,
-    turns: Arc<StdMutex<HashMap<String, ManagedSessionTurn>>>,
+    turns: Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>,
     turn_concurrency_limit: std::num::NonZeroUsize,
 }
 
@@ -107,7 +108,7 @@ pub(in crate::runtime) struct UsageCapability {
     /// Tracks live child-turn usage already bubbled into the shared
     /// token ledger so child turn completion can reconcile final usage
     /// without double counting.
-    child_turn_live_usage: Arc<std::sync::Mutex<HashMap<String, TokenUsage>>>,
+    child_turn_live_usage: Arc<std::sync::Mutex<HashMap<TurnId, TokenUsage>>>,
     /// Optional relay for bubbling child-session token usage into the
     /// parent turn's live event stream.
     child_usage_event_relay: Option<ChildUsageEventRelay>,
@@ -355,7 +356,7 @@ impl RuntimeSessionServices {
     pub(super) fn direct_completion_client<'run>(
         self: &Arc<Self>,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
     ) -> DirectCompletionClient<'run> {
         DirectCompletionClient::runtime(Arc::clone(self), effect_controller, turn_id)
     }
@@ -906,6 +907,7 @@ pub(super) async fn emit_session_events(
 mod process_visibility_tests {
     use super::{ProcessVisibility, RuntimeSessionProcessService};
     use crate::ProcessRegistrar as _;
+    use crate::TurnId;
 
     use crate::runtime::tests::helpers::{named_turn_scope, standard_test_policy};
     use std::sync::Arc;
@@ -1031,7 +1033,7 @@ mod process_visibility_tests {
     fn scope() -> crate::ProcessOpScope<'static> {
         crate::ProcessOpScope::new(named_turn_scope(
             SESSION_ID,
-            &uuid::Uuid::new_v4().to_string(),
+            &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
     }
 

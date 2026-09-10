@@ -671,6 +671,7 @@ impl LoserPolicy {
 #[cfg(test)]
 mod effect_group_contract_tests {
     use super::*;
+    use crate::TurnId;
     use crate::runtime::effect::envelope::{RuntimeEffectCommand, RuntimeEffectKind, RuntimeScope};
 
     fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
@@ -694,7 +695,7 @@ mod effect_group_contract_tests {
         crate::AwaitEventKey {
             scope: crate::ExecutionScope::Turn {
                 session_id: "session".to_string(),
-                turn_id: "turn".to_string(),
+                turn_id: TurnId::from("turn"),
             },
             wait: crate::AwaitEventWaitIdentity::ToolCompletion {
                 tool_call_id: "call".to_string(),

@@ -11,6 +11,7 @@
 //! `list_pending_turn_inputs`, `list_turn_input_applications`, and
 //! `cancel_pending_turn_input`.
 
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -84,9 +85,9 @@ async fn acceptance_runtime(
     .expect("build the direct-turn acceptance conformance runtime")
 }
 
-fn direct_input(turn_id: &str, text: &str) -> crate::TurnInput {
+fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
     let mut input = crate::TurnInput::text(text);
-    input.trace_turn_id = Some(turn_id.to_string());
+    input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
     input
 }
 
@@ -109,7 +110,7 @@ pub async fn direct_turn_accepts_before_driving(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
-    let turn_id = format!("{prefix}-accept-before-drive");
+    let turn_id = TurnId::from(format!("{prefix}-accept-before-drive"));
     let probe = Arc::new(std::sync::Mutex::new(None));
     let provider = {
         let store = Arc::clone(&store);
@@ -221,7 +222,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
-    let turn_id = format!("{prefix}-orphaned-direct-turn");
+    let turn_id = TurnId::from(format!("{prefix}-orphaned-direct-turn"));
     let abort_plugin: Arc<dyn crate::facade_support::PluginFactory> =
         Arc::new(crate::plugin::StaticPluginFactory::new(
             "conformance-direct-turn-abort",
@@ -357,7 +358,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     .await;
     let mut acceptances = Vec::new();
     for round in 0..2 {
-        let turn_id = format!("{prefix}-resubmit-{round}");
+        let turn_id = TurnId::from(format!("{prefix}-resubmit-{round}"));
         let scope = effect_host
             .scoped(crate::ExecutionScope::turn(SESSION_ID, &turn_id))
             .expect("scope a resubmitted direct turn");
@@ -396,7 +397,7 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
-    let turn_id = format!("{prefix}-busy-lane-refusal");
+    let turn_id = TurnId::from(format!("{prefix}-busy-lane-refusal"));
     let successor_owner = crate::LeaseOwnerIdentity::opaque(
         format!("{prefix}-successor-owner"),
         format!("{prefix}-successor-incarnation"),

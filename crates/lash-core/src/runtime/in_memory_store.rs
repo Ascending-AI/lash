@@ -6,6 +6,7 @@
 //! session from the store factory — so even an in-memory host needs a factory.
 //! This explicit opt-in has no silent in-memory default and holds the same `RuntimePersistence` contract as the
 //! durable backend (verified by the `runtime_persistence` conformance suite).
+use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::sync::MutexExt;
 
@@ -195,7 +196,7 @@ pub struct InMemorySessionStore {
     wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
-    turn_cancel_requests: Mutex<HashMap<String, crate::TurnCancelRequestRecord>>,
+    turn_cancel_requests: Mutex<HashMap<TurnId, crate::TurnCancelRequestRecord>>,
     attachment_manifest: SharedAttachmentManifest,
     /// Per-digest attachment GC condemnation state, shared with every store the
     /// same factory owns because the digest is factory-global: the writer's
@@ -840,7 +841,7 @@ impl InMemorySessionStore {
         &self,
         session_id: &str,
         generation: u64,
-        turn_id: &str,
+        turn_id: &TurnId,
         checkpoint: crate::CheckpointKind,
         max_inputs: usize,
         max_batches: usize,
@@ -968,7 +969,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         (
                             record.committed_at_ms,
                             crate::TurnFailureSettlement {
-                                turn_id: turn_id.clone(),
+                                turn_id: TurnId::from(turn_id.clone()),
                                 evidence: record.result.failure_evidence.clone(),
                             },
                         )

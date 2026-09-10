@@ -1,4 +1,5 @@
 use lash_core::ProcessRegistrar as _;
+use lash_sansio::TurnId;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -532,7 +533,7 @@ fn standard_config() -> TurnMachineConfig {
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: "standard-protocol-scenario".to_string(),
-        turn_id: "standard-protocol-turn".to_string(),
+        turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),
         turn_limit_final_message: Arc::new(test_turn_limit_final_message),

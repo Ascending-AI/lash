@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -762,7 +763,7 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 
 fn trajectory_entry(
     vocabulary: crate::dialect::DialectPromptVocabulary,
-    turn_id: &str,
+    turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
     validation_error: Option<String>,
@@ -787,13 +788,13 @@ fn trajectory_entry(
     }
 }
 
-fn rlm_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> String {
+fn rlm_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &str) -> String {
     format!("m_rlm_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
 fn trajectory_events(
     vocabulary: crate::dialect::DialectPromptVocabulary,
-    turn_id: &str,
+    turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
     validation_error: Option<String>,

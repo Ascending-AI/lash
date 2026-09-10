@@ -1,3 +1,4 @@
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 mod assembly;
 mod builder;
@@ -442,7 +443,7 @@ pub struct TurnInput {
     /// `TurnBuilder::turn_id` to control turn identity. Only low-level protocol
     /// transport should read this field directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_turn_id: Option<String>,
+    pub trace_turn_id: Option<TurnId>,
     #[serde(skip)]
     pub protocol_extension: Option<ProtocolTurnExtensionHandle>,
     #[serde(skip)]
@@ -1046,7 +1047,7 @@ pub enum TurnEvent {
     /// arrive first. Session-observation envelopes also carry `turn_id`, but
     /// the payload keeps it available to turn-local and collected streams.
     TurnStarted {
-        turn_id: String,
+        turn_id: TurnId,
     },
     QueuedWorkStarted {
         boundary: crate::QueuedWorkClaimBoundary,
@@ -1185,7 +1186,7 @@ pub trait TurnActivitySink: Send + Sync {
     /// [`emit`](Self::emit). Observation sinks override this method to carry
     /// turn identity on their enclosing event without adding it to
     /// [`TurnActivity`].
-    async fn emit_for_turn(&self, turn_id: &str, activity: TurnActivity) {
+    async fn emit_for_turn(&self, turn_id: &TurnId, activity: TurnActivity) {
         let _ = turn_id;
         self.emit(activity).await;
     }
@@ -1490,7 +1491,7 @@ pub struct LashRuntime {
     /// Active managed child turns, keyed by turn id. Guarded by a synchronous
     /// mutex so a `ManagedTurnLease` can release its registration from `Drop`:
     /// a cancelled child turn must never leave a ghost "running turn" behind.
-    pub(in crate::runtime) managed_turns: Arc<StdMutex<HashMap<String, ManagedSessionTurn>>>,
+    pub(in crate::runtime) managed_turns: Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here

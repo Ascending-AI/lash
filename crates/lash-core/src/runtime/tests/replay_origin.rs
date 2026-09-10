@@ -70,7 +70,11 @@ async fn runtime_with_foreign_replay(
     runtime
 }
 
-async fn run(runtime: &mut LashRuntime, token: CancellationToken, turn_id: &str) -> AssembledTurn {
+async fn run(
+    runtime: &mut LashRuntime,
+    token: CancellationToken,
+    turn_id: &TurnId,
+) -> AssembledTurn {
     runtime
         .run_turn_assembled(
             TurnInput::text("continue"),
@@ -101,7 +105,12 @@ async fn caller_shaped_completion_preserves_drop_sideband_without_provider_trace
         .build();
     let mut runtime = runtime_with_foreign_replay(provider, Vec::new(), &trace_path).await;
 
-    let turn = run(&mut runtime, CancellationToken::new(), "replay-completion").await;
+    let turn = run(
+        &mut runtime,
+        CancellationToken::new(),
+        &TurnId::from("replay-completion"),
+    )
+    .await;
     let events = trace_events(&trace_path);
     assert_drop_survived(&turn, &events);
     assert!(
@@ -126,7 +135,12 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
         .build();
     let mut runtime = runtime_with_foreign_replay(provider, Vec::new(), &trace_path).await;
 
-    let turn = run(&mut runtime, CancellationToken::new(), "replay-failure").await;
+    let turn = run(
+        &mut runtime,
+        CancellationToken::new(),
+        &TurnId::from("replay-failure"),
+    )
+    .await;
     let events = trace_events(&trace_path);
     assert_drop_survived(&turn, &events);
     assert!(
@@ -183,7 +197,7 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
     let turn = run(
         &mut runtime,
         CancellationToken::new(),
-        "replay-protocol-abort",
+        &TurnId::from("replay-protocol-abort"),
     )
     .await;
     let events = trace_events(&trace_path);
@@ -234,7 +248,12 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
         cancel_after_start.cancel();
     });
 
-    let turn = run(&mut runtime, cancellation, "replay-cancellation").await;
+    let turn = run(
+        &mut runtime,
+        cancellation,
+        &TurnId::from("replay-cancellation"),
+    )
+    .await;
     canceller.await.expect("canceller task");
     let events = trace_events(&trace_path);
     assert_drop_survived(&turn, &events);
@@ -307,7 +326,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     let turn = run(
         &mut runtime,
         CancellationToken::new(),
-        "confirm2-abort-conflict-provider-failure",
+        &TurnId::from("confirm2-abort-conflict-provider-failure"),
     )
     .await;
     assert!(turn.errors.iter().any(|error| {
@@ -394,7 +413,7 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
     let turn = run(
         &mut runtime,
         CancellationToken::new(),
-        "abort-tail-provider-failure",
+        &TurnId::from("abort-tail-provider-failure"),
     )
     .await;
     assert!(turn.errors.is_empty(), "complete cell remains accepted");

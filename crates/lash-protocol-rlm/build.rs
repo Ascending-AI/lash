@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
@@ -118,7 +119,7 @@ fn serialized_dependency_schemas() -> Vec<(&'static str, Vec<String>)> {
     let resolution = Resolution::Resolved(Box::new(grant));
     let link_key = DeferredResolutionLinkKey {
         session_id: "session".to_string(),
-        turn_id: Some("turn".to_string()),
+        turn_id: Some(TurnId::from("turn")),
         turn_index: Some(7),
         protocol_iteration: Some(2),
         effect_id: "effect".to_string(),

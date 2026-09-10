@@ -14,6 +14,7 @@
 //! terminals byte-for-byte without re-executing either body.
 
 use lash_core::ProcessLifecycle as _;
+use lash_sansio::TurnId;
 use std::sync::Arc;
 
 fn registry_local_executor(
@@ -536,7 +537,7 @@ fn public_runtime_state(policy: &lash_core::SessionPolicy) -> lash_core::Runtime
 
 fn public_runtime_input() -> lash_core::TurnInput {
     let mut input = lash_core::TurnInput::text("run PostgreSQL signal intent");
-    input.trace_turn_id = Some(TURN.to_string());
+    input.trace_turn_id = Some(TurnId::from(TURN.to_string()));
     input
 }
 
@@ -737,7 +738,7 @@ fn fig1293_state(policy: &lash_core::SessionPolicy) -> lash_core::RuntimeSession
 
 fn fig1293_input() -> lash_core::TurnInput {
     let mut input = lash_core::TurnInput::text("finish once");
-    input.trace_turn_id = Some("fig1293-restate-migrated-turn".to_string());
+    input.trace_turn_id = Some(TurnId::from("fig1293-restate-migrated-turn".to_string()));
     input
 }
 

@@ -10,6 +10,7 @@
 //! once, and a full durable adoption settles the same four.
 
 use super::*;
+use crate::TurnId;
 
 /// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,7 +274,7 @@ impl ResidentSessionContinuity {
     pub(in crate::runtime) fn record_committed_observation_turn(
         &mut self,
         revision: u64,
-        turn_id: &str,
+        turn_id: &TurnId,
     ) {
         self.last_committed_observation_turn = Some((revision, turn_id.to_string()));
     }

@@ -5,6 +5,7 @@
 
 use super::*;
 use lash_core::testing::conformance_support::ActiveTurnControl;
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 /// Number of named Layer-A vector groups executed by
@@ -44,7 +45,7 @@ where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     let session_id = format!("{prefix}-parked-session");
-    let turn_id = format!("{prefix}-parked-turn");
+    let turn_id = TurnId::from(format!("{prefix}-parked-turn"));
     let scope = durable_turn_scope(&session_id, &turn_id);
     let key = make()
         .await_event_key(

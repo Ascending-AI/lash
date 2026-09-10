@@ -6,6 +6,7 @@
 //! blanket empty root-set default cannot agree with the model by construction.
 
 use super::*;
+use lash_sansio::TurnId;
 
 const RECONCILE_SQL_SAFE_MAX: u64 = u64::MAX;
 
@@ -163,7 +164,9 @@ async fn commit_with_attachment_refs(
         ),
         session_id.clone(),
     ));
-    let turn_id = format!("attachment-turn:{seed}:{session_id}:{head_revision}");
+    let turn_id = TurnId::from(format!(
+        "attachment-turn:{seed}:{session_id}:{head_revision}"
+    ));
     let _owner_binding = turn_owned.then(|| facade.bind_turn_scoped(turn_id.clone()));
     let attachment = facade
         .put(

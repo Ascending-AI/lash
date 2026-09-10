@@ -9,6 +9,7 @@
 use lash_core::session_model::SessionHistoryRecord;
 use lash_core::{DriverAction, DriverContextView};
 use lash_rlm_types::RlmProtocolEvent;
+use lash_sansio::TurnId;
 use serde_json::Value;
 
 /// Diagnostic phase emitted exactly once per provider attempt.
@@ -115,7 +116,7 @@ fn count_pending_attempts(
     }
 }
 
-fn trajectory_entry_turn_prefix(turn_id: &str) -> String {
+fn trajectory_entry_turn_prefix(turn_id: &TurnId) -> String {
     format!("lashlang_step_{turn_id}_")
 }
 

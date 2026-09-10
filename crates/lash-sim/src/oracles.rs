@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash::scenario_contracts::AGENT_SCENARIO_CONTRACTS;
@@ -106,7 +107,7 @@ pub struct FrameSwitchSeedObservation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameSwitchCommitObservation {
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub inbound_claim_completed: bool,
     pub follow_on_enqueued: bool,
 }
@@ -7930,7 +7931,7 @@ mod tests {
         sequence: usize,
         boundary_id: &str,
         source_key: &str,
-        runtime_turn_id: Option<&str>,
+        runtime_turn_id: Option<&TurnId>,
     ) -> DeliveredBoundary {
         delivered_with_payload(
             sequence,
@@ -7953,14 +7954,29 @@ mod tests {
     fn process_wake_at_most_once_fails_on_duplicate_runtime_turns() {
         let source_key = "process/wake/session-001/001";
         let valid = vec![
-            process_wake_turn_event(1, "wake:first", source_key, Some("turn:first")),
+            process_wake_turn_event(
+                1,
+                "wake:first",
+                source_key,
+                Some(&TurnId::from("turn:first")),
+            ),
             process_wake_turn_event(2, "wake:duplicate", source_key, None),
         ];
         assert!(process_wake_at_most_once(&valid).is_passed());
 
         let duplicate = vec![
-            process_wake_turn_event(1, "wake:first", source_key, Some("turn:first")),
-            process_wake_turn_event(2, "wake:duplicate", source_key, Some("turn:second")),
+            process_wake_turn_event(
+                1,
+                "wake:first",
+                source_key,
+                Some(&TurnId::from("turn:first")),
+            ),
+            process_wake_turn_event(
+                2,
+                "wake:duplicate",
+                source_key,
+                Some(&TurnId::from("turn:second")),
+            ),
         ];
         let verdict = process_wake_at_most_once(&duplicate);
         assert!(!verdict.is_passed());

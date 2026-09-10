@@ -3,6 +3,7 @@
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::{Part, PartKind, SessionHistoryRecord};
 use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent};
+use lash_sansio::TurnId;
 
 const NATIVE_TRANSPORT_VERSION: u32 = 1;
 
@@ -16,7 +17,7 @@ enum Transport {
         parts: Vec<Part>,
     },
     Repair {
-        turn_id: String,
+        turn_id: TurnId,
         protocol_iteration: usize,
         parts: Vec<Part>,
         text: String,
@@ -56,13 +57,13 @@ pub(super) fn execution_event(step_id: String, parts: Vec<Part>) -> SessionHisto
     event(Transport::Execution { step_id, parts })
 }
 pub(super) fn repair_event(
-    turn_id: &str,
+    turn_id: &TurnId,
     protocol_iteration: usize,
     parts: Vec<Part>,
     text: String,
 ) -> SessionHistoryRecord {
     event(Transport::Repair {
-        turn_id: turn_id.to_string(),
+        turn_id: TurnId::from(turn_id.to_string()),
         protocol_iteration,
         parts,
         text,

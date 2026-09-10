@@ -1,5 +1,6 @@
 //! Durable, non-transcript evidence from charge-safety-refused generations.
 
+use crate::TurnId;
 /// Maximum resident bytes for one failed generation's visible partial output.
 ///
 /// The marker is included inside this budget. Billing and refusal fields are
@@ -148,7 +149,7 @@ impl TurnFailureEvidence {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnFailureSettlement {
     /// Store operation key of the turn settlement that owns this component.
-    pub turn_id: String,
+    pub turn_id: TurnId,
     /// Failed generations settled by this turn, in protocol order. Runtime
     /// derivation admits at most one component per sealed provider attempt.
     pub evidence: Vec<TurnFailureEvidence>,

@@ -1,3 +1,4 @@
+use crate::TurnId;
 use crate::{
     CausalRef, ObserverInheritance, SessionMeta, SessionObserverIntent,
     SessionObserverIntentAttribution, SessionRelation, StoreError,
@@ -17,7 +18,7 @@ pub enum SessionMetaWrite {
 pub struct CausalColumns {
     pub kind: Option<String>,
     pub session_id: Option<String>,
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     pub effect_id: Option<String>,
     pub call_id: Option<String>,
     pub process_id: Option<String>,

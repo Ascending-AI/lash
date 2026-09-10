@@ -2,6 +2,7 @@ use super::turn_graph_editor::ReadProjectionDiagnostic;
 use super::{
     RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft,
 };
+use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionNodeProjection;
@@ -325,7 +326,7 @@ impl TurnBoundary {
         claim_settlement: TurnClaimSettlement,
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
-        interrupted_turn_input_turn_id: Option<String>,
+        interrupted_turn_input_turn_id: Option<TurnId>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
@@ -454,7 +455,7 @@ impl TurnBoundary {
         let clock = Arc::clone(&self.clock);
         let graph_appends = self.graph_appends.clone();
         let protocol_terminal_output = self.protocol_terminal_output.clone();
-        let turn_id = self.operation_scope.id().to_string();
+        let turn_id = crate::TurnId::from(self.operation_scope.id());
         let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let state = self.final_state_mut();
         state.apply_snapshot(returned_state);
@@ -542,7 +543,7 @@ impl TurnBoundary {
         mut claim_settlement: TurnClaimSettlement,
         current_session_lease_generation: Option<u64>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
-        interrupted_turn_input_turn_id: Option<String>,
+        interrupted_turn_input_turn_id: Option<TurnId>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,

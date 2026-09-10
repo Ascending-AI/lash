@@ -120,9 +120,14 @@ pub enum StoreError {
     #[error("store head revision conflict: expected {expected}, actual {actual}")]
     HeadRevisionConflict { expected: u64, actual: u64 },
     #[error(
-        "runtime operation `{turn_id}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
+        "runtime operation `{operation_key}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
-    RuntimeTurnCommitConflict { session_id: String, turn_id: String },
+    RuntimeTurnCommitConflict {
+        session_id: String,
+        /// The commit operation identity, not a turn identity: every caller
+        /// passes the operation storage key the conflicting retry reused.
+        operation_key: String,
+    },
     #[error(
         "runtime commit for session `{session_id}` cannot both borrow and release the session execution lease"
     )]

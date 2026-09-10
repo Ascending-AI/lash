@@ -1,6 +1,7 @@
 //! Cross-layer attachment owner / cold effect-replay conformance.
 
 use super::*;
+use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
 use std::future::Future;
@@ -53,8 +54,13 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     let plain_id = Arc::new(Mutex::new(None));
     let typed_id = Arc::new(Mutex::new(None));
     let first_local_calls = Arc::new(AtomicUsize::new(0));
-    let plain_envelope = tool_attempt_envelope("plain-json-effect", "plain-json-call", TURN_ID);
-    let typed_envelope = tool_attempt_envelope("typed-effect", "typed-call", TURN_ID);
+    let plain_envelope = tool_attempt_envelope(
+        "plain-json-effect",
+        "plain-json-call",
+        &TurnId::from(TURN_ID),
+    );
+    let typed_envelope =
+        tool_attempt_envelope("typed-effect", "typed-call", &TurnId::from(TURN_ID));
 
     let first_effect_controller = backend
         .first_effect_controller
@@ -152,8 +158,13 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     assert_plain_json_outcome(&replay_plain, &plain_id);
     assert_typed_outcome(&replay_typed, &typed_id);
 
-    let stamped_commit =
-        final_turn_commit(&store_b, SESSION_ID, TURN_ID, vec![typed_id.clone()]).await;
+    let stamped_commit = final_turn_commit(
+        &store_b,
+        SESSION_ID,
+        &TurnId::from(TURN_ID),
+        vec![typed_id.clone()],
+    )
+    .await;
     let first_result = commit_with_lease(&store_b, stamped_commit.clone(), "first-commit").await;
     let duplicate = store_b
         .commit_runtime_state(stamped_commit)
@@ -246,7 +257,7 @@ fn failing_executor(calls: Arc<AtomicUsize>) -> crate::RuntimeEffectLocalExecuto
 fn tool_attempt_envelope(
     effect_id: &str,
     call_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> crate::RuntimeEffectEnvelope {
     crate::RuntimeEffectEnvelope::new(
         crate::RuntimeInvocation::effect(
@@ -353,7 +364,7 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     (backend.advance_clock)(1_000);
     commit_with_lease(
         &store,
-        final_turn_commit(&store, SESSION_ID, "later-turn", Vec::new()).await,
+        final_turn_commit(&store, SESSION_ID, &TurnId::from("later-turn"), Vec::new()).await,
         "later-turn-owner",
     )
     .await;
@@ -468,7 +479,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
 async fn final_turn_commit(
     store: &Arc<dyn crate::RuntimePersistence>,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     adopted_attachment_ids: Vec<crate::AttachmentId>,
 ) -> crate::RuntimeCommit {
     store

@@ -1,3 +1,4 @@
+use crate::TurnId;
 use crate::sansio::EffectId;
 use crate::{
     CausalRef, RuntimeEffectKind, RuntimeInvocation, RuntimeReplay, RuntimeScope, RuntimeSubject,
@@ -5,7 +6,7 @@ use crate::{
 
 pub(crate) fn turn_effect_invocation(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     turn_index: usize,
     protocol_iteration: usize,
     effect_id: EffectId,
@@ -35,7 +36,7 @@ pub(crate) fn turn_effect_invocation(
 /// entry and re-derives the admission instead of admitting a second turn.
 pub(crate) fn turn_acceptance_effect_invocation(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     turn_index: usize,
 ) -> RuntimeInvocation {
     RuntimeInvocation::effect(
@@ -75,7 +76,7 @@ pub(crate) fn turn_phase_effect_invocation(
 
 fn turn_effect_replay_key(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     turn_index: usize,
     protocol_iteration: usize,
     kind: RuntimeEffectKind,
@@ -260,7 +261,7 @@ pub(crate) fn direct_effect_invocation(
     session_id: &str,
     usage_source: &str,
     replay_discriminator: String,
-    turn_id: Option<&str>,
+    turn_id: Option<&TurnId>,
     caused_by: Option<CausalRef>,
 ) -> RuntimeInvocation {
     let replay_preimage = direct_effect_replay_preimage(
@@ -277,7 +278,7 @@ pub(crate) fn direct_effect_invocation(
     RuntimeInvocation::effect(
         RuntimeScope {
             session_id: session_id.to_string(),
-            turn_id: turn_id.map(str::to_string),
+            turn_id: turn_id.cloned(),
             turn_index: None,
             protocol_iteration: None,
         },
@@ -292,7 +293,7 @@ const DIRECT_EFFECT_FAMILY_VERSION: u8 = 2;
 
 fn direct_effect_replay_preimage(
     session_id: &str,
-    turn_id: Option<&str>,
+    turn_id: Option<&TurnId>,
     usage_source: &str,
     replay_discriminator: &str,
 ) -> Vec<u8> {
@@ -475,7 +476,7 @@ mod tests {
             (
                 CausalRef::Turn {
                     session_id: "ab".to_string(),
-                    turn_id: "c".to_string(),
+                    turn_id: TurnId::from("c"),
                 },
                 "direct-discriminator:v2:blake3:990084fc9028c4cdec32cdc3182e323cdc03bf1fef212862fbd9442d60a69d42",
             ),
@@ -557,7 +558,7 @@ mod tests {
                 None,
                 Some(&CausalRef::Turn {
                     session_id: "ab".to_string(),
-                    turn_id: "c".to_string(),
+                    turn_id: TurnId::from("c"),
                 }),
                 1,
             ),
@@ -568,7 +569,7 @@ mod tests {
                 None,
                 Some(&CausalRef::Turn {
                     session_id: "a".to_string(),
-                    turn_id: "bc".to_string(),
+                    turn_id: TurnId::from("bc"),
                 }),
                 1,
             ),
@@ -576,13 +577,15 @@ mod tests {
         );
 
         let discriminator = direct_request_discriminator(None, None, 1);
-        let preimage = direct_effect_replay_preimage("s", Some("t"), "u", &discriminator);
+        let preimage =
+            direct_effect_replay_preimage("s", Some(&TurnId::from("t")), "u", &discriminator);
         assert_eq!(
             hex(&preimage),
             "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
         );
         assert_eq!(
-            direct_effect_invocation("s", "u", discriminator, Some("t"), None).replay_key(),
+            direct_effect_invocation("s", "u", discriminator, Some(&TurnId::from("t")), None)
+                .replay_key(),
             Some(
                 "direct:v2:blake3:c92b5337c6f126eb1f8951b3c0c5eea412be5953c0e254bc4369e08d29d33451"
             )
@@ -597,12 +600,18 @@ mod tests {
             0,
         );
         let first_preimage =
-            direct_effect_replay_preimage("s", Some("t"), "u", &first_discriminator);
+            direct_effect_replay_preimage("s", Some(&TurnId::from("t")), "u", &first_discriminator);
         assert_eq!(
             hex(&first_preimage),
             "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a38356537333765643465663038366634653336616436386263396330333632393264363665623430613831646130383031356436363163653530373435303263"
         );
-        let first = direct_effect_invocation("s", "u", first_discriminator, Some("t"), None);
+        let first = direct_effect_invocation(
+            "s",
+            "u",
+            first_discriminator,
+            Some(&TurnId::from("t")),
+            None,
+        );
         assert_eq!(
             first.replay_key(),
             Some(
@@ -612,7 +621,7 @@ mod tests {
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
             "s",
-            Some("t"),
+            Some(&TurnId::from("t")),
             "u:direct:v2:caller:21:x",
             &second_discriminator,
         );
@@ -624,7 +633,7 @@ mod tests {
             "s",
             "u:direct:v2:caller:21:x",
             second_discriminator,
-            Some("t"),
+            Some(&TurnId::from("t")),
             None,
         );
         assert_eq!(
