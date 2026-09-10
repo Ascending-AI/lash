@@ -291,17 +291,27 @@ pub fn minimize_trace(
     let package_dir = artifact_root.join("minimized-regression");
     let minimized_trace_path = package_dir.join("trace.json");
     let replay_report_path = package_dir.join("replay.json");
-    let oracle_path = package_dir.join("oracle.json");
-    let final_summary_path = package_dir.join("final-summary.json");
     let package_path = package_dir.join("package.json");
 
     let replay = replay_trace(&minimized_trace_path, &best)?;
-    std::fs::create_dir_all(&package_dir)?;
-    write_trace(&minimized_trace_path, &best)?;
-    write_replay_report(&replay_report_path, &replay)?;
-    std::fs::write(&oracle_path, serde_json::to_vec_pretty(&best.oracle)?)?;
+    std::fs::create_dir_all(artifact_root)?;
+    let staging_dir = tempfile::Builder::new()
+        .prefix(".minimized-regression-")
+        .tempdir_in(artifact_root)?;
+    let staged_minimized_trace_path = staging_dir.path().join("trace.json");
+    let staged_replay_report_path = staging_dir.path().join("replay.json");
+    let staged_oracle_path = staging_dir.path().join("oracle.json");
+    let staged_final_summary_path = staging_dir.path().join("final-summary.json");
+    let staged_package_path = staging_dir.path().join("package.json");
+
+    write_trace(&staged_minimized_trace_path, &best)?;
+    write_replay_report(&staged_replay_report_path, &replay)?;
     std::fs::write(
-        &final_summary_path,
+        &staged_oracle_path,
+        serde_json::to_vec_pretty(&best.oracle)?,
+    )?;
+    std::fs::write(
+        &staged_final_summary_path,
         serde_json::to_vec_pretty(&best.final_summary)?,
     )?;
     let package = FailurePackageManifest {
@@ -321,7 +331,22 @@ pub fn minimize_trace(
             minimized_trace_path.display()
         ),
     };
-    std::fs::write(&package_path, serde_json::to_vec_pretty(&package)?)?;
+    std::fs::write(&staged_package_path, serde_json::to_vec_pretty(&package)?)?;
+    match std::fs::symlink_metadata(&package_dir) {
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "refusing to replace existing minimized package `{}`",
+                    package_dir.display()
+                ),
+            )
+            .into());
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
+    }
+    std::fs::rename(staging_dir.path(), &package_dir)?;
 
     Ok(MinimizeReport {
         schema: MINIMIZE_REPORT_SCHEMA.to_string(),
@@ -781,8 +806,48 @@ fn fixture_boundary_kind(kind: &str) -> Result<BoundaryKind, MinimizeError> {
 mod tests {
     use super::*;
     use crate::generator::generate_workload;
-    use crate::oracles::{runtime_graph_acyclic, runtime_usage_monotonic};
+    use crate::oracles::{
+        runtime_graph_acyclic, runtime_usage_monotonic, scheduler_controlled_delivery,
+    };
     use crate::runner::run_generated_workload_for_fixture;
+
+    fn synthetic_trace(target: OracleVerdict) -> SimulationTrace {
+        let summary = ModelStore::default()
+            .summarize_with_trace_checkpoint_writes(&[], &[])
+            .expect("empty model summary");
+        SimulationTrace::new(
+            1,
+            "test-generator",
+            "test-profile",
+            "1/1",
+            "test-workload",
+            "0".repeat(64),
+            "bundle",
+            Default::default(),
+            Default::default(),
+            Vec::new(),
+            Vec::new(),
+            target.clone(),
+            vec![target],
+            summary,
+        )
+    }
+
+    fn directory_snapshot(path: &Path) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+        let mut entries = std::fs::read_dir(path)
+            .expect("read package directory")
+            .map(|entry| {
+                let entry = entry.expect("package entry");
+                let path = entry.path();
+                let contents = path
+                    .is_file()
+                    .then(|| std::fs::read(&path).expect("package file"));
+                (PathBuf::from(entry.file_name()), contents)
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        entries
+    }
 
     #[tokio::test]
     async fn minimizer_writes_replayable_regression_package() {
@@ -799,6 +864,64 @@ mod tests {
         assert!(report.replay_report_path.exists());
         assert!(report.failure_package_path.exists());
         assert!(report.minimized_event_count <= report.original_event_count);
+    }
+
+    #[test]
+    fn existing_minimized_package_is_never_partially_replaced() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let first = synthetic_trace(scheduler_controlled_delivery(&[]));
+        minimize_trace(Path::new("first.trace.json"), &first, tmp.path())
+            .expect("first publication");
+        let package_dir = tmp.path().join("minimized-regression");
+        let replay_path = package_dir.join("replay.json");
+        std::fs::remove_file(&replay_path).expect("remove first replay report");
+        std::fs::create_dir(&replay_path).expect("obstruct replay report");
+        let before = directory_snapshot(&package_dir);
+        let second = synthetic_trace(runtime_usage_monotonic(&[]));
+
+        let err = minimize_trace(Path::new("second.trace.json"), &second, tmp.path())
+            .expect_err("an existing package must be refused");
+
+        assert!(
+            matches!(
+                &err,
+                MinimizeError::Io(error) if error.kind() == std::io::ErrorKind::AlreadyExists
+            ),
+            "{err}"
+        );
+        assert_eq!(directory_snapshot(&package_dir), before);
+        assert_eq!(
+            std::fs::read_dir(tmp.path())
+                .expect("artifact root")
+                .count(),
+            1,
+            "failed publication must clean its staging directory"
+        );
+    }
+
+    #[test]
+    fn failed_fresh_package_publication_leaves_no_completed_package() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let package_dir = tmp.path().join("minimized-regression");
+        std::fs::write(&package_dir, b"publication obstruction").expect("obstruct final name");
+        let trace = synthetic_trace(scheduler_controlled_delivery(&[]));
+
+        let err = minimize_trace(Path::new("trace.json"), &trace, tmp.path())
+            .expect_err("an obstructed fresh publication must fail");
+
+        assert!(matches!(err, MinimizeError::Io(_)), "{err}");
+        assert_eq!(
+            std::fs::read(&package_dir).expect("unchanged obstruction"),
+            b"publication obstruction"
+        );
+        assert_eq!(
+            std::fs::read_dir(tmp.path())
+                .expect("artifact root")
+                .count(),
+            1,
+            "failed publication must clean its staging directory"
+        );
+        assert!(!package_dir.join("package.json").exists());
     }
 
     #[tokio::test]
