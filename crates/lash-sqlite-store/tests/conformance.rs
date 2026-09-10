@@ -380,6 +380,42 @@ fn open_trigger_store(path: &Path) -> Arc<dyn TriggerStore> {
     })) as Arc<dyn TriggerStore>
 }
 
+struct SqliteTriggerOccurrenceListingFaultInjector {
+    path: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::TriggerOccurrenceListingFaultInjector
+    for SqliteTriggerOccurrenceListingFaultInjector
+{
+    async fn insert_malformed_occurrence(&self) {
+        let conn = rusqlite::Connection::open(&self.path)
+            .expect("open raw SQLite occurrence-listing fixture");
+        conn.execute(
+            "INSERT INTO trigger_occurrences (
+                occurrence_id, idempotency_key, source_type, source_key,
+                occurred_at_ms, record_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                "occurrence-listing-malformed",
+                "occurrence-listing-malformed",
+                "ui.button.pressed",
+                "occurrence-listing-malformed-source",
+                0_i64,
+                "{not valid json",
+            ],
+        )
+        .expect("insert malformed SQLite occurrence");
+    }
+
+    async fn make_occurrence_query_unavailable(&self) {
+        rusqlite::Connection::open(&self.path)
+            .expect("open raw SQLite occurrence-listing fixture")
+            .execute_batch("DROP TABLE trigger_occurrences")
+            .expect("make SQLite occurrence query unavailable");
+    }
+}
+
 struct SqliteFenceIntegrityInjector {
     _dir: TempDir,
     runtime_path: PathBuf,
@@ -1193,6 +1229,15 @@ async fn sqlite_trigger_store_satisfies_conformance() {
         }
     })
     .await;
+}
+
+#[tokio::test]
+async fn sqlite_trigger_occurrence_listing_corruption_is_not_partial_success() {
+    let dir = tempfile::tempdir().expect("SQLite occurrence-listing tempdir");
+    let path = dir.path().join("occurrence-listing.db");
+    let store = open_trigger_store(&path);
+    let injector = SqliteTriggerOccurrenceListingFaultInjector { path };
+    lash_conformance::trigger_occurrence_listing_corruption_law(store, &injector).await;
 }
 
 #[tokio::test]
