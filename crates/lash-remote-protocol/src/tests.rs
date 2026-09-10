@@ -1430,7 +1430,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 56,
+            "protocol_version": 57,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1445,7 +1445,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 56,
+            actual: 57,
             expected: 41,
         }
     ));
@@ -1491,7 +1491,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 56,
+            expected: 57,
         }
     ));
 
@@ -1508,7 +1508,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 56, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 57, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: "process:1".to_string(),
         input: RemoteProcessInput::External {
@@ -1841,7 +1841,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 56,
+            expected: 57,
         })
     ));
 }
@@ -1881,7 +1881,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 56,
+                expected: 57,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1917,7 +1917,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 56,
+                expected: 57,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1973,7 +1973,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 56,
+                expected: 57,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -2005,7 +2005,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 56,
+                expected: 57,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2498,14 +2498,14 @@ fn remote_process_event() -> RemoteProcessEvent {
 }
 
 #[test]
-fn protocol_55_is_refused_before_window_56_payload_decode() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 56, "window 56 adjacency pin");
-    let old = br#"{"protocol_version":55,"outcome":{"type":"unknown_to_56"}}"#;
+fn protocol_55_is_refused_before_window_57_payload_decode() {
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 57, "window 57 adjacency pin");
+    let old = br#"{"protocol_version":55,"outcome":{"type":"unknown_to_57"}}"#;
     assert!(matches!(
         RemoteTurnReport::decode_json(old),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 55,
-            expected: 56
+            expected: 57
         })
     ));
 }
