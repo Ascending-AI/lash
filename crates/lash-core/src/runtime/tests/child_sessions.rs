@@ -10,6 +10,10 @@ struct FirstTurnProcessTool;
 impl FirstTurnProcessTool {
     /// Starting a durable process is journal-capable work, so this test tool
     /// registers in the runtime-owned orchestrating lane.
+    #[expect(
+        unsafe_code,
+        reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+    )]
     fn orchestrating() -> crate::tool_provider::orchestration::OrchestratingToolDef {
         let implementation: Arc<
             dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
@@ -70,6 +74,10 @@ struct NestedChildSessionTool {
 impl NestedChildSessionTool {
     /// Nested managed child turns are journal-capable session work, so this
     /// test tool registers in the runtime-owned orchestrating lane.
+    #[expect(
+        unsafe_code,
+        reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+    )]
     fn orchestrating(
         parents: Arc<std::sync::Mutex<Vec<String>>>,
     ) -> crate::tool_provider::orchestration::OrchestratingToolDef {

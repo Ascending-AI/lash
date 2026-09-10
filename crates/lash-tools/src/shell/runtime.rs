@@ -436,6 +436,10 @@ impl ShellRuntime {
         })?
     }
 
+    #[expect(
+        unsafe_code,
+        reason = "detaching a launch needs libc pre_exec, fork, write and close, none of which have safe std equivalents"
+    )]
     fn spawn_detached_blocking(
         &self,
         command: &str,
@@ -550,6 +554,10 @@ impl ShellRuntime {
     }
 
     /// Stop a detached launch when its durable audit row could not be written.
+    #[expect(
+        unsafe_code,
+        reason = "signalling a process group through libc::kill has no safe std equivalent"
+    )]
     pub(crate) fn stop_detached(&self, launch: DetachedLaunch) {
         #[cfg(unix)]
         unsafe {
@@ -774,6 +782,10 @@ impl ShellRuntime {
         })?
     }
 
+    #[expect(
+        unsafe_code,
+        reason = "Command::pre_exec is unsafe: its closure runs between fork and exec"
+    )]
     pub(crate) async fn exec_pipe_process(
         &self,
         request: PipeExecProcessRequest<'_>,
@@ -992,6 +1004,7 @@ async fn sleep_until(deadline: Option<tokio::time::Instant>) {
 }
 
 #[cfg(target_os = "linux")]
+#[expect(unsafe_code, reason = "libc::pipe2 has no safe std equivalent")]
 fn detached_identity_pipe() -> std::io::Result<(libc::c_int, libc::c_int)> {
     let mut fds = [0_i32; 2];
     if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } == -1 {

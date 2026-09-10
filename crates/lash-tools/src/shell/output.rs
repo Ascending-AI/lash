@@ -226,6 +226,10 @@ pub(crate) fn kill_process_group_and_reap(
 }
 
 #[cfg(unix)]
+#[expect(
+    unsafe_code,
+    reason = "POSIX process-group termination goes through libc::kill, which has no safe std equivalent"
+)]
 fn terminate_process_group(pid: Option<u32>) {
     let Some(pid) = pid else {
         return;

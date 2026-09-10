@@ -865,6 +865,10 @@ impl NestedProcessWaitTool {
 
     /// Starting a process and awaiting it inside the tool call is orchestration,
     /// not a recorded leaf attempt, so this registers in the orchestrating lane.
+    #[expect(
+        unsafe_code,
+        reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+    )]
     fn orchestrating() -> crate::tool_provider::orchestration::OrchestratingToolDef {
         let implementation: Arc<
             dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,

@@ -2371,7 +2371,6 @@ dependencies = [
  "lash-internal-sansio",
  "proptest",
  "reqwest 0.13.4",
- "serde",
  "serde_json",
  "tokio",
  "uuid",
@@ -2512,7 +2511,6 @@ dependencies = [
  "lash-internal-sansio",
  "object_store",
  "tokio",
- "tracing",
  "url",
 ]
 
@@ -2538,7 +2536,6 @@ dependencies = [
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang",
- "lash-internal-lashlang-runtime",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "rmp-serde",
@@ -2613,7 +2610,6 @@ dependencies = [
  "libc",
  "portable-pty",
  "reqwest 0.13.4",
- "schemars 0.8.22",
  "serde",
  "serde_json",
  "tempfile",

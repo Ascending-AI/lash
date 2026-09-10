@@ -1,3 +1,12 @@
+# Crate-scoped clippy configuration for lash-core. Clippy stops at the first
+# `clippy.toml` it finds walking up from the manifest directory, so this file
+# shadows the workspace one and must repeat its keys.
+#
+# `disallowed-methods` is deliberately scoped to this crate: `tokio::spawn`
+# loses the caller's tracing context, which matters for the runtime's own tasks,
+# while hosts, examples and runbooks spawn directly by design.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
 disallowed-methods = [
     { path = "tokio::spawn", reason = "use lash_core::task::spawn so tasks inherit the caller's tracing context" },
     { path = "tokio::task::spawn", reason = "use lash_core::task::spawn so tasks inherit the caller's tracing context" },

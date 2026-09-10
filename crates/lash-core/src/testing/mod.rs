@@ -1911,6 +1911,10 @@ mod test_protocol_fakes {
     /// The test `batch` tool registers in the runtime-owned orchestration lane,
     /// exactly like `lash-protocol-standard`'s: nesting tool dispatch is not
     /// something a recorded leaf attempt can do.
+    #[expect(
+        unsafe_code,
+        reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+    )]
     fn test_batch_orchestrating_tool() -> crate::tool_provider::orchestration::OrchestratingToolDef
     {
         let implementation: Arc<

@@ -33,7 +33,6 @@ lash-protocol-standard = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-lash-s3-store = { workspace = true, features = ["testing"] }
 lash-subagents = { workspace = true }
 lash-tools = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -44,6 +43,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
+lash-s3-store = { workspace = true, features = ["testing"] }
 lash-conformance.workspace = true
 insta = "1"
 lash-postgres-store = { workspace = true, features = ["testing"] }

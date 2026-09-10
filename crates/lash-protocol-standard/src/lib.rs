@@ -191,6 +191,10 @@ fn turn_limit_exhausted_message(message_id: String, max_turns: usize) -> Message
 /// [`lash_core::facade_support::PluginSpec::with_orchestrating_tool`] from the
 /// plugin installed on the facade builder. The definition's capability-bearing
 /// constructor remains sealed inside this crate.
+#[expect(
+    unsafe_code,
+    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+)]
 pub fn standard_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
     let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
         Arc::new(StandardBatchOrchestratingTool);

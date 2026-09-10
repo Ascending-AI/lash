@@ -185,6 +185,10 @@ impl OrchestratingToolDef {
     /// a provenance convention, not a memory-safety invariant: violating it is
     /// an unsupported capability escalation, but does not by itself cause
     /// undefined behavior.
+    #[expect(
+        unsafe_code,
+        reason = "this fn is the unsafe capability boundary itself: only the crate that owns a tool contract may mint an orchestrating registration"
+    )]
     #[doc(hidden)]
     pub unsafe fn from_first_party(
         implementation: Arc<dyn OrchestratingToolImplementation>,

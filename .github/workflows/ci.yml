@@ -392,6 +392,43 @@ jobs:
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
 
+  # An unused dependency is a real cost: it enlarges the locked graph that
+  # cargo-deny audits, the surface `Cargo.lock` churns on, and every build. The
+  # check is source-level (cargo-shear parses the crates' `use` graph), so it is
+  # cheap and needs no compiled artifacts.
+  unused-deps:
+    name: Unused dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install cargo-shear
+        run: cargo install cargo-shear --locked --version 1.13.4
+
+      - name: Check for unused dependencies
+        run: cargo shear
+
   # The generated facade contract gates build rustdoc JSON for the facade crate,
   # independently of the workspace build. They run only on the full profile.
   facade-gates:
@@ -2511,6 +2548,7 @@ jobs:
       - facade-only-examples
       - test-doc
       - repo-gates
+      - unused-deps
       - facade-gates
       - semver-advisory
       - lashlang-git-consumer

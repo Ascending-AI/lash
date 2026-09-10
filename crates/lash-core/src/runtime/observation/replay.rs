@@ -1136,6 +1136,10 @@ mod tests {
     static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
 
+    #[expect(
+        unsafe_code,
+        reason = "the allocation-accounting harness installs a counting global allocator, and GlobalAlloc is an unsafe trait"
+    )]
     unsafe impl GlobalAlloc for CountingAllocator {
         unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
             ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);

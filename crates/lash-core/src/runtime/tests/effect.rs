@@ -1285,6 +1285,10 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Tr
     }
 }
 
+#[expect(
+    unsafe_code,
+    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+)]
 fn trigger_orchestrating_tool() -> crate::tool_provider::orchestration::OrchestratingToolDef {
     let implementation: Arc<
         dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
@@ -1343,6 +1347,10 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
     }
 }
 
+#[expect(
+    unsafe_code,
+    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+)]
 fn nested_trigger_batch_orchestrating_tool()
 -> crate::tool_provider::orchestration::OrchestratingToolDef {
     let implementation: Arc<

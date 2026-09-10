@@ -1,0 +1,13 @@
+# Workspace-wide clippy configuration.
+#
+# Clippy reads the nearest `clippy.toml` walking up from each crate's manifest
+# directory and stops at the first one it finds, so `crates/lash-core/clippy.toml`
+# shadows this file for that crate and repeats the keys below.
+
+# Test code is allowed to panic on a broken assumption; production code is not.
+# The workspace lint table does not deny `unwrap_used`/`expect_used` yet — the
+# current tree carries 286 and 4351 non-test sites — but the exemption these
+# keys express is the settled policy for the round that will, so it is recorded
+# here rather than rediscovered then.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
