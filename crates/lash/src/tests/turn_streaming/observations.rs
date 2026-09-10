@@ -26,6 +26,111 @@ pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Resul
 }
 
 #[tokio::test]
+async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Result<()> {
+    let streamed_reasoning = LlmOutputPart::Reasoning {
+        text: "**Planning single shell command execution**".to_string(),
+        replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+            item_id: Some("reasoning-streamed".to_string()),
+            encrypted_content: Some("opaque-streamed".to_string()),
+            summary: vec!["**Planning single shell command execution**".to_string()],
+            ..Default::default()
+        }),
+    };
+    let completed_only_reasoning = LlmOutputPart::Reasoning {
+        text: "**Completed-only summary**".to_string(),
+        replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+            item_id: Some("reasoning-completed-only".to_string()),
+            encrypted_content: Some("opaque-completed-only".to_string()),
+            summary: vec!["**Completed-only summary**".to_string()],
+            ..Default::default()
+        }),
+    };
+    let provider = crate::testing::TestProvider::builder()
+        .kind("reasoning-delta-then-completed-part")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let streamed_reasoning = streamed_reasoning.clone();
+            let completed_only_reasoning = completed_only_reasoning.clone();
+            async move {
+                let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::ReasoningDelta(
+                    "**Planning single ".to_string(),
+                ));
+                stream.send(LlmStreamEvent::ReasoningDelta(
+                    "shell command execution**".to_string(),
+                ));
+                stream.send(LlmStreamEvent::Part(streamed_reasoning.clone()));
+                stream.send(LlmStreamEvent::Part(completed_only_reasoning.clone()));
+                stream.send(LlmStreamEvent::Delta("done".to_string()));
+                Ok(LlmResponse {
+                    parts: vec![
+                        streamed_reasoning,
+                        completed_only_reasoning,
+                        LlmOutputPart::Text {
+                            text: "done".to_string(),
+                            response_meta: None,
+                        },
+                    ],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("reasoning-single-publication").open().await?;
+
+    let output = session
+        .turn(TurnInput::text("run one command"))
+        .run()
+        .await?;
+
+    let reasoning = output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reasoning,
+        vec![
+            "**Planning single ",
+            "shell command execution**",
+            "**Completed-only summary**",
+        ],
+        "incremental chunks stay distinct, their completed snapshot is not republished, and a completed-only summary remains visible",
+    );
+
+    let read_view = output
+        .result
+        .state
+        .read_view()
+        .expect("test runtime frame scope resolves");
+    let durable_reasoning = read_view
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| matches!(part.kind, lash_core::PartKind::Reasoning))
+        .map(|part| part.content.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        durable_reasoning,
+        vec![
+            "**Planning single shell command execution**",
+            "**Completed-only summary**",
+        ],
+        "completed reasoning parts remain authoritative durable response state",
+    );
+    Ok(())
+}
+
+#[tokio::test]
 pub(super) async fn session_observation_replays_live_activity_and_commit() -> Result<()> {
     let core = standard_core();
     let session = core.session("session-observation-replay").open().await?;

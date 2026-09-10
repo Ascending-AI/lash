@@ -67,6 +67,10 @@ pub(super) struct LlmStreamState<'a> {
     pub(super) protocol_iteration: usize,
     pub(super) assistant_prose_correlation: &'a mut Option<crate::TurnActivityId>,
     pub(super) reasoning_correlation: &'a mut Option<crate::TurnActivityId>,
+    /// Whether the current provider reasoning item has already published live
+    /// text through `ReasoningDelta`. Its completed `Part(Reasoning)` is then
+    /// reconciliation/replay state, not another visible delta.
+    pub(super) provider_reasoning_delta_open: &'a mut bool,
     pub(super) assistant_prose_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
     pub(super) reasoning_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
     /// Set to `true` by `forward_provider_stream_event` when a plugin
