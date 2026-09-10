@@ -1047,7 +1047,10 @@ async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_s
     let message = error.to_string();
     assert!(message.contains("Unsupported lash process registry schema"));
     assert!(message.contains("supports schema version 32"));
-    assert!(message.contains("delete the process registry database and start fresh"));
+    assert!(message.contains("database reports version 12"));
+    assert!(message.contains(
+        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
+    ));
 }
 
 #[tokio::test]
@@ -1228,7 +1231,10 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
     let message = error.to_string();
     assert!(message.contains("Unsupported lash trigger store schema"));
     assert!(message.contains("supports schema version 8"));
-    assert!(message.contains("delete the trigger store database and start fresh"));
+    assert!(message.contains("database reports version 1"));
+    assert!(message.contains(
+        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
+    ));
 }
 
 #[tokio::test]
