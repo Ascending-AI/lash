@@ -1111,5 +1111,115 @@ class VersionBumpFixtureTest(unittest.TestCase):
             MODULE.select_surfaces(surfaces, ["SCHEMA_VERSION"])
 
 
+BINARY_CONFIG = """
+[[surface]]
+constant = "FIXTURE_VERSION"
+constant_path = "src/lib.rs"
+description = "checked-in binary fixtures"
+
+[[surface.guard]]
+kind = "file"
+paths = ["fixtures/*"]
+must_cover = ["SQLite format 3"]
+"""
+
+
+class BinaryFileGuardTest(unittest.TestCase):
+    """A `file` guard over binary payloads must compare every byte.
+
+    These pin the two ways a lenient decode silently un-guards binary content:
+    `errors="replace"`, which maps every invalid byte to one U+FFFD, and
+    subprocess text mode's universal-newline translation, which folds CR and
+    CRLF into LF. Both make a real change to a durable fixture read as no
+    change, which is worse than the strict-UTF-8 crash they replace.
+    """
+
+    def fixture(self, payload: bytes) -> tuple[FixtureRepository, str]:
+        fixture = FixtureRepository(BINARY_CONFIG)
+        self.addCleanup(fixture.close)
+        fixture.write_file("src/lib.rs", "const FIXTURE_VERSION: u32 = 1;\n")
+        self.write_bytes(fixture, "fixtures/store.db", payload)
+        return fixture, fixture.commit("base fixture")
+
+    @staticmethod
+    def write_bytes(fixture: FixtureRepository, path: str, payload: bytes) -> None:
+        destination = fixture.root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+
+    # A plausible SQLite prologue: the format marker, an invalid UTF-8 byte,
+    # and a lone CR, which universal-newline translation maps onto the very
+    # LF that replaces it below -- so the two payloads decode identically
+    # unless the bytes are compared as bytes.
+    BASE_PAYLOAD = b"SQLite format 3\x00\x8a\x0dpage\x00"
+
+    def test_an_invalid_byte_change_in_a_binary_fixture_needs_a_bump(self) -> None:
+        fixture, base = self.fixture(self.BASE_PAYLOAD)
+        self.write_bytes(
+            fixture,
+            "fixtures/store.db",
+            self.BASE_PAYLOAD.replace(b"\x8a", b"\x81"),
+        )
+        head = fixture.commit("flip one invalid byte")
+
+        result = self.check_result(fixture, base, head)
+
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(result.failures[0].surface.constant, "FIXTURE_VERSION")
+
+    def test_a_cr_to_lf_change_in_a_binary_fixture_needs_a_bump(self) -> None:
+        fixture, base = self.fixture(self.BASE_PAYLOAD)
+        self.write_bytes(
+            fixture,
+            "fixtures/store.db",
+            self.BASE_PAYLOAD.replace(b"\x0d", b"\x0a"),
+        )
+        head = fixture.commit("turn a lone CR into an LF")
+
+        result = self.check_result(fixture, base, head)
+
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(result.failures[0].surface.constant, "FIXTURE_VERSION")
+
+    def test_a_bumped_binary_fixture_change_passes(self) -> None:
+        fixture, base = self.fixture(self.BASE_PAYLOAD)
+        self.write_bytes(
+            fixture,
+            "fixtures/store.db",
+            self.BASE_PAYLOAD.replace(b"\x8a", b"\x81"),
+        )
+        fixture.write_file("src/lib.rs", "const FIXTURE_VERSION: u32 = 2;\n")
+        head = fixture.commit("flip one invalid byte and bump")
+
+        result = self.check_result(fixture, base, head)
+
+        self.assertEqual(result.failures, ())
+        self.assertEqual(result.errors, ())
+
+    def test_an_unchanged_binary_fixture_needs_no_bump(self) -> None:
+        fixture, base = self.fixture(self.BASE_PAYLOAD)
+        fixture.write_file("src/other.rs", "// unrelated\n")
+        head = fixture.commit("unrelated change")
+
+        result = self.check_result(fixture, base, head)
+
+        self.assertEqual(result.failures, ())
+        self.assertEqual(result.errors, ())
+
+    def test_git_output_round_trips_invalid_bytes_and_carriage_returns(self) -> None:
+        fixture, base = self.fixture(self.BASE_PAYLOAD)
+
+        shown = MODULE.git(fixture.root, "show", f"{base}:fixtures/store.db").stdout
+
+        self.assertEqual(
+            shown.encode("utf-8", errors="surrogateescape"), self.BASE_PAYLOAD
+        )
+
+    def check_result(self, fixture: FixtureRepository, base: str, head: str):
+        surfaces = MODULE.load_config(fixture.root / "surface.toml")
+        return MODULE.check_surfaces(fixture.root, base, head, surfaces)
+
+
+
 if __name__ == "__main__":
     unittest.main()
