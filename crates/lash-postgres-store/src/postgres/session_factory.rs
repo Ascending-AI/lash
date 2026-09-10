@@ -745,6 +745,24 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
     }
+
+    async fn reclaim_attachment_condemnation(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+        sqlx::query(
+            "UPDATE lash_attachment_condemnations SET phase = 'reclaimed'
+             WHERE attachment_id = $1 AND phase = 'deleting'",
+        )
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(())
+    }
 }
 
 pub(crate) async fn delete_session_tx(

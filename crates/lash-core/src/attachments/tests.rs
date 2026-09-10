@@ -270,6 +270,13 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
     ) -> Result<(), crate::StoreError> {
         AttachmentRootSet::release_attachment_condemnation(self.factory, id).await
     }
+
+    async fn reclaim_attachment_condemnation(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        AttachmentRootSet::reclaim_attachment_condemnation(self.factory, id).await
+    }
 }
 
 /// Survival proof: the condemn CAS is a *conditional mutation* in the authority

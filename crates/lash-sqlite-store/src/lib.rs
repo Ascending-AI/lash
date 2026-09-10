@@ -1205,6 +1205,16 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
             .await?;
         store.release_attachment_condemnation(id).await
     }
+
+    async fn reclaim_attachment_condemnation(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        let store = self
+            .open_catalog_for_maintenance("condemnation reclaim")
+            .await?;
+        store.reclaim_attachment_condemnation(id).await
+    }
 }
 
 fn warn_process_registry_not_wired(path: &'static str) {

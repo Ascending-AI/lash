@@ -77,8 +77,8 @@ re-reading closes that. The sweep closes it with a clockless CAS state machine i
 the lash-owned root authority — the same durable store the manifest lives in, so
 the two sides meet inside one transaction rather than across two reads.
 
-Per digest the state is `Free`, `Condemned`, or `Deleting`, and every transition
-is a conditional mutation with no timestamp anywhere in it. The writer's `put`
+Per digest the state is `Free`, `Condemned`, `Deleting`, or `Reclaimed`, and every
+transition is a conditional mutation with no timestamp anywhere in it. The writer's `put`
 goes through `AttachmentManifest::begin_attachment_write`, which records the
 write-ahead intent *and* resolves the condemnation in one mutation: it revokes a
 `Condemned` digest and takes it back, and against a `Deleting` digest it records
@@ -86,9 +86,12 @@ nothing and retries, because bytes written into an in-flight delete are lost
 bytes. The sweep condemns before deleting
 (`AttachmentRootSet::condemn_attachment`, refused if any root or intent exists),
 arms the delete (`arm_attachment_delete`, refused if a writer revoked), issues
-the physical delete only for an armed digest, and releases. Whoever loses a CAS
-yields: a writer parks and re-puts after the release, and a sweep that meets a
-peer's condemnation defers the digest to the next sweep. Nothing waits on a
+the physical delete only for an armed digest, then records `Reclaimed` after
+success. `Reclaimed` is the durable byte-absence fact: adoption refuses it, while
+a fresh put clears it with its write-ahead intent before restoring the bytes.
+A failed or abandoned delete still releases to `Free`. Whoever loses a CAS
+yields: a writer parks and retries, and a sweep that meets a peer's condemnation
+defers the digest to the next sweep. Nothing waits on a
 lease or a TTL, and no SQL/blob-store atomicity is needed, because the
 authority's state machine — not the backend — decides whether bytes may die. A
 parked writer does pace its re-acquires with a bounded backoff rather than
@@ -105,10 +108,10 @@ The freshness re-check survives as what it always was, a cheap pre-filter, and i
 now runs while the digest is condemned, which is exactly the window a writer can
 still revoke.
 
-Answering `Fenced` is a claim about five methods across two traits —
+Answering `Fenced` is a claim about six methods across two traits —
 `AttachmentManifest::begin_attachment_write` plus the root set's `fence`,
 `condemn_attachment`, `arm_attachment_delete`, and
-`release_attachment_condemnation` — and a partial implementation is worse than
+`reclaim_attachment_condemnation` and `release_attachment_condemnation` — and a partial implementation is worse than
 none, because it silences the warning while keeping the loss. The sweep
 downgrades its own report to `BestEffort` when a self-declared fenced authority
 cannot condemn, but it cannot detect a missing writer half; that one is on the
@@ -196,9 +199,17 @@ A boundary commit adopting a stored content address also acquires a committed
 manifest root for the receiving session, even if that session never put the
 bytes. Root acquisition and graph publication share one transaction; failure
 leaves no new root. Adoption uses the existing digest fence, revoking an unarmed
-condemnation and refusing a physical delete already in flight. The receiver's
-root then follows the same owner-level retention rule as any other attachment.
-This closes cross-session adoption without changing tables or versions.
+condemnation and refusing a physical delete already in flight. After FIG-2512,
+it also refuses `Reclaimed` with `AttachmentBytesReclaimed`, because that phase
+proves the host blob store no longer holds the bytes. The caller re-reads or
+re-puts through its own facade and retries; the failed boundary publishes no
+manifest root or graph state. The receiver's root then follows the same
+owner-level retention rule as any other attachment.
+
+The `Reclaimed` phase changes the allowed values of durable condemnation rows,
+so PostgreSQL component 83 and SQLite session schema 54 are reject-and-recreate
+boundaries. The phase remains bounded to one row per distinct reclaimed digest
+and is cleared on re-put; no host blob access enters a store transaction.
 
 The schema-free mechanism retains a deleted owner's committed manifest rows
 while any of that owner's graph nodes remain retained by a head, child, or pin.

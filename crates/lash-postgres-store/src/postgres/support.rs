@@ -845,18 +845,29 @@ pub(crate) async fn commit_attachment_refs_tx(
         .collect::<std::collections::BTreeSet<_>>();
     for id in ids {
         crate::attachments::lock_attachment_fence_tx(tx, id.as_str()).await?;
-        let deleting: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM lash_attachment_condemnations
-             WHERE attachment_id = $1 AND phase = 'deleting')",
+        let phase = sqlx::query_scalar::<_, String>(
+            "SELECT phase FROM lash_attachment_condemnations
+             WHERE attachment_id = $1",
         )
         .bind(id.as_str())
-        .fetch_one(&mut **tx)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        if deleting {
-            return Err(StoreError::Backend(format!(
-                "cannot adopt attachment `{id}` while physical deletion is in flight"
-            )));
+        match phase.as_deref() {
+            Some("deleting") => {
+                return Err(StoreError::Backend(format!(
+                    "cannot adopt attachment `{id}` while physical deletion is in flight"
+                )));
+            }
+            Some("reclaimed") => {
+                return Err(StoreError::AttachmentBytesReclaimed { digest: id.clone() });
+            }
+            None | Some("condemned") => {}
+            Some(phase) => {
+                return Err(StoreError::Backend(format!(
+                    "attachment `{id}` has unknown condemnation phase `{phase}`"
+                )));
+            }
         }
         sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1 AND phase = 'condemned'")
             .bind(id.as_str()).execute(&mut **tx).await.map_err(store_sqlx_error)?;

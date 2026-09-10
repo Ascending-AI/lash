@@ -110,7 +110,11 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
         1,
         "last receiver deletion releases the root"
     );
-    adoption_fence_and_rollback(f).await;
+    adoption_fence_and_rollback(f.clone()).await;
+    adoption_after_full_gc_is_refused(f.clone()).await;
+    reput_after_full_gc_allows_adoption(f.clone()).await;
+    sweep_adoption_race(f.clone()).await;
+    sweep_reput_race(f).await;
 }
 
 async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
@@ -171,6 +175,16 @@ async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
         ids.iter().all(|id| !roots.contains(id)),
         "failed batch leaves no attachment root"
     );
+    let repeated = store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect_err("boundary rollback must leave the armed delete in place");
+    assert!(
+        repeated
+            .to_string()
+            .contains("physical deletion is in flight"),
+        "armed deletion phase was lost across rollback: {repeated}"
+    );
     assert_eq!(
         f.arm_attachment_delete(&ids[0]).await.unwrap(),
         AttachmentDeleteArming::Armed,
@@ -203,4 +217,257 @@ async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
     assert_eq!(sweep(&f, &bytes).await, 0);
     f.delete_session(&session_id).await.unwrap();
     assert_eq!(sweep(&f, &bytes).await, 2);
+}
+
+async fn adoption_after_full_gc_is_refused(f: Arc<dyn SessionStoreFactory>) {
+    let namespace = uuid::Uuid::new_v4();
+    let owner_id = format!("reclaimed-adoption-owner-{namespace}");
+    let receiver_id = format!("reclaimed-adoption-receiver-{namespace}");
+    let payload = [owner_id.as_bytes(), &[251]].concat();
+    let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let owner = create(&f, &owner_id).await;
+    let receiver = create(&f, &receiver_id).await;
+    let reference = SessionAttachmentStore::new(bytes.clone(), owner.clone(), &owner_id)
+        .put(
+            payload,
+            AttachmentCreateMeta::new(MediaType::parse("image/png").unwrap(), None, None),
+        )
+        .await
+        .unwrap();
+    let mut owner_state = state(&owner_id);
+    with_image(&mut owner_state, &reference);
+    let mut owner_commit = RuntimeCommit::persisted_state_for_test(&owner_state, &[]);
+    owner_commit.committed_attachment_ids = vec![reference.id.clone()];
+    owner.commit_runtime_state(owner_commit).await.unwrap();
+
+    let reader = SessionAttachmentStore::new(bytes.clone(), receiver.clone(), &receiver_id);
+    assert!(reader.get(&reference.id).await.is_ok());
+    f.delete_session(&owner_id).await.unwrap();
+    f.reclaim_retained_evidence(RetentionBound {
+        committed_before_epoch_ms: u64::MAX,
+    })
+    .await
+    .unwrap();
+    assert_eq!(sweep(&f, &bytes).await, 1);
+    assert!(matches!(
+        reader.get(&reference.id).await,
+        Err(AttachmentStoreError::NotFound(_))
+    ));
+
+    let snapshot = |loaded: Option<lash_core::store::PersistedSessionRead>| {
+        loaded.map(|session| {
+            (
+                session.head_revision,
+                session.checkpoint_ref,
+                serde_json::to_value(session.graph).unwrap(),
+            )
+        })
+    };
+    let before = snapshot(receiver.load_session().await.unwrap());
+    let mut receiver_state = state(&receiver_id);
+    with_image(&mut receiver_state, &reference);
+    let mut receiver_commit = RuntimeCommit::persisted_state_for_test(&receiver_state, &[]);
+    receiver_commit.committed_attachment_ids = vec![reference.id.clone()];
+    let error = receiver
+        .commit_runtime_state(receiver_commit)
+        .await
+        .expect_err("reclaimed bytes must refuse adoption");
+    assert!(matches!(
+        error,
+        StoreError::AttachmentBytesReclaimed { ref digest } if digest == &reference.id
+    ));
+    assert_eq!(
+        snapshot(receiver.load_session().await.unwrap()),
+        before,
+        "typed refusal publishes no graph or head state"
+    );
+    assert!(
+        !receiver.list_all_refs().unwrap().contains(&reference.id),
+        "typed refusal publishes no manifest row"
+    );
+    assert!(
+        !f.has_live_attachment_ref(&reference.id, u64::MAX)
+            .await
+            .unwrap()
+    );
+}
+
+async fn reput_after_full_gc_allows_adoption(f: Arc<dyn SessionStoreFactory>) {
+    let namespace = uuid::Uuid::new_v4();
+    let owner_id = format!("reput-owner-{namespace}");
+    let receiver_id = format!("reput-receiver-{namespace}");
+    let payload = [owner_id.as_bytes(), &[252]].concat();
+    let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let owner = create(&f, &owner_id).await;
+    let receiver = create(&f, &receiver_id).await;
+    let scoped_owner = SessionAttachmentStore::new(bytes.clone(), owner.clone(), &owner_id);
+    let reference = scoped_owner
+        .put(
+            payload.clone(),
+            AttachmentCreateMeta::new(MediaType::parse("image/png").unwrap(), None, None),
+        )
+        .await
+        .unwrap();
+    let mut owner_state = state(&owner_id);
+    with_image(&mut owner_state, &reference);
+    let mut owner_commit = RuntimeCommit::persisted_state_for_test(&owner_state, &[]);
+    owner_commit.committed_attachment_ids = vec![reference.id.clone()];
+    owner.commit_runtime_state(owner_commit).await.unwrap();
+    f.delete_session(&owner_id).await.unwrap();
+    f.reclaim_retained_evidence(RetentionBound {
+        committed_before_epoch_ms: u64::MAX,
+    })
+    .await
+    .unwrap();
+    assert_eq!(sweep(&f, &bytes).await, 1);
+
+    let scoped_receiver =
+        SessionAttachmentStore::new(bytes.clone(), receiver.clone(), &receiver_id);
+    let restored = scoped_receiver
+        .put(
+            payload,
+            AttachmentCreateMeta::new(MediaType::parse("image/png").unwrap(), None, None),
+        )
+        .await
+        .expect("a fresh put clears the reclaimed fact");
+    assert_eq!(restored.id, reference.id);
+    let mut receiver_state = state(&receiver_id);
+    with_image(&mut receiver_state, &restored);
+    let mut receiver_commit = RuntimeCommit::persisted_state_for_test(&receiver_state, &[]);
+    receiver_commit.committed_attachment_ids = vec![restored.id.clone()];
+    receiver
+        .commit_runtime_state(receiver_commit)
+        .await
+        .expect("adoption succeeds after re-put");
+    assert!(
+        f.has_live_attachment_ref(&restored.id, u64::MAX)
+            .await
+            .unwrap()
+    );
+    assert!(scoped_receiver.get(&restored.id).await.is_ok());
+    assert_eq!(sweep(&f, &bytes).await, 0);
+}
+
+const RACE_SCHEDULES: usize = 20;
+
+async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>) {
+    for schedule in 0..RACE_SCHEDULES {
+        let namespace = uuid::Uuid::new_v4();
+        let owner_id = format!("adoption-race-owner-{schedule}-{namespace}");
+        let receiver_id = format!("adoption-race-receiver-{schedule}-{namespace}");
+        let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+        let owner = create(&f, &owner_id).await;
+        let receiver = create(&f, &receiver_id).await;
+        let reference = put(owner.clone(), bytes.clone(), &owner_id, schedule as u8).await;
+        let mut owner_state = state(&owner_id);
+        with_image(&mut owner_state, &reference);
+        let mut owner_commit = RuntimeCommit::persisted_state_for_test(&owner_state, &[]);
+        owner_commit.committed_attachment_ids = vec![reference.id.clone()];
+        owner.commit_runtime_state(owner_commit).await.unwrap();
+        f.delete_session(&owner_id).await.unwrap();
+        f.reclaim_retained_evidence(RetentionBound {
+            committed_before_epoch_ms: u64::MAX,
+        })
+        .await
+        .unwrap();
+
+        let mut receiver_state = state(&receiver_id);
+        with_image(&mut receiver_state, &reference);
+        let mut receiver_commit = RuntimeCommit::persisted_state_for_test(&receiver_state, &[]);
+        receiver_commit.committed_attachment_ids = vec![reference.id.clone()];
+        let (reclaimed, adopted) = if schedule % 2 == 0 {
+            tokio::join!(
+                sweep(&f, &bytes),
+                receiver.commit_runtime_state(receiver_commit)
+            )
+        } else {
+            let (adopted, reclaimed) = tokio::join!(
+                receiver.commit_runtime_state(receiver_commit),
+                sweep(&f, &bytes)
+            );
+            (reclaimed, adopted)
+        };
+        let rooted = f
+            .has_live_attachment_ref(&reference.id, u64::MAX)
+            .await
+            .unwrap();
+        let present = bytes.get(&reference.id).await.is_ok();
+        assert!(
+            !rooted || present,
+            "schedule {schedule}: sweep/adoption race rooted missing bytes"
+        );
+        match adopted {
+            Ok(_) => {
+                assert!(
+                    rooted && present,
+                    "schedule {schedule}: successful adoption lost bytes"
+                );
+                assert_eq!(reclaimed, 0);
+            }
+            Err(StoreError::AttachmentBytesReclaimed { digest }) => {
+                assert_eq!(digest, reference.id);
+                assert!(!rooted && !present);
+                assert_eq!(reclaimed, 1);
+            }
+            Err(error) => {
+                assert!(
+                    error.to_string().contains("physical deletion is in flight"),
+                    "schedule {schedule}: unexpected adoption error: {error}"
+                );
+                assert!(!rooted);
+                assert_eq!(reclaimed, 1);
+            }
+        }
+    }
+}
+
+async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>) {
+    for schedule in 0..RACE_SCHEDULES {
+        let namespace = uuid::Uuid::new_v4();
+        let owner_id = format!("reput-race-owner-{schedule}-{namespace}");
+        let writer_id = format!("reput-race-writer-{schedule}-{namespace}");
+        let payload = [owner_id.as_bytes(), &[schedule as u8]].concat();
+        let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+        let owner = create(&f, &owner_id).await;
+        let writer = create(&f, &writer_id).await;
+        let reference = SessionAttachmentStore::new(bytes.clone(), owner.clone(), &owner_id)
+            .put(
+                payload.clone(),
+                AttachmentCreateMeta::new(MediaType::parse("image/png").unwrap(), None, None),
+            )
+            .await
+            .unwrap();
+        let mut owner_state = state(&owner_id);
+        with_image(&mut owner_state, &reference);
+        let mut owner_commit = RuntimeCommit::persisted_state_for_test(&owner_state, &[]);
+        owner_commit.committed_attachment_ids = vec![reference.id.clone()];
+        owner.commit_runtime_state(owner_commit).await.unwrap();
+        f.delete_session(&owner_id).await.unwrap();
+        f.reclaim_retained_evidence(RetentionBound {
+            committed_before_epoch_ms: u64::MAX,
+        })
+        .await
+        .unwrap();
+
+        let scoped_writer = SessionAttachmentStore::new(bytes.clone(), writer, &writer_id);
+        let put = scoped_writer.put(
+            payload,
+            AttachmentCreateMeta::new(MediaType::parse("image/png").unwrap(), None, None),
+        );
+        let (_reclaimed, restored) = if schedule % 2 == 0 {
+            tokio::join!(sweep(&f, &bytes), put)
+        } else {
+            let (restored, reclaimed) = tokio::join!(put, sweep(&f, &bytes));
+            (reclaimed, restored)
+        };
+        let restored = restored.expect("re-put wins or retries after the sweep");
+        assert_eq!(restored.id, reference.id);
+        let rooted = f.has_live_attachment_ref(&restored.id, 0).await.unwrap();
+        let present = scoped_writer.get(&restored.id).await.is_ok();
+        assert!(
+            !rooted || present,
+            "schedule {schedule}: sweep/re-put race rooted missing bytes; \
+             rooted={rooted}, present={present}"
+        );
+    }
 }

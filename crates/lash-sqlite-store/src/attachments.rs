@@ -50,18 +50,29 @@ pub(crate) fn commit_attachment_refs_conn(
     now: i64,
 ) -> Result<(), StoreError> {
     for id in attachment_ids {
-        let deleting: bool = tx
+        let phase = tx
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM attachment_condemnations
-             WHERE attachment_id = ?1 AND phase = 'deleting')",
+                "SELECT phase FROM attachment_condemnations WHERE attachment_id = ?1",
                 params![id.as_str()],
-                |row| row.get(0),
+                |row| row.get::<_, String>(0),
             )
+            .optional()
             .map_err(sqlite_error)?;
-        if deleting {
-            return Err(StoreError::Backend(format!(
-                "cannot adopt attachment `{id}` while physical deletion is in flight"
-            )));
+        match phase.as_deref() {
+            Some("deleting") => {
+                return Err(StoreError::Backend(format!(
+                    "cannot adopt attachment `{id}` while physical deletion is in flight"
+                )));
+            }
+            Some("reclaimed") => {
+                return Err(StoreError::AttachmentBytesReclaimed { digest: id.clone() });
+            }
+            None | Some("condemned") => {}
+            Some(phase) => {
+                return Err(StoreError::Backend(format!(
+                    "attachment `{id}` has unknown condemnation phase `{phase}`"
+                )));
+            }
         }
         tx.execute(
             "DELETE FROM attachment_condemnations WHERE attachment_id = ?1 AND phase = 'condemned'",
@@ -552,6 +563,25 @@ impl Store {
             .map_err(sqlite_error)?;
         Ok(())
     }
+
+    /// `Deleting -> Reclaimed` after the physical delete succeeds.
+    pub(crate) async fn reclaim_attachment_condemnation(
+        &self,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), StoreError> {
+        let attachment_id = attachment_id.as_str().to_string();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "UPDATE attachment_condemnations SET phase = 'reclaimed'
+                     WHERE attachment_id = ?1 AND phase = 'deleting'",
+                    params![attachment_id],
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
 }
 
 impl AttachmentManifest for Store {
@@ -567,6 +597,37 @@ impl AttachmentManifest for Store {
                 .write_flow(move |tx| {
                     let outcome: Result<(), StoreError> = (|| {
                         crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
+                        let phase = tx
+                            .query_row(
+                                "SELECT phase FROM attachment_condemnations
+                                 WHERE attachment_id = ?1",
+                                params![attachment_id],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        match phase.as_deref() {
+                            Some("deleting") => {
+                                return Err(StoreError::Backend(format!(
+                                    "cannot record attachment `{attachment_id}` while physical deletion is in flight"
+                                )));
+                            }
+                            Some("condemned" | "reclaimed") => {
+                                tx.execute(
+                                    "DELETE FROM attachment_condemnations
+                                     WHERE attachment_id = ?1
+                                       AND phase IN ('condemned', 'reclaimed')",
+                                    params![attachment_id],
+                                )
+                                .map_err(sqlite_error)?;
+                            }
+                            None => {}
+                            Some(phase) => {
+                                return Err(StoreError::Backend(format!(
+                                    "attachment `{attachment_id}` has unknown condemnation phase `{phase}`"
+                                )));
+                            }
+                        }
                         // Re-recording refreshes the timestamp and durable owner
                         // together. GC later composes this age with owner-death proof.
                         tx.execute(
@@ -636,13 +697,15 @@ impl AttachmentManifest for Store {
                             }
                             // Take the digest back before the sweeper can arm.
                             // The predicate is repeated on the DELETE so this
-                            // can only ever remove a still-condemned row, the
-                            // same belt the PostgreSQL writer wears.
-                            Some(_) => {
+                            // can only ever remove a revocable condemnation or
+                            // a completed-delete fact, the same belt the
+                            // PostgreSQL writer wears.
+                            Some("condemned" | "reclaimed") => {
                                 let revoked = tx
                                     .execute(
                                         "DELETE FROM attachment_condemnations
-                                         WHERE attachment_id = ?1 AND phase = 'condemned'",
+                                         WHERE attachment_id = ?1
+                                           AND phase IN ('condemned', 'reclaimed')",
                                         params![attachment_id],
                                     )
                                     .map_err(sqlite_error)?;
@@ -653,6 +716,11 @@ impl AttachmentManifest for Store {
                                 }
                             }
                             None => {}
+                            Some(phase) => {
+                                return Err(StoreError::Backend(format!(
+                                    "attachment `{attachment_id}` has unknown condemnation phase `{phase}`"
+                                )));
+                            }
                         }
                         tx.execute(
                             "INSERT INTO attachment_manifest

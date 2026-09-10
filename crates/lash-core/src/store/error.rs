@@ -119,6 +119,13 @@ pub enum StoreError {
     UnsupportedStoreOperation { operation: &'static str },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]
     HeadRevisionConflict { expected: u64, actual: u64 },
+    /// Stored-reference adoption found the durable byte-absence fact left by a
+    /// completed attachment GC delete. The boundary commit publishes nothing;
+    /// the caller may re-put the digest and retry.
+    #[error(
+        "attachment `{digest}` bytes were reclaimed; re-put the attachment before retrying the commit"
+    )]
+    AttachmentBytesReclaimed { digest: crate::AttachmentId },
     #[error(
         "runtime operation `{turn_id}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
@@ -532,6 +539,7 @@ impl StoreError {
             Self::SessionDeleted { .. } => "SessionDeleted",
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
+            Self::AttachmentBytesReclaimed { .. } => "AttachmentBytesReclaimed",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
             Self::RuntimeCommitLeaseAuthorityConflict { .. } => {
                 "RuntimeCommitLeaseAuthorityConflict"

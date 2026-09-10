@@ -137,6 +137,41 @@ impl AttachmentManifest for PostgresSessionStore {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
                 .await?;
+            lock_attachment_fence_tx(&mut tx, intent.attachment_id.as_str()).await?;
+            let phase = sqlx::query_scalar::<_, String>(
+                "SELECT phase FROM lash_attachment_condemnations
+                 WHERE attachment_id = $1",
+            )
+            .bind(intent.attachment_id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            match phase.as_deref() {
+                Some("deleting") => {
+                    return Err(StoreError::Backend(format!(
+                        "cannot record attachment `{}` while physical deletion is in flight",
+                        intent.attachment_id
+                    )));
+                }
+                Some("condemned" | "reclaimed") => {
+                    sqlx::query(
+                        "DELETE FROM lash_attachment_condemnations
+                         WHERE attachment_id = $1
+                           AND phase IN ('condemned', 'reclaimed')",
+                    )
+                    .bind(intent.attachment_id.as_str())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+                }
+                None => {}
+                Some(phase) => {
+                    return Err(StoreError::Backend(format!(
+                        "attachment `{}` has unknown condemnation phase `{phase}`",
+                        intent.attachment_id
+                    )));
+                }
+            }
             // Re-recording refreshes the timestamp and durable owner together.
             // The GC statement later composes this age with owner-death proof.
             sqlx::query(
@@ -201,15 +236,15 @@ impl AttachmentManifest for PostgresSessionStore {
                     return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
                 }
                 // Take the digest back before the sweeper can arm its delete.
-                // The predicate is repeated on the DELETE as a second belt: even
-                // if the phase read above were ever to observe a stale
-                // `condemned`, this removes only a row that is still condemned,
-                // and zero rows means the delete was armed underneath us — park
-                // rather than erase a `deleting` row.
-                Some(_) => {
+                // The predicate is repeated on the DELETE as a second belt: it
+                // removes only a revocable condemnation or a completed-delete
+                // fact. Zero rows means a condemned delete was armed underneath
+                // us, so park rather than erase a `deleting` row.
+                Some("condemned" | "reclaimed") => {
                     let revoked = sqlx::query(
                         "DELETE FROM lash_attachment_condemnations
-                         WHERE attachment_id = $1 AND phase = 'condemned'",
+                         WHERE attachment_id = $1
+                           AND phase IN ('condemned', 'reclaimed')",
                     )
                     .bind(intent.attachment_id.as_str())
                     .execute(&mut *tx)
@@ -222,6 +257,12 @@ impl AttachmentManifest for PostgresSessionStore {
                     }
                 }
                 None => {}
+                Some(phase) => {
+                    return Err(StoreError::Backend(format!(
+                        "attachment `{}` has unknown condemnation phase `{phase}`",
+                        intent.attachment_id
+                    )));
+                }
             }
             sqlx::query(
                 "INSERT INTO lash_attachment_manifest (

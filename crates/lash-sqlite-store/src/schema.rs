@@ -378,7 +378,7 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
 -- `lash_core::AttachmentCondemnation`), never an expiry.
 CREATE TABLE IF NOT EXISTS attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
-    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))
+    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))
 );
 
 CREATE TABLE IF NOT EXISTS artifact_refs (
@@ -557,7 +557,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// (`usage_deltas.usage_disposition_json`, FIG-2765). Version 52 rows carry no
 /// disposition at all and their unreported holes cannot be reconstructed, so
 /// existing catalogs are rejected rather than migrated with a defaulted column.
-pub(crate) const SCHEMA_VERSION: i32 = 53;
+/// Version 54 preserves successful attachment deletion as the terminal
+/// `reclaimed` phase so adoption can refuse roots whose bytes are absent.
+pub(crate) const SCHEMA_VERSION: i32 = 54;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

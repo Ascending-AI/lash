@@ -35,7 +35,7 @@ SET default_table_access_method = heap;
 CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
     attachment_id text NOT NULL,
     phase text NOT NULL,
-    CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text])))
+    CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text, 'reclaimed'::text])))
 );
 
 
@@ -965,7 +965,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 82);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 83);
 
 
 --
