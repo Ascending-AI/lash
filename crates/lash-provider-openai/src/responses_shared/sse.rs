@@ -81,34 +81,38 @@ pub fn process_sse_event(
                             Some("function_call") => {
                                 let _ = state.update_tool_call_from_item(item, output_index);
                             }
-                            Some("reasoning") => state.begin_reasoning_part(output_index),
+                            Some("reasoning") => state.begin_reasoning_item(
+                                output_index,
+                                item.get("id").and_then(Value::as_str),
+                            ),
                             Some(_) => state.streamed_item_content_received = true,
                             None => {}
                         }
                     }
                 }
-                ResponsesStreamEvent::ResponseReasoningSummaryPartAdded => {
-                    state.begin_reasoning_part(output_index)
-                }
+                ResponsesStreamEvent::ResponseReasoningSummaryPartAdded => state
+                    .begin_reasoning_part(
+                        output_index,
+                        event.get("item_id").and_then(Value::as_str),
+                    ),
                 ResponsesStreamEvent::ResponseReasoningSummaryTextDelta => {
                     if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
-                        state.push_reasoning_delta(delta, output_index);
+                        state.push_reasoning_delta(
+                            delta,
+                            output_index,
+                            event.get("item_id").and_then(Value::as_str),
+                        );
                     }
                 }
                 ResponsesStreamEvent::ResponseReasoningSummaryTextDone => {
                     // The `text` field is the full text for the current part; reconcile
                     // by appending the missing suffix if our accumulator lags behind.
-                    if let Some(text) = event.get("text").and_then(|v| v.as_str())
-                        && let Some(index) = state.current_reasoning_part
-                        && let Some(LlmOutputPart::Reasoning { text: existing, .. }) =
-                            state.parts.get(index)
-                    {
-                        let existing = existing.clone();
-                        if text != existing
-                            && let Some(suffix) = text.strip_prefix(existing.as_str())
-                        {
-                            state.push_reasoning_delta(suffix, output_index);
-                        }
+                    if let Some(text) = event.get("text").and_then(|v| v.as_str()) {
+                        state.reconcile_reasoning_event(
+                            text,
+                            output_index,
+                            event.get("item_id").and_then(Value::as_str),
+                        );
                     }
                 }
                 ResponsesStreamEvent::ResponseReasoningSummaryPartDone => {
@@ -116,12 +120,20 @@ pub fn process_sse_event(
                 }
                 ResponsesStreamEvent::ResponseOutputTextDelta => {
                     if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
-                        state.push_text_delta(delta, output_index);
+                        state.push_text_delta(
+                            delta,
+                            output_index,
+                            event.get("item_id").and_then(|v| v.as_str()),
+                        );
                     }
                 }
                 ResponsesStreamEvent::ResponseOutputTextDone => {
                     if let Some(text) = event.get("text").and_then(|v| v.as_str()) {
-                        state.reconcile_text_event(text, output_index);
+                        state.reconcile_text_event(
+                            text,
+                            output_index,
+                            event.get("item_id").and_then(|v| v.as_str()),
+                        );
                     }
                 }
                 ResponsesStreamEvent::ResponseFunctionCallArgumentsDelta => {
