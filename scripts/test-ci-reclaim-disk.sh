@@ -56,7 +56,16 @@ RM
   cat >"$bin_dir/df" <<'DF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' 'Filesystem      Size  Used Avail Use% Mounted on' 'mock            1G   1M   1G   1% /'
+if [[ "${CI_RECLAIM_MOCK_DF_STATUS:-0}" != 0 ]]; then
+  exit "${CI_RECLAIM_MOCK_DF_STATUS}"
+fi
+if [[ " $* " == *" -Pk "* ]]; then
+  printf '%s\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on' \
+    "mock 152043520 1 ${CI_RECLAIM_MOCK_AVAILABLE_KIB} 1% /"
+else
+  printf '%s\n' 'Filesystem Size Used Avail Use% Mounted on' \
+    "mock 145G 1G ${CI_RECLAIM_MOCK_AVAILABLE_KIB}K 1% /"
+fi
 DF
 
   cat >"$bin_dir/docker" <<'DOCKER'
@@ -85,6 +94,7 @@ DOCKER
 
 run_case() {
   local name="$1" expected_status="$2" docker_status="$3" rm_status="$4"
+  local available_kib="$5" df_status="$6" expect_reclaim="$7"
   local bin_dir="$test_tmp/$name/bin"
   local state_dir="$test_tmp/$name/state" output="$test_tmp/$name/output.log"
   local log_file="$test_tmp/$name/commands.log" status
@@ -97,8 +107,28 @@ run_case() {
     CI_RECLAIM_MOCK_LOG="$log_file" \
     CI_RECLAIM_MOCK_DOCKER_STATUS="$docker_status" \
     CI_RECLAIM_MOCK_RM_STATUS="$rm_status" \
+    CI_RECLAIM_MOCK_AVAILABLE_KIB="$available_kib" \
+    CI_RECLAIM_MOCK_DF_STATUS="$df_status" \
   setsid bash "$script" >"$output" 2>&1 &
   active_pid=$!
+
+  if [[ "$expect_reclaim" != 1 ]]; then
+    wait_for_exit "$active_pid" \
+      || fail "$name: reclaim script did not take the ample-capacity fast path"
+    set +e
+    wait "$active_pid"
+    status=$?
+    set -e
+    active_pid=""
+    [[ "$status" -eq "$expected_status" ]] \
+      || fail "$name: reclaim script exited $status, expected $expected_status\n$(sed -n '1,120p' "$output")"
+    grep -Fq 'runner disk reclaim skipped: available capacity meets the floor' "$output" \
+      || fail "$name: skip decision was not reported\n$(sed -n '1,120p' "$output")"
+    [[ ! -e "$log_file" ]] \
+      || fail "$name: cleanup commands ran despite ample capacity\n$(sed -n '1,120p' "$log_file")"
+    printf '%s case passed (status %s)\n' "$name" "$status"
+    return
+  fi
 
   wait_for_file "$state_dir/prune-started" \
     || fail "$name: mock prune did not start within ${wait_seconds}s\n$(sed -n '1,120p' "$output")"
@@ -141,6 +171,8 @@ run_case() {
   printf '%s case passed (status %s)\n' "$name" "$status"
 }
 
-run_case successful-prune 0 0 0
-run_case failed-cleanup 0 17 23
+run_case ample-capacity 0 0 0 90177536 0 0
+run_case low-capacity 0 0 0 14680064 0 1
+run_case failed-capacity-probe 0 0 0 0 19 1
+run_case failed-cleanup 0 17 23 14680064 0 1
 printf '%s\n' 'ci reclaim disk checks passed'

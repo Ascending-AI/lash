@@ -27,7 +27,7 @@
 # the slots stay free for the rest of the workspace.
 #
 # Scope note, so the group is not mistaken for a CI win it does not currently
-# deliver: every nextest call site today runs service-less (the shards in
+# deliver: every nextest call site today runs service-less (the workspace job in
 # `.github/workflows/ci.yml` and `scripts/push-gate.sh`, which unsets
 # `LASH_POSTGRES_DATABASE_URL` outright), so these tests all self-skip and the
 # group does nothing there. The jobs that do have services — `Test Postgres
@@ -94,9 +94,9 @@ test-group = "docker-services"
 # these tests is a 3-9 minute serial run (the fault-matrix chunks fork real
 # `cargo` invocations; the lash-sim runner/minimizer cases replay generated
 # fixtures), so a single one of them set the wall-clock of every per-push
-# shard. The trybuild `ui` binary is excluded WITHOUT a heavy-side run: the
+# ordinary suite. The trybuild `ui` binary is excluded WITHOUT a heavy-side run: the
 # `Seal-test the API surface` step in the test-doc job already runs the same
-# suite on every push, so a shard-side run was a second, slower report of the
+# suite on every push, so a workspace-side run would be a second report of the
 # same defect. Keep this expression and the `ci-heavy` default-filter exact
 # complements over the heavy set.
 default-filter = '''
@@ -110,8 +110,8 @@ default-filter = '''
     + (package(lash-runtime) & binary(ui))
   )
 '''
-# One failing test must never hide the rest of the shard (the alpha.82 lesson,
-# recorded at the shard invocation in ci.yml). The shards pass `--no-fail-fast`
+# One failing test must never hide the rest of the suite (the alpha.82 lesson,
+# recorded at the workspace invocation in ci.yml). The job passes `--no-fail-fast`
 # explicitly and keep doing so; this makes the same answer the profile's
 # default, so a CI nextest call that forgets the flag still reports in full.
 fail-fast = false
@@ -123,7 +123,7 @@ flaky-result = "fail"
 
 # CI bounds an ordinary test at five minutes: the baseline P99 was 1.209s and
 # the slowest completed non-special test was 42.729s. A slow test is still a
-# failure when this bound is reached; termination only releases the shard.
+# failure when this bound is reached; termination releases the workspace job.
 # Keep the local default report-only so developers retain the full diagnostic
 # run for tests whose cost depends on a warm or service-backed workspace.
 slow-timeout = { period = "300s", terminate-after = 1 }
@@ -181,15 +181,3 @@ filter = '''
 '''
 priority = 98
 slow-timeout = { period = "600s", terminate-after = 1 }
-
-# Cold-process recovery helpers are Cargo examples so their conformance
-# dependency stays dev-only. Preserve both executables in relocated archives.
-[[profile.default.archive.include]]
-path = "debug/examples/sqlite-await-event-helper"
-relative-to = "target"
-on-missing = "error"
-
-[[profile.default.archive.include]]
-path = "debug/examples/postgres-await-event-helper"
-relative-to = "target"
-on-missing = "error"

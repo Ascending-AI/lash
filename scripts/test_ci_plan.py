@@ -10,7 +10,7 @@ import ci_plan
 
 
 CI_WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
-AGGREGATOR_ALLOWLIST = {"plan", "ci-conclusion", "linux-release-cache"}
+AGGREGATOR_ALLOWLIST = {"plan", "ci-conclusion"}
 
 
 def unregistered_ci_jobs(workflow_source: str) -> set[str]:
@@ -197,7 +197,7 @@ class ConclusionTests(unittest.TestCase):
         for result in ("failure", "cancelled"):
             with self.subTest(result=result):
                 needs = successful_needs()
-                needs["test-shard"]["result"] = result
+                needs["workspace-tests"]["result"] = result
                 self.assertTrue(ci_plan.evaluate_conclusion(needs))
 
     def test_planned_skip_succeeds(self) -> None:
@@ -209,14 +209,14 @@ class ConclusionTests(unittest.TestCase):
 
     def test_wrongly_skipped_job_fails(self) -> None:
         needs = successful_needs()
-        needs["test-shard"]["result"] = "skipped"
+        needs["workspace-tests"]["result"] = "skipped"
         problems = ci_plan.evaluate_conclusion(needs)
         self.assertTrue(any("required it to run" in problem for problem in problems))
 
     def test_inconsistent_classifier_output_fails(self) -> None:
         needs = successful_needs()
         needs["plan"]["outputs"].update({"docs_only": "false", "fail_open": "false", "rust": "false"})
-        needs["test-shard"]["result"] = "skipped"
+        needs["workspace-tests"]["result"] = "skipped"
         problems = ci_plan.evaluate_conclusion(needs)
         self.assertTrue(any("wrongly skipped" in problem for problem in problems))
 
@@ -248,7 +248,7 @@ class ProducerConclusionTests(unittest.TestCase):
         return ci_plan.evaluate_conclusion(needs, event, "refs/heads/main", enabled)
 
     def assert_producer_rejected(self, event, result):
-        for producer in ("nextest-archive", "worker-artifacts"):
+        for producer in ("worker-artifacts",):
             with self.subTest(producer=producer):
                 needs = self.event_needs(event)
                 needs[producer]["result"] = result
@@ -283,7 +283,7 @@ class ProducerConclusionTests(unittest.TestCase):
 
     def test_skipped_consumer_cascade_rejected(self):
         for event in ("push", "workflow_dispatch", "pull_request"):
-            for consumer in ("test-shard", "restate-postgres-workers", "restate-postgres-workers-summary"):
+            for consumer in ("workspace-tests", "restate-postgres-workers", "restate-postgres-workers-summary"):
                 with self.subTest(event=event, consumer=consumer):
                     needs = self.event_needs(event)
                     needs[consumer]["result"] = "skipped"
