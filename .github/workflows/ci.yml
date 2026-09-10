@@ -8,9 +8,10 @@ name: CI
 # green commit on main. Ordinary merges never tag or publish.
 
 on:
-  # Manual re-validation for when GitHub drops a push event (merge commit
-  # d70ce7ea got zero check suites). Recovery-only: no inputs, never invoked
-  # from another workflow, and unrelated to the removed pass-2 bump chain.
+  # Manual full-profile validation serves release certification and recovery
+  # when GitHub drops an automatic event (merge commit d70ce7ea got zero check
+  # suites). It has no inputs, is never invoked from another workflow, and is
+  # unrelated to the removed pass-2 bump chain.
   #
   # Don't drive this recovery by hand: `scripts/ci_ensure_run.sh <branch>
   # <head-sha>` waits a bounded window for the run GitHub should have made,
@@ -18,8 +19,9 @@ on:
   # to a conclusion. A dispatch run is NOT equivalent to the run it replaces —
   # the event-conditional `Check versioned surface bumps` step below does not
   # run, and it builds refs/heads/<branch> rather than the PR merge tree — so
-  # the script exits 3,
-  # not 0, on a green dispatch. Callers opt in with --accept-dispatch-run.
+  # the script exits 3, not 0, on a green dispatch. Callers opt in with
+  # --accept-dispatch-run. Release certification instead relies on the full
+  # dispatch profile and the exact-SHA gate in release.yml.
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -36,9 +38,9 @@ on:
 # dispatch of the same commit carries `refs/heads/<branch>`, so keying on
 # `github.ref` put them in different groups and ran the whole board twice over an
 # identical tree. That duplication was the single largest line in the CI bill
-# (54% of branch runner-minutes). Now a dispatch supersedes the pull-request run
-# of the same branch instead of doubling it, and the dispatch trigger itself
-# stays exactly as it was — still the recovery path for a dropped push event.
+# (54% of branch runner-minutes). A dispatch supersedes a pull-request run from
+# the same branch instead of doubling it; the trigger supplies both the recovery
+# path for a dropped event and the full profile required for release evidence.
 #
 # The key is not *only* the branch name, because a branch name is not unique
 # across repositories: a fork's pull request from a branch literally named `main`
@@ -48,14 +50,15 @@ on:
 # `git check-ref-format` forbids in a ref name. That is what makes them
 # unforgeable: no branch anyone can push, here or in a fork, can produce one.
 #
-# * `push` (main only) keys on `trunk:push`, so a trunk run shares a group with
-#   nothing but another trunk push. Trunk runs are never cancelled: release.yml
-#   refuses to release a commit without its own successful main CI run, so a
-#   cancelled trunk run would strand that commit as unreleasable.
-# * a dispatch on main keys on `trunk:dispatch` for the same reason — it is the
-#   recovery path that produces exactly that release evidence. The cost is that
-#   it no longer queues behind a live trunk push run but runs beside it; two
-#   validations of main are wasteful, never wrong.
+# * `push` (main only) keys on `trunk:push`, so every newer automatic trunk run
+#   cancels the older queued or active one. Cancellation is visible
+#   supersession, not successful CI evidence; release.yml still requires its
+#   own exact-target full-profile dispatch.
+# * a dispatch on main keys on `trunk:dispatch`, so release certification for
+#   the current main tip cannot cancel or be cancelled by automatic pushes. An
+#   older main commit is certified from a temporary branch pinned to that exact
+#   commit; its branch-named group is isolated from `trunk:push`. See the
+#   release procedure in CONTRIBUTING.md.
 # * a *fork* pull request keys on its PR number, which no branch name can
 #   collide with. Same-repo pull requests keep the branch key, which is what lets
 #   a dispatch dedupe with them.
@@ -73,7 +76,7 @@ concurrency:
       || github.head_ref
       || github.ref_name
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}
 
 permissions:
   contents: read
@@ -373,6 +376,7 @@ jobs:
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_gate_scope.py
+          python3 scripts/test_main_ci_policy.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
           python3 scripts/test_production_file_size.py
