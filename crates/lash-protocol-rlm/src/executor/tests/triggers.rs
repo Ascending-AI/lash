@@ -969,6 +969,44 @@ pub(super) fn typescript_process_body_uses_trigger_command_handler() {
 }
 
 #[test]
+pub(super) fn typescript_process_local_helper_reaches_trigger_command_handler() {
+    block_on(async {
+        let result = execute_trigger_process(
+            "typescript",
+            r#"
+                const registrar = defineProcess({
+                  name: "registrar", signals: {},
+                  run: async () => {
+                    const listRegistrations = () => triggers.list({});
+                    return await listRegistrations();
+                  }
+                });
+                const handle = start(registrar);
+                finish(handle.id);
+            "#,
+        )
+        .await;
+
+        assert_eq!(
+            result.terminal,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!([])
+            ))
+        );
+        assert_eq!(
+            result
+                .trigger_effects
+                .iter()
+                .map(|(_, operation)| *operation)
+                .collect::<Vec<_>>(),
+            ["list"]
+        );
+        assert!(result.trigger_effects[0].0.starts_with("lashlang:"));
+        assert!(result.subscriptions.is_empty());
+    });
+}
+
+#[test]
 pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
     block_on(async {
         let scalar = CapturingTriggerEffectController::default();
