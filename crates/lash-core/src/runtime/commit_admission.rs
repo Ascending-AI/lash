@@ -6,13 +6,12 @@
 //! process-wide lane before creating any head-derived state. The durable store
 //! CAS still decides whether the attempt advances the head.
 
-use crate::SessionId;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use lash_sansio::sync::MutexExt;
+use lash_sansio::{SessionId, sync::MutexExt};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
@@ -168,10 +167,9 @@ impl CommitAdmissionCoordinator {
         let queued = {
             let mut state = self.inner.state.lock_recover();
             if !state.sessions.contains_key(&claim.session_id) {
-                state.sessions.insert(
-                    SessionId::from(claim.session_id.clone().to_string()),
-                    SessionAdmissionState::default(),
-                );
+                state
+                    .sessions
+                    .insert(claim.session_id.clone(), SessionAdmissionState::default());
                 None
             } else {
                 let queue_depth = state
