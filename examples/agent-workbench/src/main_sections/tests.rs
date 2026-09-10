@@ -848,23 +848,23 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .open()
         .await
         .expect("open cancelled session");
-    state
-        .core
-        .turn_work_driver()
-        .expect("workbench core has a session catalog")
-        .request_cancel(lash::TurnCancelRequest::new(
-            session.turn_address("turn-cancel"),
-            "original-stop",
-            Some("user".to_string()),
-        ))
-        .await
-        .expect("seed cancellation request");
+    let address = session.turn_address("turn-cancel");
     let (cancelled, turn) = tokio::join!(
         cancel_turn(State(state.clone()), Query(TurnCancelQuery::default())),
-        session
-            .turn(lash::TurnInput::text("already cancelled"))
-            .turn_id("turn-cancel")
-            .run(),
+        async {
+            let recorded = await_durable_turn_cancel_request(&state, &address).await;
+            assert_eq!(recorded.request.origin.as_deref(), Some("user"));
+            assert_eq!(
+                recorded.request.reason.as_deref(),
+                Some("workbench Abort control")
+            );
+            assert_eq!(recorded.request.mode, lash::TurnCancelMode::Immediate);
+            session
+                .turn(lash::TurnInput::text("already cancelled"))
+                .turn_id("turn-cancel")
+                .run()
+                .await
+        },
     );
     let (status, Json(accepted)) = cancelled.expect("cancel turn");
     let turn = turn.expect("cancelled turn commits");
@@ -877,14 +877,15 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     assert!(matches!(
         accepted.cancellations.as_slice(),
         [TurnCancelReceipt::TerminalAttached {
-            cancellation: RecordedTurnCancellation::AlreadyRequested(_),
+            cancellation: RecordedTurnCancellation::Requested(requested),
             terminal: lash::TurnTerminal::Committed {
                 outcome: lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }),
                 ..
             },
             ..
-        }] if evidence.request_id == "original-stop"
+        }] if evidence == requested
             && evidence.origin.as_deref() == Some("user")
+            && evidence.reason.as_deref() == Some("workbench Abort control")
     ));
     // The execution publisher owns the terminal event; the cancel route
     // publishes nothing for this core-run turn.
@@ -910,8 +911,9 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .expect("read cancellation gate");
     assert!(matches!(
         duplicate.outcome,
-        lash::TurnCancelOutcome::AlreadyRequested(_)
+        lash::TurnCancelOutcome::CompletionWonRace
     ));
+    assert!(duplicate.record.is_none());
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
