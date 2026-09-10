@@ -127,13 +127,10 @@ pub enum EmbedError {
     /// Wraps the store failure.
     Store(#[from] lash_core::StoreError),
     #[error(
-        "store-less session id `{session_id}` was already used by this LashCore; store-less sessions require distinct ids per process"
+        "session store is required; pass an explicit store with SessionBuilder::store(...) or configure LashCoreBuilder::store_factory(...)"
     )]
-    /// A store-less session identifier was reused by this core.
-    EphemeralSessionIdReused {
-        /// Store-less session identifier that was reused.
-        session_id: SessionId,
-    },
+    /// Returned before execution when a facade session has no store source.
+    MissingSessionStore,
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
     /// A loaded store belongs to a different session than requested.
     StoreSessionMismatch {
@@ -166,9 +163,12 @@ pub enum EmbedError {
     #[error("invalid native substrate configuration: {0}")]
     /// Wraps a native scheduler pacing validation failure.
     NativeSubstrateConfig(#[from] lash_core::NativeSubstrateConfigError),
-    #[error("this operation requires a LashCore store factory")]
-    /// Returned when an operation requiring durable session state has no store factory.
-    MissingSessionStoreFactory,
+    #[error("session catalog does not support `{operation}` in this LashCore")]
+    /// Returned when an administrative/catalog operation has no selected catalog.
+    SessionCatalogUnavailable {
+        /// The unavailable catalog operation.
+        operation: &'static str,
+    },
     #[error("failed to delete process state for session `{session_id}`: {message}")]
     /// Process-state deletion failed for the identified session.
     SessionDeleteProcess {
@@ -304,7 +304,8 @@ impl EmbedError {
             | Self::MissingProcessRegistry
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
-            | Self::MissingSessionStoreFactory
+            | Self::MissingSessionStore
+            | Self::SessionCatalogUnavailable { .. }
             | Self::MissingPluginTurnInput { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(

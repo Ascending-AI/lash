@@ -16,7 +16,6 @@ use lash_core::runtime::{
     RuntimeScope,
 };
 use lash_sansio::SessionId;
-use std::collections::HashSet;
 
 mod advanced_builder;
 mod drain;
@@ -56,8 +55,6 @@ pub struct LashCore {
     /// this core reports its worker faults to the same sink the registry
     /// decorator emits events on.
     pub(crate) process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
-    /// Store-less session ids rejected for reuse by this core.
-    pub(crate) ephemeral_session_ids: Arc<std::sync::Mutex<HashSet<SessionId>>>,
     pub(crate) tool_intent_submission_gates:
         Arc<crate::tool_intent_ingress::RuntimeSubmissionGates>,
 }
@@ -213,7 +210,9 @@ impl LashCore {
     pub async fn session_exists(&self, session_id: impl AsRef<str>) -> Result<bool> {
         let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "session_exists",
+            });
         };
         let request = lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
@@ -247,7 +246,9 @@ impl LashCore {
     ) -> Result<Option<crate::persistence::SessionReadView>> {
         let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "read_session",
+            });
         };
         store_factory
             .read_session(&session_id)
@@ -262,7 +263,9 @@ impl LashCore {
     pub async fn session_was_deleted(&self, session_id: impl AsRef<str>) -> Result<bool> {
         let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "session_was_deleted",
+            });
         };
         store_factory
             .session_was_deleted(&session_id)
@@ -301,6 +304,7 @@ impl LashCore {
     /// per open via [`SessionBuilder::plugin`] are not re-applied here; parking
     /// is the round-trip for the core's own configuration.
     pub async fn resume(&self, parked: ParkedSession) -> Result<LashSession> {
+        let ParkedSession { inner, binding } = parked;
         // Build the per-session env exactly like `SessionBuilder::open_resolved`
         // (minus builder-scoped plugins): a fresh plugin host with this core's
         // factories, the shared work drivers, and the core provider resolver
@@ -310,26 +314,21 @@ impl LashCore {
             self.plugin_factories.as_ref(),
             Vec::new(),
         )?;
-        let mut env = self.env.clone();
+        let mut env = binding.apply_owner(self.env.clone());
         env.core = plugin_host.install_process_engine_contributions(
             env.core.clone(),
             self.process_lifecycle_available,
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let effect_host = Arc::clone(&env.core.control.effect_host);
-        let ports = self.substrate_slot.ports().await;
-        env = env.with_work_ports(ports.process.clone(), ports.queued_port());
-        let process_work = env.process_work();
         let runtime =
-            LashRuntime::resume(parked.inner, &env, self.session_execution_owner.clone()).await?;
+            LashRuntime::resume(inner, &env, self.session_execution_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
         Ok(LashSession {
             runtime: handle,
-            effect_host,
+            binding,
             parent_session_id: None,
             active_plugins: Vec::new(),
-            process_work,
             process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
@@ -377,13 +376,17 @@ impl LashCore {
     /// The returned driver is independently usable from any session handle.
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
-    pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
-        let driver = facade_support::TurnWorkDriver::new(self.effect_host());
-        self.store_factory
+    pub fn turn_work_driver(&self) -> Result<facade_support::TurnWorkDriver> {
+        let catalog = self
+            .store_factory
             .as_ref()
-            .map_or(driver.clone(), |factory| {
-                driver.with_session_store_factory(Arc::clone(factory))
-            })
+            .ok_or(EmbedError::SessionCatalogUnavailable {
+                operation: "turn_work_driver",
+            })?;
+        Ok(facade_support::TurnWorkDriver::for_catalog(
+            self.effect_host(),
+            Arc::clone(catalog),
+        ))
     }
 
     /// Persist host input without opening a competing session writer.
@@ -404,7 +407,9 @@ impl LashCore {
         facade_support::ensure_durable_effect_input(&input).map_err(EmbedError::Runtime)?;
         let session_id = session_id.into();
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "enqueue_turn_input",
+            });
         };
         let mut policy = self.policy.clone();
         policy.session_id = Some(session_id.clone());
@@ -453,7 +458,7 @@ impl LashCore {
     /// a host wants to make a past turn forkable later.
     pub async fn pin(&self, node_id: impl AsRef<str>) -> Result<lash_core::ForkPoint> {
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable { operation: "pin" });
         };
         store_factory
             .pin(node_id.as_ref())
@@ -465,7 +470,7 @@ impl LashCore {
     /// remains forkable through its session-head checkpoint.
     pub async fn unpin(&self, node_id: impl AsRef<str>) -> Result<()> {
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable { operation: "unpin" });
         };
         store_factory
             .unpin(node_id.as_ref())
@@ -476,7 +481,9 @@ impl LashCore {
     /// Enumerate pinned past turns and unpinned live tips that can be forked.
     pub async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>> {
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "fork_points",
+            });
         };
         store_factory.fork_points().await.map_err(Into::into)
     }
@@ -511,7 +518,9 @@ impl LashCore {
         observer_inheritance: lash_core::ObserverInheritance,
     ) -> Result<lash_core::ForkSessionReceipt> {
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "fork_at",
+            });
         };
         let node_id = node_id.into();
         let session_id = session_id.into();
@@ -621,7 +630,9 @@ impl LashCore {
     ) -> Result<SessionDeleteReport> {
         let session_id = SessionId::from(session_id.as_ref());
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "delete_session",
+            });
         };
         match lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
             &scoped_effect_controller,
@@ -1386,7 +1397,6 @@ impl LashCoreBuilder {
             worker_slot_supplier,
             substrate_slot: Arc::new(NativeSubstrateSlot::new(substrate)),
             process_event_sink,
-            ephemeral_session_ids: Arc::new(std::sync::Mutex::new(HashSet::new())),
             tool_intent_submission_gates: Default::default(),
         })
     }
@@ -1605,7 +1615,9 @@ impl LashCore {
         filter: SessionListFilter,
     ) -> Result<Vec<SessionSummary>> {
         let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStoreFactory);
+            return Err(EmbedError::SessionCatalogUnavailable {
+                operation: "sessions_filtered",
+            });
         };
         store_factory
             .list_sessions(&filter)

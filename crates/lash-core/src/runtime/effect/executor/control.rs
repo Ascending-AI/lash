@@ -1613,6 +1613,15 @@ pub fn await_event_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
 /// Deployment-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
+    /// Project the terminal attachment owned by this same effect deployment.
+    ///
+    /// A driver never accepts an independently supplied attachment. Durable
+    /// hosts override this projection; native hosts use keyed promises through
+    /// the host itself.
+    fn turn_attach(&self) -> Option<Arc<dyn crate::TurnAttach>> {
+        None
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

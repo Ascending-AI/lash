@@ -370,30 +370,50 @@ pub trait TurnAttach: Send + Sync {
 #[derive(Clone)]
 pub struct TurnWorkDriver {
     effect_host: Arc<dyn EffectHost>,
-    attach: Option<Arc<dyn TurnAttach>>,
-    store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+    store: TurnWorkStore,
+}
+
+#[derive(Clone)]
+enum TurnWorkStore {
+    Session {
+        session_id: String,
+        store: Arc<dyn crate::RuntimePersistence>,
+    },
+    Catalog(Arc<dyn crate::SessionStoreFactory>),
 }
 
 impl TurnWorkDriver {
-    pub fn new(effect_host: Arc<dyn EffectHost>) -> Self {
+    /// Bind control to one already-opened session store.
+    ///
+    /// The address is checked against `session_id` before the store or effect
+    /// host is touched. Facades with an opened session should use this form so
+    /// a root catalog override cannot redirect cancellation storage.
+    pub fn for_session(
+        effect_host: Arc<dyn EffectHost>,
+        session_id: impl Into<String>,
+        store: Arc<dyn crate::RuntimePersistence>,
+    ) -> Self {
         Self {
             effect_host,
-            attach: None,
-            store_factory: None,
+            store: TurnWorkStore::Session {
+                session_id: session_id.into(),
+                store,
+            },
         }
     }
 
-    pub fn with_attach(mut self, attach: Arc<dyn TurnAttach>) -> Self {
-        self.attach = Some(attach);
-        self
-    }
-
-    pub fn with_session_store_factory(
-        mut self,
+    /// Bind control to a deployment catalog for arbitrary-session addressing.
+    ///
+    /// Each request resolves its store from this same catalog. This is the
+    /// remote/admin form; an already-opened session uses [`Self::for_session`].
+    pub fn for_catalog(
+        effect_host: Arc<dyn EffectHost>,
         store_factory: Arc<dyn crate::SessionStoreFactory>,
     ) -> Self {
-        self.store_factory = Some(store_factory);
-        self
+        Self {
+            effect_host,
+            store: TurnWorkStore::Catalog(store_factory),
+        }
     }
 
     pub fn effect_host(&self) -> Arc<dyn EffectHost> {
@@ -415,31 +435,14 @@ impl TurnWorkDriver {
             }
             Err(err) => return Err(err),
         };
-        let record = if let Some(factory) = self.store_factory.as_ref() {
-            let store = factory
-                .open_existing_store_by_id(&request.address.session_id)
-                .await
-                .map_err(|err| RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err))?
-                .ok_or_else(|| {
-                    RuntimeError::new(
-                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                        format!("session `{}` does not exist", request.address.session_id),
-                    )
-                })?;
-            Some(
-                store
-                    .record_turn_cancel_request(request.clone())
-                    .await
-                    .map_err(|err| {
-                        RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
-                    })?,
-            )
-        } else {
-            None
-        };
-        let evidence = record
-            .as_ref()
-            .map_or_else(|| request.evidence(), |record| record.request.evidence());
+        let store = self.store_for(&request.address).await?;
+        let record = store
+            .record_turn_cancel_request(request.clone())
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?;
+        let evidence = record.request.evidence();
         let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
         let outcome = match self
             .effect_host
@@ -460,21 +463,43 @@ impl TurnWorkDriver {
             },
             ResolveOutcome::UnknownOrRevoked => Ok(TurnCancelOutcome::UnknownOrRevoked),
         }?;
-        let record = if let (Some(factory), Some(_)) = (self.store_factory.as_ref(), record) {
-            factory
-                .open_existing_store_by_id(&request.address.session_id)
+        let record = store
+            .turn_cancel_request(&request.address)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?;
+        Ok(TurnCancelReceipt { outcome, record })
+    }
+
+    async fn store_for(
+        &self,
+        address: &TurnAddress,
+    ) -> Result<Arc<dyn crate::RuntimePersistence>, RuntimeError> {
+        match &self.store {
+            TurnWorkStore::Session { session_id, store } => {
+                if session_id != &address.session_id {
+                    return Err(RuntimeError::new(
+                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                        format!(
+                            "turn work driver is bound to session `{session_id}` and cannot address `{}`",
+                            address.session_id
+                        ),
+                    ));
+                }
+                Ok(Arc::clone(store))
+            }
+            TurnWorkStore::Catalog(factory) => factory
+                .open_existing_store_by_id(&address.session_id)
                 .await
                 .map_err(|err| RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err))?
-                .expect("cancellation store existed")
-                .turn_cancel_request(&request.address)
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
-                })?
-        } else {
-            None
-        };
-        Ok(TurnCancelReceipt { outcome, record })
+                .ok_or_else(|| {
+                    RuntimeError::new(
+                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                        format!("session `{}` does not exist", address.session_id),
+                    )
+                }),
+        }
     }
 
     /// Upgrade an address whose first-writer gate holds a weaker request.
@@ -516,7 +541,7 @@ impl TurnWorkDriver {
         address: &TurnAddress,
     ) -> Result<TurnTerminal, RuntimeError> {
         address.validate()?;
-        if let Some(attach) = self.attach.as_ref() {
+        if let Some(attach) = self.effect_host.turn_attach() {
             return attach.await_terminal(address).await;
         }
         let key = terminal_key(self.effect_host.as_ref(), address).await?;

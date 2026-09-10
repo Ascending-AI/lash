@@ -110,32 +110,26 @@ impl TurnAttach for RestateTurnAttach {
 /// no Restate Admin API access is involved.
 pub struct RestateTurnDeployment {
     effect_host: Arc<RestateEffectHost>,
-    driver: TurnWorkDriver,
-    attach: Arc<RestateTurnAttach>,
 }
 
 impl RestateTurnDeployment {
     pub fn new(connection: impl Into<RestateConnection>) -> Self {
-        let connection = connection.into();
-        let effect_host = Arc::new(RestateEffectHost::new(connection.clone()));
-        let attach = Arc::new(RestateTurnAttach::new(connection));
-        let driver = TurnWorkDriver::new(effect_host.clone()).with_attach(attach.clone());
-        Self {
-            effect_host,
-            driver,
-            attach,
-        }
+        let effect_host = Arc::new(RestateEffectHost::new(connection));
+        Self { effect_host }
     }
 
     pub fn effect_host(&self) -> Arc<RestateEffectHost> {
         Arc::clone(&self.effect_host)
     }
 
-    pub fn turn_work_driver(&self) -> TurnWorkDriver {
-        self.driver.clone()
+    pub fn turn_work_driver(
+        &self,
+        catalog: Arc<dyn lash_core::SessionStoreFactory>,
+    ) -> TurnWorkDriver {
+        TurnWorkDriver::for_catalog(self.effect_host.clone(), catalog)
     }
 
     pub fn turn_attach(&self) -> Arc<RestateTurnAttach> {
-        Arc::clone(&self.attach)
+        self.effect_host.turn_attach_handle()
     }
 }
