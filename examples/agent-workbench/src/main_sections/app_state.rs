@@ -1533,6 +1533,7 @@ pub(crate) fn deleted_session_message(session_id: &SessionId) -> String {
 }
 
 pub(crate) fn log_deleted_session_refusal(session_id: &SessionId, context: Option<&str>) {
+    let session_id = session_id.as_str();
     eprintln!(
         "agent-workbench session admission refusal: session_id={session_id:?} \
          tombstone_outcome=\"retired\" outcome=\"refused\" store_context={context:?}"
