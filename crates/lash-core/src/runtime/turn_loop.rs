@@ -11,6 +11,11 @@ use crate::facade_support::{
 use lash_sansio::core_support::*;
 use std::pin::Pin;
 
+mod resident_session;
+
+pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
+pub(crate) use resident_session::ResidentSessionState;
+
 /// How many pending next-turn inputs one idle claim absorbs into a single turn.
 ///
 /// Direct and drained ingress share the bound because they share the claim
@@ -663,15 +668,18 @@ impl CommittedTurn {
         {
             lease.mark_released();
         }
-        runtime.last_committed_lease_continuity = self.retained_lease_continuity;
+        runtime
+            .resident_session
+            .retain_committed_lease_continuity(self.retained_lease_continuity);
         runtime.state = self.resident_state;
         let observation_revision = if runtime.state.checkpoint_ref.is_some() {
             runtime.state.head_revision
         } else {
             runtime.state.turn_index as u64
         };
-        runtime.last_committed_observation_turn =
-            Some((observation_revision, trace_turn_id.to_string()));
+        runtime
+            .resident_session
+            .record_committed_observation_turn(observation_revision, trace_turn_id);
         Ok(PostCommitDelivery {
             turn: self.turn,
             events: self.events,
@@ -803,291 +811,6 @@ impl crate::QueuedLaneProbe for SessionExecutionLaneProbe {
 }
 
 impl LashRuntime {
-    pub(super) fn invalidate_resident_session_state(&mut self) {
-        if matches!(self.resident_session_state, ResidentSessionState::Valid) {
-            self.resident_session_state = ResidentSessionState::Invalidated {
-                decision_id: format!(
-                    "resident-session-reload:{}:{}",
-                    self.state.session_id,
-                    uuid::Uuid::new_v4()
-                ),
-            };
-        }
-        self.graph_loaded_from_store = false;
-        self.last_committed_lease_continuity = None;
-        self.last_committed_observation_turn = None;
-        if let Some(session) = self.session.as_ref() {
-            session.invalidate_runtime_caches();
-        }
-    }
-
-    /// Settle every resident-freshness fact after a full durable adoption
-    /// (FIG-1875): the resident state is valid, the graph is the one loaded
-    /// from the store, and no cross-process staleness is pending.
-    ///
-    /// `lease_continuity` is the continuity of the session-execution lease
-    /// held across the adoption, when the caller holds one: while that lease
-    /// stays live no other executor can advance the durable head, so the
-    /// freshly adopted resident graph is current under it and the turn loop
-    /// issues no second durable probe.
-    pub(super) fn mark_resident_adopted(
-        &mut self,
-        lease_continuity: Option<SessionExecutionLeaseContinuity>,
-    ) {
-        self.resident_session_state = ResidentSessionState::Valid;
-        self.graph_loaded_from_store = true;
-        self.resident_graph_head_stale
-            .store(false, Ordering::Release);
-        self.last_committed_lease_continuity = lease_continuity;
-    }
-
-    pub(super) fn trace_synchronous_resident_state_refusal(
-        &self,
-        decision_id: &str,
-        consumer: &'static str,
-    ) {
-        tracing::info!(
-            event = "resident_session_state.sync_refusal",
-            decision_id,
-            session_id = %self.state.session_id,
-            consumer,
-            consulted_validity = false,
-            outcome = "refused",
-            error_classification = RuntimeErrorCode::ResidentSessionReloadFailed.as_str(),
-            "synchronous resident-state consumer refused invalidated state"
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn trace_resident_session_reload_decision(
-        &self,
-        decision_id: &str,
-        consulted_validity: bool,
-        durable_source: &'static str,
-        resident_head_revision: u64,
-        durable_head_freshness: &'static str,
-        durable_head_revision: u64,
-        failing_restore_stage: &'static str,
-        outcome: &'static str,
-        error_classification: &str,
-    ) {
-        tracing::info!(
-            event = "resident_session_state.reload_decision",
-            decision_id,
-            session_id = %self.state.session_id,
-            consulted_validity,
-            durable_source,
-            resident_head_revision,
-            durable_head_freshness,
-            durable_head_revision,
-            failing_restore_stage,
-            outcome,
-            error_classification,
-            "resident-state reload gate decided"
-        );
-    }
-
-    pub(super) async fn reload_invalidated_resident_session_state(
-        &mut self,
-    ) -> Result<(), RuntimeError> {
-        self.reload_invalidated_resident_session_state_under_lease(None)
-            .await
-    }
-
-    pub(super) async fn reload_invalidated_resident_session_state_under_lease(
-        &mut self,
-        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
-    ) -> Result<(), RuntimeError> {
-        let decision_id = match &self.resident_session_state {
-            ResidentSessionState::Valid => {
-                self.trace_resident_session_reload_decision(
-                    "resident-session-reload:not-required",
-                    true,
-                    "not_consulted",
-                    self.state.head_revision,
-                    "current_resident_state",
-                    self.state.head_revision,
-                    "none",
-                    "not_required",
-                    "none",
-                );
-                return Ok(());
-            }
-            ResidentSessionState::Invalidated { decision_id } => decision_id.clone(),
-        };
-        let resident_head_revision = self.state.head_revision;
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store());
-        let durable_source = if store.is_some() {
-            "history_store"
-        } else {
-            "resident_snapshot"
-        };
-        let mut durable_head_freshness = if store.is_some() {
-            "refresh_pending"
-        } else {
-            "store_unavailable"
-        };
-        let mut durable_state = self.state.clone();
-        let mut durable_head_revision = durable_state.head_revision;
-        let reload_result: Result<(), (&'static str, RuntimeError)> = async {
-            if let Some(store) = store.as_ref() {
-                crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
-                    .await
-                    .map_err(|err| {
-                        (
-                            "durable_head_refresh",
-                            RuntimeError::new(
-                                RuntimeErrorCode::ResidentSessionReloadFailed,
-                                format!(
-                                    "failed to reload invalidated resident session state: {err}"
-                                ),
-                            ),
-                        )
-                    })?;
-                durable_head_freshness = "reloaded_from_store";
-                durable_head_revision = durable_state.head_revision;
-            }
-
-            let session = self.session.as_mut().ok_or_else(|| {
-                (
-                    "session_availability",
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        "runtime session is unavailable while reloading invalidated resident state",
-                    ),
-                )
-            })?;
-            session.invalidate_runtime_caches();
-            if let Some(tool_state) = durable_state.tool_state_snapshot().cloned() {
-                session
-                    .plugins()
-                    .tool_registry()
-                    .restore_state(tool_state)
-                    .map_err(|err| {
-                        (
-                            "tool_state_restore",
-                            RuntimeError::new(
-                                RuntimeErrorCode::ResidentSessionReloadFailed,
-                                err.to_string(),
-                            ),
-                        )
-                    })?;
-            }
-            session.refresh_tool_catalog().await.map_err(|err| {
-                (
-                    "tool_catalog_refresh",
-                    RuntimeError::new(
-                        RuntimeErrorCode::ResidentSessionReloadFailed,
-                        err.to_string(),
-                    ),
-                )
-            })?;
-            if let Some(snapshot) = durable_state.plugin_state() {
-                session.plugins().hydrate_state(snapshot).map_err(|err| {
-                    (
-                        "plugin_state_restore",
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
-            }
-            let protocol_session = Arc::clone(session.plugins().protocol_session());
-            let session_id = durable_state.session_id.clone();
-            protocol_session
-                .restore_session(
-                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    crate::plugin::ProtocolSessionRestoreView::new(&durable_state),
-                )
-                .await
-                .map_err(|err| {
-                    (
-                        "protocol_session_restore",
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
-
-            if store.is_some() {
-                durable_state.discard_runtime_snapshots();
-            } else {
-                durable_state.discard_runtime_snapshots_retaining_accepted_execution();
-            }
-            session
-                .plugins()
-                .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                    crate::SessionReadView::from_persisted_state(&durable_state),
-                ))
-                .await
-                .map_err(|err| {
-                    (
-                        "session_restored_hook",
-                        RuntimeError::new(
-                            RuntimeErrorCode::ResidentSessionReloadFailed,
-                            err.to_string(),
-                        ),
-                    )
-                })?;
-            self.state = durable_state;
-            // A successful reload is a full durable adoption: settle the
-            // freshness facts so the turn loop does not issue a second
-            // durable probe right after this reload (FIG-1875).
-            self.mark_resident_adopted(
-                session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity),
-            );
-            Ok(())
-        }
-        .await;
-
-        match reload_result {
-            Ok(()) => {
-                self.trace_resident_session_reload_decision(
-                    &decision_id,
-                    false,
-                    durable_source,
-                    resident_head_revision,
-                    durable_head_freshness,
-                    durable_head_revision,
-                    "none",
-                    "restored",
-                    "none",
-                );
-                Ok(())
-            }
-            Err((failing_restore_stage, err)) => {
-                if failing_restore_stage == "durable_head_refresh" {
-                    durable_head_freshness = "refresh_failed";
-                }
-                self.trace_resident_session_reload_decision(
-                    &decision_id,
-                    false,
-                    durable_source,
-                    resident_head_revision,
-                    durable_head_freshness,
-                    durable_head_revision,
-                    failing_restore_stage,
-                    "denied",
-                    err.code.as_str(),
-                );
-                Err(err)
-            }
-        }
-    }
-
-    pub(super) async fn reload_invalidated_resident_session_state_for_session(
-        &mut self,
-    ) -> Result<(), SessionError> {
-        self.reload_invalidated_resident_session_state()
-            .await
-            .map_err(|err| SessionError::Protocol(err.to_string()))
-    }
-
     pub(super) fn max_context_tokens(&self) -> usize {
         self.state.effective_policy().context_window_tokens()
     }
@@ -1727,8 +1450,8 @@ impl LashRuntime {
             } else {
                 self.state.turn_index as u64
             };
-            self.last_committed_observation_turn =
-                Some((observation_revision, trace_turn_id.clone()));
+            self.resident_session
+                .record_committed_observation_turn(observation_revision, &trace_turn_id);
             self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
             publish_terminal_after_commit(
                 turn_control,
@@ -3277,10 +3000,9 @@ impl LashRuntime {
             .await?;
         let lease_continuity =
             session_execution_lease.and_then(SessionExecutionLeaseGuard::continuity);
-        let resident_graph_is_current = self.graph_loaded_from_store
-            && !self.resident_graph_head_stale.load(Ordering::Acquire)
-            && lease_continuity.is_some()
-            && lease_continuity == self.last_committed_lease_continuity;
+        let resident_graph_is_current = self
+            .resident_session
+            .graph_is_current_under(lease_continuity);
         if !resident_graph_is_current {
             self.refresh_session_graph_from_store()
                 .await

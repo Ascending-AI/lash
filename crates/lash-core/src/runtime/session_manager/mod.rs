@@ -248,7 +248,7 @@ impl CurrentSessionCapability {
             runtime_lease_executor_id: runtime.runtime_lease_executor_id.clone(),
             held_session_execution_lease: held_session_execution_lease
                 .map(SessionExecutionLeaseGuard::borrowed_authority),
-            resident_graph_head_stale: Arc::clone(&runtime.resident_graph_head_stale),
+            resident_graph_head_stale: Arc::clone(runtime.resident_session.graph_head_stale_flag()),
             turn_phase_probe: runtime.turn_phase_probe.clone(),
         }
     }

@@ -2,15 +2,6 @@ use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 
-/// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ResidentSessionState {
-    /// In-memory session and plugin state are valid and match durable expectations.
-    Valid,
-    /// Resident state was invalidated and requires durable reload before further execution.
-    Invalidated { decision_id: String },
-}
-
 impl LashRuntime {
     pub fn session_id(&self) -> &str {
         &self.state.session_id
@@ -29,7 +20,7 @@ impl LashRuntime {
     pub(super) fn active_tool_catalog_shared(
         &self,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
-        match &self.resident_session_state {
+        match self.resident_session.validity() {
             ResidentSessionState::Invalidated { decision_id } => {
                 self.trace_synchronous_resident_state_refusal(
                     decision_id,
@@ -48,7 +39,7 @@ impl LashRuntime {
     }
 
     pub fn tool_state(&self) -> Result<crate::ToolState, SessionError> {
-        match &self.resident_session_state {
+        match self.resident_session.validity() {
             ResidentSessionState::Invalidated { decision_id } => {
                 self.trace_synchronous_resident_state_refusal(decision_id, "tool_state");
                 return Err(SessionError::Protocol(
@@ -99,7 +90,7 @@ impl LashRuntime {
         plugin_options: &crate::PluginOptions,
         is_root_session: bool,
     ) -> Result<(), crate::PluginError> {
-        match &self.resident_session_state {
+        match self.resident_session.validity() {
             ResidentSessionState::Invalidated { decision_id } => {
                 self.trace_synchronous_resident_state_refusal(
                     decision_id,
@@ -294,8 +285,7 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         else {
-            self.resident_graph_head_stale
-                .store(false, Ordering::Release);
+            self.resident_session.mark_graph_head_current();
             return Ok(());
         };
         let requires_hydration = match store.load_session_head_meta().await {
@@ -313,9 +303,8 @@ impl LashRuntime {
                         },
                     });
                 }
-                self.graph_loaded_from_store = true;
-                self.resident_graph_head_stale
-                    .store(false, Ordering::Release);
+                self.resident_session.mark_graph_loaded();
+                self.resident_session.mark_graph_head_current();
                 return Ok(());
             }
             // The bounded read is an optimization. If it cannot determine the
@@ -324,18 +313,16 @@ impl LashRuntime {
             Err(_) => true,
         };
         if !requires_hydration {
-            self.graph_loaded_from_store = true;
-            self.resident_graph_head_stale
-                .store(false, Ordering::Release);
+            self.resident_session.mark_graph_loaded();
+            self.resident_session.mark_graph_head_current();
             return Ok(());
         }
         let read = store.load_session().await.map_err(|err| {
             SessionError::Protocol(format!("failed to refresh session graph from store: {err}"))
         })?;
-        self.graph_loaded_from_store = true;
+        self.resident_session.mark_graph_loaded();
         let Some(read) = read else {
-            self.resident_graph_head_stale
-                .store(false, Ordering::Release);
+            self.resident_session.mark_graph_head_current();
             return Ok(());
         };
         // Defend refreshes against third-party stores that return an unvalidated resident graph.
@@ -371,8 +358,7 @@ impl LashRuntime {
             context: "failed to restore session checkpoint".to_string(),
             source,
         })?;
-        self.resident_graph_head_stale
-            .store(false, Ordering::Release);
+        self.resident_session.mark_graph_head_current();
         // The adopted head is authoritative for usage too: rebuild the attempts
         // this session still owes usage for from the durable rows plus the
         // resident rows that have not been confirmed into them yet.
@@ -395,7 +381,7 @@ impl LashRuntime {
     pub(super) fn runtime_session_services(
         &self,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
-        match &self.resident_session_state {
+        match self.resident_session.validity() {
             ResidentSessionState::Invalidated { decision_id } => {
                 self.trace_synchronous_resident_state_refusal(
                     decision_id,
@@ -511,7 +497,7 @@ impl LashRuntime {
 
     /// The plugin session bound to the currently active runtime session, if any.
     pub fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
-        match &self.resident_session_state {
+        match self.resident_session.validity() {
             ResidentSessionState::Invalidated { decision_id } => {
                 self.trace_synchronous_resident_state_refusal(decision_id, "plugin_session");
                 return None;

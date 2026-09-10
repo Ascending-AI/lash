@@ -158,9 +158,7 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
     append_history(&mut runtime, 2).await;
     let head_reads_before = store.load_session_head_meta_count();
     let full_loads_before = store.load_session_count();
-    runtime
-        .resident_graph_head_stale
-        .store(true, Ordering::Release);
+    runtime.resident_session.mark_graph_head_stale();
     store.fail_next_load_session_head_meta();
 
     runtime
@@ -178,7 +176,7 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
         1,
         "a failed head projection must not be treated as a fresh session"
     );
-    assert!(!runtime.resident_graph_head_stale.load(Ordering::Acquire));
+    assert!(!runtime.resident_session.graph_head_is_stale());
 }
 
 #[tokio::test]
@@ -606,7 +604,10 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
         head_prompt,
         "the invalidation reload must adopt the head's prompt"
     );
-    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
 }
 
 /// FIG-1875 pin (b): a successful invalidation reload settles the freshness
@@ -663,9 +664,12 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         0,
         "a successful reload settles freshness; no bounded head probe may follow it"
     );
-    assert_eq!(runtime.resident_session_state, ResidentSessionState::Valid);
+    assert_eq!(
+        *runtime.resident_session.validity(),
+        ResidentSessionState::Valid
+    );
     assert!(
-        runtime.graph_loaded_from_store,
+        runtime.resident_session.graph_loaded_from_store(),
         "the reload settles graph_loaded_from_store"
     );
 }

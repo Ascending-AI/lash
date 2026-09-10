@@ -92,7 +92,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
     }));
     assert!(
         matches!(
-            runtime.resident_session_state,
+            runtime.resident_session.validity(),
             ResidentSessionState::Invalidated { .. }
         ),
         "a failed post-commit hook invalidates resident plugin state"

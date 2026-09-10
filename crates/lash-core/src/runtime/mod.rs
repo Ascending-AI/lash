@@ -1472,7 +1472,8 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     }
 }
 
-pub(crate) use session_api::ResidentSessionState;
+pub(in crate::runtime) use turn_loop::ResidentSessionContinuity;
+pub(crate) use turn_loop::ResidentSessionState;
 
 /// Runtime session orchestration over host-supplied services and policy.
 pub struct LashRuntime {
@@ -1497,24 +1498,13 @@ pub struct LashRuntime {
     pub(in crate::runtime) shared_token_ledger:
         Arc<std::sync::Mutex<Vec<session_manager::PendingTokenLedgerEntry>>>,
     pub(in crate::runtime) process_sync_needed: Arc<AtomicBool>,
-    /// Set by a successful borrowed nested commit. The lane remains continuous,
-    /// but the durable head may have advanced outside this runtime's resident
-    /// state, so the next physical turn must reload deliberately before planning.
-    resident_graph_head_stale: Arc<AtomicBool>,
     pub(in crate::runtime) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
-    /// Lease-guard identity retained across a successful physical-turn commit.
-    /// A match proves no release/reacquisition boundary occurred before the
-    /// next physical turn on this handle.
-    pub(in crate::runtime) last_committed_lease_continuity:
-        Option<session_execution_lease::SessionExecutionLeaseContinuity>,
-    /// Most recent physical turn committed by this runtime, paired with the
-    /// resulting session revision for observation-envelope attribution.
-    pub(in crate::runtime) last_committed_observation_turn: Option<(u64, String)>,
-    /// Set only after this handle itself has attempted a durable graph load.
-    pub(in crate::runtime) graph_loaded_from_store: bool,
-    /// Freshness state for live plugin/protocol resident state on this handle.
-    /// Invalidation retains the initial incident decision identity until a successful reload.
-    pub(in crate::runtime) resident_session_state: ResidentSessionState,
+    /// How far this handle's resident session has travelled with the durable
+    /// one: validity of live plugin/protocol state, whether this handle loaded
+    /// the graph itself, cross-process staleness, and the lease and turn its
+    /// last commit ran under. Its reload and invalidation rules are methods on
+    /// [`ResidentSessionContinuity`].
+    pub(in crate::runtime) resident_session: ResidentSessionContinuity,
     /// Materialization resolved protocol facts that must be durable before queued work may
     /// reconstruct this session in another runtime.
     pub(in crate::runtime) materialized_protocol_config_dirty: bool,

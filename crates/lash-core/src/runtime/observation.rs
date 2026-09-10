@@ -51,17 +51,16 @@ impl RuntimeObservation {
             Ok(catalog) => (catalog, None),
             Err(err) => (Arc::new(Vec::new()), Some(err.to_string())),
         };
-        let tool_state_generation = matches!(
-            runtime.resident_session_state,
-            super::ResidentSessionState::Valid
-        )
-        .then(|| {
-            runtime
-                .session
-                .as_ref()
-                .map(|session| session.plugins().tool_registry().generation())
-        })
-        .flatten();
+        let tool_state_generation = runtime
+            .resident_session
+            .is_valid()
+            .then(|| {
+                runtime
+                    .session
+                    .as_ref()
+                    .map(|session| session.plugins().tool_registry().generation())
+            })
+            .flatten();
         let tool_state = match (
             tool_state_generation,
             previous.and_then(|observation| observation.tool_state.as_ref()),
@@ -839,10 +838,8 @@ fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
 
 impl LashRuntime {
     fn last_committed_turn_id_for_revision(&self, revision: SessionRevision) -> Option<&str> {
-        self.last_committed_observation_turn
-            .as_ref()
-            .filter(|(committed_revision, _)| *committed_revision == revision.as_u64())
-            .map(|(_, turn_id)| turn_id.as_str())
+        self.resident_session
+            .last_committed_turn_id_for_revision(revision.as_u64())
     }
 }
 
