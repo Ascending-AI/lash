@@ -248,7 +248,9 @@ async fn adoption_after_full_gc_and_release_is_refused(f: Arc<dyn SessionStoreFa
 
     let reader = SessionAttachmentStore::new(bytes.clone(), receiver.clone(), &receiver_id);
     assert!(reader.get(&reference.id).await.is_ok());
-    f.delete_session(&owner_id).await.unwrap();
+    f.delete_session(&SessionId::from(owner_id.as_str()))
+        .await
+        .unwrap();
     f.reclaim_retained_evidence(RetentionBound {
         committed_before_epoch_ms: u64::MAX,
     })
@@ -326,7 +328,9 @@ async fn reput_after_full_gc_allows_adoption(f: Arc<dyn SessionStoreFactory>) {
     let mut owner_commit = RuntimeCommit::persisted_state_for_test(&owner_state, &[]);
     owner_commit.committed_attachment_ids = vec![reference.id.clone()];
     owner.commit_runtime_state(owner_commit).await.unwrap();
-    f.delete_session(&owner_id).await.unwrap();
+    f.delete_session(&SessionId::from(owner_id.as_str()))
+        .await
+        .unwrap();
     f.reclaim_retained_evidence(RetentionBound {
         committed_before_epoch_ms: u64::MAX,
     })
@@ -377,7 +381,9 @@ async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>) {
         let mut owner_commit = RuntimeCommit::persisted_state_for_test(&owner_state, &[]);
         owner_commit.committed_attachment_ids = vec![reference.id.clone()];
         owner.commit_runtime_state(owner_commit).await.unwrap();
-        f.delete_session(&owner_id).await.unwrap();
+        f.delete_session(&SessionId::from(owner_id.as_str()))
+            .await
+            .unwrap();
         f.reclaim_retained_evidence(RetentionBound {
             committed_before_epoch_ms: u64::MAX,
         })
@@ -455,7 +461,9 @@ async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>) {
         let mut owner_commit = RuntimeCommit::persisted_state_for_test(&owner_state, &[]);
         owner_commit.committed_attachment_ids = vec![reference.id.clone()];
         owner.commit_runtime_state(owner_commit).await.unwrap();
-        f.delete_session(&owner_id).await.unwrap();
+        f.delete_session(&SessionId::from(owner_id.as_str()))
+            .await
+            .unwrap();
         f.reclaim_retained_evidence(RetentionBound {
             committed_before_epoch_ms: u64::MAX,
         })
