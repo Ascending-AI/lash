@@ -368,10 +368,9 @@ pub async fn cold_process_real_turn_driver(
             effect_controller
         };
     let task_identity = identity.clone();
-    let task =
-        crate::task::spawn(
-            async move { drive_turn(runtime, effect_controller, &task_identity).await },
-        );
+    let task = crate::task::spawn(async move {
+        Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
+    });
     if action == ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome {
         let result = task.await;
         panic!(

@@ -196,8 +196,6 @@ CREATE TABLE IF NOT EXISTS usage_deltas (
     cache_read_input_tokens  INTEGER NOT NULL,
     cache_write_input_tokens INTEGER NOT NULL,
     reasoning_output_tokens     INTEGER NOT NULL,
-    -- The complete typed disposition, hole identities included: a reopened
-    -- runtime rebuilds the attempts it still owes usage for from this column.
     usage_disposition_json   TEXT NOT NULL,
     UNIQUE (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
 );

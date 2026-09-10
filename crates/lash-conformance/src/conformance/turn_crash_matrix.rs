@@ -1682,7 +1682,7 @@ where
     // The golden trace below is an exact ordering; pin the one seam whose timing
     // is owned by a background timer rather than by the turn.
     control.pin_renewal_after_provider();
-    let turn = drive_turn(runtime, effect_controller, &identity)
+    let turn = Box::pin(drive_turn(runtime, effect_controller, &identity))
         .await
         .expect("reference turn succeeds")
         .expect("reference ingress produces a turn");
@@ -1884,10 +1884,9 @@ async fn run_crash_matrix_case<F, I>(
     .await;
     control.arm(entry.point.clone());
     let task_identity = identity.clone();
-    let task =
-        crate::task::spawn(
-            async move { drive_turn(runtime, effect_controller, &task_identity).await },
-        );
+    let task = crate::task::spawn(async move {
+        Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
+    });
     control.wait_for_hit().await;
     control.simulate_process_crash();
     task.abort();
@@ -1933,9 +1932,13 @@ async fn run_crash_matrix_case<F, I>(
     if pressure == RenewalPressure::Starved {
         successor_control.starve_renewals();
     }
-    let _ = drive_turn(successor, successor_effect_controller, &identity)
-        .await
-        .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
+    let _ = Box::pin(drive_turn(
+        successor,
+        successor_effect_controller,
+        &identity,
+    ))
+    .await
+    .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
     successor_invocation.end();
 
     let reader = make(scenario);
@@ -2090,7 +2093,7 @@ async fn drive_drain_turn<F, I>(
     ))
     .await;
     control.clear();
-    let _ = drive_turn(runtime, effect_controller, identity)
+    let _ = Box::pin(drive_turn(runtime, effect_controller, identity))
         .await
         .unwrap_or_else(|error| panic!("drain turn failed for {scenario}: {error}"));
     invocation.end();

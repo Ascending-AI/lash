@@ -8772,6 +8772,7 @@ lash::testing::TestProviderBuilder::complete_error
 lash::testing::TestProviderBuilder::kind
 lash::testing::TestProviderBuilder::new
 lash::testing::TestProviderBuilder::options
+lash::testing::TestProviderBuilder::reconcile_usage
 lash::testing::TestProviderBuilder::requires_streaming
 lash::testing::TestProviderBuilder::serialize_config
 lash::testing::behavior_transcript::Actor
@@ -10563,7 +10564,10 @@ lash::usage::LedgerUsageDisposition::Unreported::attempts
 lash::usage::LedgerUsageDisposition::accumulates_with
 lash::usage::LedgerUsageDisposition::is_reported
 lash::usage::LedgerUsageDisposition::reconciled_attempts
+lash::usage::LedgerUsageDisposition::unreported
+lash::usage::LedgerUsageDisposition::unreported_attempt_descriptors
 lash::usage::LedgerUsageDisposition::unreported_attempts
+lash::usage::LedgerUsageDisposition::validate
 lash::usage::ReconciledUsageAttempt
 lash::usage::ReconciledUsageAttempt::attempt
 lash::usage::ReconciledUsageAttempt::provider_usage
