@@ -1,7 +1,7 @@
-# Managed by prek (https://github.com/j178/prek): `prek install --hook-type pre-commit --hook-type pre-push`
+# Managed by prek (https://github.com/j178/prek): `prek install --hook-type pre-commit`
 #
 # pre-commit = seconds (hygiene + the cheap gates CI's Lint job enforces).
-# pre-push  = the expensive workspace-wide lint.
+# No pre-push build: workspace Clippy runs in CI or on explicit local request.
 # Tests deliberately stay out of hooks: the full workspace suite is minutes
 # long and belongs to the development loop and CI's Test job — a hook that
 # slow gets --no-verify'd and rots.
@@ -115,16 +115,3 @@ repos:
         entry: python3 scripts/check_version_bump_fixtures.py
         files: '^(crates/lash-postgres-store/src/(?:lib\.rs|postgres/schema\.rs)|runbooks/restate-postgres-workers/src/bin/version_bump\.rs|scripts/(?:check_version_bump_fixtures\.py|version-bump-recreation-e2e\.sh))$'
         pass_filenames: false
-
-      # Mirrors CI Lint "Clippy (workspace, all targets)". Warm-cache this is
-      # tens of seconds; run at push so commits stay instant.
-      # `--locked` because CI passes it: without it this hook may resolve and
-      # write a new Cargo.lock, so it lints a dependency graph the pushed tree
-      # does not have and passes a change CI then fails on the lockfile.
-      - id: cargo-clippy-workspace
-        name: cargo clippy (workspace, all targets)
-        language: system
-        entry: cargo clippy --workspace --all-targets --locked -- -D warnings
-        files: '\.rs$'
-        pass_filenames: false
-        stages: [pre-push]

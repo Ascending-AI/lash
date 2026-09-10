@@ -27,44 +27,48 @@ kept releasable.
 4. Keep the branch current and merge only after required CI is green.
 5. Delete the branch after merge.
 
-Changes to turn execution in `lash-core` or its `lash-restate` adapter must run
-both durable geometries locally: `just agent-workbench-restate-e2e` and
-`just restate-postgres-workers-e2e`. The latter is required because replay,
-ingress, and failover behavior can differ behind the two-worker proxy even when
-the single-endpoint workbench is green.
+Keep local validation proportional to the change:
+
+- Run cheap formatting and static checks relevant to the files you changed.
+- For behavior changes, run the narrowest regression that proves the changed
+  behavior. `scripts/fast-test.sh` is an optional broader iteration aid when
+  reverse-dependency coverage is useful; high-fan-out crates can still select a
+  large part of the workspace.
+- Add a targeted live recipe only for a named durability or behavior risk that
+  the current CI plan does not exercise. Merely touching `lash-core` or
+  `lash-restate` does not require running both durable geometries locally.
+
+`just push-gate` and the `just confidence*` lanes remain available as explicit
+full diagnostics before an unusual-risk change, release work, or when a user
+requests them. They are not routine push or merge prerequisites. Stop once the
+focused evidence is green; CI and independent review supply the broad merge
+proof rather than repeating the same broad suite locally.
 
 ### Required checks and the merge queue
 
 `ci.yml` subscribes to `merge_group`, so a queued pull request is validated from
-its own `gh-readonly-queue/main/pr-<n>-<sha>` ref. The intended required-check
-set is every correctness leg of that workflow: `Lint`, `Test docs + build cache`,
-`Test shard 1/4` through `Test shard 4/4`, `Repository gates`, `Public API
-example coverage`, `Package feature checks`, `Runtime feature boundary`, `Test
-Postgres store (PG 14|16|18)`, `Test S3 store against MinIO`, `Stack budget`, the
-seven `Functional E2E (...)` legs, `Restate + Postgres + MinIO Workers
-(segment 1|2)` plus `Restate workers E2E coverage summary`, the five
-`Confidence fast (...)` shards, and `Confidence fast summary`. `Build Linux
-release cache` is deliberately **not** in that set: it warms a cache for
-release.yml and perf.yml on `main` and is skipped for pull requests and queue
-entries, where the cache it writes is scoped to a ref nothing else can read.
+its own `gh-readonly-queue/main/pr-<n>-<sha>` ref. Its plan job classifies the
+exact diff and selects the correctness families configured for that event,
+including workspace tests, lint and repository gates, public API checks,
+feature checks, confidence shards, store backends, functional E2E, and worker
+E2E. The single `CI conclusion` job rejects failed, cancelled, missing, or
+incorrectly skipped correctness jobs and is the aggregate merge context.
+`Build Linux release cache` is deliberately outside that conclusion: it warms a
+cache for release.yml and perf.yml on `main` and is skipped for pull requests
+and queue entries, where the cache it writes is scoped to a ref nothing else can
+read.
 
-The workers E2E checks never *execute* on pull-request, merge-queue, or
-`main`-push events: their jobs report success in seconds and run the full
-distributed E2E only on full-profile (`workflow_dispatch`) runs, which the
-release gate requires on the release SHA. A green PR or push therefore does
-not prove workers E2E behavior — for changes touching the `lash-restate`
-geometry, run the local recipes above before relying on CI; the full-profile
-run before the next release is the execution witness.
+The workers E2E family runs when selected on `main` pushes and full-profile
+(`workflow_dispatch`) runs, and on pull requests carrying the `ci:workers`
+label. It does not execute in the merge queue. Run a local worker recipe only
+when a changed behavior needs earlier evidence or falls outside that CI
+coverage; name that risk and recipe in the PR.
 
-That set is enforced by the active `main merge queue` ruleset on the default
-branch: a merge-queue rule (ALLGREEN grouping, squash merges, up to five
-entries built and merged per group) plus a required-status-checks rule naming
-exactly the checks above. Pull requests land by being added to the queue, which
-revalidates every entry against the true merged base before it lands — never by
-direct merge. Any later split of a required job must either keep the original
-name on a gate job that needs the new sub-jobs, or update the ruleset in the
-same motion; a renamed job that leaves a stale required-check name will wedge
-every queue entry behind a check that can never report.
+Pull requests land through the `main` merge queue, which revalidates every entry
+against the true merged base before it lands — never by direct merge. Keep the
+ruleset's required context aligned with the aggregate `CI conclusion`; renaming
+that job without updating the ruleset will wedge every queue entry behind a
+check that can never report.
 
 ## Concurrent local gates
 

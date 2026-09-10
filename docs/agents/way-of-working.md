@@ -46,7 +46,7 @@ A **runbook** is an **agent-driven test scenario**: QA performed by an agent aga
 - **Location:** `runbooks/<scenario>/runbook.md`, one scenario per directory. `runbooks/RULES.md` holds every shared rule; a runbook adds only its scenario-specific purpose, phases, and scorecard.
 - **Two layers, kept separate.** Scripted deterministic harnesses (`runbooks/restate-postgres-workers/`, the `just *-e2e` recipes) are gate *evidence*: they boot real infrastructure and assert exact outcomes, and they stay scripts. Browser runbooks are the agent-judged semantic layer on top, gating on what the example app actually renders. A runbook never re-implements a scripted harness, and a harness never asks for judgement.
 - **Safe to run wholesale.** Every runbook validates; none mutates beyond its own seeded scenario state. An agent told "run the runbooks" must never destroy anything. Destructive or maintenance procedures are not runbooks; they belong in `docs/` as operational reference.
-- **Ship with the change.** A PR that creates or changes live behavior ships or updates the runbook that proves it. Merged is not done; live-validated is (see Definition of done).
+- **Ship the needed proof.** When a named durability or behavior risk needs live validation beyond the current CI plan, the PR ships or updates the targeted runbook that proves it. Otherwise, focused local regression evidence and CI satisfy the validation requirements (see Definition of done).
 - **Scope flavors:** per-behavior scenarios (regression-style, e.g. one FIG's fix) and per-subsystem validations tied to the ADR they prove out.
 
 ## ADR norms
@@ -66,7 +66,7 @@ The workflow states, in order:
 - **Todo.** Specified and ready to pick up. This is where dispatch matters (labels below).
 - **In Progress.** Claimed and being worked; claiming = assigning.
 - **In Review.** A PR is open against it.
-- **Done.** Live-validated per the Definition of Done (below). **Canceled** / **Duplicate**: terminal, not doing it. (`Canceled` covers "won't fix"; there is no `wontfix` label.)
+- **Done.** Merged and validated per the Definition of Done (below). **Canceled** / **Duplicate**: terminal, not doing it. (`Canceled` covers "won't fix"; there is no `wontfix` label.)
 
 Two dispatch labels, and only these two, live on **Todo** tickets; they say who takes the ticket, which no state can:
 
@@ -89,24 +89,24 @@ When diagnosing live behavior (a stall, a wrong decision, a failed run, a lost e
 
 State the expected proof on the ticket. Defaults when unstated:
 
-- **Behavior changes:** live-validated. The relevant runbook (new or existing) passes. Merged-with-green-CI is necessary, not sufficient. Changes to turn execution in `lash-core` or its `lash-restate` adapter additionally run both durable geometries locally (`just agent-workbench-restate-e2e` and `just restate-postgres-workers-e2e`), per `CONTRIBUTING.md`.
-- **Mechanical changes** (renames, link sweeps, codegen, doc moves): merged, with the stated verification in the PR.
+- **Behavior changes:** the narrowest meaningful regression passes locally. Add a targeted live runbook or recipe only for a named durability or behavior risk that the current CI plan does not exercise; touching `lash-core` or `lash-restate` alone does not require both durable geometries.
+- **Mechanical changes** (renames, link sweeps, codegen, doc moves): the relevant cheap static check passes, then the change is merged with that scope stated in the PR.
 - **Decisions:** the ADR is merged and the resolving ticket links it.
 - **Contract-asserting gates** (schema and drift gates, boundary gates, conformance suites and laws, simulation oracles, coverage and version gates): changes that create or modify one ship with a red-side mutation proof recorded in the PR—the mutation applied, the observed failure, and confirmation that it failed for the stated reason. Formatting and style checks are out of scope. A gate that cannot fail is indistinguishable from no gate; green is what everyone expects to see.
 
-Gate merges on the local battery (`just push-gate`, plus the confidence-gate lane the change warrants) and review; CI is the backstop, not the first signal. Deterministic failure classes (docs lint, conformance, contract drift) must be fixed, never bypassed.
+Use focused local evidence for fast feedback, then gate merges on independent review and the aggregate `CI conclusion`, which verifies the correctness families configured for that diff and CI event. A permitted event-policy skip is not execution evidence; use targeted live evidence for a named risk those jobs do not exercise. Deterministic failure classes (docs lint, conformance, contract drift) must be fixed, never bypassed. Do not repeat broad local suites that CI already proves.
 
-Heavy gates are serial within a lane and capped across the box: build width comes from the environment the checkout was prepared with (`CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`), and the build-heavy legs of `push-gate.sh` run through the `heavy-slot` semaphore when the machine provides it, so concurrent lanes queue instead of thrashing. Both are feature-detected and inert on CI. Do not override either without a measured need; the mechanics are in `CONTRIBUTING.md` under "Concurrent local gates".
+`just push-gate` and the confidence lanes are opt-in full diagnostics for unusual-risk changes, release work, or an explicit user request; they are not routine push, review, or merge prerequisites. When run, heavy gates are serial within a lane and capped across the box: build width comes from the environment the checkout was prepared with (`CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`), and the build-heavy legs of `push-gate.sh` run through the `heavy-slot` semaphore when the machine provides it, so concurrent lanes queue instead of thrashing. Both are feature-detected and inert on CI. Do not override either without a measured need; the mechanics are in `CONTRIBUTING.md` under "Concurrent local gates".
 
-A battery may consult `python3 scripts/gate_scope.py --base origin/main` to skip gate families no touched path can reach — a prose-only change does not need the compile battery. The classifier only ever skips what it can prove is unaffected: a shared input (manifests, lockfile, toolchain, `scripts/`, `.github/`), an unrecognised path, an empty path set, or its own failure runs everything. Its decision line must be printed verbatim into the gate log next to the gate table, so a reviewer can audit every skip rather than take it on trust; a battery result reported without that line is reported as if nothing was skipped.
+When an opt-in battery is warranted, it may consult `python3 scripts/gate_scope.py --base origin/main` to skip gate families no touched path can reach — a prose-only change does not need the compile battery. The classifier only ever skips what it can prove is unaffected: a shared input (manifests, lockfile, toolchain, `scripts/`, `.github/`), an unrecognised path, an empty path set, or its own failure runs everything. Its decision line must be printed verbatim into the gate log next to the gate table, so a reviewer can audit every skip rather than take it on trust; a battery result reported without that line is reported as if nothing was skipped.
 
 ### Iterating: change-scoped fast tests
 
-`scripts/fast-test.sh` runs the workspace suite narrowed to the crates your diff touches plus everything that depends on them (nextest `rdeps()` filtersets over the merge-base diff, crate granularity). Use it for the edit-run loop, and for the decisive re-run when you have fixed a reviewer's finding and want that finding's blast radius re-proved in minutes rather than an hour.
+`scripts/fast-test.sh` is an optional broader iteration aid. It runs the workspace suite narrowed to the crates your diff touches plus everything that depends on them (nextest `rdeps()` filtersets over the merge-base diff, crate granularity). Use it when reverse-dependency coverage adds value beyond the focused regression, including when re-proving the blast radius of a review finding.
 
-It is fail-closed by construction: a manifest, `Cargo.lock`, the toolchain pin, `.cargo/`, `.config/`, `scripts/`, `.github/`, or any file it cannot attribute to exactly one workspace crate widens the run back to the full workspace suite and says so, and a filterset that selects zero tests exits nonzero instead of reporting a pass.
+It is fail-closed by construction: a manifest, `Cargo.lock`, the toolchain pin, `.cargo/`, `.config/`, `scripts/`, `.github/`, or any file it cannot attribute to exactly one workspace crate widens the run back to the full workspace suite and says so, and a filterset that selects zero tests exits nonzero instead of reporting a pass. Changes to a high-fan-out crate such as `lash-core` can also select most or all of the suite through `rdeps()`; that breadth is a property of this optional tool, not a blanket local requirement.
 
-**Narrowing is never the proof.** The single pre-push battery and CI stay full-suite, and "green" on a ticket or a PR means the full suite ran — a scoped run is iteration evidence, and saying so is part of the claim.
+State exactly what ran and passed: a focused or change-scoped run is valid local evidence, but it is not a claim that the full suite ran. The merge queue's `CI conclusion` supplies proof for the diff-selected families configured to run on that event; an accepted event-policy skip does not prove the skipped behavior.
 
 ### Expect tests versus conformance assertions
 

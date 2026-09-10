@@ -935,17 +935,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     f"{name} runs here but its gate runs only in CI",
                 )
 
-    def test_pre_commit_clippy_hook_matches_the_ci_clippy_invocation(self) -> None:
-        pre_commit = PRE_COMMIT_CONFIG.read_text(encoding="utf-8")
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        lint = workflow_job_block(workflow, "lint")
-
-        # Without `--locked` the hook may resolve and write a new Cargo.lock,
-        # so it lints a dependency graph the pushed tree does not have.
-        clippy = "cargo clippy --workspace --all-targets --locked"
-        self.assertIn(clippy, lint)
-        self.assertIn(f"entry: {clippy} -- -D warnings", pre_commit)
-
     def test_push_gate_serializes_live_differential_before_postgres_free_suite(
         self,
     ) -> None:

@@ -12,8 +12,11 @@
 # falls back to the full workspace suite and says so. An empty changed-crate set
 # is a fallback too, never a "nothing to run".
 #
-# This is an iteration and re-run tool. The pre-push battery and CI stay
-# full-suite; see docs/agents/way-of-working.md.
+# This is an optional broader iteration and re-run tool, not the default local
+# proof. Prefer the focused regression for the behavior you changed; use this
+# when reverse-dependency coverage adds value. A high-fan-out crate can select
+# most or all of the workspace, and shared inputs deliberately fall back to the
+# full suite. CI supplies broad merge proof; see docs/agents/way-of-working.md.
 #
 # nextest's `rdeps(P)` filterset matches tests in the reverse-dependency closure
 # of P *including P itself* (nexte.st/docs/filtersets: rdeps is "the package and
@@ -34,6 +37,10 @@ usage() {
   cat <<'EOF'
 usage: scripts/fast-test.sh [--base <rev>] [--dry-run]
        scripts/fast-test.sh --classify [path ...]
+
+Optional broader iteration aid: test changed crates and their reverse
+dependencies. This can approach or become the full workspace suite; prefer a
+focused behavior regression when that is sufficient.
 
   --base <rev>  Compare against <rev> instead of `git merge-base HEAD origin/main`.
   --dry-run     Print the cargo nextest command that would run, and exit 0.
