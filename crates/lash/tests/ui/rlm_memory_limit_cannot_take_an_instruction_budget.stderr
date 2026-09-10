@@ -17,10 +17,10 @@ error[E0308]: arguments to this function are incorrect
    |
 22 |     let _ = ExecutionBounds::new(
    |             ^^^^^^^^^^^^^^^^^^^^
-22 |         MemoryBound::mebibytes(64),
+23 |         MemoryBound::mebibytes(64),
    |         -------------------------- expected `InstructionBound`, found `MemoryBound`
-23 |         WallClockBound::secs(30),
-24 |         InstructionBound::instructions(1_000_000),
+24 |         WallClockBound::secs(30),
+25 |         InstructionBound::instructions(1_000_000),
    |         ----------------------------------------- expected `MemoryBound`, found `InstructionBound`
    |
 note: associated function defined here
