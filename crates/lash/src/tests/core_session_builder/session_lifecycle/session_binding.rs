@@ -81,6 +81,59 @@ async fn catalog_and_administration_are_typed_unavailable_without_a_root_catalog
 }
 
 #[tokio::test]
+async fn every_created_session_requires_a_store_regardless_of_relation() -> Result<()> {
+    let core = standard_core();
+    let parent = core
+        .session("explicit-parent-store")
+        .store(Arc::new(
+            lash_core::facade_support::InMemorySessionStore::default(),
+        ))
+        .open()
+        .await?;
+
+    for (session_id, relation) in [
+        (
+            "created-root-without-catalog",
+            lash_core::SessionRelation::Root,
+        ),
+        (
+            "created-child-without-catalog",
+            lash_core::SessionRelation::Child {
+                parent_session_id: parent.session_id(),
+                caused_by: None,
+            },
+        ),
+    ] {
+        let error = parent
+            .admin()
+            .children()
+            .create_session(SessionCreateRequest {
+                session_id: Some(session_id.to_string()),
+                relation,
+                start: lash_core::SessionStartPoint::Empty,
+                policy: None,
+                plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+                initial_nodes: Vec::new(),
+                observed_processes: Vec::new(),
+                tool_access: lash_core::SessionToolAccess::default(),
+                subagent: None,
+                context_overlay: lash_core::SessionContextOverlay::default(),
+                plugin_options: lash_core::PluginOptions::default(),
+                usage_source: None,
+            })
+            .await
+            .expect_err("session creation without a catalog must be refused");
+        assert!(matches!(
+            error,
+            EmbedError::Plugin(lash_core::PluginError::MissingSessionStore {
+                session_id: ref missing,
+            }) if missing == session_id
+        ));
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identity() -> Result<()> {
     let owner = crate::testing::runtime_lease_owner();
     let source_host = Arc::new(lash_core::facade_support::NativeEffectHost::default());
@@ -183,15 +236,15 @@ async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> 
 }
 
 #[tokio::test]
-async fn explicit_root_binding_keeps_root_catalog_and_child_catalog_distinct() -> Result<()> {
+async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Result<()> {
     let root_catalog = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let child_catalog = Arc::new(RecordingStoreFactory::default());
+    let creation_catalog = Arc::new(RecordingStoreFactory::default());
     let explicit_store = Arc::new(lash_core::facade_support::InMemorySessionStore::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(root_catalog.clone())
-        .child_store_factory(child_catalog.clone())
+        .session_creation_store_factory(creation_catalog.clone())
         .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("catalog-root").open().await?);
     let session = core
@@ -266,9 +319,32 @@ async fn explicit_root_binding_keeps_root_catalog_and_child_catalog_distinct() -
         })
         .await?;
 
+    session
+        .admin()
+        .children()
+        .create_session(SessionCreateRequest {
+            session_id: Some("explicit-root-related-root".to_string()),
+            relation: lash_core::SessionRelation::Root,
+            start: lash_core::SessionStartPoint::Empty,
+            policy: None,
+            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+            initial_nodes: Vec::new(),
+            observed_processes: Vec::new(),
+            tool_access: lash_core::SessionToolAccess::default(),
+            subagent: None,
+            context_overlay: lash_core::SessionContextOverlay::default(),
+            plugin_options: lash_core::PluginOptions::default(),
+            usage_source: None,
+        })
+        .await?;
+
     assert_eq!(
-        child_catalog.session_ids(),
-        vec!["explicit-root-child".to_string()]
+        creation_catalog.session_ids(),
+        vec![
+            "explicit-root-child".to_string(),
+            "explicit-root-related-root".to_string(),
+        ],
+        "the creation catalog is selected by the creation boundary, not relation kind"
     );
     Ok(())
 }

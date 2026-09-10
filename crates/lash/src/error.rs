@@ -100,7 +100,7 @@ pub enum EmbedError {
     /// Returned when the host did not choose how queued work is executed.
     MissingQueuedWorkSource,
     #[error(
-        "native queued work requires a LashCore store factory; call .store_factory(...) or choose .with_queued_work(...) or .without_queued_work()"
+        "native queued work requires a session-creation store factory; call .store_factory(...) or .session_creation_store_factory(...), or choose .with_queued_work(...) or .without_queued_work()"
     )]
     /// Returned when native queued work cannot rebuild session runtimes.
     NativeQueuedWorkRequiresStoreFactory,
@@ -139,11 +139,11 @@ pub enum EmbedError {
         /// Session identifier requested by the builder.
         requested: SessionId,
     },
-    #[error("durable process worker requires a LashCore store factory")]
+    #[error("durable process worker requires a session-creation store factory")]
     /// Returned when a durable process worker has no store factory.
     MissingProcessWorkerStoreFactory,
     #[error(
-        "a process registry is configured for the default native process work runner but no session store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) - InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory - or use .process_work(...) for an externally driven durable runner."
+        "a process registry is configured for the default native process work runner but no session-creation store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) or .session_creation_store_factory(...) with InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory, or use .process_work(...) for an externally driven durable runner."
     )]
     /// Returned when the native process runner cannot rebuild sessions without a store factory.
     ProcessRegistryRequiresStoreFactory,

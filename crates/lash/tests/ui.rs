@@ -23,6 +23,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/taxonomy_types_are_not_root.rs");
     t.compile_fail("tests/ui/process_start_requires_scope.rs");
     t.compile_fail("tests/ui/children_start_turn_is_not_public.rs");
+    t.compile_fail("tests/ui/child_activation_is_not_public.rs");
     t.compile_fail("tests/ui/tool_state_generation_is_sealed.rs");
     t.compile_fail("tests/ui/orchestrating_tool_def_requires_unsafe.rs");
     t.compile_fail("tests/ui/orchestrating_tool_def_unsafe_is_auditable.rs");

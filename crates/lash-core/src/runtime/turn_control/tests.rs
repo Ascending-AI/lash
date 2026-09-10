@@ -89,6 +89,82 @@ fn bound_driver(host: Arc<NativeEffectHost>, address: &TurnAddress) -> TurnWorkD
     )
 }
 
+struct TurnAttachProbe {
+    calls: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl TurnAttach for TurnAttachProbe {
+    async fn await_terminal(&self, _address: &TurnAddress) -> Result<TurnTerminal, RuntimeError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        panic!("a foreign exact-session address must be refused before terminal attachment")
+    }
+}
+
+#[tokio::test]
+async fn exact_driver_rejects_foreign_terminal_attach_before_touching_the_host() {
+    let host = Arc::new(NativeEffectHost::default());
+    let foreign = address("foreign-terminal-attach");
+    let active = ActiveTurnControl::new(host.as_ref(), foreign.clone())
+        .await
+        .expect("active foreign turn control");
+    let terminal = TurnTerminal::Committed {
+        outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
+            text: "finished".to_string(),
+        }),
+        session_revision: Some(9),
+    };
+    let store = Arc::new(InMemorySessionStore::default());
+    let probe = Arc::new(TurnAttachProbe {
+        calls: AtomicUsize::new(0),
+    });
+    let wrong_driver =
+        TurnWorkDriver::for_session(host.clone(), "different-bound-session", store.clone())
+            .with_test_attach(probe.clone());
+
+    for result in [
+        wrong_driver.await_terminal(&foreign).await,
+        wrong_driver
+            .await_terminal_with_timeout(&foreign, Duration::from_millis(1))
+            .await,
+    ] {
+        let error = result.expect_err("an exact driver cannot attach to another session");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::InvalidTurnCancelRequest
+        );
+    }
+    assert_eq!(probe.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        store
+            .turn_cancel_request(&foreign)
+            .await
+            .expect("read cancellation store")
+            .is_none(),
+        "terminal attachment validation must not write cancellation storage"
+    );
+
+    active
+        .publish_terminal(host.as_ref(), &terminal)
+        .await
+        .expect("publish foreign terminal after both refusals");
+    let attached = TurnWorkDriver::for_session(
+        host,
+        foreign.session_id.clone(),
+        Arc::new(InMemorySessionStore::default()),
+    )
+    .await_terminal(&foreign)
+    .await
+    .expect("the rejected attaches left the host terminal untouched");
+    assert!(matches!(
+        attached,
+        TurnTerminal::Committed {
+            outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage { ref text }),
+            session_revision: Some(9),
+        } if text == "finished"
+    ));
+}
+
 #[tokio::test]
 async fn exact_driver_rejects_another_session_before_store_or_gate_effects() {
     let host = Arc::new(NativeEffectHost::default());

@@ -1414,7 +1414,8 @@ pub struct TurnReport {
     /// (ADR 0069), and this is the same receipt
     /// [`EnqueueTurnBuilder::send`](crate::EnqueueTurnBuilder::send) returns: its
     /// `input_id` addresses the pending row and matches the settled application.
-    /// Absent only for a store-less session, which cannot record an acceptance.
+    /// Facade sessions always populate it because session open requires an
+    /// explicitly selected store. The option remains for lower-level callers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance: Option<lash_core::runtime::TurnInputAcceptanceReceipt>,
     /// Undelivered inputs affected by this turn's cancellation policy.

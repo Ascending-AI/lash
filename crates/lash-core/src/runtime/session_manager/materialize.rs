@@ -5,7 +5,7 @@ use crate::runtime::host::EmbeddedRuntimeHost;
 pub(in crate::runtime::session_manager) struct MaterializedSession {
     pub(in crate::runtime::session_manager) runtime: LashRuntime,
     pub(in crate::runtime::session_manager) store_binding:
-        Option<Arc<dyn crate::store::RuntimePersistence>>,
+        Arc<dyn crate::store::RuntimePersistence>,
 }
 
 pub(in crate::runtime::session_manager) async fn materialize_session_create_plan(
@@ -14,14 +14,14 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
 ) -> Result<MaterializedSession, crate::PluginError> {
     let plugins = build_session_plugins(current, plan)?;
     let store_binding = bind_session_store(current, plan).await?;
-    // Child-session creation routes through the same assembler as the live open
-    // and worker-rebuild paths. A freshly created session has a single path, so
-    // it materializes under KeepAll (residency trimming is an open-time concern).
+    // Session creation routes through the same assembler as live open and
+    // worker-rebuild paths. A freshly created session has a single path, so it
+    // materializes under KeepAll (residency trimming is an open-time concern).
     let mut runtime = LashRuntime::assemble_runtime(
         plan.policy.clone(),
         embedded_host(current),
         plugins,
-        crate::runtime::lifecycle::RuntimePersistenceBindings::new(store_binding.clone()),
+        crate::runtime::lifecycle::RuntimePersistenceBindings::new(Some(store_binding.clone())),
         current.host.work.clone(),
         crate::runtime::lifecycle::RuntimeSessionAssembly::new(
             plan.initial_runtime_state.clone(),
@@ -73,9 +73,11 @@ fn build_session_plugins(
 async fn bind_session_store(
     current: &CurrentSessionCapability,
     plan: &SessionCreatePlan,
-) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::PluginError> {
+) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::PluginError> {
     let Some(factory) = &current.host.session_store_factory else {
-        return Ok(None);
+        return Err(crate::PluginError::MissingSessionStore {
+            session_id: plan.session_id.clone(),
+        });
     };
     let store = factory
         .create_store(&SessionStoreCreateRequest {
@@ -86,19 +88,13 @@ async fn bind_session_store(
         })
         .await
         .map_err(|message| {
-            crate::PluginError::Session(child_store_factory_error(
+            crate::PluginError::Session(session_creation_store_factory_error(
                 &plan.session_id,
-                plan.parent_session_id.as_ref(),
                 message.to_string(),
             ))
         })?;
-    validate_child_store_binding(
-        store.as_ref(),
-        &plan.session_id,
-        plan.parent_session_id.as_ref(),
-    )
-    .await?;
-    Ok(Some(store))
+    validate_created_session_store_binding(store.as_ref(), &plan.session_id).await?;
+    Ok(store)
 }
 
 fn embedded_host(current: &CurrentSessionCapability) -> EmbeddedRuntimeHost {
@@ -109,47 +105,37 @@ fn embedded_host(current: &CurrentSessionCapability) -> EmbeddedRuntimeHost {
     }
 }
 
-fn child_store_guidance(parent_session_id: Option<&SessionId>) -> String {
-    let parent = parent_session_id
-        .map(|id| format!(" for parent session `{id}`"))
-        .unwrap_or_default();
+fn session_creation_store_guidance() -> &'static str {
+    "A session-creation factory must return a distinct store bound to the requested session id. \
+     Do not wrap a single pre-opened store in LashCoreBuilder::store_factory; pass that exact \
+     store with SessionBuilder::store(...) and configure \
+     LashCoreBuilder::session_creation_store_factory(...) for sessions created from a running session."
+}
+
+fn session_creation_store_factory_error(session_id: &SessionId, message: String) -> String {
     format!(
-        "Managed child sessions require a store for the child session id{parent}. \
-         Do not wrap a single pre-opened root store in LashCoreBuilder::store_factory; \
-         pass root-only stores with SessionBuilder::store(...) and configure \
-         LashCoreBuilder::child_store_factory(...) for managed children."
+        "failed to create store for session `{session_id}`: {message}. {}",
+        session_creation_store_guidance()
     )
 }
 
-fn child_store_factory_error(
-    session_id: &SessionId,
-    parent_session_id: Option<&SessionId>,
-    message: String,
-) -> String {
-    format!(
-        "failed to create store for child session `{session_id}`: {message}. {}",
-        child_store_guidance(parent_session_id)
-    )
-}
-
-async fn validate_child_store_binding(
+async fn validate_created_session_store_binding(
     store: &dyn crate::RuntimePersistence,
     session_id: &SessionId,
-    parent_session_id: Option<&SessionId>,
 ) -> Result<(), crate::PluginError> {
     let meta = store.load_session_meta().await.map_err(|err| {
         crate::PluginError::Session(format!(
-            "failed to inspect store for child session `{session_id}`: {err}. {}",
-            child_store_guidance(parent_session_id)
+            "failed to inspect store for session `{session_id}`: {err}. {}",
+            session_creation_store_guidance()
         ))
     })?;
     if let Some(meta) = meta
-        && meta.session_id != session_id
+        && &meta.session_id != session_id
     {
         return Err(crate::PluginError::Session(format!(
-            "configured child session store is already bound to session `{}` and cannot be used for child session `{session_id}`. {}",
+            "configured session-creation store is already bound to session `{}` and cannot be used for session `{session_id}`. {}",
             meta.session_id,
-            child_store_guidance(parent_session_id)
+            session_creation_store_guidance()
         )));
     }
     Ok(())

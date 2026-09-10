@@ -925,7 +925,6 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
                 sqlite_dir.path().join("managed-create-sessions"),
             ))),
         ),
-        ("ephemeral", None),
     ];
 
     for (case, store_factory) in cases {
@@ -941,13 +940,9 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
                 .provider(mock_provider())
                 .model(mock_model_spec())
                 .process_work(wiring);
-        builder = if let Some(store_factory) = store_factory.clone() {
-            builder
-                .store_factory(store_factory)
-                .with_native_queued_work()
-        } else {
-            builder.without_queued_work()
-        };
+        builder = builder
+            .store_factory(store_factory.clone().expect("every case selects a store"))
+            .with_native_queued_work();
         let core = builder.build(crate::testing::runtime_lease_owner())?;
         let session = core.session(&parent_session_id).open().await?;
 
@@ -1079,21 +1074,18 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
     Ok(())
 }
 
-/// The one carve-out: a session with no store has nowhere to record an
-/// acceptance, so its turns report none and remain caller-owned.
+/// Facade admission refuses a session with no selected store, so there is no
+/// storeless exception to durable turn acceptance.
 #[tokio::test]
-async fn store_less_direct_turn_reports_no_acceptance() -> Result<()> {
+async fn a_session_without_a_store_cannot_bypass_turn_acceptance() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("store-less-acceptance").open().await?;
-
-    let output = session.turn(TurnInput::text("ephemeral")).run().await?;
-
-    assert!(
-        output.result.acceptance.is_none(),
-        "a store-less session has no durable ingress to be admitted through"
-    );
+    let error = match core.session("missing-store-acceptance").open().await {
+        Ok(_) => panic!("facade session admission requires a store"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, EmbedError::MissingSessionStore));
     Ok(())
 }

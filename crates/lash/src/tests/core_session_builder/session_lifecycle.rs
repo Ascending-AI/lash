@@ -2300,7 +2300,7 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
 }
 
 #[tokio::test]
-async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
+async fn core_store_factory_is_used_for_sessions_created_from_a_running_session() -> Result<()> {
     let factory = Arc::new(RecordingStoreFactory::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
@@ -2342,7 +2342,7 @@ async fn core_store_factory_is_used_for_managed_child_sessions() -> Result<()> {
 }
 
 #[tokio::test]
-async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> {
+async fn reused_exact_store_factory_reports_session_creation_guidance() -> Result<()> {
     let reused_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(BoundSessionStore {
         session_id: SessionId::from("root-store"),
     });
@@ -2379,9 +2379,9 @@ async fn reused_root_store_factory_reports_child_store_guidance() -> Result<()> 
         .expect_err("reused root store should not open a child session");
     let message = err.to_string();
 
-    assert!(message.contains("configured child session store is already bound"));
+    assert!(message.contains("configured session-creation store is already bound"));
     assert!(message.contains("SessionBuilder::store"));
-    assert!(message.contains("LashCoreBuilder::child_store_factory"));
+    assert!(message.contains("LashCoreBuilder::session_creation_store_factory"));
     Ok(())
 }
 

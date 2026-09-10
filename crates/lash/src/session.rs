@@ -107,9 +107,9 @@ impl SessionBuilder {
     /// Use a specific persistence store for this root session.
     ///
     /// This is the right API for a host-owned, pre-opened session database.
-    /// Managed child sessions never reuse this store; configure
-    /// `LashCoreBuilder::child_store_factory` when child sessions should also
-    /// persist.
+    /// Sessions created from this running session never reuse the exact store;
+    /// configure `LashCoreBuilder::session_creation_store_factory` when this
+    /// session can create more sessions.
     pub fn store(mut self, store: Arc<dyn RuntimePersistence>) -> Self {
         self.store = Some(store);
         self
@@ -631,7 +631,8 @@ impl LashSession {
 
     /// Build the execution scope for a turn in this opened session.
     ///
-    /// Durable and store-less sessions use the same host-provided session id.
+    /// The scope uses the exact store-backed session identity owned by this
+    /// facade handle's Session Binding.
     pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash_core::ExecutionScope {
         lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope(
             &self.runtime.observe().persisted_state,

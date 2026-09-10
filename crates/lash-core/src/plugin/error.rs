@@ -33,6 +33,12 @@ pub enum PluginError {
     },
     #[error("plugin session error: {0}")]
     Session(String),
+    /// A session-creation request had no catalog capable of selecting and
+    /// admitting the new session's exact store.
+    #[error(
+        "session store is required before creating session `{session_id}`; configure a session-creation store factory"
+    )]
+    MissingSessionStore { session_id: String },
     /// An existing plugin session cannot be reconstructed because a required
     /// protocol-owned field is absent from its durable record.
     #[error("recorded session config for plugin `{plugin_id}` is missing required field `{field}`")]
@@ -208,6 +214,7 @@ impl PluginError {
             }
             Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }
+            | Self::MissingSessionStore { .. }
             | Self::MissingRecordedSessionConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }
             | Self::AppendOperationIdentityConflict { .. }

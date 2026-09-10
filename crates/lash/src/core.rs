@@ -882,7 +882,7 @@ pub struct LashCoreBuilder {
     session_spec: SessionSpec,
     provider: Option<ProviderHandle>,
     pub(crate) store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    child_store_factory: Option<Arc<dyn SessionStoreFactory>>,
+    session_creation_store_factory: Option<Arc<dyn SessionStoreFactory>>,
     // `RuntimeHostConfig` has no `Default`: the generic host-owned durability
     // dependencies must be named. They are collected here and resolved in
     // `build()`, which errors if any is unset.
@@ -934,7 +934,7 @@ impl LashCoreBuilder {
             session_spec: SessionSpec::new().turn_budget(turn_budget),
             provider: None,
             store_factory: None,
-            child_store_factory: None,
+            session_creation_store_factory: None,
             effect_host: None,
             attachment_store: None,
             process_env_store: None,
@@ -980,12 +980,13 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure a factory that can create a persistence store for any root
-    /// session opened from this core.
+    /// Configure the catalog used for sessions opened directly from this core.
     ///
     /// The factory must honor `SessionStoreCreateRequest::session_id` and
-    /// return a store for that specific session. Do not use this to wrap one
-    /// pre-opened root store; pass root-only stores with
+    /// return a store for that specific session. It is also the default catalog
+    /// for sessions created from a running session unless
+    /// [`Self::session_creation_store_factory`] selects another catalog. Do not
+    /// use this to wrap one pre-opened store; pass exact stores with
     /// `LashCore::session(...).store(store)` instead.
     ///
     /// Durable attachment GC never guesses process-registry co-location. Hosts
@@ -998,17 +999,21 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure the persistence factory used by managed child sessions, such
-    /// as local subagents.
+    /// Configure the persistence factory used for sessions created from a
+    /// running session.
     ///
-    /// Child factories must return a distinct store bound to the requested
-    /// child session id. Hosts that pass an explicit root store with
-    /// `SessionBuilder::store` should set this when child sessions need
-    /// persistence.
+    /// The factory applies to every `SessionCreateRequest`, independent of its
+    /// relation or subagent configuration, and must return a distinct store
+    /// bound to the requested session id. Hosts that pass an exact opened store
+    /// with `SessionBuilder::store` should set this when that session can create
+    /// more sessions.
     /// The same explicit process-registry wiring required by `store_factory`
     /// applies when this factory participates in attachment GC.
-    pub fn child_store_factory(mut self, store_factory: Arc<dyn SessionStoreFactory>) -> Self {
-        self.child_store_factory = Some(store_factory);
+    pub fn session_creation_store_factory(
+        mut self,
+        store_factory: Arc<dyn SessionStoreFactory>,
+    ) -> Self {
+        self.session_creation_store_factory = Some(store_factory);
         self
     }
 
@@ -1197,7 +1202,7 @@ impl LashCoreBuilder {
             return Err(EmbedError::MissingQueuedWorkSource);
         }
         if matches!(self.queued_work_source, QueuedWorkSource::Native)
-            && self.child_store_factory.is_none()
+            && self.session_creation_store_factory.is_none()
             && self.store_factory.is_none()
         {
             return Err(EmbedError::NativeQueuedWorkRequiresStoreFactory);
@@ -1296,12 +1301,13 @@ impl LashCoreBuilder {
         } else if let Some(wiring) = process_work_source.external_wiring() {
             env_builder = env_builder.with_process_work(wiring);
         }
-        if let Some(child_store_factory) = self
-            .child_store_factory
+        if let Some(session_creation_store_factory) = self
+            .session_creation_store_factory
             .as_ref()
             .or(self.store_factory.as_ref())
         {
-            env_builder = env_builder.with_session_store_factory(Arc::clone(child_store_factory));
+            env_builder =
+                env_builder.with_session_store_factory(Arc::clone(session_creation_store_factory));
         }
         let trigger_store = self.trigger_store.as_ref().cloned().unwrap_or_else(|| {
             Arc::new(facade_support::InMemoryTriggerStore::with_clock(
@@ -1329,7 +1335,7 @@ impl LashCoreBuilder {
         for store_factory in self
             .store_factory
             .iter()
-            .chain(self.child_store_factory.iter())
+            .chain(self.session_creation_store_factory.iter())
         {
             store_factory.bind_effect_host(&env.core.control.effect_host);
         }
@@ -1352,7 +1358,7 @@ impl LashCoreBuilder {
             policy.clone(),
             protocol_factory.clone(),
             Arc::new(plugin_factories.clone()),
-            self.child_store_factory
+            self.session_creation_store_factory
                 .as_ref()
                 .or(self.store_factory.as_ref()),
             Arc::clone(&live_replay_store),
@@ -1367,7 +1373,7 @@ impl LashCoreBuilder {
             wake: process_registry
                 .clone()
                 .zip(
-                    self.child_store_factory
+                    self.session_creation_store_factory
                         .as_ref()
                         .or(self.store_factory.as_ref())
                         .cloned(),

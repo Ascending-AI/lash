@@ -564,6 +564,7 @@ impl TurnWorkDriver {
         address: &TurnAddress,
     ) -> Result<TurnTerminal, RuntimeError> {
         address.validate()?;
+        self.validate_address(address)?;
         #[cfg(any(test, feature = "testing"))]
         if let Some(attach) = self.test_attach.as_ref() {
             return attach.await_terminal(address).await;

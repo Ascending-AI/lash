@@ -316,8 +316,9 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
 }
 
 #[tokio::test]
-async fn durable_process_worker_config_uses_child_store_factory_without_root() -> Result<()> {
-    // The CLI can wire a child store factory without a root store factory.
+async fn durable_process_worker_config_uses_session_creation_store_factory_without_root()
+-> Result<()> {
+    // A host can wire a creation store factory without a root-open factory.
     // The process worker config must resolve the same effective factory.
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
@@ -328,36 +329,39 @@ async fn durable_process_worker_config_uses_child_store_factory_without_root() -
         .await
         .expect("open durable registry"),
     );
-    let child_factory = durable_session_store_factory(dir.path());
+    let creation_factory = durable_session_store_factory(dir.path());
     let core = peer_coherence_builder()
         .with_native_queued_work()
         .effect_host(Arc::new(
             lash_core::facade_support::NativeEffectHost::default(),
         ))
-        .child_store_factory(Arc::clone(&child_factory))
+        .session_creation_store_factory(Arc::clone(&creation_factory))
         .attachment_store(durable_attachment_store(dir.path()))
         .process_env_store(durable_process_env_store(dir.path()).await)
         .trigger_store(durable_trigger_store(dir.path()).await)
         .process_registry(registry)
         .build(crate::testing::runtime_lease_owner())?;
     let config = core.durable_process_worker_config()?;
-    assert!(Arc::ptr_eq(&config.session_store_factory, &child_factory));
+    assert!(Arc::ptr_eq(
+        &config.session_store_factory,
+        &creation_factory
+    ));
     Ok(())
 }
 
 #[tokio::test]
-async fn durable_process_worker_config_matches_inline_child_factory_when_both_are_set() -> Result<()>
-{
+async fn durable_process_worker_config_matches_session_creation_factory_when_both_are_set()
+-> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
     let root_factory = durable_session_store_factory(&dir.path().join("root"));
-    let child_factory = durable_session_store_factory(&dir.path().join("child"));
+    let creation_factory = durable_session_store_factory(&dir.path().join("created"));
     let core = peer_coherence_builder()
         .with_native_queued_work()
         .effect_host(Arc::new(
             lash_core::facade_support::NativeEffectHost::default(),
         ))
         .store_factory(root_factory)
-        .child_store_factory(Arc::clone(&child_factory))
+        .session_creation_store_factory(Arc::clone(&creation_factory))
         .attachment_store(durable_attachment_store(dir.path()))
         .process_env_store(durable_process_env_store(dir.path()).await)
         .trigger_store(durable_trigger_store(dir.path()).await)
@@ -371,11 +375,11 @@ async fn durable_process_worker_config_matches_inline_child_factory_when_both_ar
     let public_config = core.durable_process_worker_config()?;
     assert!(Arc::ptr_eq(
         &inline_config.session_store_factory,
-        &child_factory
+        &creation_factory
     ));
     assert!(Arc::ptr_eq(
         &public_config.session_store_factory,
-        &child_factory
+        &creation_factory
     ));
     assert!(Arc::ptr_eq(
         &inline_config.session_store_factory,
