@@ -502,3 +502,21 @@ impl TurnInputStore for PostgresSessionStore {
         Ok(repaired)
     }
 }
+
+#[cfg(any(test, feature = "testing"))]
+impl PostgresSessionStore {
+    #[doc(hidden)]
+    pub async fn turn_cancel_request_paused_for_testing(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+        pause: &TurnCancelReadPause,
+    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+        load_turn_cancel_request_pg_with_pause(
+            &self.pool,
+            &address.session_id,
+            &address.turn_id,
+            pause,
+        )
+        .await
+    }
+}
