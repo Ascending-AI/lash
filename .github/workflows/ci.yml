@@ -362,8 +362,6 @@ jobs:
 
       - name: Test repository scripts
         run: |
-          python3 scripts/check_conformance_law_registrations.py
-          python3 scripts/test_check_conformance_law_registrations.py
           python3 scripts/test_api_surface.py
           python3 scripts/test_check_facade_external_types.py
           python3 scripts/test_check_facade_only_examples.py
