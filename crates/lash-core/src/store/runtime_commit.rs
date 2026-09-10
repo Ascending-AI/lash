@@ -5,19 +5,21 @@ use super::{
     SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
 };
 
-const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 2;
-pub(super) const USAGE_PAYLOAD_ENCODING_V2: u32 = USAGE_PAYLOAD_FAMILY_VERSION as u32;
+const USAGE_PAYLOAD_FAMILY_VERSION: u8 = 4;
+pub(super) const USAGE_PAYLOAD_ENCODING_V4: u32 = USAGE_PAYLOAD_FAMILY_VERSION as u32;
 
 /// Permanent tag registry for runtime-usage payload identities.
 ///
-/// Version 2 has no sum or optional variants: source, model, and the five
-/// counters form its complete sequence. Retired tags remain burned when
-/// variants are introduced in a later family version.
-/// Version 2 canonical bytes, in order:
+/// Retired tags remain burned when variants are introduced in a later family
+/// version. Version 4 canonical bytes, in order:
 ///
 /// The shared framing header owns the domain and family version. Source and
 /// model follow as length-prefixed strings, then the five signed counters in
-/// declaration order as big-endian `i64` values.
+/// declaration order as big-endian `i64` values, then the disposition: tag `0`
+/// reported; tag `1` unreported followed by a `u64` hole count and, per hole,
+/// the call id, the `u32` attempt ordinal, and an optional generation id
+/// (`0` absent / `1` present + string); tag `2` reconciled followed by the
+/// corrected call id and its `u32` attempt ordinal.
 ///
 /// The full destructures deliberately omit `..`: adding a semantic field to
 /// either durable DTO fails compilation until this projection is reconsidered.
@@ -26,6 +28,7 @@ fn usage_payload_identity_bytes(entry: &crate::TokenLedgerEntry) -> Vec<u8> {
         source,
         model,
         usage,
+        usage_disposition,
     } = entry;
     let crate::TokenUsage {
         input_tokens,
@@ -46,12 +49,42 @@ fn usage_payload_identity_bytes(entry: &crate::TokenLedgerEntry) -> Vec<u8> {
     identity.i64(*cache_read_input_tokens);
     identity.i64(*cache_write_input_tokens);
     identity.i64(*reasoning_output_tokens);
+    // v4: the disposition is part of the row's identity, so an unreported
+    // hole and a reconciled correction can never alias a reported row. Each
+    // hole projects its full descriptor — v3 projected only a count, which is
+    // why a reloaded row could not rebuild the attempts a host owes usage for.
+    match usage_disposition {
+        crate::LedgerUsageDisposition::Reported => identity.tag(0),
+        crate::LedgerUsageDisposition::Unreported { attempts } => {
+            identity.tag(1);
+            identity.sequence(attempts, |identity, attempt| {
+                let crate::UnreportedLedgerAttempt {
+                    call_id,
+                    attempt_ordinal,
+                    generation_id,
+                } = attempt;
+                identity.string(call_id);
+                identity.u32(*attempt_ordinal);
+                identity.optional(generation_id.as_deref(), |identity, generation_id| {
+                    identity.string(generation_id)
+                });
+            });
+        }
+        crate::LedgerUsageDisposition::Reconciled {
+            call_id,
+            attempt_ordinal,
+        } => {
+            identity.tag(2);
+            identity.string(call_id);
+            identity.u32(*attempt_ordinal);
+        }
+    }
     identity.finish()
 }
 
 fn usage_payload_identity_hash(entry: &crate::TokenLedgerEntry) -> String {
     crate::stable_hash::blake3_hex(
-        "lash-runtime-usage-payload/v2",
+        "lash-runtime-usage-payload/v4",
         &usage_payload_identity_bytes(entry),
     )
 }
@@ -296,7 +329,7 @@ impl RuntimeUsageDeltaIdentity {
         Self {
             operation_storage_key,
             entry_ordinal,
-            payload_encoding_version: USAGE_PAYLOAD_ENCODING_V2,
+            payload_encoding_version: USAGE_PAYLOAD_ENCODING_V4,
             payload_hash,
         }
     }
@@ -310,7 +343,7 @@ mod usage_payload_identity_tests {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
-    macro_rules! define_usage_payload_v2_corpus {
+    macro_rules! define_usage_payload_v4_corpus {
         ($(
             $row:literal => crate::TokenLedgerEntry {
                 source: $source:expr,
@@ -321,10 +354,11 @@ mod usage_payload_identity_tests {
                     cache_read_input_tokens: $cache_read_input_tokens:expr,
                     cache_write_input_tokens: $cache_write_input_tokens:expr,
                     reasoning_output_tokens: $reasoning_output_tokens:expr $(,)?
-                } $(,)?
+                },
+                usage_disposition: $usage_disposition:expr $(,)?
             }
         ),+ $(,)?) => {
-            fn usage_payload_v2_corpus() -> Vec<(&'static str, crate::TokenLedgerEntry)> {
+            fn usage_payload_v4_corpus() -> Vec<(&'static str, crate::TokenLedgerEntry)> {
                 vec![$((
                     $row,
                     crate::TokenLedgerEntry {
@@ -337,6 +371,7 @@ mod usage_payload_identity_tests {
                             cache_write_input_tokens: $cache_write_input_tokens,
                             reasoning_output_tokens: $reasoning_output_tokens,
                         },
+                        usage_disposition: $usage_disposition,
                     },
                 )),+]
             }
@@ -346,9 +381,11 @@ mod usage_payload_identity_tests {
     // The macro repeats the complete TokenLedgerEntry and TokenUsage shapes in
     // every fixture. A field addition cannot compile until the corpus is
     // updated; any projection change then moves the exact golden bytes.
-    // Neither v2 DTO has an Option field, so empty/non-empty strings pin its
-    // only absence/presence boundary instead of inventing None/Some semantics.
-    define_usage_payload_v2_corpus! {
+    // Neither v4 DTO has an Option field, so empty/non-empty strings pin the
+    // string absence/presence boundary; the disposition variants pin each
+    // tagged arm of the v4 suffix (reported, unreported hole, reconciled
+    // correction).
+    define_usage_payload_v4_corpus! {
         "empty_strings_zero_usage" => crate::TokenLedgerEntry {
             source: String::new(),
             model: String::new(),
@@ -359,6 +396,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 0,
             },
+            usage_disposition: crate::LedgerUsageDisposition::Reported,
         },
         "representative_nested_usage" => crate::TokenLedgerEntry {
             source: "turn\0source".to_string(),
@@ -370,6 +408,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 4,
                 reasoning_output_tokens: 5,
             },
+            usage_disposition: crate::LedgerUsageDisposition::Reported,
         },
         "all_counters_i64_max" => crate::TokenLedgerEntry {
             source: "max".to_string(),
@@ -381,6 +420,7 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: i64::MAX,
                 reasoning_output_tokens: i64::MAX,
             },
+            usage_disposition: crate::LedgerUsageDisposition::Reported,
         },
         "signed_counter_edges" => crate::TokenLedgerEntry {
             source: "signed".to_string(),
@@ -392,12 +432,53 @@ mod usage_payload_identity_tests {
                 cache_write_input_tokens: 1,
                 reasoning_output_tokens: i64::MAX,
             },
+            usage_disposition: crate::LedgerUsageDisposition::Reported,
+        },
+        "unreported_after_abort_hole" => crate::TokenLedgerEntry {
+            source: "turn".to_string(),
+            model: "openrouter/model".to_string(),
+            usage: crate::TokenUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            },
+            usage_disposition: crate::LedgerUsageDisposition::unreported([
+                crate::UnreportedLedgerAttempt {
+                    call_id: "call-hole-1".to_string(),
+                    attempt_ordinal: 0,
+                    generation_id: Some("gen-hole-1".to_string()),
+                },
+                // Pins the absent-generation tag: an attempt that never got far
+                // enough to have a generation id is a fact, not missing data.
+                crate::UnreportedLedgerAttempt {
+                    call_id: "call-hole-2".to_string(),
+                    attempt_ordinal: 3,
+                    generation_id: None,
+                },
+            ]),
+        },
+        "reconciled_correction" => crate::TokenLedgerEntry {
+            source: "turn".to_string(),
+            model: "openrouter/model".to_string(),
+            usage: crate::TokenUsage {
+                input_tokens: 120,
+                output_tokens: 35,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 7,
+            },
+            usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+                call_id: "call-7".to_string(),
+                attempt_ordinal: 1,
+            },
         },
     }
 
     #[test]
-    fn usage_payload_encoding_v2_golden_identity_corpus() {
-        let rendered = usage_payload_v2_corpus()
+    fn usage_payload_encoding_v4_golden_identity_corpus() {
+        let rendered = usage_payload_v4_corpus()
             .into_iter()
             .enumerate()
             .map(|(entry_ordinal, (name, entry))| {
@@ -423,7 +504,7 @@ mod usage_payload_identity_tests {
                 )
             })
             .collect::<std::collections::BTreeMap<_, _>>();
-        let expected = include_str!("testdata/usage_payload_encoding_v2.hex")
+        let expected = include_str!("testdata/usage_payload_encoding_v4.hex")
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(|line| {
@@ -448,16 +529,16 @@ mod usage_payload_identity_tests {
                 .expect("rendered golden corpus row was checked above");
             assert_eq!(
                 actual, **expected,
-                "v2 preimage, payload hash, or full identity moved for {name}"
+                "v4 preimage, payload hash, or full identity moved for {name}"
             );
         }
     }
 
     #[test]
     fn usage_identity_version_participates_in_equality() {
-        let entry = usage_payload_v2_corpus().pop().expect("usage fixture").1;
+        let entry = usage_payload_v4_corpus().pop().expect("usage fixture").1;
         let current = RuntimeUsageDeltaIdentity::for_entry("operation".to_string(), 0, &entry);
-        assert_eq!(current.payload_encoding_version, USAGE_PAYLOAD_ENCODING_V2);
+        assert_eq!(current.payload_encoding_version, USAGE_PAYLOAD_ENCODING_V4);
         let mut future = current.clone();
         future.payload_encoding_version += 1;
         assert_ne!(current, future);
@@ -465,7 +546,7 @@ mod usage_payload_identity_tests {
 
     #[test]
     fn runtime_commit_rejects_a_payload_version_hash_mismatch() {
-        let entry = usage_payload_v2_corpus().pop().expect("usage fixture").1;
+        let entry = usage_payload_v4_corpus().pop().expect("usage fixture").1;
         let state = crate::RuntimeSessionState {
             session_id: "usage-payload-version".to_string(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(

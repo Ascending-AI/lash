@@ -94,6 +94,18 @@ impl Provider for OpenAiCompatibleProvider {
         "openai-compatible"
     }
 
+    async fn reconcile_usage(
+        &mut self,
+        generation_id: &str,
+    ) -> Result<Option<lash_core::provider::ReconciledUsage>, LlmTransportError> {
+        match self.compat.usage_reconciliation {
+            Some(crate::config::UsageReconciliation::OpenRouterGeneration) => {
+                crate::openrouter::reconcile_generation_usage(self, generation_id).await
+            }
+            None => Ok(None),
+        }
+    }
+
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
         ProviderRouteIdentity::for_endpoint(self.kind(), &self.base_url, model)
     }
@@ -150,6 +162,13 @@ impl Provider for OpenAiCompatibleProvider {
 impl Provider for OpenAiProvider {
     fn kind(&self) -> &'static str {
         "openai"
+    }
+
+    async fn reconcile_usage(
+        &mut self,
+        generation_id: &str,
+    ) -> Result<Option<lash_core::provider::ReconciledUsage>, LlmTransportError> {
+        self.inner.reconcile_usage(generation_id).await
     }
 
     fn route_identity(&self, model: &str) -> ProviderRouteIdentity {

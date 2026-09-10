@@ -237,10 +237,15 @@ pub struct SessionNodeRecord {
 ///
 /// Version 11 carries host instruction roles and native feedback capabilities.
 ///
+/// Version 12 stamps each LLM attempt with its usage disposition (FIG-2765):
+/// provider-reported, or unreported by the provider, after an abort, or after
+/// a failure. Reported attempts elide the field, so a v11 body reads as v12
+/// bytes; the fence exists because a v11 reader would drop a hole silently.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 11;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 12;
 
 /// Generation of a body written before the stamp existed.
 ///

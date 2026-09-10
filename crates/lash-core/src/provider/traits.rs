@@ -1,5 +1,6 @@
 use super::support::*;
 use crate::LlmTerminalReason;
+use crate::llm::types::LlmUsage;
 
 /// Provider guarantee that repeating a logical generation cannot buy and
 /// replace a second generation after output has already been observed.
@@ -16,6 +17,16 @@ pub enum GenerationRetryGuarantee {
     None,
     Idempotent,
     Resumable,
+}
+
+/// Usage recovered by [`Provider::reconcile_usage`] for one generation.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ReconciledUsage {
+    /// Normalized token counts the provider's generation record reports.
+    pub usage: LlmUsage,
+    /// The provider's own accounting record for the generation (cost, native
+    /// token counts, cancellation flag), kept verbatim for host billing.
+    pub provider_usage: serde_json::Value,
 }
 
 /// A configured LLM backend: its identity, host-config serialization, its
@@ -75,6 +86,23 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// transport state have nothing to release.
     async fn close(&self) -> Result<(), LlmTransportError> {
         Ok(())
+    }
+
+    /// Look up, after the fact, the usage of a generation whose stream ended
+    /// before the provider reported it (ADR 0031, FIG-2765): a protocol
+    /// boundary aborted the stream, or the attempt failed mid-stream.
+    ///
+    /// `generation_id` is the provider response id the attempt's execution
+    /// evidence carried. The lookup is host-invoked through
+    /// `LashRuntime::reconcile_unreported_usage`, never from the turn's hot
+    /// path, and must be bounded: implementations time out and retry at most
+    /// once. `Ok(None)` means the provider has no such record (or no
+    /// reconciliation endpoint at all — the default); the hole stays open.
+    async fn reconcile_usage(
+        &mut self,
+        _generation_id: &str,
+    ) -> Result<Option<ReconciledUsage>, LlmTransportError> {
+        Ok(None)
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider>;

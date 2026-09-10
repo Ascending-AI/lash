@@ -1556,6 +1556,62 @@ pub enum ChargeSafetyDecision {
     },
 }
 
+/// Whether an attempt's `usage` is provider-reported fact or a typed hole.
+///
+/// ADR 0031: absence means unreported and an explicit zero is information.
+/// The disposition makes the reason for an absence part of the sealed record,
+/// so a host summing cost can tell "the provider reported nothing" from "the
+/// call was cut off before the provider's final usage chunk arrived" — the
+/// latter is billed by the provider even though lash never saw the count.
+///
+/// A `Reported` disposition means provider usage was observed before the
+/// attempt ended. Dialects that stream usage incrementally may have delivered
+/// only an early partial; the record carries what was observed, never a guess.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttemptUsageDisposition {
+    /// Provider-reported usage was observed; `usage` is `Some`. Records
+    /// sealed before this disposition existed decode here.
+    #[default]
+    Reported,
+    /// The attempt completed and the provider reported no usage at all.
+    UnreportedByProvider,
+    /// The attempt was aborted — a protocol-owned stream abort or an explicit
+    /// cancellation — before the provider's usage arrived. The provider may
+    /// still bill the generation; see `Provider::reconcile_usage`.
+    UnreportedAfterAbort,
+    /// The attempt failed or was interrupted before the provider's usage
+    /// arrived.
+    UnreportedAfterFailure,
+}
+
+impl AttemptUsageDisposition {
+    /// Derive the disposition from what the attempt actually observed.
+    pub fn for_attempt(outcome: AttemptOutcome, usage: Option<&LlmUsage>) -> Self {
+        if usage.is_some() {
+            return Self::Reported;
+        }
+        match outcome {
+            AttemptOutcome::Completed => Self::UnreportedByProvider,
+            AttemptOutcome::Aborted => Self::UnreportedAfterAbort,
+            AttemptOutcome::Failed | AttemptOutcome::Interrupted => Self::UnreportedAfterFailure,
+        }
+    }
+
+    /// True when the attempt ended early and its provider usage never arrived
+    /// — the hole a usage ledger must show rather than silently sum as zero.
+    pub fn is_unreported_after_interruption(self) -> bool {
+        matches!(
+            self,
+            Self::UnreportedAfterAbort | Self::UnreportedAfterFailure
+        )
+    }
+
+    pub fn is_reported(&self) -> bool {
+        matches!(self, Self::Reported)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AttemptRecord {
     pub ordinal: u32,
@@ -1578,6 +1634,10 @@ pub struct AttemptRecord {
     /// Provider-reported usage only. Absence is not zero usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<LlmUsage>,
+    /// Why `usage` is present or absent. Additive: records sealed without it
+    /// decode as [`AttemptUsageDisposition::Reported`].
+    #[serde(default, skip_serializing_if = "AttemptUsageDisposition::is_reported")]
+    pub usage_disposition: AttemptUsageDisposition,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

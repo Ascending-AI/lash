@@ -23,6 +23,7 @@ mod output_started_tests;
 mod replay_provenance_tests;
 mod request_work_tests;
 mod responses_text_slot_tests;
+mod usage_reconciliation_tests;
 
 /// The cross-provider conformance law is feature-gated. This crate's self
 /// dev-dependency keeps `testing` on for every test build, so a bare

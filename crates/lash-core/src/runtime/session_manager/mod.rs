@@ -21,13 +21,13 @@ pub(in crate::runtime::session_manager) use usage::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use usage::{
-    PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
-    stage_token_ledger_shared,
+    PendingTokenLedgerEntry, StagedTokenLedger, record_reconciled_usage_shared,
+    record_token_usage_shared, record_unreported_attempts_shared, stage_token_ledger_shared,
 };
 #[cfg(not(any(test, feature = "testing")))]
 pub(in crate::runtime) use usage::{
-    PendingTokenLedgerEntry, StagedTokenLedger, record_token_usage_shared,
-    stage_token_ledger_shared,
+    PendingTokenLedgerEntry, StagedTokenLedger, record_reconciled_usage_shared,
+    record_token_usage_shared, record_unreported_attempts_shared, stage_token_ledger_shared,
 };
 
 #[derive(Clone)]

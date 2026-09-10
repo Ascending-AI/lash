@@ -934,8 +934,8 @@ impl SessionCommitStore for Store {
                         let mut stmt = tx
                             .prepare(
                                 "INSERT OR IGNORE INTO usage_deltas (
-                                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens
-                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
+                                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                             )
                             .map_err(sqlite_error)?;
                         for entry in &commit.usage_deltas {
@@ -959,6 +959,9 @@ impl SessionCommitStore for Store {
                                 entry.entry.usage.cache_read_input_tokens,
                                 entry.entry.usage.cache_write_input_tokens,
                                 entry.entry.usage.reasoning_output_tokens,
+                                crate::blobs::encode_usage_disposition(
+                                    &entry.entry.usage_disposition,
+                                )?,
                             ])
                             .map_err(sqlite_error)?;
                         }

@@ -45,5 +45,5 @@ pub use resolver::{
 };
 pub use traits::{
     DefaultProviderFailureClassifier, GenerationRetryGuarantee, Provider,
-    ProviderFailureClassifier, is_context_overflow_text,
+    ProviderFailureClassifier, ReconciledUsage, is_context_overflow_text,
 };

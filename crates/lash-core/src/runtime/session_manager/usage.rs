@@ -312,10 +312,12 @@ pub fn record_token_usage_shared(
         return;
     }
     let mut ledger = token_ledger.lock_recover();
-    if let Some(entry) = ledger
-        .iter_mut()
-        .find(|entry| entry.identity.is_none() && entry.source == source && entry.model == model)
-    {
+    if let Some(entry) = ledger.iter_mut().find(|entry| {
+        entry.identity.is_none()
+            && entry.source == source
+            && entry.model == model
+            && entry.usage_disposition.is_reported()
+    }) {
         // Pre-identity staging deliberately saturates so infallible provider
         // callbacks cannot wrap or discard a row. The checked merge permits a
         // clamped counter only when every counter and the canonical total still
@@ -346,12 +348,68 @@ pub fn record_token_usage_shared(
             .reasoning_output_tokens
             .saturating_add(usage.reasoning_output_tokens);
     } else {
+        ledger.push(PendingTokenLedgerEntry::unstaged(
+            TokenLedgerEntry::reported(source, model, usage.clone()),
+        ));
+    }
+}
+
+/// Record interrupted attempts whose provider usage never arrived: a
+/// zero-usage row marked unreported, so the ledger shows the hole instead of
+/// writing nothing (ADR 0031). Accumulates into the pending unreported row for
+/// the same `(source, model)`.
+pub fn record_unreported_attempts_shared(
+    token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
+    source: &str,
+    model: &str,
+    attempts: &[crate::UnreportedLedgerAttempt],
+) {
+    if attempts.is_empty() {
+        return;
+    }
+    let incoming = crate::LedgerUsageDisposition::unreported(attempts.iter().cloned());
+    let mut ledger = token_ledger.lock_recover();
+    if let Some(entry) = ledger.iter_mut().find(|entry| {
+        entry.identity.is_none()
+            && entry.source == source
+            && entry.model == model
+            && matches!(
+                entry.usage_disposition,
+                crate::LedgerUsageDisposition::Unreported { .. }
+            )
+    }) {
+        entry.entry.usage_disposition.absorb_saturating(&incoming);
+    } else {
         ledger.push(PendingTokenLedgerEntry::unstaged(TokenLedgerEntry {
             source: source.to_string(),
             model: model.to_string(),
-            usage: usage.clone(),
+            usage: TokenUsage::default(),
+            usage_disposition: incoming,
         }));
     }
+}
+
+/// Append one reconciliation correction row attributed to the attempt whose
+/// usage was recovered from the provider. Append-only: never merged into the
+/// reported row and never rewrites the unreported row it fills.
+pub fn record_reconciled_usage_shared(
+    token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
+    source: &str,
+    model: &str,
+    usage: &TokenUsage,
+    call_id: &str,
+    attempt_ordinal: u32,
+) {
+    let mut ledger = token_ledger.lock_recover();
+    ledger.push(PendingTokenLedgerEntry::unstaged(TokenLedgerEntry {
+        source: source.to_string(),
+        model: model.to_string(),
+        usage: usage.clone(),
+        usage_disposition: crate::LedgerUsageDisposition::Reconciled {
+            call_id: call_id.to_string(),
+            attempt_ordinal,
+        },
+    }));
 }
 
 pub(in crate::runtime::session_manager) fn subtract_usage(
@@ -499,6 +557,7 @@ mod staging_tests {
                 input_tokens,
                 ..TokenUsage::default()
             },
+            usage_disposition: Default::default(),
         }
     }
 

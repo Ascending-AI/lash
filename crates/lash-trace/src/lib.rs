@@ -90,7 +90,10 @@ pub use lashlang_graph::{
 /// turn starts and completed LLM calls retain lifecycle and per-call usage evidence.
 /// Version 17 adds compile/link outcomes for every RLM program step.
 /// Version 18 carries attachment sources through request blocks.
-pub const TRACE_SCHEMA_VERSION: u32 = 18;
+/// Version 19 adds the attempt usage disposition to retry attempts so an
+/// aborted or failed call whose usage never arrived is distinguishable from
+/// a free one.
+pub const TRACE_SCHEMA_VERSION: u32 = 19;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -504,6 +507,11 @@ pub struct TraceRetryAttempt {
     /// Provider-reported usage for this attempt. Absence is not zero usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TraceTokenUsage>,
+    /// Why `usage` is absent when it is: `reported`, `unreported_by_provider`,
+    /// `unreported_after_abort`, or `unreported_after_failure` (LLM attempts
+    /// only; tool attempts carry none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_disposition: Option<String>,
 }
 
 /// Terminal state of one provider or tool attempt in a trace retry ladder.

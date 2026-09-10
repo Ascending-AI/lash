@@ -62,10 +62,21 @@ pub struct RuntimePromptConfig {
     pub prompt: crate::PromptLayer,
 }
 
+/// Default [`RuntimeControlConfig::abort_drain_grace`].
+pub const DEFAULT_ABORT_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_millis(2_000);
+
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
     pub termination: TerminationPolicy,
+    /// How long a protocol-owned stream abort (a protocol boundary that ends
+    /// the model's turn under ADR 0036's no-wire-stop rule) keeps draining the
+    /// provider stream before the task is aborted. The drain exists so a
+    /// cooperative provider's trailing usage event still lands on the aborted
+    /// attempt; past the grace the attempt is sealed with a typed unreported
+    /// disposition (ADR 0031). Defaults to
+    /// [`DEFAULT_ABORT_DRAIN_GRACE`] (2 s).
+    pub abort_drain_grace: std::time::Duration,
     /// Host-selected boundary for process wakes entering the target session.
     pub process_wake_delivery_policy: crate::DeliveryPolicy,
     /// Optional narrow-only policy for the model-facing session process tools.
@@ -125,6 +136,7 @@ impl RuntimeHostConfig {
             },
             control: RuntimeControlConfig {
                 termination: TerminationPolicy::default(),
+                abort_drain_grace: DEFAULT_ABORT_DRAIN_GRACE,
                 effect_host,
                 process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
                 lease_timings: crate::LeaseTimings::default(),

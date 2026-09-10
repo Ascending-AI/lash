@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 57;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 58;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -91,7 +91,7 @@ fn assert_fixture_schema_version(found: u32) {
 
 #[test]
 fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
-    const PREDECESSOR: u32 = 56;
+    const PREDECESSOR: u32 = 57;
     assert_eq!(
         PREDECESSOR + 1,
         DURABLE_READ_FIXTURE_SCHEMA_VERSION,
@@ -163,6 +163,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             cache_write_input_tokens: 3,
             reasoning_output_tokens: 2,
         },
+        usage_disposition: Default::default(),
     };
     let legacy_operation = OperationId::new(
         ExecutionScope::runtime_operation("durable-read-legacy-commit"),

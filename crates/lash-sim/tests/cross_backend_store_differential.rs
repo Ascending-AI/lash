@@ -820,6 +820,7 @@ fn differential_usage_delta() -> TokenLedgerEntry {
             cache_write_input_tokens: 3,
             reasoning_output_tokens: 2,
         },
+        usage_disposition: Default::default(),
     }
 }
 

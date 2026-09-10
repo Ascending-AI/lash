@@ -882,6 +882,7 @@ pub struct LashCoreBuilder {
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
     termination: Option<TerminationPolicy>,
+    abort_drain_grace: Option<std::time::Duration>,
     // Advanced full-config override; used as the base core when present.
     runtime_host_config: Option<RuntimeHostConfig>,
     tool_providers: Vec<Arc<dyn ToolProvider>>,
@@ -928,6 +929,7 @@ impl LashCoreBuilder {
             trace_level: None,
             trace_context: None,
             termination: None,
+            abort_drain_grace: None,
             runtime_host_config: None,
             tool_providers: Vec::new(),
             plugin_stack: PluginStack::default(),
@@ -1116,6 +1118,17 @@ impl LashCoreBuilder {
     /// Configures the termination and returns the updated builder.
     pub fn termination(mut self, termination: TerminationPolicy) -> Self {
         self.termination = Some(termination);
+        self
+    }
+
+    /// Bound how long a protocol-owned stream abort (an RLM cell boundary
+    /// ending the model's turn) keeps draining the provider stream before the
+    /// provider task is aborted. The drain lets a cooperative provider's
+    /// trailing usage event land on the aborted attempt; past the grace the
+    /// attempt is sealed with a typed unreported usage disposition and the
+    /// turn's usage ledger records the hole. Defaults to 2 seconds.
+    pub fn abort_drain_grace(mut self, grace: std::time::Duration) -> Self {
+        self.abort_drain_grace = Some(grace);
         self
     }
 

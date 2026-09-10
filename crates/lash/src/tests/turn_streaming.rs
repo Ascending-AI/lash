@@ -7172,6 +7172,20 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
                 .and_then(|evidence| evidence.collection_interruption),
             Some(lash_core::ExecutionEvidenceCollectionInterruption::ProtocolAbort)
         );
+        // Abort-retains-usage law: the late usage landed inside the drain
+        // grace, so the aborted attempt is reported, not a hole.
+        assert_eq!(
+            attempt.usage_disposition,
+            lash_core::AttemptUsageDisposition::Reported
+        );
+        assert_eq!(
+            attempt.usage.as_ref().map(|usage| usage.input_tokens),
+            Some(17)
+        );
+        let report = session.usage_report();
+        assert_eq!(report.usage.unreported_attempts, 0);
+        assert_eq!(report.usage.usage.input_tokens, 17);
+        assert!(session.unreported_usage_attempts().await.is_empty());
 
         let journaled = recorder
             .persisted_outcomes()
@@ -7257,7 +7271,91 @@ fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<()> {
             result.final_value(),
             Some(&serde_json::json!("deadline survived"))
         );
+        // FIG-2765: the deadline wins, so the attempt has no provider usage.
+        // The turn's own counters stay at zero, but the aborted call must
+        // never look free: the sealed attempt says its usage is unreported
+        // after the abort, and the session ledger carries a typed hole for
+        // it even though every counter is zero.
         assert_eq!(result.result.usage, lash_core::TokenUsage::default());
+        let attempt = result
+            .result
+            .llm_calls
+            .first()
+            .and_then(|record| record.attempts.first())
+            .expect("sealed aborted attempt");
+        assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Aborted);
+        assert_eq!(attempt.usage, None);
+        assert_eq!(
+            attempt.usage_disposition,
+            lash_core::AttemptUsageDisposition::UnreportedAfterAbort
+        );
+
+        let report = session.usage_report();
+        assert_eq!(report.usage.unreported_attempts, 1);
+        assert_eq!(report.usage.reconciled_attempts, 0);
+        assert_eq!(report.usage.total_tokens, 0);
+        let row = report
+            .by_source_model
+            .iter()
+            .find(|row| row.source == "turn")
+            .expect("unreported turn row is written even at zero usage");
+        assert_eq!(row.usage.unreported_attempts, 1);
+        assert_eq!(row.usage.usage, lash_core::TokenUsage::default());
+        let unreported = session.unreported_usage_attempts().await;
+        assert_eq!(unreported.len(), 1);
+        assert_eq!(unreported[0].call_id, result.result.llm_calls[0].call_id.0);
+        assert_eq!(unreported[0].attempt_ordinal, 1);
+        assert_eq!(unreported[0].source, "turn");
+        // The test provider never named a generation, so reconciliation has
+        // nothing to ask for: the hole stays open and is reported as such.
+        let reconciliation = session.reconcile_unreported_usage().await?;
+        assert!(reconciliation.reconciled.is_empty());
+        assert_eq!(reconciliation.unresolved, unreported);
+        assert_eq!(session.usage_report().usage.unreported_attempts, 1);
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn rlm_turn_without_interruption_or_usage_writes_no_ledger_row() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-zero-usage-no-row", || async {
+        let provider = crate::testing::TestProvider::builder()
+            .kind("rlm-zero-usage")
+            .complete(|_request| async move {
+                Ok(LlmResponse {
+                    parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                        text: "<lashlang>\nfinish \"quiet\"\n</lashlang>\n".to_string(),
+                        response_meta: None,
+                    }],
+                    terminal_reason: lash_core::LlmTerminalReason::Stop,
+                    ..LlmResponse::default()
+                })
+            })
+            .build()
+            .into_handle();
+        let core = rlm_abort_drain_core(provider)?;
+        let session = core.session("rlm-zero-usage").open().await?;
+        let result = session.turn(TurnInput::text("finish")).run().await?;
+        assert_eq!(result.final_value(), Some(&serde_json::json!("quiet")));
+        let attempt = result
+            .result
+            .llm_calls
+            .first()
+            .and_then(|record| record.attempts.first())
+            .expect("completed attempt");
+        assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
+        assert_eq!(
+            attempt.usage_disposition,
+            lash_core::AttemptUsageDisposition::UnreportedByProvider
+        );
+        let report = session.usage_report();
+        assert_eq!(
+            report.entry_count, 0,
+            "zero usage with no interruption writes nothing"
+        );
+        assert_eq!(report.usage.unreported_attempts, 0);
+        assert!(session.unreported_usage_attempts().await.is_empty());
         Ok(())
     })
 }

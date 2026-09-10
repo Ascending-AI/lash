@@ -2407,6 +2407,7 @@ mod rolling_history_persistence;
 mod stack_budget;
 mod tool_intent_ingress;
 mod turn_streaming;
+mod usage_durability;
 
 /// `SnapshotStore` backs the facade tests, so it owes the displacement contract
 /// too: a double that reports no displacement would let a facade-level regression

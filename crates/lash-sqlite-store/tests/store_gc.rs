@@ -432,6 +432,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
                 input_tokens: 1,
                 ..Default::default()
             },
+            usage_disposition: Default::default(),
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(state, &[usage]);
         commit.graph = GraphAppend {

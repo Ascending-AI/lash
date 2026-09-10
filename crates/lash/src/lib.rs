@@ -872,14 +872,15 @@ pub mod provider {
         SamplingCapability, StreamTermination, facade_support::GenerationRetryGuarantee,
         facade_support::LlmTimeouts, facade_support::Provider, facade_support::ProviderComponents,
         facade_support::ProviderHandle, facade_support::ProviderOptions,
+        facade_support::ReconciledUsage,
     };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
     pub use lash_core::{
-        AttemptOutcome, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
-        ExecutionEvidenceMergeError, LlmRequest, LlmRequestScope, LlmResponse, LlmStreamEvidence,
-        NormalizedError, ProtocolPosition, ProviderEndpointError,
-        facade_support::LlmTransportError,
+        AttemptOutcome, AttemptUsageDisposition, ExecutionEvidence,
+        ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmRequest,
+        LlmRequestScope, LlmResponse, LlmStreamEvidence, NormalizedError, ProtocolPosition,
+        ProviderEndpointError, facade_support::LlmTransportError,
     };
 }

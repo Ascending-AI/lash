@@ -186,6 +186,101 @@ impl LashRuntime {
         SessionUsageReport::from_entries_with_saturation(&entries, saturated)
     }
 
+    /// Attempts of finished turns whose usage never arrived after an abort or
+    /// failure and have not been reconciled (ADR 0031). The ledger already
+    /// carries them as unreported rows; this is their attribution.
+    pub fn unreported_usage_attempts(&self) -> &[UnreportedUsageAttempt] {
+        &self.unreported_usage_attempts
+    }
+
+    /// Ask the session's provider for the usage of every registered
+    /// unreported attempt and append one `Reconciled` correction row per
+    /// recovered generation (FIG-2765).
+    ///
+    /// Host-invoked and never on the turn hot path: each lookup is bounded by
+    /// the provider (timeout plus one retry). Rows are append-only; the
+    /// unreported row written at turn end is never rewritten, and
+    /// [`UsageTotals::unreported_attempts`] derives the outstanding hole from
+    /// both. Corrections ride the shared pending ledger and persist at the
+    /// next usage-ledger boundary like live usage does. Attempts the provider
+    /// cannot resolve stay registered and come back as `unresolved`.
+    pub async fn reconcile_unreported_usage(
+        &mut self,
+    ) -> Result<UsageReconciliationReport, SessionError> {
+        let mut report = UsageReconciliationReport::default();
+        if self.unreported_usage_attempts.is_empty() {
+            return Ok(report);
+        }
+        let session_id = self.state.session_id.clone();
+        let policy = self.state.effective_policy().clone();
+        let mut provider = self
+            .host
+            .resolve_session_policy(&session_id, policy)?
+            .binding
+            .provider;
+        // Cancellation safety (FIG-2765): the registry is NOT drained up front.
+        // Dropping this future mid-lookup must leave every unfinished attempt
+        // registered, so we iterate a snapshot and remove each key only after
+        // its correction is on the shared ledger, with no await in between.
+        let pending = self.unreported_usage_attempts.clone();
+        for attempt in pending {
+            let Some(generation_id) = attempt.generation_id.as_deref() else {
+                report.unresolved.push(attempt);
+                continue;
+            };
+            match provider.reconcile_usage(generation_id).await {
+                Ok(Some(reconciled)) => {
+                    let crate::llm::types::LlmUsage {
+                        input_tokens,
+                        output_tokens,
+                        cache_read_input_tokens,
+                        cache_write_input_tokens,
+                        reasoning_output_tokens,
+                    } = reconciled.usage;
+                    let usage = TokenUsage {
+                        input_tokens,
+                        output_tokens,
+                        cache_read_input_tokens,
+                        cache_write_input_tokens,
+                        reasoning_output_tokens,
+                    };
+                    session_manager::record_reconciled_usage_shared(
+                        &self.shared_token_ledger,
+                        &attempt.source,
+                        &attempt.model,
+                        &usage,
+                        &attempt.call_id,
+                        attempt.attempt_ordinal,
+                    );
+                    // Synchronous with the append above: no await may separate
+                    // recording the correction from retiring the attempt.
+                    self.unreported_usage_attempts.retain(|registered| {
+                        registered.call_id != attempt.call_id
+                            || registered.attempt_ordinal != attempt.attempt_ordinal
+                    });
+                    report.reconciled.push(ReconciledUsageAttempt {
+                        attempt,
+                        usage,
+                        provider_usage: reconciled.provider_usage,
+                    });
+                }
+                Ok(None) => report.unresolved.push(attempt),
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        call_id = %attempt.call_id,
+                        attempt_ordinal = attempt.attempt_ordinal,
+                        generation_id,
+                        error = %error,
+                        "usage reconciliation lookup failed; attempt stays unreported"
+                    );
+                    report.unresolved.push(attempt);
+                }
+            }
+        }
+        Ok(report)
+    }
+
     pub async fn await_background_work(&mut self) -> Result<(), SessionError> {
         if self.process_sync_needed.swap(false, Ordering::AcqRel) {
             self.refresh_session_graph_from_store().await?;
@@ -278,7 +373,23 @@ impl LashRuntime {
         })?;
         self.resident_graph_head_stale
             .store(false, Ordering::Release);
+        // The adopted head is authoritative for usage too: rebuild the attempts
+        // this session still owes usage for from the durable rows plus the
+        // resident rows that have not been confirmed into them yet.
+        self.rehydrate_unreported_usage_attempts();
         Ok(())
+    }
+
+    /// Rebuild the pending-attempt registry from durable ledger rows and the
+    /// unconfirmed resident rows layered on top. Confirmed resident rows are
+    /// already in `state.token_ledger`, and rebuilding by identity rather than
+    /// by count means seeing a hole twice cannot double-count it.
+    pub(in crate::runtime) fn rehydrate_unreported_usage_attempts(&mut self) {
+        let mut entries = self.state.token_ledger.clone();
+        for pending in self.shared_token_ledger.lock_recover().iter() {
+            entries.push(pending.entry.clone());
+        }
+        self.unreported_usage_attempts = crate::runtime::outstanding_unreported_attempts(&entries);
     }
 
     pub(super) fn runtime_session_services(

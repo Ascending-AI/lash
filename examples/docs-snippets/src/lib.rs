@@ -42,6 +42,8 @@ mod fig1556_preflight;
 mod fig1556_probe;
 mod fig1922_read_session;
 mod fig2499_scope_retirement;
+#[cfg(test)]
+mod fig2765_usage_reconciliation;
 mod index;
 mod operations;
 mod persistence;

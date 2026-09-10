@@ -266,6 +266,13 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
+    /// Bound the provider-stream drain after a protocol-owned abort. See
+    /// [`crate::RuntimeControlConfig::abort_drain_grace`].
+    pub fn with_abort_drain_grace(mut self, grace: std::time::Duration) -> Self {
+        self.env.core.control.abort_drain_grace = grace;
+        self
+    }
+
     pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
         self.env.core.control.effect_host = effect_host;
         self

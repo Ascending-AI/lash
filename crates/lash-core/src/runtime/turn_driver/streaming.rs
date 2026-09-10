@@ -548,6 +548,8 @@ impl RuntimeTurnDriver<'_> {
                                     evidence: None,
                                     generation_disposition: None,
                                     usage: None,
+                                    usage_disposition:
+                                        crate::AttemptUsageDisposition::UnreportedAfterFailure,
                                 }],
                             });
                             let failure = LlmCallError {
@@ -1275,7 +1277,9 @@ impl RuntimeTurnDriver<'_> {
     /// `AttemptReset` is a hard boundary: the completed response belongs to
     /// the accepted attempt and must not be cleared by a provider retry that
     /// raced with cancellation. If the deadline wins, an uncooperative
-    /// provider's late usage is unavailable for this attempt.
+    /// provider's late usage is unavailable for this attempt and the sealed
+    /// record says so (`AttemptUsageDisposition::UnreportedAfterAbort`). The
+    /// deadline is the host's `abort_drain_grace` lever, not a literal.
     async fn collect_trailing_stream_events_before_abort<T>(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
@@ -1283,7 +1287,7 @@ impl RuntimeTurnDriver<'_> {
         llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
-        let deadline = self.host.core.clock.now() + std::time::Duration::from_millis(2_000);
+        let deadline = self.host.core.clock.now() + self.host.core.control.abort_drain_grace;
         loop {
             tokio::select! {
                 _ = self.host.core.clock.sleep_until(deadline) => break,
@@ -1438,6 +1442,7 @@ mod clamp_report_tests {
             evidence: None,
             generation_disposition,
             usage: None,
+            usage_disposition: Default::default(),
         }
     }
     fn call_record(attempts: Vec<crate::AttemptRecord>) -> crate::LlmCallRecord {
@@ -1485,6 +1490,7 @@ mod clamp_report_tests {
             evidence: None,
             generation_disposition: applied(),
             usage: None,
+            usage_disposition: Default::default(),
         }]);
 
         record_clamped_output_token_cap(&mut result, Some(&mut call_record));

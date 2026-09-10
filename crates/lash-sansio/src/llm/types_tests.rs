@@ -296,6 +296,7 @@ fn attempt_contract_round_trips_closed_outcomes_and_preserves_optional_zero() {
                     cache: GenerationOptionOutcome::Applied,
                 }),
                 usage: None,
+                usage_disposition: Default::default(),
             }],
         };
         let decoded: LlmCallRecord =
@@ -313,4 +314,67 @@ fn attempt_contract_round_trips_closed_outcomes_and_preserves_optional_zero() {
 
     let absent = ExecutionEvidence::default();
     assert_eq!(absent.reasoning_output_tokens, None);
+}
+
+#[test]
+fn attempt_usage_disposition_follows_outcome_when_usage_is_absent() {
+    let usage = LlmUsage {
+        input_tokens: 1,
+        ..LlmUsage::default()
+    };
+    for outcome in [
+        AttemptOutcome::Completed,
+        AttemptOutcome::Failed,
+        AttemptOutcome::Aborted,
+        AttemptOutcome::Interrupted,
+    ] {
+        assert_eq!(
+            AttemptUsageDisposition::for_attempt(outcome, Some(&usage)),
+            AttemptUsageDisposition::Reported
+        );
+    }
+    assert_eq!(
+        AttemptUsageDisposition::for_attempt(AttemptOutcome::Completed, None),
+        AttemptUsageDisposition::UnreportedByProvider
+    );
+    assert_eq!(
+        AttemptUsageDisposition::for_attempt(AttemptOutcome::Aborted, None),
+        AttemptUsageDisposition::UnreportedAfterAbort
+    );
+    assert_eq!(
+        AttemptUsageDisposition::for_attempt(AttemptOutcome::Failed, None),
+        AttemptUsageDisposition::UnreportedAfterFailure
+    );
+    assert_eq!(
+        AttemptUsageDisposition::for_attempt(AttemptOutcome::Interrupted, None),
+        AttemptUsageDisposition::UnreportedAfterFailure
+    );
+    assert!(AttemptUsageDisposition::UnreportedAfterAbort.is_unreported_after_interruption());
+    assert!(!AttemptUsageDisposition::UnreportedByProvider.is_unreported_after_interruption());
+}
+
+#[test]
+fn legacy_attempt_records_decode_as_reported_and_reported_stays_elided() {
+    // Sealed before FIG-2765: no `usage_disposition` field at all.
+    let legacy = serde_json::json!({
+        "ordinal": 1,
+        "started_at": 42,
+        "duration": { "secs": 0, "nanos": 7000000 },
+        "outcome": "aborted",
+        "protocol_position": "output_started",
+        "retry_budget_consumed": true
+    });
+    let record: AttemptRecord = serde_json::from_value(legacy.clone()).expect("legacy attempt");
+    assert_eq!(record.usage_disposition, AttemptUsageDisposition::Reported);
+    assert_eq!(serde_json::to_value(&record).expect("encode"), legacy);
+
+    let mut aborted = record.clone();
+    aborted.usage_disposition = AttemptUsageDisposition::UnreportedAfterAbort;
+    let encoded = serde_json::to_value(&aborted).expect("encode aborted");
+    assert_eq!(encoded["usage_disposition"], "unreported_after_abort");
+    let decoded: AttemptRecord = serde_json::from_value(encoded).expect("decode aborted");
+    assert_eq!(
+        decoded.usage_disposition,
+        AttemptUsageDisposition::UnreportedAfterAbort
+    );
 }

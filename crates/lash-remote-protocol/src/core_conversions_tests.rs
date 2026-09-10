@@ -1003,6 +1003,7 @@ fn remote_turn_result_maps_core_semantics() {
                 output_tokens: 2,
                 ..lash_core::llm::types::LlmUsage::default()
             }),
+            usage_disposition: Default::default(),
         }],
     };
     let turn = lash_core::facade_support::AssembledTurn {
@@ -1034,17 +1035,15 @@ fn remote_turn_result_maps_core_semantics() {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 0,
         },
-        children_usage: vec![lash_core::TokenLedgerEntry {
-            source: "subagent".to_string(),
-            model: "m".to_string(),
-            usage: lash_core::TokenUsage {
+        children_usage: vec![lash_core::TokenLedgerEntry::reported(
+            "subagent",
+            "m",
+            lash_core::TokenUsage {
                 input_tokens: 3,
                 output_tokens: 4,
-                cache_read_input_tokens: 0,
-                cache_write_input_tokens: 0,
-                reasoning_output_tokens: 0,
+                ..lash_core::TokenUsage::default()
             },
-        }],
+        )],
         llm_calls: vec![call_record.clone()],
         tool_calls: vec![lash_core::ToolCallRecord {
             call_id: Some("exec-call".to_string()),
@@ -1165,6 +1164,7 @@ fn synthetic_terminal_call_record(
             evidence: None,
             generation_disposition: None,
             usage: None,
+            usage_disposition: Default::default(),
         }],
     }
 }
@@ -1284,6 +1284,7 @@ fn core_diagnostics_do_not_cross_the_public_remote_projection() {
             evidence: None,
             generation_disposition: None,
             usage: None,
+            usage_disposition: Default::default(),
         }],
     };
 

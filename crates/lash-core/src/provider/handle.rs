@@ -373,6 +373,10 @@ impl ProviderHandle {
             match result {
                 Ok(response) => {
                     let outcome = success_outcome(response.terminal_reason);
+                    let usage = response
+                        .provider_usage
+                        .as_ref()
+                        .map(|_| response.usage.clone());
                     records.push(AttemptRecord {
                         ordinal: records.len() as u32 + 1,
                         started_at,
@@ -384,10 +388,11 @@ impl ProviderHandle {
                         error: None,
                         evidence: response.execution_evidence.clone(),
                         generation_disposition: response.generation_disposition,
-                        usage: response
-                            .provider_usage
-                            .as_ref()
-                            .map(|_| response.usage.clone()),
+                        usage: usage.clone(),
+                        usage_disposition: AttemptUsageDisposition::for_attempt(
+                            outcome,
+                            usage.as_ref(),
+                        ),
                     });
                     return Ok(ProviderCompletion {
                         response,
@@ -598,6 +603,20 @@ impl ProviderHandle {
             .catch_unwind()
             .await
             .unwrap_or_else(provider_close_panicked)
+    }
+
+    /// Recover the usage of one generation whose stream ended before the
+    /// provider reported it. Forwards to [`Provider::reconcile_usage`]; a
+    /// panic inside the provider is contained as a typed failure like
+    /// [`ProviderHandle::close`].
+    pub async fn reconcile_usage(
+        &mut self,
+        generation_id: &str,
+    ) -> Result<Option<ReconciledUsage>, LlmTransportError> {
+        std::panic::AssertUnwindSafe(self.components.provider.reconcile_usage(generation_id))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|payload| provider_close_panicked(payload).map(|()| None))
     }
 }
 
@@ -1091,17 +1110,23 @@ fn failure_attempt_record(
             .get_or_insert_with(ExecutionEvidence::default)
             .provider_request_id = Some(provider_request_id);
     }
+    let outcome = match (failure.terminal_reason, failure.kind) {
+        (LlmTerminalReason::Cancelled, _) => AttemptOutcome::Aborted,
+        (_, ProviderFailureKind::Timeout | ProviderFailureKind::Stream) => {
+            AttemptOutcome::Interrupted
+        }
+        _ => AttemptOutcome::Failed,
+    };
+    let usage = partial.and_then(|response| {
+        (response.provider_usage.is_some()
+            || response.usage != crate::llm::types::LlmUsage::default())
+        .then(|| response.usage.clone())
+    });
     AttemptRecord {
         ordinal,
         started_at,
         duration,
-        outcome: match (failure.terminal_reason, failure.kind) {
-            (LlmTerminalReason::Cancelled, _) => AttemptOutcome::Aborted,
-            (_, ProviderFailureKind::Timeout | ProviderFailureKind::Stream) => {
-                AttemptOutcome::Interrupted
-            }
-            _ => AttemptOutcome::Failed,
-        },
+        outcome,
         protocol_position,
         retry_budget_consumed,
         retry_decision,
@@ -1115,11 +1140,8 @@ fn failure_attempt_record(
         }),
         evidence,
         generation_disposition: partial.and_then(|response| response.generation_disposition),
-        usage: partial.and_then(|response| {
-            (response.provider_usage.is_some()
-                || response.usage != crate::llm::types::LlmUsage::default())
-            .then(|| response.usage.clone())
-        }),
+        usage_disposition: AttemptUsageDisposition::for_attempt(outcome, usage.as_ref()),
+        usage,
     }
 }
 

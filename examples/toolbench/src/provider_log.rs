@@ -105,6 +105,12 @@ impl Provider for LoggedProvider {
     async fn close(&self) -> Result<(), LlmTransportError> {
         self.inner.close().await
     }
+    async fn reconcile_usage(
+        &mut self,
+        generation_id: &str,
+    ) -> Result<Option<ReconciledUsage>, LlmTransportError> {
+        self.inner.reconcile_usage(generation_id).await
+    }
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(Self {
             inner: self.inner.clone_boxed(),

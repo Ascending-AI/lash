@@ -360,6 +360,7 @@ pub mod facade_support {
     pub use crate::provider::ProviderComponents;
     pub use crate::provider::ProviderHandle;
     pub use crate::provider::ProviderOptions;
+    pub use crate::provider::ReconciledUsage;
     pub use crate::provider::SingleProviderResolver;
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;
@@ -431,6 +432,7 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkWakeContended;
     pub use crate::runtime::QueuedWorkWakeFailure;
     pub use crate::runtime::QueuedWorkWakeOutcome;
+    pub use crate::runtime::ReconciledUsageAttempt;
     pub use crate::runtime::RuntimeAwaitEventOptions;
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeEnvironment;
@@ -468,6 +470,8 @@ pub mod facade_support {
     pub use crate::runtime::TurnOptions;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
+    pub use crate::runtime::UnreportedUsageAttempt;
+    pub use crate::runtime::UsageReconciliationReport;
     pub use crate::runtime::UsageReportRow;
     pub use crate::runtime::UsageTotals;
     pub use crate::runtime::WakeDeliveryDriveReport;
@@ -684,7 +688,7 @@ pub use attachments::{
     StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, ChargeSafetyDecision,
+    AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
     LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
@@ -1119,9 +1123,9 @@ pub use runtime::{
     EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
     GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
-    LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
+    LedgerUsageDisposition, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    LlmRequestSpec, LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
     NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
@@ -1170,10 +1174,11 @@ pub use runtime::{
     TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
     TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
     TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    UnclaimedTurnInputs, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork,
-    WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
+    UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState,
+    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
+    WorkerSlotSupplier, WorkerSweepPolicy,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,

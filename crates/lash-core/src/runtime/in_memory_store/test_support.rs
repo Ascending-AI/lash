@@ -400,6 +400,7 @@ mod tests {
                 input_tokens: 1,
                 ..Default::default()
             },
+            usage_disposition: Default::default(),
         };
         let commit = RuntimeCommit::persisted_state_for_test(&second_state, &[usage]);
         let occupied_node_id = commit

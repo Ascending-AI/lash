@@ -90,5 +90,9 @@
   "lash_trigger_mutation_receipts.result_json": {
     "verdict": "deliberately-excluded",
     "reason": "Trigger command results are replay receipts tied to request_fingerprint and must move with the trigger carrier family."
+  },
+  "lash_usage_deltas.usage_disposition_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "LedgerUsageDisposition is fenced by the usage-payload component cutover and the versioned usage-identity contract: the column is written only under the current schema component, its bytes are bound into RuntimeUsageDeltaIdentity's payload hash at USAGE_PAYLOAD_ENCODING_V4, and a value this build cannot decode is a typed StoredDataCorrupt refusal rather than a defaulted read."
   }
 }

@@ -306,11 +306,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // its effect children, groups, and await-event promises in one transaction
 // and leaves a tombstone every admission path refuses. Component-79 stores
 // must be recreated; there is no migration into this generation.
-// Version 81 adds the turn-cancel `mode` column (FIG-635); older catalogs are
+// Version 81 added the turn-cancel `mode` column (FIG-635); older catalogs are
 // refused before a modeless request row can be read as an immediate abort.
-// Component-80 stores must be recreated; there is no migration into this
+// Version 82 adds the usage-disposition column (FIG-2765); older catalogs are
+// refused before an unreported usage row can be read as a reported one.
+// Component-81 stores must be recreated; there is no migration into this
 // generation.
-const SCHEMA_VERSION: i32 = 81;
+const SCHEMA_VERSION: i32 = 82;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

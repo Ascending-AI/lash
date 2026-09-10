@@ -40,6 +40,7 @@ fn usage_entry(source: &str, model: &str, input_tokens: i64) -> crate::TokenLedg
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 0,
         },
+        usage_disposition: Default::default(),
     }
 }
 #[test]

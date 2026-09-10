@@ -321,6 +321,7 @@ impl RawDurableReader {
                                 cache_write_input_tokens: row.get(5),
                                 reasoning_output_tokens: row.get(6),
                             },
+                            usage_disposition: Default::default(),
                         })
                     })
                     .collect();

@@ -10,7 +10,13 @@ use super::*;
 
 const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
+// Version 2 (FIG-2765): staged usage rows carry their usage disposition through
+// the usage-payload identity, so a retried usage-ledger commit whose rows gained
+// a hole or a correction no longer matches a v1 receipt. Version 3 (FIG-2765 fix
+// round): the v4 payload identity projects each hole's descriptor instead of a
+// count, moving every unreported row's payload hash again. The projection and
+// domain are unchanged; the version is the fence.
+const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
@@ -186,12 +192,12 @@ mod semantic_boundary_request_identity_tests {
         // UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 cargo test -p lash-core \
         //   semantic_boundary_request_identity_v1_golden_corpus -- --exact
         let rows = [
-            ("record-config", "protocol-materialization"),
-            ("create-session", "child-1"),
-            ("usage-ledger", "child-turn"),
+            ("record-config", "protocol-materialization", 1),
+            ("create-session", "child-1", 1),
+            ("usage-ledger", "child-turn", 3),
         ]
         .into_iter()
-        .map(|(key, boundary)| {
+        .map(|(key, boundary, expected_version)| {
             let commit = boundary_commit(boundary, key);
             let operation =
                 SemanticBoundaryOperation::from_operation_key(key).expect("adopted operation key");
@@ -199,7 +205,10 @@ mod semantic_boundary_request_identity_tests {
                 .expect("encode canonical request");
             let (encoding_version, hash) = semantic_boundary_request_identity(&commit, operation)
                 .expect("hash canonical request");
-            assert_eq!(encoding_version, 1, "every v1 family starts at version 1");
+            assert_eq!(
+                encoding_version, expected_version,
+                "{key} request identity encoding version"
+            );
             format!("{key}={preimage}|{hash}")
         })
         .collect::<Vec<_>>()
@@ -270,6 +279,7 @@ mod semantic_boundary_request_identity_tests {
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 0,
                 },
+                usage_disposition: Default::default(),
             }],
         )
         .expect("stage usage");

@@ -31,6 +31,8 @@ macro_rules! runtime_persistence_tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn load_retains_reasoning_only_usage() { $runner($crate::RuntimePersistenceLaw::load_retains_reasoning_only_usage).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts() { $runner($crate::RuntimePersistenceLaw::load_retains_usage_dispositions_and_rebuilds_outstanding_attempts).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn checkpoint_restore_rejects_turn_index_without_increment_headroom() { $runner($crate::RuntimePersistenceLaw::checkpoint_restore_rejects_turn_index_without_increment_headroom).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows() { $runner($crate::RuntimePersistenceLaw::checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows).await; }
@@ -234,6 +236,8 @@ macro_rules! runtime_persistence_reopenable_tests {
         async fn load_hydrates_checkpoint_and_usage() { $runner($crate::RuntimePersistenceLaw::load_hydrates_checkpoint_and_usage).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn load_retains_reasoning_only_usage() { $runner($crate::RuntimePersistenceLaw::load_retains_reasoning_only_usage).await; }
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts() { $runner($crate::RuntimePersistenceLaw::load_retains_usage_dispositions_and_rebuilds_outstanding_attempts).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn checkpoint_restore_rejects_turn_index_without_increment_headroom() { $runner($crate::RuntimePersistenceLaw::checkpoint_restore_rejects_turn_index_without_increment_headroom).await; }
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

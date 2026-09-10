@@ -27,7 +27,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_SOURCE = "crates/lash-postgres-store/src/lib.rs"
-MIGRATIONS_SOURCE = "crates/lash-postgres-store/src/postgres/schema.rs"
+MIGRATIONS_SOURCE = "crates/lash-postgres-store/src/postgres/schema/migrations.rs"
+# The refusal renderers stayed behind in the module the catalog was split out of.
+RENDERERS_SOURCE = "crates/lash-postgres-store/src/postgres/schema.rs"
 FIXTURE_SOURCE = "runbooks/restate-postgres-workers/src/bin/version_bump.rs"
 GATE_SOURCE = "scripts/version-bump-recreation-e2e.sh"
 
@@ -41,7 +43,7 @@ REFUSAL_MARKERS = (
 
 VERSION_CONSTANT = re.compile(r"^const SCHEMA_VERSION: i32 = (\d+);$", re.MULTILINE)
 MIGRATIONS_BLOCK = re.compile(
-    r"^const SCHEMA_MIGRATIONS: &\[SchemaMigration\] = &\[$(.*?)^\];$",
+    r"^(?:pub\(super\) )?const SCHEMA_MIGRATIONS: &\[SchemaMigration\] = &\[$(.*?)^\];$",
     re.MULTILINE | re.DOTALL,
 )
 MIGRATION_ENTRY = re.compile(r"^\s{4}SchemaMigration \{$", re.MULTILINE)
@@ -290,6 +292,7 @@ def check(repo: Path) -> tuple[bool, str]:
     version_text = read_source(repo, VERSION_SOURCE)
     migrations_text = read_source(repo, MIGRATIONS_SOURCE)
     fixture_text = read_source(repo, FIXTURE_SOURCE)
+    renderers_text = read_source(repo, RENDERERS_SOURCE)
     gate_text = read_source(repo, GATE_SOURCE)
 
     component_version = int_constant(
@@ -406,7 +409,13 @@ def check(repo: Path) -> tuple[bool, str]:
     # Derive that remainder from the migration DDL rather than trusting a hand-kept
     # list, and reject names the table drops already cover: those would be a
     # `DROP INDEX` of a relation that no longer exists.
-    indexed_table = index_targets(migrations_text, MIGRATIONS_SOURCE)
+    # `CREATE INDEX` text lives in both halves of the split: the catalog carries
+    # inline statements, the module it was split out of carries the named DDL
+    # constants those statements reference.
+    indexed_table = index_targets(
+        f"{migrations_text}\n{renderers_text}",
+        f"{MIGRATIONS_SOURCE} / {RENDERERS_SOURCE}",
+    )
     post_floor_tables = set(floor.source_missing_tables)
     left_behind = tuple(
         relation
@@ -424,7 +433,7 @@ def check(repo: Path) -> tuple[bool, str]:
                 f"the component-{floor.from_version} migration's introduced_relations that "
                 "dropping POST_FLOOR_TABLES leaves behind (a relation survives unless it is "
                 "one of those tables or its CREATE INDEX in "
-                f"{MIGRATIONS_SOURCE} names one)",
+                f"{MIGRATIONS_SOURCE} / {RENDERERS_SOURCE} names one)",
                 declared_indexes,
                 left_behind,
             )
@@ -438,7 +447,7 @@ def check(repo: Path) -> tuple[bool, str]:
     # renderers wrap with Rust line continuations, which the rendered string does
     # not contain.
     renderers = {
-        function: rust_function_body(migrations_text, MIGRATIONS_SOURCE, function)
+        function: rust_function_body(renderers_text, RENDERERS_SOURCE, function)
         for _, function in REFUSAL_MARKERS
     }
     for marker_constant, owner in REFUSAL_MARKERS:
@@ -451,13 +460,13 @@ def check(repo: Path) -> tuple[bool, str]:
         if not carriers:
             failures.append(
                 f"{FIXTURE_SOURCE}: {marker_constant} ({marker!r}) no longer appears in "
-                f"{MIGRATIONS_SOURCE}'s {owner}, so the refusal kind it identifies cannot "
+                f"{RENDERERS_SOURCE}'s {owner}, so the refusal kind it identifies cannot "
                 "be classified"
             )
         else:
             failures.append(
                 f"{FIXTURE_SOURCE}: {marker_constant} ({marker!r}) must select only "
-                f"{owner}, but {MIGRATIONS_SOURCE} carries it in "
+                f"{owner}, but {RENDERERS_SOURCE} carries it in "
                 + ", ".join(carriers)
                 + ". Overlapping markers make the harness match more than one refusal "
                 "kind and fail mid-run"

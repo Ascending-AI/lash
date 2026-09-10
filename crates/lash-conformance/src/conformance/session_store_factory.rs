@@ -1265,6 +1265,7 @@ async fn session_store_factory_rejects_writes_after_delete(
                         input_tokens: 1,
                         ..Default::default()
                     },
+                    usage_disposition: Default::default(),
                 }],
             ))
             .await,
@@ -1687,6 +1688,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
                     input_tokens: 7,
                     ..Default::default()
                 },
+                usage_disposition: Default::default(),
             }],
         ))
         .await

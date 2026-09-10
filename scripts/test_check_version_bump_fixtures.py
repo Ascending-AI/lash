@@ -137,6 +137,9 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
             for relative, text in (
                 (MODULE.VERSION_SOURCE, version),
                 (MODULE.MIGRATIONS_SOURCE, migrations),
+                # The catalog and the refusal renderers live in two files that
+                # were split apart; this single blob stands in for both.
+                (MODULE.RENDERERS_SOURCE, migrations),
                 (MODULE.FIXTURE_SOURCE, fixture),
                 (MODULE.GATE_SOURCE, gate),
             ):

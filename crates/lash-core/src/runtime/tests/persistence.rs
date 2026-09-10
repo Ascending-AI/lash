@@ -38,6 +38,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
             input_tokens: 1,
             ..crate::TokenUsage::default()
         },
+        usage_disposition: Default::default(),
     });
 
     let error = runtime

@@ -18,6 +18,7 @@ use lash_core::runtime::{
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
     QueuedWorkClaim, TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
 };
+use lash_core::runtime::{UnreportedUsageAttempt, UsageReconciliationReport};
 use lash_core::{
     LiveReplayStoreError, SessionObservationEvent, TurnCancelMode, facade_support::LiveReplayGap,
 };
@@ -1093,6 +1094,30 @@ impl LashSession {
     /// Returns the session's current usage report.
     pub fn usage_report(&self) -> SessionUsageReport {
         self.runtime.observe().usage_report.clone()
+    }
+
+    /// Attempts of finished turns whose provider usage never arrived after a
+    /// protocol abort or a failure, not yet reconciled. Each is already
+    /// counted in [`usage_report`](Self::usage_report) as an unreported row;
+    /// [`reconcile_unreported_usage`](Self::reconcile_unreported_usage) fills
+    /// them.
+    pub async fn unreported_usage_attempts(&self) -> Vec<UnreportedUsageAttempt> {
+        let writer = self.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.unreported_usage_attempts().to_vec()
+    }
+
+    /// Ask the session's provider for the usage of every unreported attempt
+    /// and append one correction row per recovered generation. Host-invoked
+    /// (a billing sweep, an idle hook), never on the turn's hot path; each
+    /// lookup is bounded by the provider. Attempts the provider cannot resolve
+    /// stay registered and return as `unresolved`.
+    pub async fn reconcile_unreported_usage(&self) -> Result<UsageReconciliationReport> {
+        let writer = self.runtime.writer();
+        let mut runtime = writer.lock().await;
+        let report = runtime.reconcile_unreported_usage().await?;
+        self.runtime.publish_resident_from(&runtime);
+        Ok(report)
     }
 
     /// Installs the probe used to observe turn-phase transitions.

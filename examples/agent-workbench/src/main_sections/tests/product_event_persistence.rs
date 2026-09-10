@@ -205,6 +205,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                             cache_write_input_tokens: 2,
                             reasoning_output_tokens: 5,
                         }),
+                        usage_disposition: Default::default(),
                     },
                     lash::remote::llm::RemoteAttemptRecord {
                         ordinal: 2,
@@ -224,6 +225,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                         evidence: None,
                         generation_disposition: None,
                         usage: None,
+                        usage_disposition: Default::default(),
                     },
                 ],
             };

@@ -835,6 +835,7 @@ fn child_cumulative_entries(
             source,
             model,
             usage,
+            usage_disposition: Default::default(),
         })
         .collect()
 }

@@ -1087,7 +1087,9 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "futures-util",
+ "lash-internal-http-transport",
  "lash-internal-lashlang",
  "lash-internal-plugin-mcp",
  "lash-internal-postgres-store",

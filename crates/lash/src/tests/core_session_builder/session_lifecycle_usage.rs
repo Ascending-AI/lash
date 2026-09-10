@@ -44,6 +44,7 @@ fn turn_result_total_usage_sums_parent_and_children() {
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 0,
                 },
+                usage_disposition: Default::default(),
             },
             TokenLedgerEntry {
                 source: "compaction".to_string(),
@@ -55,6 +56,7 @@ fn turn_result_total_usage_sums_parent_and_children() {
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 0,
                 },
+                usage_disposition: Default::default(),
             },
         ],
         llm_calls: Vec::new(),
