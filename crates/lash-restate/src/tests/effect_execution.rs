@@ -9,7 +9,7 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
         .expect("register");
     continuations
         .put_segment_handover(
-            "mid-chain",
+            &ProcessId::from("mid-chain"),
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 3,
                 handover: lash_core::SegmentHandover {
@@ -68,7 +68,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
         .expect("register externally-owned row with pending abandon");
     registry
         .request_process_abandon(
-            "ext-abandon",
+            &ProcessId::from("ext-abandon"),
             lash_core::AbandonRequest {
                 requested_by: "operator".to_string(),
                 requested_at_ms: 111,
@@ -131,7 +131,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
     // The abandon-request externally-owned row is now terminal Abandoned, written
     // by the reconciled-request path with no Lash execution owner to name.
     let abandoned = registry
-        .get_process("ext-abandon")
+        .get_process(&ProcessId::from("ext-abandon"))
         .await
         .expect("read process")
         .expect("get reconciled row");
@@ -151,7 +151,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
     // The externally-owned row without an abandon request is left untouched for
     // its external owner to complete.
     let idle = registry
-        .get_process("ext-idle")
+        .get_process(&ProcessId::from("ext-idle"))
         .await
         .expect("read process")
         .expect("get idle externally-owned row");
@@ -423,7 +423,7 @@ pub(super) async fn restate_attach_survives_control_timeout_and_honors_ceiling()
             "process-1",
             "await_terminal",
             &RestateProcessAwaitRequest {
-                process_id: "process-1".to_string(),
+                process_id: ProcessId::from("process-1"),
             },
         )
         .await
@@ -876,7 +876,7 @@ pub(super) async fn restate_ingress_client_calls_workflow_and_decodes_output() {
             "process-1",
             "await_terminal",
             &RestateProcessAwaitRequest {
-                process_id: "process-1".to_string(),
+                process_id: ProcessId::from("process-1"),
             },
         )
         .await
@@ -967,7 +967,7 @@ pub(super) async fn restate_process_attach_calls_await_terminal_ingress() {
 #[tokio::test]
 pub(super) async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolves() {
     assert_eq!(
-        terminal_completion_workflow_key("retained-terminal", 2),
+        terminal_completion_workflow_key(&ProcessId::from("retained-terminal"), 2),
         Some("retained-terminal".to_string())
     );
     let registry = process_registry();
@@ -978,7 +978,7 @@ pub(super) async fn cancel_during_successor_boundary_routes_root_and_await_termi
     let expected = process_cancellation("cancelled after a long chain", None);
     registry
         .complete_process(
-            "retained-terminal",
+            &ProcessId::from("retained-terminal"),
             expected.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -1228,7 +1228,7 @@ pub(super) async fn restate_driver_short_circuits_terminal_without_ingress_call(
         .expect("register");
     registry
         .complete_process(
-            "process-1",
+            &ProcessId::from("process-1"),
             output.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -1328,14 +1328,14 @@ pub(super) async fn restate_deployment_sink_funnel_feeds_appended_events() {
         .expect("register");
     registry
         .append_event(
-            "sink-funnel",
+            &ProcessId::from("sink-funnel"),
             lash_core::ProcessEventAppendRequest::new("producer.tick", serde_json::json!({})),
         )
         .await
         .expect("append");
     registry
         .complete_process(
-            "sink-funnel",
+            &ProcessId::from("sink-funnel"),
             process_success(serde_json::Value::Null),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )

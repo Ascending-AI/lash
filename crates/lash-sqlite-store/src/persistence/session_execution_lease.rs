@@ -4,13 +4,13 @@ use super::*;
 impl SessionExecutionLeaseStore for Store {
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let owner = owner.clone();
         let executor_id = executor_id.to_string();
         let lease_token = claim_nonce.as_str().to_string();
@@ -46,7 +46,7 @@ impl SessionExecutionLeaseStore for Store {
                                      lease_term_ms = ?5
                                  WHERE session_id = ?1",
                                 params![
-                                    session_id,
+                                    session_id.as_str(),
                                     lease_token,
                                     claimed_at as i64,
                                     sql_expires_at,
@@ -204,10 +204,10 @@ impl SessionExecutionLeaseStore for Store {
                            AND lease_executor_id = ?4
                            AND lease_token = ?5",
                         params![
-                            fence.session_id,
-                            fence.owner.owner_id,
-                            fence.owner.incarnation_id,
-                            fence.executor_id,
+                            fence.session_id.as_str(),
+                            fence.owner.owner_id.as_str(),
+                            fence.owner.incarnation_id.as_str(),
+                            fence.executor_id.as_str(),
                             fence.lease_token,
                             sql_expires_at,
                             sql_lease_term
@@ -293,9 +293,9 @@ impl SessionExecutionLeaseStore for Store {
 
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<lash_core::SessionExecutionLeaseObservation, StoreError> {
-        let session_id = session_id.to_string();
+        let session_id = SessionId::from(session_id.to_string());
         let observed_at_epoch_ms = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {

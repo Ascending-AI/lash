@@ -8,7 +8,7 @@ pub(super) enum ClaimTransactionOutcome<T> {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn checkpoint_work_pending_postgres(
     pool: &PgPool,
-    session_id: &str,
+    session_id: &SessionId,
     generation: u64,
     turn_id: &TurnId,
     checkpoint: lash_core::CheckpointKind,
@@ -55,7 +55,7 @@ pub(super) async fn checkpoint_work_pending_postgres(
          )"
     );
     sqlx::query_scalar(&sql)
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
         .bind(turn_id.as_str())
         .bind(max_inputs as i64)
@@ -77,7 +77,7 @@ pub(super) async fn checkpoint_work_pending_postgres(
 /// the candidate query used, and both run only on a refusal.
 pub(super) async fn postgres_refusal_for_empty_scan(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
     policy: &QueuedWorkClaimPolicy,
@@ -91,7 +91,7 @@ pub(super) async fn postgres_refusal_for_empty_scan(
          LIMIT 1",
         QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
     ))
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(sql_session_lease_generation(generation)?)
     .fetch_all(&mut **tx)
     .await
@@ -116,7 +116,7 @@ pub(super) async fn postgres_refusal_for_empty_scan(
                )
          )",
     ))
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(sql_session_lease_generation(generation)?)
     .fetch_one(&mut **tx)
     .await
@@ -135,7 +135,7 @@ pub(super) async fn postgres_refusal_for_empty_scan(
 pub(super) async fn claim_queued_work_rows_postgres(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     now: u64,
-    session_id: &str,
+    session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     generation: u64,
     selected_batches: Vec<QueuedWorkBatch>,
@@ -169,7 +169,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
                     OR claim_session_lease_generation <> $5
                )",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(&row.batch_id)
         .bind(&lease.claim_id)
         .bind(&lease.lease_token)
@@ -186,7 +186,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
         }
     }
     Ok(ClaimTransactionOutcome::Commit(Some(QueuedWorkClaim {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         claim_id: lease.claim_id,
         owner: owner.clone(),
         lease_token: lease.lease_token,
@@ -202,13 +202,13 @@ pub(super) async fn claim_queued_work_rows_postgres(
 
 pub(super) async fn scan_queued_work_candidates_postgres(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     generation: u64,
     boundary: QueuedWorkClaimBoundary,
     max_rows: usize,
 ) -> Result<(Vec<QueuedWorkBatch>, Vec<ClaimCandidate>), StoreError> {
     let rows = sqlx::query(&postgres_queued_work_claim_candidates_sql(boundary))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
         .bind(claim_scan_limit(max_rows))
         .fetch_all(&mut **tx)
@@ -235,7 +235,7 @@ pub(super) async fn scan_queued_work_candidates_postgres(
 
 pub(super) async fn claim_ready_queued_work_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
@@ -278,7 +278,7 @@ pub(super) async fn claim_ready_queued_work_postgres_tx(
 /// this backend cannot drift from the SQLite one.
 pub(super) async fn load_turn_cancel_request_pg(
     pool: &sqlx::PgPool,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
@@ -287,7 +287,7 @@ pub(super) async fn load_turn_cancel_request_pg(
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .fetch_optional(&mut *connection)
     .await
@@ -308,7 +308,7 @@ pub(super) async fn load_turn_cancel_request_pg(
          WHERE request.session_id = $1 AND request.turn_id = $2
          ORDER BY affected.ordinal ASC",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .fetch_all(&mut *connection)
     .await
@@ -318,7 +318,7 @@ pub(super) async fn load_turn_cancel_request_pg(
 
 pub(super) async fn load_turn_cancel_request_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let row: Option<TurnCancelRequestRow> = sqlx::query_as(
@@ -326,7 +326,7 @@ pub(super) async fn load_turn_cancel_request_tx(
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .fetch_optional(&mut **tx)
     .await
@@ -347,7 +347,7 @@ pub(super) async fn load_turn_cancel_request_tx(
          WHERE request.session_id = $1 AND request.turn_id = $2
          ORDER BY affected.ordinal ASC",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .fetch_all(&mut **tx)
     .await
@@ -360,7 +360,7 @@ pub(super) async fn load_turn_cancel_request_tx(
 pub(super) type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, String);
 
 pub(super) fn turn_cancel_record_from_rows(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     row: TurnCancelRequestRow,
     affected_rows: Vec<(String, String, String)>,
@@ -432,7 +432,7 @@ pub(super) fn turn_cancel_disposition_wire(
 
 pub(super) async fn append_turn_cancel_outcome_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     affected: lash_core::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
@@ -445,7 +445,7 @@ pub(super) async fn append_turn_cancel_outcome_tx(
              affected_dispositions = array_append(affected_dispositions, $4)
          WHERE session_id = $1 AND turn_id = $2",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .bind(&affected.input_id)
     .bind(turn_cancel_disposition_wire(affected.disposition))
@@ -457,7 +457,7 @@ pub(super) async fn append_turn_cancel_outcome_tx(
 
 pub(super) async fn defer_orphaned_active_turn_inputs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     live_generation: u64,
     scope: lash_core::OrphanedTurnInputScope<'_>,
 ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
@@ -467,7 +467,7 @@ pub(super) async fn defer_orphaned_active_turn_inputs_tx(
          WHERE session_id = $1 AND state = ANY($2) ORDER BY enqueue_seq ASC
          FOR UPDATE",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(
         [
             lash_core::TurnInputState::PendingActive.as_str(),
@@ -529,7 +529,7 @@ pub(super) async fn defer_orphaned_active_turn_inputs_tx(
              claim_session_lease_generation = 0
          WHERE session_id = $1 AND input_id = $2",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(&input_id)
         .bind(match disposition {
             lash_core::TurnCancelDisposition::Defer => {
@@ -559,7 +559,7 @@ pub(super) async fn defer_orphaned_active_turn_inputs_tx(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
@@ -585,7 +585,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     let accepted_state =
         lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
     query
-        .push_bind(session_id)
+        .push_bind(session_id.as_str())
         .push(" AND (state = ")
         .push_bind(wanted_state.as_str())
         .push(" OR (")
@@ -665,7 +665,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
                     OR claim_session_lease_generation <> $8
                )",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(&row.input_id)
         .bind(state_after_claim.as_str())
         .bind(&lease.claim_id)
@@ -688,7 +688,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     }
     Ok(ClaimTransactionOutcome::Commit(Some(
         lash_core::TurnInputClaim {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             claim_id: lease.claim_id,
             owner: owner.clone(),
             lease_token: lease.lease_token,
@@ -706,7 +706,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
 pub(super) async fn claim_pending_turn_inputs_postgres(
     pool: &PgPool,
     #[cfg(any(test, feature = "testing"))] lease_clock: Option<&Arc<dyn lash_core::Clock>>,
-    session_id: &str,
+    session_id: &SessionId,
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
@@ -753,7 +753,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
 /// this SELECT itself still has no `FOR UPDATE`.
 pub(crate) async fn read_session_execution_lease_unlocked(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
@@ -762,7 +762,7 @@ pub(crate) async fn read_session_execution_lease_unlocked(
          FROM lash_session_execution_leases
          WHERE session_id = $1",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -772,7 +772,7 @@ pub(crate) async fn read_session_execution_lease_unlocked(
 
 pub(crate) async fn load_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
@@ -782,7 +782,7 @@ pub(crate) async fn load_session_execution_lease_tx(
          WHERE session_id = $1
          FOR UPDATE",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -816,10 +816,10 @@ pub(super) fn session_execution_lease_row_from_columns(
 /// globally, so they do not need this.)
 pub(super) async fn lock_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), StoreError> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0::bigint))")
-        .bind(session_id)
+        .bind(session_id.as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -868,7 +868,7 @@ pub(super) async fn acquire_session_execution_lease_tx(
             lease_expires_at_ms = EXCLUDED.lease_expires_at_ms,
             lease_term_ms = EXCLUDED.lease_term_ms",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(&owner.owner_id)
     .bind(&owner.incarnation_id)
     .bind(executor_id)
@@ -881,7 +881,7 @@ pub(super) async fn acquire_session_execution_lease_tx(
     .await
     .map_err(store_sqlx_error)?;
     Ok(SessionExecutionLease {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         owner: owner.clone(),
         executor_id: executor_id.to_string(),
         lease_token: lease_token.to_string(),
@@ -894,7 +894,7 @@ pub(super) async fn acquire_session_execution_lease_tx(
 
 pub(super) async fn ensure_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     fence: &SessionExecutionLeaseAuthority,
 ) -> Result<(), StoreError> {
     let now = postgres_transaction_epoch_ms(tx).await?;
@@ -934,7 +934,7 @@ pub(super) async fn release_session_execution_lease_tx(
            AND lease_executor_id = $4
            AND lease_token = $5",
     )
-    .bind(&completion.session_id)
+    .bind(completion.session_id.as_str())
     .bind(&completion.owner.owner_id)
     .bind(&completion.owner.incarnation_id)
     .bind(&completion.executor_id)

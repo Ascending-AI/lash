@@ -4,7 +4,7 @@ use super::*;
 impl SessionExecutionLeaseStore for PostgresSessionStore {
     async fn try_claim_session_execution_lease_with_token(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
         claim_nonce: &lash_core::LeaseClaimNonce,
@@ -45,7 +45,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                          lease_term_ms = $5
                      WHERE session_id = $1",
                 )
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .bind(lease_token)
                 .bind(claimed_at as i64)
                 .bind(sql_expires_at)
@@ -57,7 +57,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 // Reentry advances no generation: nobody is displaced.
                 return Ok(SessionExecutionLeaseClaimOutcome::Acquired(
                     SessionExecutionLeaseAcquisition::fresh(SessionExecutionLease {
-                        session_id: session_id.to_string(),
+                        session_id: SessionId::from(session_id.to_string()),
                         owner: owner.clone(),
                         executor_id: executor_id.to_string(),
                         lease_token: lease_token.to_string(),
@@ -189,7 +189,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                AND lease_executor_id = $4
                AND lease_token = $5",
         )
-        .bind(&fence.session_id)
+        .bind(fence.session_id.as_str())
         .bind(&fence.owner.owner_id)
         .bind(&fence.owner.incarnation_id)
         .bind(&fence.executor_id)
@@ -264,7 +264,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
 
     async fn get_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<lash_core::SessionExecutionLeaseObservation, StoreError> {
         // Non-locking on purpose: observation must never be able to delay the
         // lane it observes. See `read_session_execution_lease_unlocked`.

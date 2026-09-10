@@ -71,7 +71,12 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
     )
     .await;
 
-    enqueue_idle_turn_input(store.as_ref(), "root", "input held when the lease is lost").await;
+    enqueue_idle_turn_input(
+        store.as_ref(),
+        &SessionId::from("root"),
+        "input held when the lease is lost",
+    )
+    .await;
     let registry = runtime
         .host
         .process_registry()
@@ -96,7 +101,7 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
     append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "lease-loss-claimed-wake",
+        &ProcessId::from("lease-loss-claimed-wake"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -111,7 +116,10 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("renewal-failure-mid-turn")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("renewal-failure-mid-turn"),
+                ),
             ))
             .await
             .map(crate::facade_support::QueuedTurnDrain::ran)
@@ -126,7 +134,7 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
     let successor_lease =
         crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
             store.as_ref(),
-            "root",
+            &SessionId::from("root"),
             &successor,
             "renewal-failure-mid-turn-does-not-select-a-durable-branch-executor",
             60_000,
@@ -358,7 +366,10 @@ pub(super) async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry
         .run_turn_assembled(
             TurnInput::text("lease expires at commit"),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("final-commit-lease-expiry-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("final-commit-lease-expiry-turn"),
+            ),
         )
         .await
         .expect("head CAS must authorize final commit after advisory lease expiry");
@@ -412,7 +423,7 @@ pub(super) async fn prepared_checkpoint_continues_after_advisory_lease_expiry() 
             TurnInput::text("lease expires at prepared checkpoint"),
             CancellationToken::new(),
             named_turn_scope(
-                "root",
+                &SessionId::from("root"),
                 &TurnId::from("prepared-checkpoint-lease-expiry-turn"),
             ),
         )
@@ -459,7 +470,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
         .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     let process_caused_by = crate::CausalRef::SessionNode {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         node_id: "trigger:button".to_string(),
     };
     registry
@@ -481,7 +492,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "wake-proc",
+        &ProcessId::from("wake-proc"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -506,7 +517,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("process-wake-turn")),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("process-wake-turn")),
             )
             .with_events(&sink)
             .with_turn_events(&turn_events),
@@ -560,7 +571,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
         "durable wake events must not be bridged as injected plugin messages"
     );
     assert!(
-        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
             .await
             .expect("queued work after commit")
             .is_empty()
@@ -653,7 +664,10 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
         .run_turn_assembled(
             TurnInput::text("r".repeat(900)),
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("seed-retained-history")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("seed-retained-history"),
+            ),
         )
         .await
         .expect("seed retained history without queued work");
@@ -674,14 +688,14 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
             )
             .with_extra_event_types([process_wake_event_type()])
-            .with_wake_session_id(Some("root".to_string())),
+            .with_wake_session_id(Some(SessionId::from("root"))),
         )
         .await
         .expect("register wake process");
     append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "reserve-proc",
+        &ProcessId::from("reserve-proc"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({"text": "short wake", "value": {"status": "done"}}),
@@ -689,28 +703,37 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
     )
     .await;
 
-    let batch_id = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list wake for selected drain")
-        .into_iter()
-        .next()
-        .expect("queued wake")
-        .batch_id;
+    let batch_id = crate::store::QueuedWorkStore::list_pending_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list wake for selected drain")
+    .into_iter()
+    .next()
+    .expect("queued wake")
+    .batch_id;
 
     runtime
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("small-window-drain")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("small-window-drain"),
+                ),
             ),
             &[batch_id],
         )
         .await
         .expect("a short wake drains under a small window");
     assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
-    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list drained queue");
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list drained queue");
     assert!(
         pending.is_empty(),
         "the drained wake must not remain pending: {pending:?}"
@@ -776,7 +799,7 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
             )
             .with_extra_event_types([process_wake_event_type()])
-            .with_wake_session_id(Some("root".to_string())),
+            .with_wake_session_id(Some(SessionId::from("root"))),
         )
         .await
         .expect("register wake process");
@@ -784,7 +807,7 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
         append_process_wake_to_queue(
             registry.as_ref(),
             store.as_ref(),
-            "paired-wake-proc",
+            &ProcessId::from("paired-wake-proc"),
             crate::ProcessEventAppendRequest::new(
                 "process.wake",
                 json!({"text": text, "value": {"status": "done"}}),
@@ -795,19 +818,25 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
 
     // Both rows share `PROCESS_WAKE_MERGE_KEY`, so they are mergeable and the
     // automatic policy would have a choice to make here.
-    let batch_ids = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list queued wakes")
-        .into_iter()
-        .map(|batch| batch.batch_id)
-        .collect::<Vec<_>>();
+    let batch_ids = crate::store::QueuedWorkStore::list_pending_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list queued wakes")
+    .into_iter()
+    .map(|batch| batch.batch_id)
+    .collect::<Vec<_>>();
     assert_eq!(batch_ids.len(), 2);
 
     runtime
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("paired-exact-drain")),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("paired-exact-drain"),
+                ),
             ),
             &batch_ids,
         )
@@ -815,9 +844,12 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
         .expect("an exact two-row selection is claimable")
         .expect("the exact selection produces a turn");
 
-    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list queue after exact drain");
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list queue after exact drain");
     assert!(
         pending.is_empty(),
         "both selected rows must drain together: {pending:?}"
@@ -876,14 +908,14 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
             )
             .with_extra_event_types([process_wake_event_type()])
-            .with_wake_session_id(Some("root".to_string())),
+            .with_wake_session_id(Some(SessionId::from("root"))),
         )
         .await
         .expect("register wake process");
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        "oversized-proc",
+        &ProcessId::from("oversized-proc"),
         crate::ProcessEventAppendRequest::new(
             "process.wake",
             json!({"text": "w".repeat(4_000), "value": {"status": "done"}}),
@@ -891,19 +923,22 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
     )
     .await;
 
-    let batch_id = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list oversized wake")
-        .into_iter()
-        .next()
-        .expect("queued wake")
-        .batch_id;
+    let batch_id = crate::store::QueuedWorkStore::list_pending_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list oversized wake")
+    .into_iter()
+    .next()
+    .expect("queued wake")
+    .batch_id;
 
     let err = runtime
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &TurnId::from("oversized-row")),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("oversized-row")),
             ),
             std::slice::from_ref(&batch_id),
         )
@@ -925,9 +960,12 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
     assert_eq!(refused_batch_id, batch_id);
     assert_eq!(max_context_tokens, 1_000);
     assert!(required_context_tokens > max_context_tokens);
-    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(store.as_ref(), "root")
-        .await
-        .expect("list refused wake");
+    let pending = crate::store::QueuedWorkStore::list_pending_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list refused wake");
     assert_eq!(pending.len(), 1);
     assert!(matches!(
         &pending[0].items[0].payload,
@@ -1396,7 +1434,10 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("ordinary-child-parent-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("ordinary-child-parent-turn"),
+            ),
         )
         .await
         .expect("parent turn");
@@ -1459,7 +1500,7 @@ pub(super) async fn runtime_can_activate_managed_child_session() {
         .expect("child session");
 
     runtime
-        .activate_managed_session("child")
+        .activate_managed_session(&SessionId::from("child"))
         .await
         .expect("activate child");
 
@@ -1524,7 +1565,7 @@ pub(super) async fn failed_managed_session_activation_leaves_the_child_activatab
         .cloned()
         .expect("managed child handle");
     let err = runtime
-        .activate_managed_session("child")
+        .activate_managed_session(&SessionId::from("child"))
         .await
         .expect_err("activation of an in-use child must fail");
     assert!(err.to_string().contains("still in use"));
@@ -1535,7 +1576,7 @@ pub(super) async fn failed_managed_session_activation_leaves_the_child_activatab
 
     drop(in_use);
     runtime
-        .activate_managed_session("child")
+        .activate_managed_session(&SessionId::from("child"))
         .await
         .expect("activation is retryable once the child is no longer in use");
     assert_eq!(runtime.session_id(), "child");
@@ -1637,7 +1678,10 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("alias-normalize-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("alias-normalize-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -1718,7 +1762,10 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("unsupported-effort-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("unsupported-effort-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -1790,7 +1837,7 @@ pub(super) async fn session_generation_options_reach_every_provider_request() {
                     turn_context: crate::TurnContext::default(),
                 },
                 CancellationToken::new(),
-                named_turn_scope("root", turn_id),
+                named_turn_scope(&SessionId::from("root"), turn_id),
             )
             .await
             .expect("turn");
@@ -1894,7 +1941,10 @@ pub(super) async fn omitted_generation_options_are_reported_on_the_turn_llm_call
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("generation-disposition-turn")),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("generation-disposition-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -1993,7 +2043,7 @@ pub(super) async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", &TurnId::from("clamped-cap-turn")),
+            named_turn_scope(&SessionId::from("root"), &TurnId::from("clamped-cap-turn")),
         )
         .await
         .expect("a cap above the model's capacity must not fail the turn");

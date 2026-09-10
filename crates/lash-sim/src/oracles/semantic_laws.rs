@@ -975,7 +975,8 @@ pub(super) fn process_wake_source_key(event: &DeliveredBoundary) -> Option<Strin
         .pointer("/runtime_process_wake/sequence")
         .and_then(Value::as_u64)?;
     Some(lash_core::facade_support::process_wake_source_key(
-        process_id, sequence,
+        &ProcessId::from(process_id),
+        sequence,
     ))
 }
 

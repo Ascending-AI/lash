@@ -41,7 +41,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn claim_leading_ready_session_command(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
@@ -95,7 +95,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn claim_ready_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
@@ -175,7 +175,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn claim_checkpoint_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         turn_id: &lash_core::TurnId,
@@ -251,7 +251,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
@@ -281,7 +281,7 @@ impl QueuedWorkStore for PostgresSessionStore {
              FROM lash_queued_work_batches
              WHERE session_id = $1 AND batch_id = ANY($2)",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(batch_ids)
         .fetch_all(&mut *tx)
         .await
@@ -309,7 +309,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                  ORDER BY enqueue_seq ASC",
             QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(now as i64)
         .bind(sql_session_lease_generation(generation)?)
         .bind(batch_ids)
@@ -344,7 +344,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                      ORDER BY enqueue_seq ASC",
                     QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
                 ))
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .bind(now as i64)
                 .bind(sql_session_lease_generation(generation)?)
                 .bind(&involved_claim_ids)
@@ -403,7 +403,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                      ORDER BY enqueue_seq ASC",
                     QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
                 ))
-                .bind(session_id)
+                .bind(session_id.as_str())
                 .bind(now as i64)
                 .bind(sql_session_lease_generation(generation)?)
                 .bind(requested_rows[0].enqueue_seq as i64)
@@ -500,7 +500,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                  claim_session_lease_generation = 0
              WHERE session_id = $1 AND claim_id = $2 AND claim_token = $3",
         )
-        .bind(&claim.session_id)
+        .bind(claim.session_id.as_str())
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
         .bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))
@@ -527,7 +527,7 @@ impl QueuedWorkStore for PostgresSessionStore {
              FROM (",
         );
         query.push_tuples(claims, |mut row, claim| {
-            row.push_bind(&claim.session_id)
+            row.push_bind(claim.session_id.as_str())
                 .push_bind(&claim.claim_id)
                 .push_bind(&claim.lease_token)
                 .push_bind(
@@ -555,7 +555,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn cancel_queued_work_batch(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -580,7 +580,7 @@ impl QueuedWorkStore for PostgresSessionStore {
              FOR UPDATE",
             QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(batch_id)
         .bind(now as i64)
         .fetch_optional(&mut *tx)
@@ -602,7 +602,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn queued_work_batch_completed(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<bool, StoreError> {
         let marker = lash_core::store_backend_support::session_command_batch_completion_key(
@@ -615,14 +615,17 @@ impl QueuedWorkStore for PostgresSessionStore {
                 WHERE session_id = $1 AND turn_id = $2
              )",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(marker)
         .fetch_one(&mut *connection)
         .await
         .map_err(store_sqlx_error)
     }
 
-    async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+    async fn list_queued_work(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -635,7 +638,7 @@ impl QueuedWorkStore for PostgresSessionStore {
              ORDER BY enqueue_seq ASC",
             QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -649,7 +652,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn pending_session_work_ordering(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -700,7 +703,7 @@ impl QueuedWorkStore for PostgresSessionStore {
              LEFT JOIN earliest_command AS command ON TRUE
              LEFT JOIN earliest_input AS input ON TRUE",
         )
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(now as i64)
         .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
         .bind(QueuedWorkKind::Control.as_str())
@@ -726,7 +729,7 @@ impl QueuedWorkStore for PostgresSessionStore {
 
     async fn list_pending_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -749,7 +752,7 @@ impl QueuedWorkStore for PostgresSessionStore {
              ORDER BY enqueue_seq ASC",
             QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
         ))
-        .bind(session_id)
+        .bind(session_id.as_str())
         .bind(now as i64)
         .fetch_all(&mut *tx)
         .await

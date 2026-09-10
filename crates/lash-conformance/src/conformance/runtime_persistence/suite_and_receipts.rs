@@ -196,10 +196,10 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
         }
     }
 
-    fn request(session_id: &str) -> crate::SessionStoreCreateRequest {
+    fn request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
         crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         }
@@ -208,7 +208,7 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
     async fn add_session(
         handles: &UnboundSessionResolutionHandles,
         admission_state: UnboundSessionAdmissionState,
-        session_id: &str,
+        session_id: &SessionId,
     ) {
         let store = handles
             .factory
@@ -222,7 +222,7 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
             });
         if admission_state == UnboundSessionAdmissionState::Committed {
             let state = RuntimeSessionState {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
             };
             commit_runtime_state_for_test(
@@ -258,7 +258,12 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
             cell(0)
         );
 
-        add_session(&handles, admission_state, "unbound-resolution-a").await;
+        add_session(
+            &handles,
+            admission_state,
+            &SessionId::from("unbound-resolution-a"),
+        )
+        .await;
         let one_expected = match admission_state {
             UnboundSessionAdmissionState::AdmittedOnly => ReadResolution::Absent,
             UnboundSessionAdmissionState::Committed => ReadResolution::Present,
@@ -270,7 +275,12 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
             cell(1)
         );
 
-        add_session(&handles, admission_state, "unbound-resolution-b").await;
+        add_session(
+            &handles,
+            admission_state,
+            &SessionId::from("unbound-resolution-b"),
+        )
+        .await;
         assert_eq!(
             assert_reads_agree(&handles, &cell(2)).await,
             ReadResolution::Indeterminate,
@@ -292,14 +302,14 @@ pub(super) async fn pending_turn_input_mint_is_unique_across_store_instances(
     let session_id = "pending-turn-input-multi-store-mint";
     let first_input = first
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             "first independent-store input",
         ))
         .await
         .expect("first store instance mints a pending turn-input ID");
     let second_input = second
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             "second independent-store input",
         ))
         .await
@@ -328,7 +338,7 @@ pub async fn runtime_persistence_clock_expiry(
     let successor = lease_owner("clock-expiry-successor");
     let batch = store
         .enqueue_queued_work(queued_draft(
-            session_id,
+            &SessionId::from(session_id),
             "clock expiry queued work",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
@@ -336,14 +346,14 @@ pub async fn runtime_persistence_clock_expiry(
         .expect("enqueue clock-expiry queued work");
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             "clock expiry turn input",
         ))
         .await
         .expect("enqueue clock-expiry turn input");
     let stale_lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &stale_owner,
             "runtime-persistence-clock-expiry-executor",
             TTL_MS,
@@ -354,7 +364,7 @@ pub async fn runtime_persistence_clock_expiry(
         .expect("clock-expiry stale lease acquired");
     let stale_queue_claim = store
         .claim_ready_queued_work_by_batch_ids(
-            session_id,
+            &SessionId::from(session_id),
             &stale_lease.fence(),
             &stale_owner,
             QueuedWorkClaimBoundary::Idle,
@@ -365,7 +375,12 @@ pub async fn runtime_persistence_clock_expiry(
         .expect("claim clock-expiry queued work")
         .expect("clock-expiry queued work claim exists");
     let stale_input_claim = store
-        .claim_next_turn_inputs(session_id, &stale_lease.fence(), &stale_owner, 1)
+        .claim_next_turn_inputs(
+            &SessionId::from(session_id),
+            &stale_lease.fence(),
+            &stale_owner,
+            1,
+        )
         .await
         .expect("claim clock-expiry turn input")
         .expect("clock-expiry turn input claim exists");
@@ -374,7 +389,7 @@ pub async fn runtime_persistence_clock_expiry(
 
     let successor_lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &successor,
             "runtime-persistence-clock-expiry-executor-2",
             TTL_MS,
@@ -386,7 +401,7 @@ pub async fn runtime_persistence_clock_expiry(
     assert!(successor_lease.fencing_token > stale_lease.fencing_token);
     let successor_queue_claim = store
         .claim_ready_queued_work_by_batch_ids(
-            session_id,
+            &SessionId::from(session_id),
             &successor_lease.fence(),
             &successor,
             QueuedWorkClaimBoundary::Idle,
@@ -397,7 +412,12 @@ pub async fn runtime_persistence_clock_expiry(
         .expect("reclaim clock-expiry queued work")
         .expect("dead-generation queued work is reclaimable");
     let successor_input_claim = store
-        .claim_next_turn_inputs(session_id, &successor_lease.fence(), &successor, 1)
+        .claim_next_turn_inputs(
+            &SessionId::from(session_id),
+            &successor_lease.fence(),
+            &successor,
+            1,
+        )
         .await
         .expect("reclaim clock-expiry turn input")
         .expect("dead-generation turn input is reclaimable");
@@ -405,7 +425,7 @@ pub async fn runtime_persistence_clock_expiry(
     assert!(successor_input_claim.fencing_token > stale_input_claim.fencing_token);
 
     let stale_state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let stale_commit = store
@@ -727,7 +747,7 @@ pub(super) async fn session_prompt_layer_round_trips_through_the_committed_head(
     let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
     policy.prompt = expected_prompt.clone();
     let state = RuntimeSessionState {
-        session_id: "session-prompt-layer".to_string(),
+        session_id: SessionId::from("session-prompt-layer"),
         policy,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -766,7 +786,7 @@ pub(super) async fn session_protocol_turn_options_round_trip_through_the_committ
         }),
     };
     let mut state = RuntimeSessionState {
-        session_id: "session-protocol-turn-options".to_string(),
+        session_id: SessionId::from("session-protocol-turn-options"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.protocol_turn_options = expected.clone();
@@ -804,7 +824,7 @@ pub(super) async fn execution_state_replace_then_clear_removes_the_live_checkpoi
 ) {
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    state.session_id = "execution-state-replace-then-clear".to_string();
+    state.session_id = SessionId::from("execution-state-replace-then-clear".to_string());
     state.set_execution_state_snapshot(Some(b"initial-execution-state".to_vec()));
 
     let initial = commit_runtime_state_for_test(
@@ -867,11 +887,15 @@ pub(super) async fn commit_rejects_carried_nondefault_node_budget(
 ) {
     const CONFIGURED_NODE_LIMIT: usize = 1;
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let parent = sample_session_node("root", "budget-frame", None);
-    let child = sample_session_node("root", "budget-child", Some(&parent.node_id));
+    let parent = sample_session_node(&SessionId::from("root"), "budget-frame", None);
+    let child = sample_session_node(
+        &SessionId::from("root"),
+        "budget-child",
+        Some(&parent.node_id),
+    );
     let budget = crate::CommitBudget::new(
         crate::CommitBudgetLimit::Unbounded,
         crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
@@ -900,7 +924,7 @@ pub(super) async fn commit_rejects_carried_nondefault_byte_budget(
 ) {
     const CONFIGURED_BYTE_LIMIT: usize = 64;
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let budget = crate::CommitBudget::new(
@@ -928,7 +952,7 @@ pub(super) async fn commit_rejects_carried_nondefault_byte_budget(
 
 pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCommit {
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     RuntimeCommit::persisted_state_for_test_with_budget(
@@ -953,7 +977,7 @@ pub(super) async fn commit_rejects_queue_batch_bytes_over_budget(
         "root",
         DeliveryPolicy::AfterCurrentTurnCommit,
         crate::TurnWorkPayload::agent_frame_task(
-            crate::session_graph::frame_node_id("root", "oversized-queue-batch"),
+            crate::session_graph::frame_node_id(&SessionId::from("root"), "oversized-queue-batch"),
             "q".repeat(BYTE_LIMIT * 2),
             None,
         ),
@@ -1062,7 +1086,7 @@ pub(super) async fn commit_with_every_payload_family_inside_budget_succeeds(
 ) {
     const BYTE_LIMIT: usize = 64 * 1024;
     let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
@@ -1090,7 +1114,7 @@ pub(super) async fn commit_with_every_payload_family_inside_budget_succeeds(
         "root",
         DeliveryPolicy::AfterCurrentTurnCommit,
         crate::TurnWorkPayload::agent_frame_task(
-            crate::session_graph::frame_node_id("root", "all-families-follow-up"),
+            crate::session_graph::frame_node_id(&SessionId::from("root"), "all-families-follow-up"),
             "follow-up",
             None,
         ),
@@ -1186,7 +1210,7 @@ pub(super) async fn head_retirement_gate_distinguishes_leaf_change_from_same_lea
 
 pub(super) async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let usage = TokenLedgerEntry {
@@ -1225,7 +1249,7 @@ pub(super) async fn load_retains_usage_dispositions_and_rebuilds_outstanding_att
     store: Arc<dyn RuntimePersistence>,
 ) {
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let hole =
@@ -1329,7 +1353,7 @@ pub(super) async fn load_retains_usage_dispositions_and_rebuilds_outstanding_att
 
 pub(super) async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let usage = [
@@ -1379,7 +1403,7 @@ pub(super) async fn checkpoint_restore_rejects_turn_index_without_increment_head
 ) {
     let turn_index = usize::MAX - 16;
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         turn_index,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -1423,7 +1447,7 @@ pub(super) async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal
         "the canonical total must stay in range so this pins the prompt subtotal check"
     );
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         token_usage,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -1462,7 +1486,7 @@ pub(super) async fn usage_delta_identity_is_idempotent_across_commits(
         usage_disposition: Default::default(),
     };
     let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let first = RuntimeCommit::persisted_state_for_test(&state, std::slice::from_ref(&usage));

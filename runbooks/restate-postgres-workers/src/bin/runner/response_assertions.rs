@@ -98,7 +98,7 @@ pub(super) fn assert_trigger_setup_response(response: &TurnResponse) -> Result<(
     Ok(())
 }
 
-pub(super) fn assert_signal_suspend_setup_response(response: &TurnResponse) -> Result<String> {
+pub(super) fn assert_signal_suspend_setup_response(response: &TurnResponse) -> Result<ProcessId> {
     anyhow::ensure!(
         response.final_value.get("final").and_then(Value::as_str) == Some("signal-suspend-started"),
         "signal setup did not submit signal-suspend-started: {}",
@@ -109,7 +109,7 @@ pub(super) fn assert_signal_suspend_setup_response(response: &TurnResponse) -> R
         .get("process_id")
         .and_then(Value::as_str)
         .context("signal setup submitted no process_id")?;
-    Ok(process_id.to_string())
+    Ok(ProcessId::from(process_id))
 }
 
 pub(super) fn assert_async_completion_response(response: &TurnResponse) -> Result<()> {

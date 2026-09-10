@@ -47,6 +47,8 @@ use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::{MutexExt, RwLockExt};
 use restate_sdk::context::{ContextClient, RequestTarget, RunRetryPolicy, WorkflowContext};
@@ -216,7 +218,10 @@ fn is_process_cancellation(output: &ProcessAwaitOutput) -> bool {
     )
 }
 
-fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> ExecutionScope {
+fn durable_turn_scope(
+    session_id: impl Into<SessionId>,
+    turn_id: impl Into<TurnId>,
+) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
 }
@@ -727,7 +732,7 @@ impl Fig1464RunGuardRepro for Fig1464RunGuardReproImpl {
 
 struct Fig779DurableCancelTransport {
     registry: Arc<dyn ProcessRegistry>,
-    process_id: String,
+    process_id: ProcessId,
 }
 
 impl std::fmt::Debug for Fig779DurableCancelTransport {

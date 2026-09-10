@@ -1,8 +1,8 @@
 use super::*;
 
 pub(super) struct SegmentOneOutput {
-    pub(super) trigger_process_id: String,
-    pub(super) signal_process_id: String,
+    pub(super) trigger_process_id: ProcessId,
+    pub(super) signal_process_id: ProcessId,
 }
 
 pub(super) async fn run_workflow_segment_one(

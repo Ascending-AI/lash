@@ -3,15 +3,19 @@ use super::*;
 #[tokio::test]
 pub(super) async fn recording_context_propagates_revoked_session_from_turn_cancel_gate() {
     let context = Arc::new(RecordingContext::default());
-    RestateControllerContext::update_session_waits(&context, "recording-revoked".to_string(), true)
-        .await
-        .expect("revoke recording-context session");
+    RestateControllerContext::update_session_waits(
+        &context,
+        SessionId::from("recording-revoked"),
+        true,
+    )
+    .await
+    .expect("revoke recording-context session");
 
     let outcome = RestateControllerContext::sleep_or_turn_cancel(
         &context,
         Duration::from_secs(60),
         Some(test_turn_cancel_wait_request(
-            "recording-revoked",
+            &SessionId::from("recording-revoked"),
             &TurnId::from("turn"),
         )),
         tokio_util::sync::CancellationToken::new(),
@@ -31,7 +35,7 @@ pub(super) async fn positional_replay_context_propagates_revoked_session_from_tu
     let context = Arc::new(PositionalReplayContext::default());
     RestateControllerContext::update_session_waits(
         &context,
-        "positional-revoked".to_string(),
+        SessionId::from("positional-revoked"),
         true,
     )
     .await
@@ -41,7 +45,7 @@ pub(super) async fn positional_replay_context_propagates_revoked_session_from_tu
         &context,
         Duration::from_secs(60),
         Some(test_turn_cancel_wait_request(
-            "positional-revoked",
+            &SessionId::from("positional-revoked"),
             &TurnId::from("turn"),
         )),
         tokio_util::sync::CancellationToken::new(),
@@ -62,7 +66,7 @@ pub(super) async fn replayable_recording_context_propagates_revoked_session_from
     let context = Arc::new(ReplayableRecordingContext::default());
     RestateControllerContext::update_session_waits(
         &context,
-        "replayable-revoked".to_string(),
+        SessionId::from("replayable-revoked"),
         true,
     )
     .await
@@ -72,7 +76,7 @@ pub(super) async fn replayable_recording_context_propagates_revoked_session_from
         &context,
         Duration::from_secs(60),
         Some(test_turn_cancel_wait_request(
-            "replayable-revoked",
+            &SessionId::from("replayable-revoked"),
             &TurnId::from("turn"),
         )),
         tokio_util::sync::CancellationToken::new(),
@@ -90,18 +94,20 @@ pub(super) async fn replayable_recording_context_propagates_revoked_session_from
 #[tokio::test]
 pub(super) async fn recording_context_process_await_reports_turn_cancelled() {
     let context = Arc::new(RecordingContext::default());
-    let turn_cancel = test_turn_cancel_wait_request("recording-process", &TurnId::from("turn"));
+    let turn_cancel =
+        test_turn_cancel_wait_request(&SessionId::from("recording-process"), &TurnId::from("turn"));
     let task_context = Arc::clone(&context);
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
-            "recording-process-child".to_string(),
+            ProcessId::from("recording-process-child"),
             Some(turn_cancel),
         )
         .await
     });
     wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request("recording-process", &TurnId::from("turn"));
+    let turn_cancel =
+        test_turn_cancel_wait_request(&SessionId::from("recording-process"), &TurnId::from("turn"));
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
@@ -126,18 +132,24 @@ pub(super) async fn recording_context_process_await_reports_turn_cancelled() {
 #[tokio::test]
 pub(super) async fn positional_replay_context_process_await_reports_turn_cancelled() {
     let context = Arc::new(PositionalReplayContext::default());
-    let turn_cancel = test_turn_cancel_wait_request("positional-process", &TurnId::from("turn"));
+    let turn_cancel = test_turn_cancel_wait_request(
+        &SessionId::from("positional-process"),
+        &TurnId::from("turn"),
+    );
     let task_context = Arc::clone(&context);
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
-            "positional-process-child".to_string(),
+            ProcessId::from("positional-process-child"),
             Some(turn_cancel),
         )
         .await
     });
     wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request("positional-process", &TurnId::from("turn"));
+    let turn_cancel = test_turn_cancel_wait_request(
+        &SessionId::from("positional-process"),
+        &TurnId::from("turn"),
+    );
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
@@ -162,18 +174,24 @@ pub(super) async fn positional_replay_context_process_await_reports_turn_cancell
 #[tokio::test]
 pub(super) async fn replayable_recording_context_process_await_reports_turn_cancelled() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let turn_cancel = test_turn_cancel_wait_request("replayable-process", &TurnId::from("turn"));
+    let turn_cancel = test_turn_cancel_wait_request(
+        &SessionId::from("replayable-process"),
+        &TurnId::from("turn"),
+    );
     let task_context = Arc::clone(&context);
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
-            "replayable-process-child".to_string(),
+            ProcessId::from("replayable-process-child"),
             Some(turn_cancel),
         )
         .await
     });
     wait_for_test_turn_cancel_registration(&context.events.turn_cancel_gate).await;
-    let turn_cancel = test_turn_cancel_wait_request("replayable-process", &TurnId::from("turn"));
+    let turn_cancel = test_turn_cancel_wait_request(
+        &SessionId::from("replayable-process"),
+        &TurnId::from("turn"),
+    );
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
@@ -202,7 +220,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
         &recording,
         Duration::ZERO,
         Some(test_turn_cancel_wait_request(
-            "recording-complete",
+            &SessionId::from("recording-complete"),
             &TurnId::from("turn"),
         )),
         tokio_util::sync::CancellationToken::new(),
@@ -216,7 +234,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
         &positional,
         Duration::ZERO,
         Some(test_turn_cancel_wait_request(
-            "positional-complete",
+            &SessionId::from("positional-complete"),
             &TurnId::from("turn"),
         )),
         tokio_util::sync::CancellationToken::new(),
@@ -230,7 +248,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
         &replayable,
         Duration::ZERO,
         Some(test_turn_cancel_wait_request(
-            "replayable-complete",
+            &SessionId::from("replayable-complete"),
             &TurnId::from("turn"),
         )),
         tokio_util::sync::CancellationToken::new(),
@@ -360,7 +378,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
                             intents: lash_core::ToolIntents::v1(vec![
                                 lash_core::ToolIntent::StartProcess(Box::new(
                                     lash_core::StartProcessIntent {
-                                        session_id: "session".to_string(),
+                                        session_id: SessionId::from("session"),
                                         request: lash_core::ProcessStartRequest::external(
                                             "positional-replay-child",
                                             lash_core::ProcessOriginator::host_scoped(
@@ -745,7 +763,7 @@ pub(super) async fn restate_session_cancel_cancels_current_waits_but_allows_new_
     tokio::task::yield_now().await;
     assert!(!wait.is_finished());
     let host = RestateRuntimeEffectController::new(context.clone());
-    host.cancel_await_events_for_session("cancel-session")
+    host.cancel_await_events_for_session(&SessionId::from("cancel-session"))
         .await
         .expect("cancel session waits");
     assert_eq!(
@@ -794,7 +812,7 @@ pub(super) async fn restate_session_delete_revokes_current_and_future_waits() {
     });
     tokio::task::yield_now().await;
     assert!(!wait.is_finished());
-    host.revoke_await_events_for_session("deleted-session")
+    host.revoke_await_events_for_session(&SessionId::from("deleted-session"))
         .await
         .expect("revoke deleted session waits");
     assert_eq!(
@@ -1091,18 +1109,18 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     );
 }
 
-pub(super) fn replay_test_policy(session_id: &str) -> lash_core::SessionPolicy {
+pub(super) fn replay_test_policy(session_id: &SessionId) -> lash_core::SessionPolicy {
     let mut policy = lash_core::testing::mock_session_policy();
-    policy.session_id = Some(session_id.to_string());
+    policy.session_id = Some(SessionId::from(session_id.to_string()));
     policy
 }
 
 pub(super) fn replay_test_state(
-    session_id: &str,
+    session_id: &SessionId,
     policy: &lash_core::SessionPolicy,
 ) -> lash_core::RuntimeSessionState {
     lash_core::RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         policy: policy.clone(),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
@@ -1179,7 +1197,7 @@ pub(super) fn fig1293_migrated_tool_factories()
 
 pub(super) async fn fig1293_seed_control_target(
     registry: &Arc<dyn ProcessRegistry>,
-    session_id: &str,
+    session_id: &SessionId,
 ) {
     registry
         .register_process_with_observers(
@@ -1196,7 +1214,7 @@ pub(super) async fn fig1293_seed_control_target(
                 payload_schema: lash_core::LashSchema::any(),
                 semantics: lash_core::ProcessEventSemanticsSpec::default(),
             }]),
-            &[session_id.to_string()],
+            &[SessionId::from(session_id.to_string())],
         )
         .await
         .expect("register FIG-1293 control target");
@@ -1244,7 +1262,7 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
                     .map(|child| {
                         lash_core::ToolIntent::StartProcess(Box::new(
                             lash_core::StartProcessIntent {
-                                session_id: call.context.session_id().to_string(),
+                                session_id: SessionId::from(call.context.session_id()),
                                 request: lash_core::ProcessStartRequest::new(
                                     format!("restate-parent-end-child-{child}"),
                                     ProcessInput::Engine {
@@ -1357,14 +1375,14 @@ impl AwaitEventResolver for RestateParentEndFaultController {
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), lash_core::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
@@ -1464,7 +1482,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtToolIntentParentEnd {
 }
 
 pub(super) async fn replay_test_runtime(
-    session_id: &str,
+    session_id: &SessionId,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
@@ -1482,7 +1500,7 @@ pub(super) async fn replay_test_runtime(
 }
 
 pub(super) async fn replay_test_runtime_with_plugins(
-    session_id: &str,
+    session_id: &SessionId,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
@@ -1503,7 +1521,7 @@ pub(super) async fn replay_test_runtime_with_plugins(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn replay_test_runtime_with_plugins_and_registry(
-    session_id: &str,
+    session_id: &SessionId,
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
@@ -1543,7 +1561,7 @@ pub(super) async fn replay_test_runtime_with_plugins_and_registry(
 pub(super) async fn run_restate_replay_turn(
     runtime: &mut lash_core::facade_support::LashRuntime,
     context: Arc<ReplayableRecordingContext>,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> lash_core::facade_support::AssembledTurn {
     let controller = RestateRuntimeEffectController::new(context);
@@ -1566,7 +1584,7 @@ pub(super) async fn run_restate_replay_turn_with_parent_end_fault(
     runtime: &mut lash_core::facade_support::LashRuntime,
     context: Arc<ReplayableRecordingContext>,
     state: Arc<RestateParentEndFaultState>,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> lash_core::facade_support::AssembledTurn {
     let scope = durable_turn_scope(session_id, turn_id);

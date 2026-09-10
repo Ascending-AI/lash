@@ -15,9 +15,9 @@ where
 {
     let open = make();
     let open_identity = Arc::downgrade(&open);
-    bind_conformance_session(&open, "checkpoint-component-refs").await;
+    bind_conformance_session(&open, &SessionId::from("checkpoint-component-refs")).await;
     let mut state = RuntimeSessionState {
-        session_id: "checkpoint-component-refs".to_string(),
+        session_id: SessionId::from("checkpoint-component-refs"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec()));
@@ -59,7 +59,7 @@ where
         "checkpoint-component reopen factory reused the writer handle"
     );
     let reopen_identity = Arc::downgrade(&reopen);
-    bind_conformance_session(&reopen, "checkpoint-component-refs").await;
+    bind_conformance_session(&reopen, &SessionId::from("checkpoint-component-refs")).await;
 
     // Exercise the production hydration and ordinary commit boundary. No test
     // code re-inserts arbitrary keys: the runtime-owned complete set must carry
@@ -151,7 +151,7 @@ where
             && !std::sync::Weak::ptr_eq(&reopen_identity, &Arc::downgrade(&cold_reopen)),
         "checkpoint-component cold reader reused a writer handle"
     );
-    bind_conformance_session(&cold_reopen, "checkpoint-component-refs").await;
+    bind_conformance_session(&cold_reopen, &SessionId::from("checkpoint-component-refs")).await;
     let read = cold_reopen
         .load_session()
         .await
@@ -206,7 +206,7 @@ where
     );
     let rejection_lease = claim_session_execution_lease_for_test(
         &cold_reopen,
-        "checkpoint-component-refs",
+        &SessionId::from("checkpoint-component-refs"),
         "checkpoint-component-rejections",
     )
     .await;
@@ -255,7 +255,7 @@ where
 /// already exists in the backend.
 pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
-        session_id: "checkpoint-unknown-ref".to_string(),
+        session_id: SessionId::from("checkpoint-unknown-ref"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
@@ -290,7 +290,7 @@ pub(super) async fn commit_rejects_leaf_without_frame_open_ancestor(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let state = RuntimeSessionState {
-        session_id: "missing-frame-root".to_string(),
+        session_id: SessionId::from("missing-frame-root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let node = SessionNodeRecord {
@@ -334,9 +334,11 @@ pub(super) async fn turn_input_application_identity_survives_pending_tombstone_v
 ) {
     let session_id = "turn-input-application";
     let owner_id = "turn-input-application-owner";
-    let lease = claim_session_execution_lease_for_test(&store, session_id, owner_id).await;
+    let lease =
+        claim_session_execution_lease_for_test(&store, &SessionId::from(session_id), owner_id)
+            .await;
     let mut state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut expected = Vec::new();
@@ -349,7 +351,7 @@ pub(super) async fn turn_input_application_identity_survives_pending_tombstone_v
         let admitted = futures_util::future::try_join_all((0..2).map(|input_index| {
             store.enqueue_pending_turn_input(
                 pending_next_turn_input_draft(
-                    session_id,
+                    &SessionId::from(session_id),
                     &format!("canonical application {turn_index}:{input_index}"),
                 )
                 .with_source_key(format!(
@@ -360,7 +362,12 @@ pub(super) async fn turn_input_application_identity_survives_pending_tombstone_v
         .await
         .expect("enqueue application inputs");
         let mut claim = store
-            .claim_next_turn_inputs(session_id, &lease.fence(), &lease_owner(owner_id), 10)
+            .claim_next_turn_inputs(
+                &SessionId::from(session_id),
+                &lease.fence(),
+                &lease_owner(owner_id),
+                10,
+            )
             .await
             .expect("claim application inputs")
             .expect("application input claim");
@@ -401,7 +408,7 @@ pub(super) async fn turn_input_application_identity_survives_pending_tombstone_v
     );
     assert_eq!(
         store
-            .list_turn_input_applications(session_id)
+            .list_turn_input_applications(&SessionId::from(session_id))
             .await
             .expect("read durable application identity"),
         expected,
@@ -411,7 +418,7 @@ pub(super) async fn turn_input_application_identity_survives_pending_tombstone_v
     store.vacuum().await.expect("vacuum application tombstone");
     assert_eq!(
         store
-            .list_turn_input_applications(session_id)
+            .list_turn_input_applications(&SessionId::from(session_id))
             .await
             .expect("read application identity after tombstone vacuum"),
         expected,
@@ -425,7 +432,7 @@ pub(super) async fn checkpoint_work_claims_both_families_once(store: Arc<dyn Run
     let owner = lease_owner("checkpoint-owner");
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "checkpoint input",
@@ -434,7 +441,7 @@ pub(super) async fn checkpoint_work_claims_both_families_once(store: Arc<dyn Run
         .expect("enqueue checkpoint input");
     let batch = store
         .enqueue_queued_work(queued_draft(
-            session_id,
+            &SessionId::from(session_id),
             "checkpoint queued work",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
@@ -442,7 +449,7 @@ pub(super) async fn checkpoint_work_claims_both_families_once(store: Arc<dyn Run
         .expect("enqueue checkpoint queued work");
     let lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "checkpoint-work-claims-both-families-once-executor",
             60_000,
@@ -454,7 +461,7 @@ pub(super) async fn checkpoint_work_claims_both_families_once(store: Arc<dyn Run
 
     let (input_claim, queue_claim) = store
         .claim_checkpoint_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             &turn_id,
@@ -473,7 +480,7 @@ pub(super) async fn checkpoint_work_claims_both_families_once(store: Arc<dyn Run
 
     let second = store
         .claim_checkpoint_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             &turn_id,
@@ -504,7 +511,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     let owner = lease_owner("checkpoint-min-boundary-owner");
     let before_completion = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::BeforeCompletion,
             "withheld until before-completion",
@@ -513,7 +520,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
         .expect("enqueue before-completion input");
     let lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "checkpoint-min-boundary-executor",
             60_000,
@@ -525,7 +532,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 
     let probed = store
         .claim_checkpoint_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             &turn_id,
@@ -542,7 +549,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     assert!(
         store
             .claim_active_turn_inputs(
-                session_id,
+                &SessionId::from(session_id),
                 &lease.fence(),
                 &owner,
                 &turn_id,
@@ -557,7 +564,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 
     let after_work_first = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "admitted at after-work",
@@ -566,7 +573,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
         .expect("enqueue first after-work input");
     let after_work_second = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "admitted through the direct claim path",
@@ -575,7 +582,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
         .expect("enqueue second after-work input");
     let after_work_third = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "still pending at before-completion",
@@ -585,7 +592,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 
     let (probe_claim, probe_queue) = store
         .claim_checkpoint_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             &turn_id,
@@ -610,7 +617,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 
     let after_work_claim = store
         .claim_active_turn_inputs(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             &turn_id,
@@ -632,7 +639,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 
     let (input_claim, queue_claim) = store
         .claim_checkpoint_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             &turn_id,
@@ -669,7 +676,7 @@ pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
     let owner = lease_owner("checkpoint-budget-atomicity-owner");
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             &TurnId::from(turn_id.as_str()),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "input that must survive a queue budget refusal",
@@ -679,7 +686,7 @@ pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
     let oversized_text = "oversized queued work".repeat(64);
     store
         .enqueue_queued_work(queued_draft(
-            session_id,
+            &SessionId::from(session_id),
             &oversized_text,
             DeliveryPolicy::EarliestSafeBoundary,
         ))
@@ -687,7 +694,7 @@ pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
         .expect("enqueue oversized checkpoint queued work");
     let lease = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "checkpoint-budget-refusal-executor",
             60_000,
@@ -698,7 +705,7 @@ pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
         .expect("checkpoint atomicity session lease acquired");
     let error = store
         .claim_checkpoint_work(
-            session_id,
+            &SessionId::from(session_id),
             &lease.fence(),
             &owner,
             &turn_id,
@@ -720,7 +727,7 @@ pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
     ));
 
     let pending = store
-        .list_pending_turn_inputs(session_id)
+        .list_pending_turn_inputs(&SessionId::from(session_id))
         .await
         .expect("list active input after checkpoint budget refusal");
     assert_eq!(
@@ -739,7 +746,7 @@ pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
 /// transaction and deferred work remains claimable at the idle boundary.
 pub async fn checkpoint_claim_probe_transaction_counts(
     store: Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     counts: impl Fn() -> (usize, usize),
 ) {
     let turn_id = crate::TurnId::from(format!("{session_id}:counter-turn"));
@@ -852,22 +859,22 @@ pub async fn checkpoint_claim_probe_transaction_counts(
 
 /// Build a queued process-wake draft for backend conformance tests.
 pub fn queued_process_wake_draft(
-    session_id: &str,
+    session_id: &SessionId,
     text: &str,
     delivery_policy: DeliveryPolicy,
 ) -> QueuedWorkBatchDraft {
     let wake = ProcessWakeDelivery {
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{session_id}:{text}"),
-        target_session_id: session_id.to_string(),
-        process_id: format!("process:{text}"),
+        target_session_id: session_id.clone(),
+        process_id: ProcessId::from(format!("process:{text}")),
         process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
             scope: RuntimeScope::new(session_id),
             subject: RuntimeSubject::ProcessEvent {
-                process_id: format!("process:{text}"),
+                process_id: ProcessId::from(format!("process:{text}")),
                 sequence: 1,
                 event_type: "process.wake".to_string(),
             },
@@ -885,14 +892,14 @@ pub fn queued_process_wake_draft(
         crate::TurnWorkPayload::process_wake(wake),
     )
     .with_source_key(crate::process_wake_source_key(
-        &format!("process:{text}"),
+        &ProcessId::from(format!("process:{text}")),
         1,
     ))
-    .with_process_wake_source(format!("process:{text}"), 1)
+    .with_process_wake_source(ProcessId::from(format!("process:{text}")), 1)
 }
 
 pub(super) fn queued_draft(
-    session_id: &str,
+    session_id: &SessionId,
     text: &str,
     delivery_policy: DeliveryPolicy,
 ) -> QueuedWorkBatchDraft {
@@ -907,7 +914,10 @@ pub(super) fn queued_draft(
     )
 }
 
-pub(super) fn queued_session_command_draft(session_id: &str, reason: &str) -> QueuedWorkBatchDraft {
+pub(super) fn queued_session_command_draft(
+    session_id: &SessionId,
+    reason: &str,
+) -> QueuedWorkBatchDraft {
     QueuedWorkBatchDraft::new(
         session_id,
         DeliveryPolicy::EarliestSafeBoundary,
@@ -927,7 +937,7 @@ pub(super) fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
 }
 
 pub(super) fn pending_next_turn_input_draft(
-    session_id: &str,
+    session_id: &SessionId,
     text: &str,
 ) -> crate::PendingTurnInputDraft {
     crate::PendingTurnInputDraft::new(
@@ -942,7 +952,7 @@ pub(super) fn inline_png(bytes: Vec<u8>) -> crate::AttachmentSource {
 }
 
 pub(super) fn pending_active_turn_input_draft(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     min_boundary: crate::TurnInputCheckpointBoundary,
     text: &str,
@@ -990,7 +1000,7 @@ pub(super) async fn release_session_execution_lease_for_test(
 }
 
 pub(super) fn sample_session_node(
-    session_id: &str,
+    session_id: &SessionId,
     id: &str,
     parent: Option<&str>,
 ) -> SessionNodeRecord {
@@ -1023,7 +1033,7 @@ pub(super) fn sample_session_node(
     }
 }
 
-pub(super) fn caller_frame_node_id(session_id: &str, material: &str) -> crate::FrameNodeId {
+pub(super) fn caller_frame_node_id(session_id: &SessionId, material: &str) -> crate::FrameNodeId {
     let frame_key =
         crate::FrameKey::from_caller_material(material).expect("non-empty frame material");
     crate::frame_node_id(session_id, frame_key.as_str())
@@ -1032,7 +1042,7 @@ pub(super) fn caller_frame_node_id(session_id: &str, material: &str) -> crate::F
 pub(super) fn attachment_intent(id: &str) -> AttachmentIntent {
     AttachmentIntent {
         attachment_id: AttachmentId::parse(id).expect("valid attachment id"),
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         canonical_uri: format!("sha256:{id}"),
         intent_at_epoch_ms: 100,
         owner_kind: None,

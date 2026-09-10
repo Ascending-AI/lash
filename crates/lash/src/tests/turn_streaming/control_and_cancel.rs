@@ -448,7 +448,7 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
 
     let request = lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "create-only-factory-idles".to_string(),
+        session_id: SessionId::from("create-only-factory-idles"),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -595,7 +595,7 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
     .expect("the hydrated runtime drains every queued input");
     let request = lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: "queued-work-hydration-burst".to_string(),
+        session_id: SessionId::from("queued-work-hydration-burst"),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -800,7 +800,7 @@ pub(super) async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<
 }
 
 pub(super) async fn assert_session_turn_cancel_disposition(
-    session_id: &'static str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     disposition: lash_core::facade_support::TurnCancelDisposition,
     use_legacy_method: bool,
@@ -914,7 +914,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
 pub(super) async fn request_turn_cancel_with_disposition_drops_undelivered_active_input()
 -> Result<()> {
     assert_session_turn_cancel_disposition(
-        "session-cancel-explicit-drop",
+        &SessionId::from("session-cancel-explicit-drop"),
         &TurnId::from("session-cancel-explicit-drop:turn"),
         lash_core::facade_support::TurnCancelDisposition::Drop,
         false,
@@ -926,7 +926,7 @@ pub(super) async fn request_turn_cancel_with_disposition_drops_undelivered_activ
 pub(super) async fn request_turn_cancel_legacy_method_defers_undelivered_active_input() -> Result<()>
 {
     assert_session_turn_cancel_disposition(
-        "session-cancel-legacy-defer",
+        &SessionId::from("session-cancel-legacy-defer"),
         &TurnId::from("session-cancel-legacy-defer:turn"),
         lash_core::facade_support::TurnCancelDisposition::Defer,
         true,
@@ -1543,7 +1543,10 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
     let output = session
         .turn(TurnInput::text("use tool"))
         .advanced()
-        .collect_with_scope(live.as_ref(), turn_scope(&session.session_id()))
+        .collect_with_scope(
+            live.as_ref(),
+            turn_scope(&SessionId::from(session.session_id())),
+        )
         .await?;
 
     assert!(matches!(

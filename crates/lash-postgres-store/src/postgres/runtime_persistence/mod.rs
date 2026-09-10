@@ -1,5 +1,6 @@
 use crate::*;
 use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
+use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
@@ -10,10 +11,10 @@ pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, resu
 
 pub(crate) async fn lock_session_history_mutation_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), StoreError> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 1::bigint))")
-        .bind(session_id)
+        .bind(session_id.as_str())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -22,7 +23,7 @@ pub(crate) async fn lock_session_history_mutation_tx(
 
 pub(crate) async fn lock_session_history_mutations_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_ids: &[String],
+    session_ids: &[SessionId],
 ) -> Result<(), StoreError> {
     if session_ids.is_empty() {
         return Ok(());
@@ -35,7 +36,12 @@ pub(crate) async fn lock_session_history_mutations_tx(
              ORDER BY session_id
          ) AS ordered",
     )
-    .bind(session_ids)
+    .bind(
+        session_ids
+            .iter()
+            .map(SessionId::as_str)
+            .collect::<Vec<_>>(),
+    )
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -44,7 +50,7 @@ pub(crate) async fn lock_session_history_mutations_tx(
 
 pub(crate) async fn ensure_session_not_deleted_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<(), StoreError> {
     lock_session_history_mutation_tx(tx, session_id).await?;
     let deleted = sqlx::query_scalar::<_, bool>(
@@ -52,13 +58,13 @@ pub(crate) async fn ensure_session_not_deleted_tx(
             SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
          )",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_one(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
     if deleted {
         Err(StoreError::SessionDeleted {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
         })
     } else {
         Ok(())
@@ -267,8 +273,8 @@ async fn enqueue_queued_work_with_outcome_tx(
             "SELECT allocation_floor FROM lash_wake_redelivery_fences
              WHERE session_id = $1 AND process_id = $2",
         )
-        .bind(&batch.session_id)
-        .bind(&wake_source.process_id)
+        .bind(batch.session_id.as_str())
+        .bind(wake_source.process_id.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
@@ -302,7 +308,7 @@ async fn enqueue_queued_work_with_outcome_tx(
     )
     .bind(enqueue_seq)
     .bind(&batch_id)
-    .bind(&batch.session_id)
+    .bind(batch.session_id.as_str())
     .bind(&batch.source_key)
     .bind(batch.delivery_policy.as_str())
     .bind(batch.kind().as_str())
@@ -321,7 +327,7 @@ async fn enqueue_queued_work_with_outcome_tx(
             "SELECT batch_id FROM lash_queued_work_batches
              WHERE session_id = $1 AND source_key = $2",
         )
-        .bind(&batch.session_id)
+        .bind(batch.session_id.as_str())
         .bind(source_key)
         .fetch_optional(&mut **tx)
         .await
@@ -378,7 +384,7 @@ async fn enqueue_queued_work_with_outcome_tx(
 /// locks.
 async fn lock_process_wake_source_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     source_key: &str,
 ) -> Result<(), StoreError> {
     // `PostgresStorage::from_pool` accepts externally configured pools, so
@@ -407,7 +413,7 @@ async fn lock_process_wake_source_tx(
              )
          )",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .bind(source_key)
     .execute(&mut **tx)
     .await
@@ -417,14 +423,14 @@ async fn lock_process_wake_source_tx(
 
 async fn read_session_state_version_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    session_id: &str,
+    session_id: &SessionId,
     lock: bool,
 ) -> Result<u32, StoreError> {
     let suffix = if lock { " FOR UPDATE" } else { "" };
     let marker: Option<Option<i32>> = sqlx::query_scalar(&format!(
         "SELECT session_state_version FROM lash_session_meta WHERE session_id = $1{suffix}"
     ))
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;

@@ -165,12 +165,12 @@ pub(super) struct TestTurnCancelGate {
 #[derive(Default)]
 pub(super) struct TestTurnCancelGateState {
     next_registration_id: usize,
-    revoked_sessions: HashSet<String>,
+    revoked_sessions: HashSet<SessionId>,
     registrations: HashMap<usize, TestTurnCancelGateEntry>,
 }
 
 pub(super) struct TestTurnCancelGateEntry {
-    session_id: String,
+    session_id: SessionId,
     key: AwaitEventKey,
     sender: tokio::sync::oneshot::Sender<RestateTurnCancelWake>,
 }
@@ -190,7 +190,7 @@ impl TestTurnCancelGate {
         &self,
         key: AwaitEventKey,
     ) -> Result<TestTurnCancelRegistrationVerdict, TerminalError> {
-        let Some(session_id) = key.scope.session_id().map(str::to_string) else {
+        let Some(session_id) = key.scope.session_id().map(SessionId::from) else {
             return Err(TerminalError::new(
                 "turn cancellation gate is missing its session id",
             ));
@@ -226,18 +226,18 @@ impl TestTurnCancelGate {
         self.wake_matching(|entry| entry.key == *key, wake)
     }
 
-    fn revoke_session(&self, session_id: &str) {
+    fn revoke_session(&self, session_id: &SessionId) {
         self.state
             .lock_recover()
             .revoked_sessions
-            .insert(session_id.to_string());
+            .insert(SessionId::from(session_id.to_string()));
         self.wake_matching(
             |entry| entry.session_id == session_id,
             RestateTurnCancelWake::SessionRevoked,
         );
     }
 
-    fn is_revoked(&self, session_id: &str) -> bool {
+    fn is_revoked(&self, session_id: &SessionId) -> bool {
         self.state
             .lock_recover()
             .revoked_sessions
@@ -270,7 +270,7 @@ impl TestTurnCancelGate {
 
 pub(super) fn test_turn_cancel_wake_outcome<T>(
     wake: RestateTurnCancelWake,
-    session_id: String,
+    session_id: SessionId,
 ) -> RestateTurnCancelRaceOutcome<T> {
     match wake {
         RestateTurnCancelWake::TurnCancelled | RestateTurnCancelWake::TurnCancelDeferred => {
@@ -341,7 +341,7 @@ where
             .key
             .scope
             .session_id()
-            .map(str::to_string)
+            .map(SessionId::from)
             .ok_or_else(|| {
                 TerminalError::new("turn cancellation gate is missing its session id")
             })?;
@@ -405,7 +405,7 @@ where
             .key
             .scope
             .session_id()
-            .map(str::to_string)
+            .map(SessionId::from)
             .ok_or_else(|| {
                 TerminalError::new("turn cancellation gate is missing its session id")
             })?;
@@ -453,7 +453,7 @@ where
 pub(super) fn test_await_process_terminal_or_turn_cancel<'run, 'ctx, C>(
     context: &'run C,
     gate: &'run TestTurnCancelGate,
-    process_id: String,
+    process_id: ProcessId,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
 ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
 where
@@ -472,7 +472,7 @@ where
             .key
             .scope
             .session_id()
-            .map(str::to_string)
+            .map(SessionId::from)
             .ok_or_else(|| {
                 TerminalError::new("turn cancellation gate is missing its session id")
             })?;
@@ -537,8 +537,8 @@ pub(super) struct RecordingContext {
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     process_terminal_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
-    session_waits: Mutex<HashMap<String, Vec<AwaitEventKey>>>,
-    revoked_sessions: Mutex<HashSet<String>>,
+    session_waits: Mutex<HashMap<SessionId, Vec<AwaitEventKey>>>,
+    revoked_sessions: Mutex<HashSet<SessionId>>,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
 }
 
@@ -562,7 +562,11 @@ impl RecordingContext {
         }
     }
 
-    pub(super) fn resolve_process_terminal(&self, process_id: &str, output: &ProcessAwaitOutput) {
+    pub(super) fn resolve_process_terminal(
+        &self,
+        process_id: &ProcessId,
+        output: &ProcessAwaitOutput,
+    ) {
         let resolution =
             restate_process_terminal_resolution(output).expect("terminal await resolution");
         self.resolve_process_terminal_resolution(process_id, resolution);
@@ -570,7 +574,7 @@ impl RecordingContext {
 
     pub(super) fn resolve_process_terminal_resolution(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
         resolution: Resolution,
     ) {
         let key = restate_process_terminal_await_key(process_id).expect("terminal await key");
@@ -588,7 +592,7 @@ impl RecordingContext {
             .clone()
     }
 
-    fn process_terminal_notify(&self, process_id: &str) -> Arc<tokio::sync::Notify> {
+    fn process_terminal_notify(&self, process_id: &ProcessId) -> Arc<tokio::sync::Notify> {
         self.process_terminal_notifies
             .lock_recover()
             .entry(process_id.to_string())
@@ -620,12 +624,11 @@ impl RecordingContext {
         &self,
         request: RestateDurableWaitResolveRequest,
     ) -> ResolveOutcome {
-        if request
-            .key
-            .scope
-            .session_id()
-            .is_some_and(|session_id| self.revoked_sessions.lock_recover().contains(session_id))
-        {
+        if request.key.scope.session_id().is_some_and(|session_id| {
+            self.revoked_sessions
+                .lock_recover()
+                .contains(&SessionId::from(session_id))
+        }) {
             return ResolveOutcome::UnknownOrRevoked;
         }
         self.turn_cancel_gate.resolve(
@@ -661,7 +664,11 @@ impl RecordingContext {
         let Some(session_id) = key.scope.session_id() else {
             return;
         };
-        if let Some(waits) = self.session_waits.lock_recover().get_mut(session_id) {
+        if let Some(waits) = self
+            .session_waits
+            .lock_recover()
+            .get_mut(&SessionId::from(session_id))
+        {
             waits.retain(|wait| wait != key);
         }
     }
@@ -768,7 +775,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         let process_id = request.process_id.clone();
         self.cancelled
             .lock_recover()
-            .push((request.process_id.clone(), request.reason.clone()));
+            .push((request.process_id.to_string(), request.reason.clone()));
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
                 invoke_process_workflow_endpoint(&endpoint, "cancel", &process_id, &request, false)
@@ -800,7 +807,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                 context
                     .session_waits
                     .lock_recover()
-                    .entry(session_id.to_string())
+                    .entry(SessionId::from(session_id.to_string()))
                     .or_default()
                     .push(request.key.clone());
             }
@@ -883,7 +890,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn await_process_terminal<'run>(
         &'run self,
-        process_id: String,
+        process_id: ProcessId,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -915,7 +922,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
-        process_id: String,
+        process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
     ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
@@ -942,7 +949,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn update_session_waits<'run>(
         &'run self,
-        session_id: String,
+        session_id: SessionId,
         revoke: bool,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
@@ -980,7 +987,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn session_is_revoked<'run>(
         &'run self,
-        session_id: String,
+        session_id: SessionId,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -1093,8 +1100,12 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                             intents: lash_core::ToolIntents::v1(vec![
                                 lash_core::ToolIntent::SignalProcess(
                                     lash_core::SignalProcessIntent {
-                                        session_id: TOOL_INTENT_CORPUS_SESSION.to_string(),
-                                        process_id: TOOL_INTENT_CORPUS_TARGET.to_string(),
+                                        session_id: SessionId::from(
+                                            TOOL_INTENT_CORPUS_SESSION.to_string(),
+                                        ),
+                                        process_id: ProcessId::from(
+                                            TOOL_INTENT_CORPUS_TARGET.to_string(),
+                                        ),
                                         signal_name: "resume".to_string(),
                                         payload: serde_json::json!({
                                             "source": "checked-in-endpoint-corpus"
@@ -1120,7 +1131,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                 .scoped_effect_controller(scope)
                 .map_err(TerminalError::from_error)?,
             lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry)),
-            TOOL_INTENT_CORPUS_SESSION,
+            &SessionId::from(TOOL_INTENT_CORPUS_SESSION),
             "tool-intent-corpus-call",
             &intents,
         )
@@ -1218,7 +1229,7 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
     .await
     .expect("feed checked-in corpus bytes through the Restate endpoint");
     let signal_events = registry
-        .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
+        .events_after(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
         .await
         .expect("read corpus signal outcomes")
         .into_iter()
@@ -1324,7 +1335,7 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
         );
         assert_eq!(
             registry
-                .events_after(TOOL_INTENT_CORPUS_TARGET, 0)
+                .events_after(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
                 .await
                 .expect("read the refusal witness target")
                 .into_iter()
@@ -1711,7 +1722,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
 
     fn await_process_terminal<'run>(
         &'run self,
-        _process_id: String,
+        _process_id: ProcessId,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -1721,7 +1732,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
 
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
-        process_id: String,
+        process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
     ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
@@ -1755,7 +1766,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
 
     fn update_session_waits<'run>(
         &'run self,
-        session_id: String,
+        session_id: SessionId,
         revoke: bool,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
@@ -1769,7 +1780,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
 
     fn session_is_revoked<'run>(
         &'run self,
-        session_id: String,
+        session_id: SessionId,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -2003,7 +2014,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn await_process_terminal<'run>(
         &'run self,
-        process_id: String,
+        process_id: ProcessId,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -2013,7 +2024,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
-        process_id: String,
+        process_id: ProcessId,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
     ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
@@ -2039,7 +2050,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn update_session_waits<'run>(
         &'run self,
-        session_id: String,
+        session_id: SessionId,
         revoke: bool,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
@@ -2050,7 +2061,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn session_is_revoked<'run>(
         &'run self,
-        session_id: String,
+        session_id: SessionId,
     ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -2069,7 +2080,7 @@ pub(super) fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> Ru
 }
 
 pub(super) fn test_turn_cancel_wait_request(
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> RestateDurableWaitAwaitRequest {
     let key = restate_await_event_key(

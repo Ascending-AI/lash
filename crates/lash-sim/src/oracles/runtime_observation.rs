@@ -768,7 +768,7 @@ pub fn runtime_graph_acyclic(writes: &[crate::store::CheckpointWriteEvent]) -> O
         if let Err(message) = validate_raw_graph_rows(
             rows,
             raw.get("graph_leaf_node_id").and_then(Value::as_str),
-            session_id,
+            &SessionId::from(session_id),
             write.commit_index,
         ) {
             return OracleVerdict::failed(RUNTIME_GRAPH_ACYCLIC_ORACLE, message);
@@ -792,7 +792,7 @@ pub fn runtime_graph_acyclic(writes: &[crate::store::CheckpointWriteEvent]) -> O
 pub(super) fn validate_raw_graph_rows(
     rows: &[Value],
     leaf_node_id: Option<&str>,
-    session_id: &str,
+    session_id: &SessionId,
     commit_index: usize,
 ) -> Result<(), String> {
     let context = format!("session `{session_id}` commit {commit_index}");

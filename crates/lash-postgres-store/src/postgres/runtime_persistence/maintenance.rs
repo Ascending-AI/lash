@@ -7,7 +7,7 @@ impl StoreMaintenance for PostgresSessionStore {
         // identity evidence and must survive every retention-pruning pass (FIG-754 / FIG-748).
         let removed_node_count =
             sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1 AND tombstoned = TRUE")
-                .bind(&self.session_id)
+                .bind(self.session_id.as_str())
                 .execute(&self.pool)
                 .await
                 .map_err(|error| {
@@ -21,7 +21,7 @@ impl StoreMaintenance for PostgresSessionStore {
             "DELETE FROM lash_pending_turn_inputs
              WHERE session_id = $1 AND state IN ($2, $3)",
         )
-        .bind(&self.session_id)
+        .bind(self.session_id.as_str())
         .bind(lash_core::TurnInputState::Cancelled.as_str())
         .bind(lash_core::TurnInputState::Completed.as_str())
         .execute(&self.pool)
@@ -37,7 +37,7 @@ impl StoreMaintenance for PostgresSessionStore {
         })?
         .rows_affected();
         sqlx::query("DELETE FROM lash_turn_cancel_requests WHERE session_id = $1")
-            .bind(&self.session_id)
+            .bind(self.session_id.as_str())
             .execute(&self.pool)
             .await
             .map_err(|error| {

@@ -31,7 +31,7 @@ pub(super) async fn fig779_sdk_pending_durable_timer_suspends_cleanly_without_gu
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 pub(super) struct Fig790TurnEventPumpInput {
-    process_id: String,
+    process_id: ProcessId,
     prequeue_event: bool,
 }
 
@@ -101,7 +101,7 @@ pub(super) async fn assert_fig790_turn_event_pump_suspends_cleanly(
         "run",
         invocation_id,
         &Fig790TurnEventPumpInput {
-            process_id: format!("{invocation_id}-process"),
+            process_id: ProcessId::from(format!("{invocation_id}-process")),
             prequeue_event,
         },
     )
@@ -187,7 +187,7 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
     }
 }
 
-pub(super) fn fig790_cancelled_process_output(process_id: &str) -> ProcessAwaitOutput {
+pub(super) fn fig790_cancelled_process_output(process_id: &ProcessId) -> ProcessAwaitOutput {
     process_cancellation(
         format!("process `{process_id}` observed durable turn cancellation"),
         None,
@@ -195,7 +195,7 @@ pub(super) fn fig790_cancelled_process_output(process_id: &str) -> ProcessAwaitO
 }
 
 pub(super) async fn fig790_process_await_endpoint(
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> (Endpoint, Arc<dyn ProcessRegistry>) {
     let registry = process_registry();
     registry
@@ -214,7 +214,7 @@ pub(super) async fn fig790_process_await_endpoint(
 }
 
 pub(super) async fn fig790_pre_pr_suspended_process_call(
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> endpoint_protocol::RestateCallFrame {
     let endpoint = Endpoint::builder()
         .bind(Fig790TurnEventPumpImpl.serve())
@@ -225,7 +225,7 @@ pub(super) async fn fig790_pre_pr_suspended_process_call(
         "run",
         &format!("{process_id}-pre-pr-fixture"),
         &Fig790TurnEventPumpInput {
-            process_id: process_id.to_string(),
+            process_id: ProcessId::from(process_id.to_string()),
             prequeue_event: false,
         },
     )
@@ -245,8 +245,8 @@ pub(super) async fn fig790_pre_pr_suspended_process_call(
 #[tokio::test]
 pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_terminal() {
     let process_id = "fig790-pre-pr-terminal";
-    let pre_pr_call = fig790_pre_pr_suspended_process_call(process_id).await;
-    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let pre_pr_call = fig790_pre_pr_suspended_process_call(&ProcessId::from(process_id)).await;
+    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,
@@ -299,8 +299,8 @@ pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_terminal()
 #[tokio::test]
 pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_cancelled() {
     let process_id = "fig790-pre-pr-cancelled";
-    let pre_pr_call = fig790_pre_pr_suspended_process_call(process_id).await;
-    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let pre_pr_call = fig790_pre_pr_suspended_process_call(&ProcessId::from(process_id)).await;
+    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,
@@ -308,7 +308,7 @@ pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_cancelled(
         ),
         cancel_on_suspend_wake: false,
     };
-    let cancelled = fig790_cancelled_process_output(process_id);
+    let cancelled = fig790_cancelled_process_output(&ProcessId::from(process_id));
     let replay = encode_call_replay(
         "fig790-pre-pr-cancelled",
         &input,
@@ -352,7 +352,7 @@ pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_cancelled(
 #[tokio::test]
 pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_process() {
     let process_id = "fig790-revoked-session";
-    let (endpoint, registry) = fig790_process_await_endpoint(process_id).await;
+    let (endpoint, registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,
@@ -416,7 +416,7 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
     );
     assert!(
         !registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("revoked await keeps its process record")
             .expect("revoked await keeps the process present")
@@ -438,7 +438,7 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
     );
     assert!(
         !registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("redriven revoked await keeps its process record")
             .expect("redriven revoked await keeps the process present")
@@ -449,7 +449,7 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
 #[tokio::test]
 pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancelling_process() {
     let process_id = "fig790-registered-then-revoked";
-    let (endpoint, registry) = fig790_process_await_endpoint(process_id).await;
+    let (endpoint, registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,
@@ -511,7 +511,7 @@ pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancell
     );
     assert!(
         !registry
-            .get_process(process_id)
+            .get_process(&ProcessId::from(process_id))
             .await
             .expect("registered revocation keeps its process record")
             .expect("registered revocation keeps the process present")
@@ -523,7 +523,7 @@ pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancell
 #[tokio::test]
 pub(super) async fn fig790_process_terminal_wins_when_terminal_and_cancellation_are_both_ready() {
     let process_id = "fig790-terminal-and-cancel-ready";
-    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,
@@ -600,7 +600,7 @@ pub(super) async fn fig790_process_terminal_wins_when_terminal_and_cancellation_
 #[tokio::test]
 pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_with_fig779() {
     let process_id = "fig790-cancel-during-suspension";
-    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,
@@ -667,7 +667,7 @@ pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_w
             .is_empty()
     );
 
-    let cancelled = fig790_cancelled_process_output(process_id);
+    let cancelled = fig790_cancelled_process_output(&ProcessId::from(process_id));
     let replay = encode_call_replay(
         "fig790-cancel-during-suspension",
         &input,
@@ -720,7 +720,7 @@ pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_w
 #[tokio::test]
 pub(super) async fn fig790_second_await_terminal_suspension_redrives_after_journaled_cancel() {
     let process_id = "fig790-second-await-redrive";
-    let (endpoint, _registry) = fig790_process_await_endpoint(process_id).await;
+    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
     let input = Fig790ProcessAwaitRedriveInput {
         process_ref: lash_core::ProcessRef::new(
             process_id,
@@ -810,7 +810,7 @@ pub(super) async fn fig790_second_await_terminal_suspension_redrives_after_journ
     };
     assert_eq!(second_await_call.handler, "await_terminal");
 
-    let cancelled = fig790_cancelled_process_output(process_id);
+    let cancelled = fig790_cancelled_process_output(&ProcessId::from(process_id));
     let redrive = encode_call_replay(
         "fig790-second-await-redrive",
         &input,

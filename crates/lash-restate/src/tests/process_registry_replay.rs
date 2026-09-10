@@ -14,7 +14,7 @@ pub(super) async fn restate_controller_replays_parent_shaped_start_await_suspend
         },
     )
     .expect("parent suspend key");
-    context.resolve_process_terminal(process_id, &terminal);
+    context.resolve_process_terminal(&ProcessId::from(process_id), &terminal);
     context.resolve_durable_event(RestateDurableWaitResolveRequest {
         key: suspend_key.clone(),
         resolution: Resolution::Ok(serde_json::json!({ "answer": "resume" })),
@@ -23,11 +23,17 @@ pub(super) async fn restate_controller_replays_parent_shaped_start_await_suspend
     run_parent_shaped_start_await_suspend_flow(
         &host,
         registry.clone(),
-        process_id,
+        &ProcessId::from(process_id),
         suspend_key.clone(),
     )
     .await;
-    run_parent_shaped_start_await_suspend_flow(&host, registry, process_id, suspend_key).await;
+    run_parent_shaped_start_await_suspend_flow(
+        &host,
+        registry,
+        &ProcessId::from(process_id),
+        suspend_key,
+    )
+    .await;
 
     assert_eq!(
         context.process_command_log.lock_recover().as_slice(),
@@ -77,7 +83,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
         "process-env:test:process-1",
     )))
-    .with_wake_session_id(Some("session".to_string()));
+    .with_wake_session_id(Some(SessionId::from("session")));
 
     let outcome = host
         .execute_effect(
@@ -110,7 +116,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     );
     assert_eq!(
         registry
-            .get_process("process-1")
+            .get_process(&ProcessId::from("process-1"))
             .await
             .expect("read process")
             .expect("registered process")
@@ -160,7 +166,7 @@ pub(super) async fn restate_controller_lists_and_transfers_observers_through_pro
     registry
         .add_observer(
             &s1.session_id,
-            "task-list",
+            &ProcessId::from("task-list"),
             lash_core::ProcessObserverBy::host("restate-list-test"),
         )
         .await
@@ -195,7 +201,7 @@ pub(super) async fn restate_controller_lists_and_transfers_observers_through_pro
                 RuntimeEffectCommand::process(ProcessCommand::Transfer {
                     from_scope: s1.clone(),
                     to_scope: s2.clone(),
-                    process_ids: vec!["task-list".to_string()],
+                    process_ids: vec![ProcessId::from("task-list")],
                 }),
             ),
             registry_local_executor(registry.clone()),
@@ -263,13 +269,13 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     let awaited_output = process_success(serde_json::json!({ "done": true }));
     registry
         .complete_process(
-            "task-await-signal",
+            &ProcessId::from("task-await-signal"),
             awaited_output.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete");
-    context.resolve_process_terminal("task-await-signal", &awaited_output);
+    context.resolve_process_terminal(&ProcessId::from("task-await-signal"), &awaited_output);
 
     let outcome = host
         .execute_effect(
@@ -431,8 +437,8 @@ pub(super) async fn restate_controller_cancel_requests_call_workflow_cancel() {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct RecordedProcessRun {
-    pub(super) process_id: String,
-    pub(super) wake_target_session_id: Option<String>,
+    pub(super) process_id: ProcessId,
+    pub(super) wake_target_session_id: Option<SessionId>,
     pub(super) tool_effect_id: Option<String>,
     pub(super) execution_scope_id: String,
     pub(super) turn_control_participation: lash_core::TurnControlParticipation,
@@ -788,7 +794,9 @@ impl RestateProcessRunner for SegmentedRecordingRunner {
     }
 }
 
-pub(super) fn native_process_scope(process_id: &str) -> lash_core::ScopedEffectController<'static> {
+pub(super) fn native_process_scope(
+    process_id: &ProcessId,
+) -> lash_core::ScopedEffectController<'static> {
     lash_core::ScopedEffectController::shared(
         Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
         lash_core::ExecutionScope::process(process_id.to_string()),
@@ -824,12 +832,13 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
     let run = {
         let workflow = Arc::clone(&workflow);
         tokio::spawn(async move {
-            let cancellation_signal = workflow.cancellation_signal("prompt-cancel", 0);
+            let cancellation_signal =
+                workflow.cancellation_signal(&ProcessId::from("prompt-cancel"), 0);
             workflow
                 .run_registration(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope("prompt-cancel"),
+                    native_process_scope(&ProcessId::from("prompt-cancel")),
                     0,
                     None,
                     cancellation_signal,
@@ -841,9 +850,9 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
     signal_transport.started.notified().await;
     registry
         .append_event(
-            "prompt-cancel",
+            &ProcessId::from("prompt-cancel"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                "prompt-cancel",
+                &ProcessId::from("prompt-cancel"),
                 Some("stop promptly".to_string()),
             ),
         )
@@ -894,7 +903,7 @@ pub(super) async fn cancellation_cleanup_failure_does_not_write_a_false_terminal
                 .run_registration(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope("cancel-cleanup-failure"),
+                    native_process_scope(&ProcessId::from("cancel-cleanup-failure")),
                     0,
                     None,
                     async move {
@@ -911,9 +920,9 @@ pub(super) async fn cancellation_cleanup_failure_does_not_write_a_false_terminal
     runner.started.notified().await;
     registry
         .append_event(
-            "cancel-cleanup-failure",
+            &ProcessId::from("cancel-cleanup-failure"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                "cancel-cleanup-failure",
+                &ProcessId::from("cancel-cleanup-failure"),
                 Some("exercise cleanup failure".to_string()),
             ),
         )
@@ -934,7 +943,7 @@ pub(super) async fn cancellation_cleanup_failure_does_not_write_a_false_terminal
         "unexpected handler error: {error:?}"
     );
     let record = registry
-        .get_process("cancel-cleanup-failure")
+        .get_process(&ProcessId::from("cancel-cleanup-failure"))
         .await
         .expect("read process after cleanup failure")
         .expect("process remains registered");
@@ -969,7 +978,7 @@ pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on
                 .run_registration(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope("non-session-cancel-failure"),
+                    native_process_scope(&ProcessId::from("non-session-cancel-failure")),
                     0,
                     None,
                     async move {
@@ -986,9 +995,9 @@ pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on
     runner.started.notified().await;
     registry
         .append_event(
-            "non-session-cancel-failure",
+            &ProcessId::from("non-session-cancel-failure"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                "non-session-cancel-failure",
+                &ProcessId::from("non-session-cancel-failure"),
                 Some("preserve prior non-session behavior".to_string()),
             ),
         )
@@ -1007,7 +1016,7 @@ pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on
             if is_process_cancellation(output.as_ref())
     ));
     let record = registry
-        .get_process("non-session-cancel-failure")
+        .get_process(&ProcessId::from("non-session-cancel-failure"))
         .await
         .expect("read process")
         .expect("process remains registered");
@@ -1051,10 +1060,10 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
         workflow.run_registration(
             registration,
             ProcessExecutionContext::default(),
-            native_process_scope("ceiling-reissues"),
+            native_process_scope(&ProcessId::from("ceiling-reissues")),
             0,
             None,
-            workflow.cancellation_signal("ceiling-reissues", 0),
+            workflow.cancellation_signal(&ProcessId::from("ceiling-reissues"), 0),
         ),
     )
     .await
@@ -1091,10 +1100,10 @@ pub(super) async fn non_timeout_cancel_watch_error_fails_the_segment() {
         .run_registration(
             rerunnable_registration("broken-cancel-watch"),
             ProcessExecutionContext::default(),
-            native_process_scope("broken-cancel-watch"),
+            native_process_scope(&ProcessId::from("broken-cancel-watch")),
             0,
             None,
-            workflow.cancellation_signal("broken-cancel-watch", 0),
+            workflow.cancellation_signal(&ProcessId::from("broken-cancel-watch"), 0),
         )
         .await
         .expect_err("a non-timeout cancel watch failure must fail the segment");
@@ -1140,10 +1149,10 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
         .run_registration(
             rerunnable_registration("unregistered-cancel-watch"),
             ProcessExecutionContext::default(),
-            native_process_scope("unregistered-cancel-watch"),
+            native_process_scope(&ProcessId::from("unregistered-cancel-watch")),
             0,
             None,
-            workflow.cancellation_signal("unregistered-cancel-watch", 0),
+            workflow.cancellation_signal(&ProcessId::from("unregistered-cancel-watch"), 0),
         )
         .await
         .expect_err("a cancel watch against an unbound service must fail the segment");
@@ -1248,7 +1257,7 @@ pub(super) async fn transient_cancel_registry_read_error_cannot_fall_through_to_
                 .run_registration(
                     registration,
                     ProcessExecutionContext::default(),
-                    native_process_scope("transient-cancel-read"),
+                    native_process_scope(&ProcessId::from("transient-cancel-read")),
                     0,
                     None,
                     async move {
@@ -1265,9 +1274,9 @@ pub(super) async fn transient_cancel_registry_read_error_cannot_fall_through_to_
     runner.started.notified().await;
     registry
         .append_event(
-            "transient-cancel-read",
+            &ProcessId::from("transient-cancel-read"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                "transient-cancel-read",
+                &ProcessId::from("transient-cancel-read"),
                 Some("retry the durable read".to_string()),
             ),
         )
@@ -1301,7 +1310,7 @@ pub(super) async fn exhausted_cancel_confirmation_is_a_retryable_handler_error()
     workflow.fail_next_cancel_reads(6);
 
     let error = workflow
-        .confirm_process_cancel_requested_for_test("cancel-confirmation")
+        .confirm_process_cancel_requested_for_test(&ProcessId::from("cancel-confirmation"))
         .await
         .expect_err("exhausted confirmation must stay retryable");
     let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
@@ -1331,7 +1340,7 @@ pub(super) async fn absent_event_after_cancel_promise_is_a_terminal_handler_erro
     );
 
     let error = workflow
-        .confirm_process_cancel_requested_for_test("missing-cancel-event")
+        .confirm_process_cancel_requested_for_test(&ProcessId::from("missing-cancel-event"))
         .await
         .expect_err("a resolved promise without its durable event must be terminal");
     let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
@@ -1393,20 +1402,20 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         handover: first_handover,
     };
     continuations
-        .put_segment_handover("segmented-durable", persisted.clone())
+        .put_segment_handover(&ProcessId::from("segmented-durable"), persisted.clone())
         .await
         .expect("persist before successor schedule");
     continuations
-        .put_segment_handover("segmented-durable", persisted.clone())
+        .put_segment_handover(&ProcessId::from("segmented-durable"), persisted.clone())
         .await
         .expect("crash recovery repeats the persist idempotently");
     assert_eq!(
-        process_segment_workflow_key("segmented-durable", 1),
+        process_segment_workflow_key(&ProcessId::from("segmented-durable"), 1),
         "segmented-durable#1"
     );
 
     let loaded = continuations
-        .get_segment_handover("segmented-durable", 1)
+        .get_segment_handover(&ProcessId::from("segmented-durable"), 1)
         .await
         .expect("load successor handover")
         .expect("persisted successor handover");
@@ -1437,7 +1446,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         &[None, Some(continuation)]
     );
     let events = registry
-        .events_after("segmented-durable", 0)
+        .events_after(&ProcessId::from("segmented-durable"), 0)
         .await
         .expect("process events");
     assert_eq!(
@@ -1449,7 +1458,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         "only the true terminal is process-visible"
     );
     let awaited = lash_core::NativeProcessWork::for_registry(registry)
-        .await_terminal("segmented-durable")
+        .await_terminal(&ProcessId::from("segmented-durable"))
         .await
         .expect("await true terminal");
     assert_eq!(awaited, terminal);
@@ -1585,14 +1594,14 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
 
             if ordinal > 0 {
                 let loaded = continuations
-                    .get_segment_handover(&process_id, ordinal)
+                    .get_segment_handover(&ProcessId::from(process_id.clone()), ordinal)
                     .await
                     .expect("get input handover")
                     .expect("running segment input survives");
                 if matches!(replay_point, RestateSegmentReplayPoint::GetHandover) {
                     assert_eq!(
                         continuations
-                            .get_segment_handover(&process_id, ordinal)
+                            .get_segment_handover(&ProcessId::from(process_id.clone()), ordinal)
                             .await
                             .expect("replayed get"),
                         Some(loaded.clone())
@@ -1605,7 +1614,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
                 .run_registration(
                     registration.clone(),
                     ProcessExecutionContext::default(),
-                    native_process_scope(&process_id),
+                    native_process_scope(&ProcessId::from(process_id.clone())),
                     ordinal,
                     input_handover.take(),
                     pending_process_cancel_signal(),
@@ -1625,12 +1634,12 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
                 handover: boundary,
             };
             continuations
-                .put_segment_handover(&process_id, persisted.clone())
+                .put_segment_handover(&ProcessId::from(process_id.clone()), persisted.clone())
                 .await
                 .expect("put matrix handover");
             if matches!(replay_point, RestateSegmentReplayPoint::PutHandover) {
                 continuations
-                    .put_segment_handover(&process_id, persisted)
+                    .put_segment_handover(&ProcessId::from(process_id.clone()), persisted)
                     .await
                     .expect("replayed put is idempotent");
             }
@@ -1642,12 +1651,12 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             for _ in 0..cancel_checks {
                 assert!(
                     !workflow
-                        .process_cancel_requested(&process_id)
+                        .process_cancel_requested(&ProcessId::from(process_id.clone()))
                         .await
                         .expect("matrix cancel check")
                 );
             }
-            let key = process_segment_workflow_key(&process_id, next);
+            let key = process_segment_workflow_key(&ProcessId::from(process_id.clone()), next);
             assert!(
                 successor_keys.insert(key.clone()),
                 "one successor per ordinal"
@@ -1666,9 +1675,9 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
         );
         registry
             .complete_process(
-                &process_id,
+                &ProcessId::from(process_id.clone()),
                 terminal.clone(),
-                workflow_key_authority(&process_id),
+                workflow_key_authority(&ProcessId::from(process_id.clone())),
             )
             .await
             .expect("write root terminal");
@@ -1676,14 +1685,14 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             lash_core::NativeProcessWork::for_registry(Arc::clone(&registry));
         assert_eq!(
             attach_after_retention
-                .await_terminal(&process_id)
+                .await_terminal(&ProcessId::from(process_id.clone()))
                 .await
                 .expect("post-retention durable attach"),
             terminal
         );
         assert_eq!(
             registry
-                .events_after(&process_id, 0)
+                .events_after(&ProcessId::from(process_id), 0)
                 .await
                 .expect("matrix events")
                 .iter()

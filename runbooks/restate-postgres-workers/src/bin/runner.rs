@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 use lash::sync::MutexExt;
 use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};

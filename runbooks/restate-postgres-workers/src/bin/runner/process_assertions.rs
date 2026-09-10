@@ -33,7 +33,7 @@ pub(super) async fn drive_durable_wait_index_scenarios(
     });
     let deadline = Instant::now() + Duration::from_secs(90);
     while !cancelled_wait.is_finished() {
-        host.cancel_await_events_for_session(DEFAULT_SESSION_ID)
+        host.cancel_await_events_for_session(&SessionId::from(DEFAULT_SESSION_ID))
             .await
             .context("cancel controller-owned session waits")?;
         anyhow::ensure!(
@@ -110,7 +110,7 @@ pub(super) async fn drive_durable_wait_index_scenarios(
         matches!(initial.outcome, TurnCancelOutcome::Requested(_)),
         "initial turn cancellation was not accepted: {initial:?}"
     );
-    host.revoke_await_events_for_session(DEFAULT_SESSION_ID)
+    host.revoke_await_events_for_session(&SessionId::from(DEFAULT_SESSION_ID))
         .await
         .context("revoke session turn control promises")?;
     let revoked = control_driver
@@ -167,7 +167,7 @@ pub(super) async fn wait_for_queued_work(
 
 pub(super) async fn wait_for_process_signal_wait(
     pool: &sqlx::PgPool,
-    process_id: &str,
+    process_id: &ProcessId,
     signal_name: &str,
     ordinal: u64,
 ) -> Result<()> {
@@ -175,7 +175,7 @@ pub(super) async fn wait_for_process_signal_wait(
     while Instant::now() < deadline {
         let row: Option<(String, String)> =
             sqlx::query_as("SELECT status, record_json FROM lash_processes WHERE process_id = $1")
-                .bind(process_id)
+                .bind(process_id.as_str())
                 .fetch_optional(pool)
                 .await
                 .with_context(|| format!("load process `{process_id}` wait state"))?;
@@ -205,7 +205,7 @@ pub(super) async fn emit_button_event(
     mock_provider_base_url: &str,
     trace_dir: Option<PathBuf>,
     ingress_url: &str,
-) -> Result<String> {
+) -> Result<ProcessId> {
     let registry = process_registry_from_storage(storage);
     let continuations =
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
@@ -265,14 +265,14 @@ pub(super) fn signal_process_output_value(await_output: Value) -> Result<Value> 
 
 pub(super) async fn assert_signal_process_output(
     pool: &sqlx::PgPool,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<()> {
     let event_json: String = sqlx::query_scalar(
         "SELECT event_json
          FROM lash_process_events
          WHERE process_id = $1 AND event_type = 'process.completed'",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .fetch_one(pool)
     .await
     .with_context(|| format!("load completed event for signal process `{process_id}`"))?;
@@ -295,7 +295,7 @@ pub(super) async fn assert_signal_process_output(
          WHERE process_id = $1
          ORDER BY sequence",
     )
-    .bind(process_id)
+    .bind(process_id.as_str())
     .fetch_all(pool)
     .await
     .with_context(|| format!("load signal process `{process_id}` events"))?;
@@ -318,12 +318,15 @@ pub(super) async fn assert_signal_process_output(
     Ok(())
 }
 
-pub(super) async fn wait_for_process_terminal(pool: &sqlx::PgPool, process_id: &str) -> Result<()> {
+pub(super) async fn wait_for_process_terminal(
+    pool: &sqlx::PgPool,
+    process_id: &ProcessId,
+) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(120);
     while Instant::now() < deadline {
         let status: Option<String> =
             sqlx::query_scalar("SELECT status FROM lash_processes WHERE process_id = $1")
-                .bind(process_id)
+                .bind(process_id.as_str())
                 .fetch_optional(pool)
                 .await
                 .with_context(|| format!("load process `{process_id}` status"))?;
@@ -752,7 +755,7 @@ pub(super) async fn assert_tool_batch_side_effects(pool: &sqlx::PgPool) -> Resul
 
 pub(super) async fn assert_trigger_delivery(
     pool: &sqlx::PgPool,
-    trigger_process_id: &str,
+    trigger_process_id: &ProcessId,
 ) -> Result<()> {
     let trigger_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM lash_trigger_subscriptions
@@ -768,7 +771,7 @@ pub(super) async fn assert_trigger_delivery(
     );
     let delivery_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM lash_trigger_deliveries WHERE process_id = $1")
-            .bind(trigger_process_id)
+            .bind(trigger_process_id.as_str())
             .fetch_one(pool)
             .await
             .context("count trigger occurrence deliveries")?;

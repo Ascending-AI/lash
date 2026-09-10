@@ -5,7 +5,7 @@ pub(super) async fn commit_increments_head_and_round_trips_agent_frames(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         policy: SessionPolicy {
             model: ModelSpec::builder("gpt-5.4-mini")
                 .context_window_tokens(200_000)
@@ -35,7 +35,9 @@ pub(super) async fn commit_increments_head_and_round_trips_agent_frames(
         "2026-07-27T00:00:00Z".to_string(),
     ));
     state.current_frame_node_id = Some(second_frame_node_id.clone());
-    state.agent_frames = state.session_graph.agent_frame_records("root");
+    state.agent_frames = state
+        .session_graph
+        .agent_frame_records(&SessionId::from("root"));
     state.set_execution_state_snapshot(Some(b"frame-vm".to_vec()));
 
     commit_runtime_state_for_test(
@@ -55,7 +57,7 @@ pub(super) async fn commit_increments_head_and_round_trips_agent_frames(
         read.current_frame_node_id.as_deref(),
         Some(second_frame_node_id.as_str())
     );
-    let frames = read.graph.agent_frame_records("root");
+    let frames = read.graph.agent_frame_records(&SessionId::from("root"));
     assert_eq!(frames.len(), 2);
     let current = frames
         .iter()
@@ -74,13 +76,15 @@ pub(super) async fn concurrent_head_revision_cas_applies_exactly_once(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "concurrent-head-cas";
-    let lease = claim_session_execution_lease_for_test(&store, session_id, "cas-owner").await;
+    let lease =
+        claim_session_execution_lease_for_test(&store, &SessionId::from(session_id), "cas-owner")
+            .await;
     let make_commit = |node_id: &str| {
         let state = RuntimeSessionState {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
-        let node = sample_session_node(session_id, node_id, None);
+        let node = sample_session_node(&SessionId::from(session_id), node_id, None);
         let derived_node_id = node.node_id.clone();
         let commit = RuntimeCommit {
             expected_head_revision: 0,
@@ -143,8 +147,8 @@ pub(super) async fn concurrent_head_revision_cas_applies_exactly_once(
         .expect("concurrent head-CAS winner persisted a session");
     assert_eq!(persisted.head_revision, 1, "exactly one commit applied");
     assert_eq!(persisted.graph.nodes.len(), 1, "exactly one graph applied");
-    let left_node_id = caller_frame_node_id(session_id, "cas-left");
-    let right_node_id = caller_frame_node_id(session_id, "cas-right");
+    let left_node_id = caller_frame_node_id(&SessionId::from(session_id), "cas-left");
+    let right_node_id = caller_frame_node_id(&SessionId::from(session_id), "cas-right");
     assert!(
         persisted.graph.nodes[0].node_id == left_node_id.as_str()
             || persisted.graph.nodes[0].node_id == right_node_id.as_str(),
@@ -155,7 +159,7 @@ pub(super) async fn concurrent_head_revision_cas_applies_exactly_once(
 
 pub(super) async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence>) {
     let alpha = RuntimeSessionState {
-        session_id: "alpha".to_string(),
+        session_id: SessionId::from("alpha"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     commit_runtime_state_for_test(
@@ -166,7 +170,7 @@ pub(super) async fn commit_rejects_a_different_session_id(store: Arc<dyn Runtime
     .await
     .expect("first commit binds the session");
     let beta = RuntimeSessionState {
-        session_id: "beta".to_string(),
+        session_id: SessionId::from("beta"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let result = commit_runtime_state_for_test(
@@ -183,7 +187,7 @@ pub(super) async fn commit_rejects_a_different_session_id(store: Arc<dyn Runtime
 
 pub(super) async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
-        session_id: "hydrated".to_string(),
+        session_id: SessionId::from("hydrated"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.set_tool_state_snapshot(Some(
@@ -233,7 +237,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
     let fresh_retry_nonce = crate::LeaseClaimNonce::new();
     let fresh_retry = store
         .try_claim_session_execution_lease_with_token(
-            "fresh-retry",
+            &SessionId::from("fresh-retry"),
             &fresh_retry_owner,
             "fresh-retry-executor",
             &fresh_retry_nonce,
@@ -247,7 +251,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
     assert_eq!(fresh_retry.lease_term_ms, 120_000);
     let fresh_retried = store
         .try_claim_session_execution_lease_with_token(
-            "fresh-retry",
+            &SessionId::from("fresh-retry"),
             &fresh_retry_owner,
             "fresh-retry-executor",
             &fresh_retry_nonce,
@@ -267,7 +271,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
 
     let takeover_predecessor = store
         .try_claim_session_execution_lease(
-            "takeover-retry",
+            &SessionId::from("takeover-retry"),
             &lease_owner("takeover-old"),
             "session-execution-lease-contract-executor",
             0,
@@ -280,7 +284,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
     let takeover_nonce = crate::LeaseClaimNonce::new();
     let takeover = store
         .try_claim_session_execution_lease_with_token(
-            "takeover-retry",
+            &SessionId::from("takeover-retry"),
             &takeover_owner,
             "takeover-new-executor",
             &takeover_nonce,
@@ -294,7 +298,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
     assert_eq!(takeover.lease_token, takeover_nonce.as_str());
     let takeover_retried = store
         .try_claim_session_execution_lease_with_token(
-            "takeover-retry",
+            &SessionId::from("takeover-retry"),
             &takeover_owner,
             "takeover-new-executor",
             &takeover_nonce,
@@ -316,7 +320,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
     let first_nonce = crate::LeaseClaimNonce::for_testing("owner-a-first-token");
     let first = store
         .try_claim_session_execution_lease_with_token(
-            "root",
+            &SessionId::from("root"),
             &owner_a,
             "owner-a-executor",
             &first_nonce,
@@ -333,7 +337,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
     let reentry_nonce = crate::LeaseClaimNonce::new();
     let reentered = store
         .try_claim_session_execution_lease_with_token(
-            "root",
+            &SessionId::from("root"),
             &owner_a,
             "owner-a-executor",
             &reentry_nonce,
@@ -357,7 +361,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
     assert!(reentered.expires_at_epoch_ms >= first.expires_at_epoch_ms);
     let retried = store
         .try_claim_session_execution_lease_with_token(
-            "root",
+            &SessionId::from("root"),
             &owner_a,
             "owner-a-executor",
             &reentry_nonce,
@@ -375,7 +379,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         matches!(
             store
                 .try_claim_session_execution_lease(
-                    "root",
+                    &SessionId::from("root"),
                     &owner_a_next,
                     "session-execution-lease-contract-executor-2",
                     60_000
@@ -390,7 +394,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         matches!(
             store
                 .try_claim_session_execution_lease(
-                    "root",
+                    &SessionId::from("root"),
                     &owner_b,
                     "session-execution-lease-contract-executor-3",
                     60_000
@@ -471,7 +475,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         matches!(
             store
                 .try_claim_session_execution_lease(
-                    "root",
+                    &SessionId::from("root"),
                     &owner_b,
                     "session-execution-lease-contract-executor-4",
                     60_000
@@ -498,7 +502,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         matches!(
             store
                 .try_claim_session_execution_lease(
-                    "root",
+                    &SessionId::from("root"),
                     &owner_b,
                     "session-execution-lease-contract-executor-5",
                     60_000
@@ -524,7 +528,8 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         err,
         StoreError::SessionExecutionLeaseReleaseRefused { .. }
     ));
-    let second = claim_session_execution_lease_for_test(&store, "root", "owner-b").await;
+    let second =
+        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "owner-b").await;
     assert!(
         second.fencing_token > first.fencing_token,
         "reclaimed session leases must advance the fencing token"
@@ -541,7 +546,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         matches!(
             store
                 .try_claim_session_execution_lease(
-                    "root",
+                    &SessionId::from("root"),
                     &owner_c,
                     "session-execution-lease-contract-executor-6",
                     60_000
@@ -556,7 +561,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
 
     let expired = store
         .try_claim_session_execution_lease(
-            "root",
+            &SessionId::from("root"),
             &owner_expired,
             "session-execution-lease-contract-executor-7",
             0,
@@ -565,12 +570,14 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         .expect("claim expiring lease")
         .acquired()
         .expect("expiring lease");
-    let reclaimed = claim_session_execution_lease_for_test(&store, "root", "owner-reclaim").await;
+    let reclaimed =
+        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "owner-reclaim")
+            .await;
     assert!(reclaimed.fencing_token > expired.fencing_token);
     release_session_execution_lease_for_test(&store, &reclaimed).await;
 
     let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let lease_free_commit = store
@@ -579,7 +586,9 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         .expect("head CAS, not the advisory lease, authorizes commit");
     state.head_revision = lease_free_commit.head_revision;
 
-    let commit_lease = claim_session_execution_lease_for_test(&store, "root", "commit-owner").await;
+    let commit_lease =
+        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "commit-owner")
+            .await;
     let lease_commit = store
         .commit_runtime_state(
             RuntimeCommit::persisted_state_for_test(&state, &[])
@@ -588,11 +597,13 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         .await
         .expect("advisory lease-bearing commit");
     state.head_revision = lease_commit.head_revision;
-    let after_commit = claim_session_execution_lease_for_test(&store, "root", "after-commit").await;
+    let after_commit =
+        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "after-commit")
+            .await;
     release_session_execution_lease_for_test(&store, &after_commit).await;
 
     let turn_state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         turn_index: 1,
         head_revision: state.head_revision,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -604,7 +615,9 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         "lease-replay-turn",
         "final",
     ));
-    let turn_lease = claim_session_execution_lease_for_test(&store, "root", "turn-owner").await;
+    let turn_lease =
+        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "turn-owner")
+            .await;
     let first_result = store
         .commit_runtime_state(
             turn_commit
@@ -621,7 +634,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
 
     let batch = store
         .enqueue_queued_work(queued_draft(
-            "root",
+            &SessionId::from("root"),
             "fenced queue",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
@@ -629,7 +642,7 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         .expect("enqueue fenced queue work");
     let err = store
         .claim_ready_queued_work(
-            "root",
+            &SessionId::from("root"),
             &commit_lease.fence(),
             &lease_owner("queue-owner"),
             QueuedWorkClaimBoundary::Idle,
@@ -641,10 +654,12 @@ pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersi
         err,
         StoreError::SessionExecutionLeaseExpired { .. }
     ));
-    let queue_lease = claim_session_execution_lease_for_test(&store, "root", "queue-owner").await;
+    let queue_lease =
+        claim_session_execution_lease_for_test(&store, &SessionId::from("root"), "queue-owner")
+            .await;
     let claim = store
         .claim_ready_queued_work(
-            "root",
+            &SessionId::from("root"),
             &queue_lease.fence(),
             &lease_owner("queue-owner"),
             QueuedWorkClaimBoundary::Idle,
@@ -667,7 +682,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
     let first_nonce = crate::LeaseClaimNonce::for_testing("borrowed-commit-first-token");
     let held = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "borrowed-commit-executor",
             &first_nonce,
@@ -678,7 +693,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
         .acquired()
         .expect("borrowed-commit lane acquired");
     let mut state = RuntimeSessionState {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let operation = crate::OperationId::new(
@@ -706,7 +721,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
 
     let replay_successor = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "borrowed-commit-executor",
             &crate::LeaseClaimNonce::for_testing("borrowed-commit-replay-token"),
@@ -728,7 +743,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
 
     let lapsed = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "borrowed-commit-executor",
             &crate::LeaseClaimNonce::for_testing("borrowed-commit-lapsed-token"),
@@ -752,7 +767,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
 
     let rotated = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "borrowed-commit-executor",
             &crate::LeaseClaimNonce::for_testing("borrowed-commit-rotated-token"),
@@ -774,7 +789,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
         StoreError::SessionExecutionLeaseExpired { .. }
     ));
     let after_rejection = store
-        .get_session_execution_lease(session_id)
+        .get_session_execution_lease(&SessionId::from(session_id))
         .await
         .expect("read lane after stale borrow rejection")
         .lease
@@ -787,14 +802,14 @@ pub(super) async fn same_incarnation_rotation_gates_claims_not_commits(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let mut state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let overlap_owner = lease_owner("same-incarnation-overlap");
     let overlap_predecessor_nonce = crate::LeaseClaimNonce::new();
     let overlap_predecessor = store
         .try_claim_session_execution_lease_with_token(
-            "root",
+            &SessionId::from("root"),
             &overlap_owner,
             "same-incarnation-executor",
             &overlap_predecessor_nonce,
@@ -807,7 +822,7 @@ pub(super) async fn same_incarnation_rotation_gates_claims_not_commits(
     let overlap_successor_nonce = crate::LeaseClaimNonce::new();
     let overlap_successor = store
         .try_claim_session_execution_lease_with_token(
-            "root",
+            &SessionId::from("root"),
             &overlap_owner,
             "same-incarnation-executor",
             &overlap_successor_nonce,
@@ -831,7 +846,7 @@ pub(super) async fn same_incarnation_rotation_gates_claims_not_commits(
         .expect("predecessor may win purely by the current-head CAS");
     state.head_revision = overlap_win.head_revision;
     let live_after_win = store
-        .get_session_execution_lease("root")
+        .get_session_execution_lease(&SessionId::from("root"))
         .await
         .expect("read overlap successor after predecessor win")
         .lease
@@ -839,7 +854,7 @@ pub(super) async fn same_incarnation_rotation_gates_claims_not_commits(
     assert_eq!(live_after_win.lease_token, overlap_successor.lease_token);
 
     let stale_state = RuntimeSessionState {
-        session_id: "root".to_string(),
+        session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let err = store
@@ -851,7 +866,7 @@ pub(super) async fn same_incarnation_rotation_gates_claims_not_commits(
         .expect_err("predecessor may lose only because the head CAS is stale");
     assert!(matches!(err, StoreError::HeadRevisionConflict { .. }));
     let live_after_loss = store
-        .get_session_execution_lease("root")
+        .get_session_execution_lease(&SessionId::from("root"))
         .await
         .expect("read overlap successor after predecessor loss")
         .lease
@@ -871,7 +886,7 @@ pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
     let first_nonce = crate::LeaseClaimNonce::for_testing("fig1133-first-token");
     let first = store
         .try_claim_session_execution_lease_with_token(
-            "fig1133-same-host-session",
+            &SessionId::from("fig1133-same-host-session"),
             &owner,
             "fig1133-executor-a",
             &first_nonce,
@@ -891,7 +906,7 @@ pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
     let second_nonce = crate::LeaseClaimNonce::for_testing("fig1133-second-token");
     let holder = match store
         .try_claim_session_execution_lease_with_token(
-            "fig1133-same-host-session",
+            &SessionId::from("fig1133-same-host-session"),
             &owner,
             "fig1133-executor-b",
             &second_nonce,
@@ -912,7 +927,7 @@ pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
     assert_eq!(holder.lease_token, "fig1133-first-token");
     assert_eq!(holder.fencing_token, 1);
     let holder_after_busy = store
-        .get_session_execution_lease("fig1133-same-host-session")
+        .get_session_execution_lease(&SessionId::from("fig1133-same-host-session"))
         .await
         .expect("read holder after busy result")
         .lease
@@ -930,7 +945,7 @@ pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
     assert_eq!(renewed.fencing_token, 1);
 
     let mut committed_state = RuntimeSessionState {
-        session_id: "fig1133-same-host-session".to_string(),
+        session_id: SessionId::from("fig1133-same-host-session"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let fenced_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
@@ -1006,7 +1021,7 @@ pub(super) async fn concurrent_session_execution_lease_rotation_and_stale_renewa
     let predecessor_nonce = crate::LeaseClaimNonce::for_testing("concurrent-predecessor-token");
     let predecessor = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "concurrent-claim-executor",
             &predecessor_nonce,
@@ -1027,7 +1042,7 @@ pub(super) async fn concurrent_session_execution_lease_rotation_and_stale_renewa
         claim_barrier.wait().await;
         claim_store
             .try_claim_session_execution_lease_with_token(
-                session_id,
+                &SessionId::from(session_id),
                 &claim_owner,
                 "concurrent-claim-executor",
                 &successor_nonce,
@@ -1062,7 +1077,7 @@ pub(super) async fn concurrent_session_execution_lease_rotation_and_stale_renewa
         Err(error) => panic!("concurrent stale renewal returned the wrong error: {error}"),
     }
     let durable = store
-        .get_session_execution_lease(session_id)
+        .get_session_execution_lease(&SessionId::from(session_id))
         .await
         .expect("read durable lease after concurrent probe")
         .lease
@@ -1101,7 +1116,7 @@ pub(super) async fn session_execution_lease_expires_by_ttl_contract<F>(
     let claimant = lease_owner("ttl-claimant");
     let holder = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &holder_owner,
             "session-execution-lease-expires-by-ttl-contract-executor",
             CONTROLLED_LEASE_TTL_MS,
@@ -1114,7 +1129,7 @@ pub(super) async fn session_execution_lease_expires_by_ttl_contract<F>(
     lease_timing.advance_to_just_before_semantic_expiry();
     let outcome = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &claimant,
             "session-execution-lease-expires-by-ttl-contract-executor-2",
             60_000,
@@ -1142,7 +1157,7 @@ pub(super) async fn session_execution_lease_expires_by_ttl_contract<F>(
     lease_timing.advance_to_semantic_expiry();
     let acquired = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &claimant,
             "session-execution-lease-expires-by-ttl-contract-executor-3",
             60_000,
@@ -1160,7 +1175,7 @@ pub(super) async fn session_execution_lease_expires_by_ttl_contract<F>(
 
 pub(super) async fn claim_session_execution_lease_after_expiry(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     claimant: &crate::LeaseOwnerIdentity,
     lease_timing: &RuntimePersistenceLeaseTiming,
     context: &str,
@@ -1172,7 +1187,7 @@ pub(super) async fn claim_session_execution_lease_after_expiry(
 
 pub(super) async fn claim_session_execution_lease_until_acquired(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     claimant: &crate::LeaseOwnerIdentity,
     lease_timing: &RuntimePersistenceLeaseTiming,
     context: &str,
@@ -1207,7 +1222,7 @@ pub(super) async fn claim_session_execution_lease_until_acquired(
 
 pub(super) async fn claim_queued_work_under_short_lease(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     owner: &crate::LeaseOwnerIdentity,
     lease_timing: &RuntimePersistenceLeaseTiming,
 ) -> (crate::SessionExecutionLease, crate::QueuedWorkClaim) {
@@ -1247,7 +1262,7 @@ pub(super) async fn claim_queued_work_under_short_lease(
 
 pub(super) async fn claim_turn_input_under_short_lease(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &str,
+    session_id: &SessionId,
     owner: &crate::LeaseOwnerIdentity,
     lease_timing: &RuntimePersistenceLeaseTiming,
 ) -> (crate::SessionExecutionLease, crate::TurnInputClaim) {
@@ -1288,7 +1303,7 @@ pub(super) async fn session_execution_lease_diagnostic_read_contract(
 ) {
     assert!(
         store
-            .get_session_execution_lease("lease-diagnostics-unknown")
+            .get_session_execution_lease(&SessionId::from("lease-diagnostics-unknown"))
             .await
             .expect("diagnostic read of an unknown session succeeds")
             .lease
@@ -1296,9 +1311,14 @@ pub(super) async fn session_execution_lease_diagnostic_read_contract(
         "an unknown session id must read as no lease rather than erroring"
     );
 
-    let held = claim_session_execution_lease_for_test(&store, "lease-diagnostics", "diag-a").await;
+    let held = claim_session_execution_lease_for_test(
+        &store,
+        &SessionId::from("lease-diagnostics"),
+        "diag-a",
+    )
+    .await;
     let observation = store
-        .get_session_execution_lease("lease-diagnostics")
+        .get_session_execution_lease(&SessionId::from("lease-diagnostics"))
         .await
         .expect("diagnostic read of a held lease");
     assert!(
@@ -1323,7 +1343,7 @@ pub(super) async fn session_execution_lease_diagnostic_read_contract(
     release_session_execution_lease_for_test(&store, &held).await;
     assert!(
         store
-            .get_session_execution_lease("lease-diagnostics")
+            .get_session_execution_lease(&SessionId::from("lease-diagnostics"))
             .await
             .expect("diagnostic read after release")
             .lease
@@ -1335,7 +1355,7 @@ pub(super) async fn session_execution_lease_diagnostic_read_contract(
     // reported rather than filtered out.
     let lapsing = store
         .try_claim_session_execution_lease(
-            "lease-diagnostics",
+            &SessionId::from("lease-diagnostics"),
             &lease_owner("diag-lapsed"),
             "session-execution-lease-diagnostic-read-contract-executor",
             0,
@@ -1345,7 +1365,7 @@ pub(super) async fn session_execution_lease_diagnostic_read_contract(
         .acquired()
         .expect("expiring lease acquired");
     let lapsed = store
-        .get_session_execution_lease("lease-diagnostics")
+        .get_session_execution_lease(&SessionId::from("lease-diagnostics"))
         .await
         .expect("diagnostic read of a lapsed lease")
         .lease
@@ -1353,10 +1373,14 @@ pub(super) async fn session_execution_lease_diagnostic_read_contract(
     assert_eq!(lapsed.owner, lapsing.owner);
     assert_eq!(lapsed.fencing_token, lapsing.fencing_token);
 
-    let successor =
-        claim_session_execution_lease_for_test(&store, "lease-diagnostics", "diag-b").await;
+    let successor = claim_session_execution_lease_for_test(
+        &store,
+        &SessionId::from("lease-diagnostics"),
+        "diag-b",
+    )
+    .await;
     let after_takeover = store
-        .get_session_execution_lease("lease-diagnostics")
+        .get_session_execution_lease(&SessionId::from("lease-diagnostics"))
         .await
         .expect("diagnostic read after takeover")
         .lease
@@ -1392,7 +1416,7 @@ pub(super) async fn session_execution_lease_diagnostic_read_contract(
 /// Callers pass a session id they own, because a claim mutates the lane.
 pub async fn session_execution_lease_displacement(
     store: &(dyn crate::store::SessionExecutionLeaseStore + '_),
-    session_id: &str,
+    session_id: &SessionId,
 ) {
     let first = lease_owner("displacement-first");
     let second = lease_owner("displacement-second");
@@ -1524,14 +1548,14 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
     let owner = lease_owner("lease-fence-owner");
     store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            session_id,
+            &SessionId::from(session_id),
             "lease fence input",
         ))
         .await
         .expect("enqueue input behind the lease fence");
     let predecessor = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "lease-fence-executor",
             &crate::LeaseClaimNonce::for_testing("lease-fence-predecessor-token"),
@@ -1543,7 +1567,7 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
         .expect("fence predecessor acquired");
     let successor = store
         .try_claim_session_execution_lease_with_token(
-            session_id,
+            &SessionId::from(session_id),
             &owner,
             "lease-fence-executor",
             &crate::LeaseClaimNonce::for_testing("lease-fence-successor-token"),
@@ -1557,7 +1581,12 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
     assert_ne!(predecessor.lease_token, successor.lease_token);
 
     let stale_token = store
-        .claim_next_turn_inputs(session_id, &predecessor.fence(), &owner, 1)
+        .claim_next_turn_inputs(
+            &SessionId::from(session_id),
+            &predecessor.fence(),
+            &owner,
+            1,
+        )
         .await
         .expect_err("a retained guard must be rejected after same-owner token rotation");
     assert!(matches!(
@@ -1568,7 +1597,7 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
     let mut stale_incarnation = successor.fence();
     stale_incarnation.owner.incarnation_id.push_str(":stale");
     let stale_incarnation = store
-        .claim_next_turn_inputs(session_id, &stale_incarnation, &owner, 1)
+        .claim_next_turn_inputs(&SessionId::from(session_id), &stale_incarnation, &owner, 1)
         .await
         .expect_err("a stale holder incarnation must be rejected");
     assert!(matches!(
@@ -1582,7 +1611,7 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
         .expect("release live successor before expiry case");
     let expired = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &lease_owner("lease-fence-expired"),
             "session-execution-lease-fence-authority-executor",
             0,
@@ -1592,7 +1621,12 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
         .acquired()
         .expect("immediately expired fence acquired");
     let expired_error = store
-        .claim_next_turn_inputs(session_id, &expired.fence(), &expired.owner, 1)
+        .claim_next_turn_inputs(
+            &SessionId::from(session_id),
+            &expired.fence(),
+            &expired.owner,
+            1,
+        )
         .await
         .expect_err("an expired lease must be rejected");
     assert!(matches!(
@@ -1602,7 +1636,7 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
 
     let current = store
         .try_claim_session_execution_lease(
-            session_id,
+            &SessionId::from(session_id),
             &lease_owner("lease-fence-current"),
             "session-execution-lease-fence-authority-executor-2",
             60_000,
@@ -1612,7 +1646,12 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
         .acquired()
         .expect("current fence acquired");
     let claim = store
-        .claim_next_turn_inputs(session_id, &current.fence(), &current.owner, 1)
+        .claim_next_turn_inputs(
+            &SessionId::from(session_id),
+            &current.fence(),
+            &current.owner,
+            1,
+        )
         .await
         .expect("the current-token holder must be accepted")
         .expect("the current-token holder claims the pending input");
@@ -1632,23 +1671,28 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
 pub(super) async fn session_execution_lease_displacement_contract(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    session_execution_lease_displacement(store.as_ref(), "lease-displacement").await;
+    session_execution_lease_displacement(store.as_ref(), &SessionId::from("lease-displacement"))
+        .await;
 }
 
 pub(super) async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
-    let root = sample_session_node("branchy", "root-node", None);
+    let root = sample_session_node(&SessionId::from("branchy"), "root-node", None);
     let root_node_id = root.node_id.clone();
     let graph = crate::SessionGraph::from_nodes(
         vec![
             root,
-            sample_session_node("branchy", "left-node", Some(&root_node_id)),
-            sample_session_node("branchy", "left-leaf", Some("left-node")),
+            sample_session_node(
+                &SessionId::from("branchy"),
+                "left-node",
+                Some(&root_node_id),
+            ),
+            sample_session_node(&SessionId::from("branchy"), "left-leaf", Some("left-node")),
         ],
         Some("left-leaf".to_string()),
     )
     .expect("branch fixture graph is valid");
     let state = RuntimeSessionState {
-        session_id: "branchy".to_string(),
+        session_id: SessionId::from("branchy"),
         current_frame_node_id: Some(crate::FrameNodeId::new(root_node_id.clone())),
         session_graph: graph,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))

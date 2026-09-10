@@ -5,6 +5,8 @@ use crate::projection::{
 use lash_core::{ProcessObserverRegistry as _, ProcessQuery as _};
 use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use lash_rlm_types::PROJECTED_JSON_TAG;
+use lash_sansio::ProcessId;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,

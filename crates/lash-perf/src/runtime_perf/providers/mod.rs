@@ -1,3 +1,4 @@
+use lash_sansio::SessionId;
 use std::{
     collections::HashMap,
     sync::{
