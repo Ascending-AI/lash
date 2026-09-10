@@ -423,6 +423,11 @@ jobs:
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
+      # The workflow-level RUSTFLAGS link through mold, so even a host-tool
+      # `cargo install` needs the linker present.
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
       - name: Install cargo-shear
         run: cargo install cargo-shear --locked --version 1.13.4
 
