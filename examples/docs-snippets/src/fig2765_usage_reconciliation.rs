@@ -120,6 +120,7 @@ fn reconciling_core(transport: Arc<RecordedOpenRouter>) -> lash::Result<lash::La
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .channel(lash::rlm::RlmChannel::Cell)
             .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );

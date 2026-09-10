@@ -44,5 +44,9 @@ the session report exposes `unreported_attempts` next to the summed counters. A 
 later ask the runtime to reconcile those holes; recovered usage is appended as
 `LedgerUsageDisposition::Reconciled` correction rows attributed to the call and attempt
 (never rewriting the original row), and the totals sum corrections while
-`reconciled_attempts` settles the outstanding count. Legacy rows and attempt records decode
+`reconciled_attempts` settles the outstanding count. A lookup only settles a hole when the
+provider actually accounts for the call: a generation record whose token counts are absent
+or null was found before its accounting landed, so it leaves the attempt registered for the
+next sweep, while an explicitly reported zero is a real observation and closes the hole.
+Legacy rows and attempt records decode
 as `Reported`; remote mirrors and trace projections carry the disposition verbatim.

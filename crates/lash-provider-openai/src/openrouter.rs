@@ -104,30 +104,48 @@ fn classify(status: u16, body: &str) -> Result<Lookup, LlmTransportError> {
         )
         .with_raw(crate::request_work::body_excerpt(body)));
     };
+    // A 200 whose accounting fields are all absent or null found the generation
+    // record before its accounting landed on it. Resolving that as zero would
+    // durably close an unreported hole with counts nobody ever observed, which
+    // is the silent downgrade this ledger exists to prevent, so it stays a hole
+    // and the attempt comes back on the next sweep.
+    let Some(usage) = observed_generation_usage(data) else {
+        return Ok(Lookup::Missing);
+    };
     Ok(Lookup::Found(ReconciledUsage {
-        usage: usage_from_generation(data),
+        usage,
         provider_usage: data.clone(),
     }))
 }
 
-/// OpenRouter reports both normalized (`tokens_*`) and native (`native_tokens_*`)
-/// counts; billing follows the native counts, so those win when present.
-fn usage_from_generation(data: &Value) -> LlmUsage {
+/// The usage a generation record actually accounts for, or `None` when it
+/// accounts for nothing yet.
+///
+/// OpenRouter reports both normalized (`tokens_*`) and native
+/// (`native_tokens_*`) counts; billing follows the native counts, so those win
+/// when present. Every one of those fields is nullable in OpenRouter's
+/// published schema, and an absent count is not the same fact as a reported
+/// zero: the first says the accounting has not landed, the second says the call
+/// cost nothing. Both prompt and completion accounting must be observed as
+/// numbers before this is a reading at all. Secondary counts (cached,
+/// reasoning) stay zero-filled — they are genuinely optional on a record that
+/// already carries its primary accounting.
+fn observed_generation_usage(data: &Value) -> Option<LlmUsage> {
     let count = |native: &str, normalized: &str| {
         data.get(native)
             .and_then(Value::as_i64)
             .or_else(|| data.get(normalized).and_then(Value::as_i64))
-            .unwrap_or(0)
     };
-    let cache_read_input_tokens = count("native_tokens_cached", "tokens_cached");
-    LlmUsage {
-        input_tokens: count("native_tokens_prompt", "tokens_prompt")
-            .saturating_sub(cache_read_input_tokens),
-        output_tokens: count("native_tokens_completion", "tokens_completion"),
+    let prompt = count("native_tokens_prompt", "tokens_prompt")?;
+    let completion = count("native_tokens_completion", "tokens_completion")?;
+    let cache_read_input_tokens = count("native_tokens_cached", "tokens_cached").unwrap_or(0);
+    Some(LlmUsage {
+        input_tokens: prompt.saturating_sub(cache_read_input_tokens),
+        output_tokens: completion,
         cache_read_input_tokens,
         cache_write_input_tokens: 0,
-        reasoning_output_tokens: count("native_tokens_reasoning", "tokens_reasoning"),
-    }
+        reasoning_output_tokens: count("native_tokens_reasoning", "tokens_reasoning").unwrap_or(0),
+    })
 }
 
 fn percent_encode(value: &str) -> String {
@@ -160,15 +178,59 @@ mod tests {
             "cancelled": true,
         });
         assert_eq!(
-            usage_from_generation(&data),
-            LlmUsage {
+            observed_generation_usage(&data),
+            Some(LlmUsage {
                 input_tokens: 100,
                 output_tokens: 35,
                 cache_read_input_tokens: 20,
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 7,
-            }
+            })
         );
+    }
+
+    #[test]
+    fn null_generation_accounting_is_not_an_explicit_zero() {
+        // Absent or null accounting must not resolve the hole: the record was
+        // found before its token counts landed, and closing the hole at zero
+        // would turn a billed call into a free one for good.
+        for data in [
+            json!({ "id": "gen-1", "total_cost": 0.00123 }),
+            json!({
+                "id": "gen-1",
+                "tokens_prompt": Value::Null,
+                "tokens_completion": Value::Null,
+                "native_tokens_prompt": Value::Null,
+                "native_tokens_completion": Value::Null,
+                "total_cost": 0.00123,
+            }),
+            // Half-accounted is still not accounted: a prompt count without a
+            // completion count would under-report the call.
+            json!({ "id": "gen-1", "native_tokens_prompt": 120 }),
+        ] {
+            assert_eq!(
+                observed_generation_usage(&data),
+                None,
+                "null accounting is not an explicit zero; keep the hole unresolved"
+            );
+            let body = json!({ "data": data }).to_string();
+            assert!(
+                matches!(classify(200, &body), Ok(Lookup::Missing)),
+                "a generation record without accounting leaves the attempt registered"
+            );
+        }
+    }
+
+    #[test]
+    fn explicitly_reported_zero_accounting_resolves_the_hole() {
+        let body = json!({
+            "data": { "id": "gen-1", "native_tokens_prompt": 0, "native_tokens_completion": 0 }
+        })
+        .to_string();
+        let Ok(Lookup::Found(reconciled)) = classify(200, &body) else {
+            panic!("an explicit zero is a real observation and resolves the attempt");
+        };
+        assert_eq!(reconciled.usage, LlmUsage::default());
     }
 
     #[test]
