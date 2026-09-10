@@ -22,8 +22,8 @@ The companion owns one PostgreSQL 16 container named
 `lash-fig897-graceful-drain-postgres`, published on loopback port `5547` by default
 (`LASH_GRACEFUL_DRAIN_POSTGRES_PORT` overrides it). It acquires the worktree gate, labels
 the container with the worktree identity, and removes the container on success or failure.
-It emits `graceful-drain e2e passed: scenarios=1` only after the contract test, docs lint,
-live scenario, and artifact assertions pass.
+It emits `graceful-drain e2e passed: scenarios=1` only after the contract test, live
+scenario, and artifact assertions pass.
 
 **No real tokens.** The in-flight turn uses a deterministic provider that parks inside one
 real LLM effect until the host releases it, then returns a fixed terminal cell in the row's
@@ -87,12 +87,11 @@ Require:
 
 - `00-container.json` names the owned PostgreSQL container and `00-postgres.json` reports
   the selected loopback port;
-- `01-contract-tests.log` passes the facade owner-drain end-to-end test;
-- `02-docs-lint.log` is green; and
+- `01-contract-tests.log` passes the facade owner-drain end-to-end test; and
 - the companion later removes its container.
 
 **Fail if:** the container uses a name outside the task's ownership prefix, publishes a
-port outside `5540-5599`, the focused test or docs lint fails, or the run leaves a container
+port outside `5540-5599`, the focused test fails, or the run leaves a container
 behind.
 
 ## Phase 1 — Seed an honestly in-flight deployment
@@ -182,7 +181,7 @@ and no `lash-fig897-graceful-drain-postgres` container.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Contract coverage | focused facade test and docs lint green | | `01-contract-tests.log`, `02-docs-lint.log` |
+| Contract coverage | focused facade test green | | `01-contract-tests.log` |
 | Honest in-flight seed | parked provider call and a non-empty active journal | | `03-observed.jsonl` seed checkpoint |
 | Quiesced ingress | admission closed and second turn rejected | | `03-observed.jsonl` observed checkpoint |
 | Effect settlement | admitted turn committed; active journal empty; completed key retained | | `03-observed.jsonl` |

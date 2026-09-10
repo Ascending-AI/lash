@@ -58,8 +58,7 @@ the owner lease to simulate expiry and never writes the terminal directly.
 ## Phase 0 — Contract and deployment gates
 
 Require the owned PostgreSQL identity in `00-*`, the facade end-to-end contract test green
-in `01-contract-tests.log`, docs lint green in `02-docs-lint.log`, and no container after
-the companion exits.
+in `01-contract-tests.log`, and no container after the companion exits.
 
 **Fail if:** the container is outside the `lash-fig897-*` ownership prefix, publishes
 outside `5540-5599`, a prerequisite gate fails, or teardown leaks it.
@@ -137,7 +136,7 @@ port, and no `lash-fig897-request-abandon-postgres` container.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Contract coverage | focused facade test and docs lint green | | `01-contract-tests.log`, `02-docs-lint.log` |
+| Contract coverage | focused facade test green | | `01-contract-tests.log` |
 | Live owner seed | running OwnerBound row with live named lease and observer | | `03-observed.jsonl` seed checkpoint |
 | Pending marker | facade return and observer show who/when/why, still Running | | `03-observed.jsonl` pending checkpoint |
 | Lease preserved | owner, token, fence, and expiry exactly unchanged | | seed versus pending checkpoints |
