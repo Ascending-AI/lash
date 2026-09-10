@@ -654,6 +654,7 @@ mod tests {
     async fn session_projection_extension_rejects_duplicate_names() {
         let session = test_session(
             RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
@@ -685,6 +686,7 @@ mod tests {
     async fn session_projection_prompt_contribution_lists_names() {
         let session = test_session(
             RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
@@ -714,6 +716,7 @@ mod tests {
         let session = test_session(RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: Some(100_000),
             ..RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
@@ -762,6 +765,7 @@ mod tests {
         let session = test_session(RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: Some(100_000),
             ..RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .wall_clock(crate::plugin::WallClockBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))

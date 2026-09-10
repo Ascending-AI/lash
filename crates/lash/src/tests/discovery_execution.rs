@@ -88,6 +88,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 crate::TurnBudget::Unbounded,
                 lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash_protocol_rlm::RlmChannel::Cell)
                         .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
                             1_000_000,
                         ))

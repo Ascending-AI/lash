@@ -23,6 +23,7 @@ async fn sqlite_core(
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
@@ -89,6 +90,7 @@ async fn postgres_core(
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
@@ -262,6 +264,7 @@ async fn shared_factory(
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .wall_clock(lash::rlm::WallClockBound::secs(30))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
@@ -568,6 +571,7 @@ mod tests {
 
         let factory = lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .wall_clock(lash::rlm::WallClockBound::secs(30))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))

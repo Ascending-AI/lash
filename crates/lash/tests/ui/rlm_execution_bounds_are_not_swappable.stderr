@@ -1,7 +1,7 @@
 error[E0308]: mismatched types
- --> tests/ui/rlm_execution_bounds_are_not_swappable.rs:6:28
+ --> tests/ui/rlm_execution_bounds_are_not_swappable.rs:7:28
   |
-6 |         .instruction_limit(lash::rlm::MemoryBound::mebibytes(64))
+7 |         .instruction_limit(lash::rlm::MemoryBound::mebibytes(64))
   |          ----------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `InstructionBound`, found `MemoryBound`
   |          |
   |          arguments to this method are incorrect
@@ -13,9 +13,9 @@ note: method defined here
   |            ^^^^^^^^^^^^^^^^^
 
 error[E0308]: mismatched types
- --> tests/ui/rlm_execution_bounds_are_not_swappable.rs:8:23
+ --> tests/ui/rlm_execution_bounds_are_not_swappable.rs:9:23
   |
-8 |         .memory_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+9 |         .memory_limit(lash::rlm::InstructionBound::instructions(1_000_000))
   |          ------------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `MemoryBound`, found `InstructionBound`
   |          |
   |          arguments to this method are incorrect

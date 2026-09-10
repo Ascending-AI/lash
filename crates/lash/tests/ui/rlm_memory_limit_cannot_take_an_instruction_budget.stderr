@@ -1,7 +1,7 @@
 error[E0308]: mismatched types
-  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:16:23
+  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:17:23
    |
-16 |         .memory_limit(InstructionBound::instructions(64 * 1024 * 1024))
+17 |         .memory_limit(InstructionBound::instructions(64 * 1024 * 1024))
    |          ------------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `MemoryBound`, found `InstructionBound`
    |          |
    |          arguments to this method are incorrect
@@ -13,14 +13,14 @@ note: method defined here
    |            ^^^^^^^^^^^^
 
 error[E0308]: arguments to this function are incorrect
-  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:21:13
+  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:22:13
    |
-21 |     let _ = ExecutionBounds::new(
+22 |     let _ = ExecutionBounds::new(
    |             ^^^^^^^^^^^^^^^^^^^^
-22 |         MemoryBound::mebibytes(64),
+23 |         MemoryBound::mebibytes(64),
    |         -------------------------- expected `InstructionBound`, found `MemoryBound`
-23 |         WallClockBound::secs(30),
-24 |         InstructionBound::instructions(1_000_000),
+24 |         WallClockBound::secs(30),
+25 |         InstructionBound::instructions(1_000_000),
    |         ----------------------------------------- expected `MemoryBound`, found `InstructionBound`
    |
 note: associated function defined here
@@ -30,9 +30,9 @@ note: associated function defined here
    |                  ^^^
 help: swap these arguments
    |
-21 ~     let _ = ExecutionBounds::new(
-22 +         InstructionBound::instructions(1_000_000),
-23 +         WallClockBound::secs(30),
-24 +         MemoryBound::mebibytes(64),
-25 ~     );
+22 ~     let _ = ExecutionBounds::new(
+23 +         InstructionBound::instructions(1_000_000),
+24 +         WallClockBound::secs(30),
+25 +         MemoryBound::mebibytes(64),
+26 ~     );
    |

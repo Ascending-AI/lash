@@ -94,4 +94,5 @@ fn rlm_config_builder_requires_every_bound() {
     }
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/rlm_config_builder_requires_every_bound.rs");
+    t.compile_fail("tests/ui/rlm_config_builder_requires_channel.rs");
 }
