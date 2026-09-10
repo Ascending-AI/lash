@@ -1040,7 +1040,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let registration = request.into_registration(env_ref);
         let command = crate::ProcessCommand::Start {
             registration,
-            observers: observers.into_iter().map(Into::into).collect(),
+            observers: observers.into_iter().collect(),
             env_spec: None,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
@@ -1070,11 +1070,7 @@ impl crate::ProcessService for EffectBackedProcessService {
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let command = crate::ProcessCommand::Start {
             registration,
-            observers: options
-                .initial_observers
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            observers: options.initial_observers.into_iter().collect(),
             env_spec: None,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };

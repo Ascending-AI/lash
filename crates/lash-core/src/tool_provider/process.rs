@@ -127,11 +127,7 @@ impl InternalProcessAdmin<'_> {
         &self,
         mut request: crate::ProcessStartRequest,
     ) -> Result<crate::ProcessHandleView, PluginError> {
-        if !request
-            .observers
-            .iter()
-            .any(|observer| observer == &self.session_id)
-        {
+        if !request.observers.contains(&self.session_id) {
             request.observers.push(self.session_id.clone());
         }
         if request.env_spec.is_none()

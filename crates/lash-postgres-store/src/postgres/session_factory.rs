@@ -962,7 +962,7 @@ pub(crate) async fn delete_process_sessions_tx(
          ORDER BY checkpoint_ref",
         )
         .bind(
-            &session_ids
+            session_ids
                 .iter()
                 .map(SessionId::as_str)
                 .collect::<Vec<_>>(),
@@ -1008,7 +1008,7 @@ pub(crate) async fn delete_process_sessions_tx(
          ON CONFLICT (session_id) DO NOTHING",
         )
         .bind(
-            &session_ids
+            session_ids
                 .iter()
                 .map(SessionId::as_str)
                 .collect::<Vec<_>>(),
@@ -1044,7 +1044,7 @@ pub(crate) async fn delete_process_sessions_tx(
              FROM deleted_sessions",
             )
             .bind(
-                &session_ids
+                session_ids
                     .iter()
                     .map(SessionId::as_str)
                     .collect::<Vec<_>>(),
@@ -1077,7 +1077,7 @@ pub(crate) async fn delete_process_sessions_tx(
              ORDER BY graph.session_id, graph.generation DESC",
             )
             .bind(
-                &session_ids
+                session_ids
                     .iter()
                     .map(SessionId::as_str)
                     .collect::<Vec<_>>(),
@@ -1176,7 +1176,7 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_trigger_manifests)",
         )
         .bind(
-            &session_ids
+            session_ids
                 .iter()
                 .map(SessionId::as_str)
                 .collect::<Vec<_>>(),

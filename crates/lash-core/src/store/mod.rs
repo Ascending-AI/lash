@@ -848,7 +848,7 @@ fn persisted_session_state_from_head(
 impl Default for SessionHead {
     fn default() -> Self {
         Self {
-            session_id: SessionId::from(default_root_session_id()),
+            session_id: default_root_session_id(),
             head_revision: 0,
             current_frame_node_id: None,
             graph: crate::SessionGraph::default(),
@@ -864,7 +864,7 @@ impl Default for SessionHeadPayload {
     fn default() -> Self {
         Self {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
-            session_id: SessionId::from(default_root_session_id()),
+            session_id: default_root_session_id(),
             config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
             current_frame_node_id: None,
         }

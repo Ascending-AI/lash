@@ -937,7 +937,7 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
         );
     }
     assert_eq!(
-        returned_ids.iter().filter(|id| *id == &boundary_id).count(),
+        returned_ids.iter().filter(|id| *id == boundary_id).count(),
         1,
         "a process completed after its page must not be dispatched again"
     );

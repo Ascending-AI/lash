@@ -1435,7 +1435,7 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
         .bind(
-            &outstanding_trigger_delivery_process_ids
+            outstanding_trigger_delivery_process_ids
                 .iter()
                 .map(ProcessId::as_str)
                 .collect::<Vec<_>>(),
@@ -1452,7 +1452,7 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
         .bind(
-            &outstanding_trigger_delivery_process_ids
+            outstanding_trigger_delivery_process_ids
                 .iter()
                 .map(ProcessId::as_str)
                 .collect::<Vec<_>>(),

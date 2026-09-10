@@ -315,7 +315,7 @@ async fn the_session_roster_survives_the_web_process() {
         let listed = listing
             .sessions
             .iter()
-            .find(|summary| &summary.session_id == session_id)
+            .find(|summary| summary.session_id == session_id)
             .unwrap_or_else(|| panic!("`{session_id}` must survive the restart: {listing:#?}"));
         assert_eq!(&listed.dialect, dialect);
     }

@@ -39,7 +39,7 @@ pub struct RecoverableChatEventId {
 impl RecoverableChatEventId {
     fn from_event(event: &SessionObservationEvent) -> Self {
         Self {
-            session_id: SessionId::from(event.session_id()),
+            session_id: event.session_id(),
             replay_incarnation_id: event.replay_incarnation_id().to_string(),
             cursor: event.cursor.to_string(),
         }

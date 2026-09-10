@@ -63,7 +63,7 @@ pub(super) async fn prune_process_rows_tx(
                 (SELECT count(*) FROM deleted_processes)",
     )
     .bind(
-        &process_ids
+        process_ids
             .iter()
             .map(ProcessId::as_str)
             .collect::<Vec<_>>(),
@@ -179,7 +179,7 @@ mod tests {
         let tombstone_count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM lash_process_tombstones WHERE process_id = $1",
         )
-        .bind(&process_id.as_str())
+        .bind(process_id.as_str())
         .fetch_one(storage.pool())
         .await
         .expect("count tombstones after divergent prune");
@@ -199,7 +199,7 @@ mod tests {
         );
 
         sqlx::query("DELETE FROM lash_processes WHERE process_id = $1")
-            .bind(&process_id.as_str())
+            .bind(process_id.as_str())
             .execute(storage.pool())
             .await
             .expect("clean rollback process");

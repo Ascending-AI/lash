@@ -366,7 +366,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         runtime
             .process_registry
             .complete_process(
-                &ProcessId::from(process_id),
+                &process_id,
                 output,
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )

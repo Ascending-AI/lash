@@ -298,7 +298,7 @@ impl EmbeddedRuntimeBuilder {
                 .map(|loaded| loaded.state)
             {
                 if let Some(session_id) = &self.session_id
-                    && &state.session_id != session_id
+                    && state.session_id != session_id
                 {
                     return Err(SessionError::Protocol(format!(
                         "store is bound to session `{}` but builder requested `{session_id}`",

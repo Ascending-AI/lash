@@ -59,7 +59,7 @@ impl InMemorySessionStore {
         session_id: &SessionId,
     ) -> Result<(), crate::StoreError> {
         match authority {
-            Some(existing) if &existing != session_id => {
+            Some(existing) if existing != session_id => {
                 Err(crate::StoreError::SessionBindingMismatch {
                     bound_session_id: existing,
                     attempted_session_id: session_id.clone(),

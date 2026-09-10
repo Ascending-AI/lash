@@ -520,11 +520,7 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
             scope_json: serde_json::to_string(&key.scope).map_err(|err| self.encode_error(&err))?,
             scope_id: key.scope.journal_identity()?.key().to_string(),
             wait_json: serde_json::to_string(&key.wait).map_err(|err| self.encode_error(&err))?,
-            session_id: key
-                .scope
-                .session_id()
-                .map(ToOwned::to_owned)
-                .map(Into::into),
+            session_id: key.scope.session_id().map(ToOwned::to_owned),
             turn_control: key.wait.is_turn_control(),
         })
     }

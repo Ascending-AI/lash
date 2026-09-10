@@ -60,7 +60,7 @@ pub(super) struct QueuedWorkExecutionTaskCompletion {
 
 impl Drop for QueuedWorkExecutionTaskCompletion {
     fn drop(&mut self) {
-        let _ = self.completed.send(self.session_id.clone().map(Into::into));
+        let _ = self.completed.send(self.session_id.clone());
     }
 }
 

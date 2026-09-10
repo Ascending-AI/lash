@@ -36,7 +36,7 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
                 .filter(|node_id| {
                     owners
                         .get(*node_id)
-                        .is_some_and(|owner| owner == &session_id)
+                        .is_some_and(|owner| owner == session_id)
                 })
                 .cloned()
                 .collect::<std::collections::HashSet<_>>()

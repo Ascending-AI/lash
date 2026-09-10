@@ -232,7 +232,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                     (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
                         .iter()
                         .any(|(session_id, turn_id, committed_at_ms)| {
-                            session_id == &entry.session_id
+                            session_id == entry.session_id
                                 && turn_id != owner_id
                                 && *committed_at_ms > entry.intent_at_epoch_ms
                         }),
@@ -300,7 +300,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                     (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => !committed_turns
                         .iter()
                         .any(|(session_id, turn_id, committed_at_ms)| {
-                            session_id == &entry.session_id
+                            session_id == entry.session_id
                                 && turn_id != owner_id
                                 && *committed_at_ms > entry.intent_at_epoch_ms
                         }),

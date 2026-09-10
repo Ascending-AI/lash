@@ -514,7 +514,7 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
         report
             .admitted
             .iter()
-            .filter(|id| *id == &delivery.process_id)
+            .filter(|id| *id == delivery.process_id)
             .count(),
         1,
         "the reconciled row is this call's admission, exactly once: {report:?}"

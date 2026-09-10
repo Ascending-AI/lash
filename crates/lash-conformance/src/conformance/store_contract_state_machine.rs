@@ -1065,7 +1065,7 @@ async fn apply_operation(
             }
             for (id, process) in &mut model.processes {
                 let pruned = matches!(
-                    handles.registry.get_process(&id).await,
+                    handles.registry.get_process(id).await,
                     Err(crate::PluginError::ProcessNoLongerRetained { .. })
                 );
                 if pruned {
@@ -1336,7 +1336,7 @@ async fn assert_rejected_write_is_noop(
     law: &str,
 ) -> Result<(), String> {
     if rejected {
-        let after = registry_snapshot(registry, &id).await;
+        let after = registry_snapshot(registry, id).await;
         if before != after {
             return Err(format!("{law}: rejected operation mutated `{id}`"));
         }
@@ -1392,7 +1392,7 @@ async fn assert_model_agreement(
 ) -> Result<(), String> {
     for (id, expected) in &model.processes {
         if expected.tombstoned {
-            if matches!(handles.registry.get_process(&id).await, Ok(Some(_))) {
+            if matches!(handles.registry.get_process(id).await, Ok(Some(_))) {
                 return Err(format!(
                     "tombstoned process `{id}` unexpectedly became live"
                 ));
@@ -1404,7 +1404,7 @@ async fn assert_model_agreement(
         };
         let actual_record = handles
             .registry
-            .get_process(&id)
+            .get_process(id)
             .await
             .map_err(|error| format!("modeled live process `{id}` lookup failed: {error}"))?
             .ok_or_else(|| format!("modeled live process `{id}` was absent"))?;
@@ -1415,7 +1415,7 @@ async fn assert_model_agreement(
         }
         let actual = handles
             .registry
-            .observers_for_process(&id)
+            .observers_for_process(id)
             .await
             .map_err(|error| error.to_string())?
             .into_iter()

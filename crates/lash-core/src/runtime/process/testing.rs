@@ -1545,7 +1545,7 @@ impl super::registry::ProcessRetention for TestLocalProcessRegistry {
                     self.tombstones.lock().await.insert(
                         (id.clone().to_string(), record.record.incarnation),
                         ProcessTombstone {
-                            process_id: ProcessId::from(id.clone()),
+                            process_id: id.clone(),
                             incarnation: record.record.incarnation,
                             terminal_label: record.record.status.label().to_string(),
                             pruned_at_ms,

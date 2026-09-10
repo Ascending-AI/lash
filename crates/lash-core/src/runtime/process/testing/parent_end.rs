@@ -18,7 +18,7 @@ pub(super) async fn list(
                 .parent_end_actions
                 .as_ref()
                 .map(|actions| ProcessParentEndPlan {
-                    process_id: ProcessId::from(process_id.clone()),
+                    process_id: process_id.clone(),
                     actions: actions.clone(),
                 })
         })

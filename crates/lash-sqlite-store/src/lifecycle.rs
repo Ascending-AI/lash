@@ -259,7 +259,7 @@ impl Store {
         };
         self.conn
             .call(move |conn| {
-                try_load_session_head_meta_from_conn(conn, &SessionId::from(session_id))
+                try_load_session_head_meta_from_conn(conn, &session_id)
                     .map_err(sqlite_conversion_error)
             })
             .await

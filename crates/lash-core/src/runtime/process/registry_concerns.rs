@@ -133,7 +133,7 @@ pub trait ProcessQuery: Send + Sync {
                 Err(error) => return Err(error),
             }
         }
-        Ok(missing.into_iter().map(Into::into).collect())
+        Ok(missing.into_iter().collect())
     }
 
     /// Return the candidate ids retained as terminal-process tombstones,
@@ -155,7 +155,7 @@ pub trait ProcessQuery: Send + Sync {
                 Err(error) => return Err(error),
             }
         }
-        Ok(tombstoned.into_iter().map(Into::into).collect())
+        Ok(tombstoned.into_iter().collect())
     }
 
     /// Count non-terminal process rows by their captured definition and

@@ -2271,7 +2271,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                     Some(lash::messages::MessageOrigin::TurnInput {
                         turn_id: committed_turn_id,
                         ..
-                    }) if committed_turn_id == &turn_id
+                    }) if committed_turn_id == turn_id
                 )
             })),
         "the initial turn input is not committed while the first provider call is in flight"
@@ -2360,7 +2360,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
             StreamItem::Done {
                 turn_id: Some(done_turn_id),
                 ..
-            } if done_turn_id == &turn_id
+            } if done_turn_id == turn_id
         )),
         "settled Done rows must leave the product-event lane"
     );

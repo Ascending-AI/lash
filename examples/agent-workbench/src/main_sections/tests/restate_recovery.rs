@@ -409,11 +409,7 @@ finish (await handle)?
     .expect("late cancellation evidence must arrive on the SSE product stream");
     let process_terminal = tokio::time::timeout(
         Duration::from_secs(10),
-        harness
-            .state
-            .core
-            .processes()
-            .await_output(&ProcessId::from(process_id)),
+        harness.state.core.processes().await_output(&process_id),
     )
     .await
     .expect("Stop-over-process must terminate the awaited process")
@@ -1130,7 +1126,7 @@ finish (await handle)?
         .state
         .process_observer
         .clone()
-        .process(&ProcessId::from(process_id.clone()))
+        .process(&process_id.clone())
         .await
         .expect("read process immediately after session revocation")
         .expect("session revocation keeps its process record");
@@ -1141,7 +1137,7 @@ finish (await handle)?
     let immediate_events = harness
         .state
         .process_observer
-        .events_after(&ProcessId::from(process_id.clone()), 0)
+        .events_after(&process_id.clone(), 0)
         .await
         .expect("read process events immediately after session revocation");
     assert!(
@@ -1180,7 +1176,7 @@ finish (await handle)?
             .state
             .core
             .processes()
-            .await_output(&ProcessId::from(process_id.clone())),
+            .await_output(&process_id.clone()),
     )
     .await
     .expect("revoked session must not stop the independent process")
@@ -1197,7 +1193,7 @@ finish (await handle)?
     let events = harness
         .state
         .process_observer
-        .events_after(&ProcessId::from(process_id), 0)
+        .events_after(&process_id, 0)
         .await
         .expect("read surviving process events");
     assert!(
@@ -1336,7 +1332,7 @@ finish "started lifecycle gates"
     assert!(cancel_receipt.accepted);
     wait_for_process_event(
         &harness.state,
-        &ProcessId::from(cancellable_id.clone()),
+        &cancellable_id.clone(),
         "process.cancel_requested",
         Duration::from_secs(20),
     )
@@ -1347,7 +1343,7 @@ finish "started lifecycle gates"
             .state
             .core
             .processes()
-            .await_output(&ProcessId::from(cancellable_id.clone())),
+            .await_output(&cancellable_id.clone()),
     )
     .await
     .expect("cancelled process terminal timeout")
@@ -1368,7 +1364,7 @@ finish "started lifecycle gates"
             .state
             .core
             .processes()
-            .await_output(&ProcessId::from(survivor_id.clone())),
+            .await_output(&survivor_id.clone()),
     )
     .await
     .expect("surviving process terminal timeout")

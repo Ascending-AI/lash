@@ -647,7 +647,7 @@ finish "registered"
                             Some(lash_core::MessageOrigin::Process {
                                 process_id: message_process_id,
                                 ..
-                            }) if message_process_id == &process_id
+                            }) if message_process_id == process_id
                         )
                     })
                     .map(|message| format!("{message:?}"))
@@ -664,7 +664,7 @@ finish "registered"
                                 sequence,
                                 caused_by,
                                 ..
-                            }) if wake_process_id == &process_id
+                            }) if wake_process_id == process_id
                                 && event_type == "process.wake"
                                 && *sequence == wake_sequence
                                 && caused_by.as_ref() == Some(&process_caused_by)
@@ -768,7 +768,7 @@ finish "registered"
                                 sequence,
                                 caused_by,
                                 ..
-                            }) if wake_process_id == &process_id
+                            }) if wake_process_id == process_id
                                 && event_type == "process.wake"
                                 && *sequence == wake_sequence
                                 && caused_by.as_ref() == Some(&process_caused_by)

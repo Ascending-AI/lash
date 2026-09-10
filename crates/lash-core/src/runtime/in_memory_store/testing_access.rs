@@ -165,7 +165,7 @@ impl InMemorySessionStore {
             .filter(|entry| {
                 session_id
                     .as_ref()
-                    .is_none_or(|session_id| &entry.batch.session_id == session_id)
+                    .is_none_or(|session_id| entry.batch.session_id == session_id)
             })
             .map(|entry| {
                 (
@@ -228,7 +228,6 @@ impl InMemorySessionStore {
                 .lock_recover()
                 .as_ref()
                 .map(|meta| meta.session_id.clone())
-                .map(Into::into)
         });
         let mut rows = self
             .attachment_manifest
@@ -267,7 +266,7 @@ impl InMemorySessionStore {
             .map(|(session_id, lease)| {
                 let held = lease.held_fields();
                 RawSessionExecutionLeaseRow {
-                    session_id: SessionId::from(session_id.clone()),
+                    session_id: session_id.clone(),
                     owner: held.map(|fields| fields.owner.clone()),
                     executor_id: held.map(|fields| fields.executor_id.to_string()),
                     lease_token: held.map(|fields| fields.lease_token.to_string()),

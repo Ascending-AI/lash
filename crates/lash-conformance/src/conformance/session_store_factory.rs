@@ -667,7 +667,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             ensure_error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "stale session binding must be fenced as deleted, got: {ensure_error}"
     );
@@ -679,7 +679,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             save_error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "stale metadata writes must be fenced as deleted, got: {save_error}"
     );
@@ -692,7 +692,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "a stale commit into a deleted session must be fenced as deleted, got: {error}"
     );
@@ -719,7 +719,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         matches!(
             stale_error,
             crate::StoreError::SessionDeleted { ref session_id }
-                if session_id == &request.session_id
+                if session_id == request.session_id
         ),
         "a pre-delete handle must remain fenced after refused recreation, got: {stale_error}"
     );
@@ -752,7 +752,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     {
         let request = crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
             relation: crate::SessionRelation::default(),
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };

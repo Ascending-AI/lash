@@ -153,7 +153,7 @@ impl Store {
                     )
                     .optional()?
                     .flatten();
-                Self::load_session_graph_from_conn(conn, &SessionId::from(session_id), leaf_node_id)
+                Self::load_session_graph_from_conn(conn, &session_id, leaf_node_id)
                     .map_err(sqlite_conversion_error)
             })
             .await

@@ -1386,7 +1386,7 @@ impl BackendRunner {
         assert!(
             matches!(
                 error,
-                StoreError::SessionDeleted { session_id } if session_id == &self.session_id
+                StoreError::SessionDeleted { session_id } if session_id == self.session_id
             ),
             "{} {operation} must return typed SessionDeleted for `{}`, got: {error}",
             self.name,

@@ -411,8 +411,7 @@ impl Store {
         let session_id = self.selected_session_id()?;
         self.conn
             .call(move |conn| {
-                Self::load_usage_deltas_conn(conn, &SessionId::from(session_id))
-                    .map_err(sqlite_conversion_error)
+                Self::load_usage_deltas_conn(conn, &session_id).map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)

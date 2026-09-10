@@ -147,7 +147,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
              WHERE process_id = ANY($1)",
         )
         .bind(
-            &process_ids
+            process_ids
                 .iter()
                 .map(ProcessId::as_str)
                 .collect::<Vec<_>>(),

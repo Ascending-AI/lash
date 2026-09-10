@@ -473,7 +473,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 crate::ForkPoint {
                     node_id: node_id.clone(),
                     checkpoint_ref: checkpoint_ref.clone(),
-                    source_session_id: SessionId::from(source_session_id.clone()),
+                    source_session_id: source_session_id.clone(),
                     config: retained_fork_config(&graph, node_id)?,
                     pinned: true,
                 },
@@ -597,7 +597,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             edge_path.push(crate::store::ForkNodeFacts {
                 node_id: node.node_id.clone(),
                 parent_node_id: node.parent_node_id.clone(),
-                owning_session_id: SessionId::from(owner.clone()),
+                owning_session_id: owner.clone(),
                 generation: generation as u64,
             });
         }
@@ -968,12 +968,10 @@ pub(crate) mod lineage_conformance_support {
                     GraphFactObservation {
                         node_id: node.node_id.clone(),
                         parent_node_id: node.parent_node_id.clone(),
-                        owning_session_id: SessionId::from(
-                            owners
-                                .get(&node.node_id)
-                                .expect("in-memory graph node has an owner")
-                                .clone(),
-                        ),
+                        owning_session_id: owners
+                            .get(&node.node_id)
+                            .expect("in-memory graph node has an owner")
+                            .clone(),
                         generation,
                         frame_node_id: graph
                             .nearest_frame_node_id(Some(&node.node_id))

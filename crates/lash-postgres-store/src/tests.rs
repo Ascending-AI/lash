@@ -404,7 +404,7 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
              ORDER BY graph.session_id, graph.generation DESC",
         )
         .bind(
-            &session_ids
+            session_ids
                 .iter()
                 .map(SessionId::as_str)
                 .collect::<Vec<_>>(),
@@ -514,7 +514,7 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
          FROM generate_series(1, 10000) AS value",
     )
     .bind(&batch_prefix)
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(&source_prefix)
     .execute(storage.pool())
     .await
@@ -600,7 +600,7 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         .await
         .expect("release selected-drain plan lease");
     sqlx::query("DELETE FROM lash_queued_work_batches WHERE session_id = $1")
-        .bind(&session_id.as_str())
+        .bind(session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("remove selected-drain plan fixture");
@@ -705,7 +705,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
          (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
          VALUES ($1, $2, NULL, 3, $2, '{}')",
     )
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(&first_node)
     .execute(storage.pool())
     .await
@@ -715,7 +715,7 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
          (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
          VALUES ($1, $2, NULL, 3, $2, '{}')",
     )
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(&second_node)
     .execute(storage.pool())
     .await
@@ -726,10 +726,10 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         StoreError::GraphGenerationCollision {
             session_id: ref actual_session_id,
             generation: 3
-        } if actual_session_id == &session_id
+        } if actual_session_id == session_id
     ));
     sqlx::query("DELETE FROM lash_graph_nodes WHERE session_id = $1")
-        .bind(&session_id.as_str())
+        .bind(session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("clean graph-generation uniqueness fixture");
@@ -762,7 +762,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         "INSERT INTO lash_sessions (session_id, head_revision, head_json)
          VALUES ($1, 7, '{}')",
     )
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .execute(storage.pool())
     .await
     .expect("insert claim-fence session head");
@@ -774,7 +774,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
          VALUES ($1, $2, '{}', $3, '{}', 1, $4, $5, 1, 1)",
     )
     .bind(&input_id)
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
     .bind(stale.claim_id())
     .bind(stale.lease_token())
@@ -799,7 +799,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
              claim_fencing_token = 2, claim_session_lease_generation = 2
          WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(&input_id)
     .execute(&mut *blocked_superseder)
     .await
@@ -827,7 +827,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         "SELECT 1::BIGINT FROM lash_pending_turn_inputs
          WHERE session_id = $1 AND input_id = $2 AND claim_id = $3 AND claim_token = $4",
     )
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(&input_id)
     .bind(stale.claim_id())
     .bind(stale.lease_token())
@@ -847,7 +847,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
              claim_fencing_token = 2, claim_session_lease_generation = 2
          WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(&input_id)
     .execute(&mut *superseder)
     .await
@@ -858,7 +858,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         .expect("commit fresh supersession");
 
     sqlx::query("UPDATE lash_sessions SET head_revision = head_revision + 1 WHERE session_id = $1")
-        .bind(&session_id.as_str())
+        .bind(session_id.as_str())
         .execute(&mut *stale_committer)
         .await
         .expect("tentatively move stale head");
@@ -871,7 +871,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
             ref session_id,
             ref claim_id,
             ..
-        } if session_id == &stale.session_id && claim_id.as_str() == stale.claim_id().unwrap_or_default()
+        } if session_id == stale.session_id && claim_id.as_str() == stale.claim_id().unwrap_or_default()
     ));
     stale_committer
         .rollback()
@@ -880,7 +880,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
 
     let head_revision: i64 =
         sqlx::query_scalar("SELECT head_revision FROM lash_sessions WHERE session_id = $1")
-            .bind(&session_id.as_str())
+            .bind(session_id.as_str())
             .fetch_one(storage.pool())
             .await
             .expect("read head after rejected stale commit");
@@ -892,7 +892,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         "SELECT claim_id, claim_token, claim_session_lease_generation
          FROM lash_pending_turn_inputs WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(&session_id.as_str())
+    .bind(session_id.as_str())
     .bind(&input_id)
     .fetch_one(storage.pool())
     .await
@@ -903,12 +903,12 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     );
 
     sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE session_id = $1")
-        .bind(&session_id.as_str())
+        .bind(session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("clean claim-fence input");
     sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
-        .bind(&session_id.as_str())
+        .bind(session_id.as_str())
         .execute(storage.pool())
         .await
         .expect("clean claim-fence head");
@@ -956,7 +956,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         error,
         StoreError::SessionDeleted {
             ref session_id
-        } if session_id == &request.session_id
+        } if session_id == request.session_id
     ));
 
     let reuse_error = match factory.create_store(&request).await {
@@ -967,7 +967,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
         reuse_error,
         StoreError::SessionDeleted {
             ref session_id
-        } if session_id == &request.session_id
+        } if session_id == request.session_id
     ));
 }
 

@@ -628,7 +628,7 @@ impl LashCore {
         ) {
             lash_core::ExecutionScope::SessionDelete {
                 session_id: scoped_session_id,
-            } if scoped_session_id == &session_id => {}
+            } if scoped_session_id == session_id => {}
             _ => {
                 return Err(lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::SessionDeleteScopeMismatch,

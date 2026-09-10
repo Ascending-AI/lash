@@ -2262,7 +2262,7 @@ async fn postgres_leased_completion_replay_repairs_projection_when_configured() 
         move |stale| async move {
             let changed =
                 sqlx::query("UPDATE lash_processes SET record_json = $2 WHERE process_id = $1")
-                    .bind(&stale.id.as_str())
+                    .bind(stale.id.as_str())
                     .bind(serde_json::to_string(&stale).expect("encode stale process projection"))
                     .execute(&pool)
                     .await

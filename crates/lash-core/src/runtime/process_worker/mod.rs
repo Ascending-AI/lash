@@ -1530,7 +1530,7 @@ impl DurableProcessWorker {
         // Boxed: building a process runtime is a rare, cold path whose future
         // holds a whole session policy, so it stays off the caller's stack.
         Box::pin(self.build_process_runtime(
-            SessionId::from(crate::process_runtime_session_ids(&registration.id)[1].clone()),
+            crate::process_runtime_session_ids(&registration.id)[1].clone(),
             policy,
             create_request.plugin_options.clone(),
             "session turn request",
@@ -1558,7 +1558,7 @@ impl DurableProcessWorker {
         )
         .await?;
         Box::pin(self.build_process_runtime(
-            SessionId::from(crate::process_runtime_session_ids(&registration.id)[0].clone()),
+            crate::process_runtime_session_ids(&registration.id)[0].clone(),
             env.policy,
             env.plugin_options,
             env_ref.as_str(),

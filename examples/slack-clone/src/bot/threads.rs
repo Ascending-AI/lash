@@ -431,7 +431,7 @@ fn committed_turn_boundary(
 
     let target_message_ids: HashSet<&str> = applications
         .iter()
-        .filter(|application| &application.turn_id == turn_id)
+        .filter(|application| application.turn_id == turn_id)
         .map(|application| application.committed_message_id.as_str())
         .collect();
     let Some(target_index) = active_path
@@ -449,7 +449,7 @@ fn committed_turn_boundary(
 
     let later_application_ids: HashSet<&str> = applications
         .iter()
-        .filter(|application| &application.turn_id != turn_id)
+        .filter(|application| application.turn_id != turn_id)
         .map(|application| application.committed_message_id.as_str())
         .collect();
     if let Some(next_turn) = active_path.iter().skip(target_index + 1).find(|node| {

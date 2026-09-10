@@ -22,7 +22,7 @@ pub(super) async fn filter_unregistered_process_ids(
          ORDER BY candidate.ordinal ASC",
     )
     .bind(
-        &process_ids
+        process_ids
             .iter()
             .map(ProcessId::as_str)
             .collect::<Vec<_>>(),
@@ -54,7 +54,7 @@ pub(super) async fn filter_tombstoned_process_ids(
          ORDER BY candidate.ordinal ASC",
     )
     .bind(
-        &process_ids
+        process_ids
             .iter()
             .map(ProcessId::as_str)
             .collect::<Vec<_>>(),

@@ -967,7 +967,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .lock_recover()
             .iter()
             .filter_map(|((owner_session_id, turn_id), record)| {
-                (owner_session_id == &meta.session_id && !record.result.failure_evidence.is_empty())
+                (owner_session_id == meta.session_id && !record.result.failure_evidence.is_empty())
                     .then(|| {
                         (
                             record.committed_at_ms,
@@ -1114,7 +1114,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let graph = self.global_session_graph.lock_recover();
             let tombstoned = self.tombstoned_node_ids.lock_recover();
             let has_existing_live_nodes = global_node_owners.iter().any(|(node_id, owner)| {
-                owner == &commit.session_id && !tombstoned.contains(node_id)
+                owner == commit.session_id && !tombstoned.contains(node_id)
             });
             let selected_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
                 !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()

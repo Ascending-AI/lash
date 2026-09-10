@@ -419,11 +419,7 @@ impl ProcessCapability {
         runner
             .start(
                 registration,
-                options
-                    .initial_observers
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
+                options.initial_observers.into_iter().collect(),
                 None,
                 execution_context,
             )
@@ -462,11 +458,7 @@ impl ProcessCapability {
         self.command_runner(current, &scope)?
             .start(
                 registration,
-                options
-                    .initial_observers
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
+                options.initial_observers.into_iter().collect(),
                 env_spec,
                 execution_context,
             )
@@ -794,8 +786,12 @@ impl ProcessCapability {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.validate_model_tool_process_handles(current, session_id, &[process_id.clone()])
-            .await?;
+        self.validate_model_tool_process_handles(
+            current,
+            session_id,
+            std::slice::from_ref(process_id),
+        )
+        .await?;
         let request =
             crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
         self.command_runner(current, &scope)?

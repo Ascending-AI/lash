@@ -24,7 +24,7 @@ impl InMemorySessionStore {
             .global_node_owners
             .lock_recover()
             .get(node_id)
-            .is_some_and(|owner| owner == &session_id)
+            .is_some_and(|owner| owner == session_id)
         {
             return Ok(true);
         }

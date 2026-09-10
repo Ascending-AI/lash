@@ -546,7 +546,7 @@ async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) 
          SET lease_token = $2, lease_claimed_at_ms = $3, lease_expires_at_ms = $4
          WHERE process_id = $1",
     )
-    .bind(&lease.process_id.as_str())
+    .bind(lease.process_id.as_str())
     .bind(&lease.lease_token)
     .bind(lease.claimed_at_epoch_ms as i64)
     .bind(lease.expires_at_epoch_ms as i64)

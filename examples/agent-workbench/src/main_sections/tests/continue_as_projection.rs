@@ -161,7 +161,7 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
             matches!(
                 message.origin.as_ref(),
                 Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. })
-                    if turn_id == &ordinary_turn_id
+                    if turn_id == ordinary_turn_id
             ) && lash::message_text(message) == ordinary_prompt
         }),
         "the asserted follow-frame send must carry runtime-stamped TurnInput provenance"

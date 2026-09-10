@@ -579,7 +579,7 @@ impl TriggerStore for PostgresTriggerStore {
             .bind(occurrence_ids)
             .bind(subscription_ids)
             .bind(
-                &process_ids
+                process_ids
                     .iter()
                     .map(ProcessId::as_str)
                     .collect::<Vec<_>>(),
@@ -709,7 +709,7 @@ impl TriggerStore for PostgresTriggerStore {
         .bind(occurrence_ids)
         .bind(subscription_ids)
         .bind(
-            &process_ids
+            process_ids
                 .iter()
                 .map(ProcessId::as_str)
                 .collect::<Vec<_>>(),
