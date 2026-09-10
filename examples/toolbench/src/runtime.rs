@@ -1,3 +1,4 @@
+use lash::SessionId;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -254,7 +255,11 @@ async fn run_turn(
             format!("run-{run}-{}-{}", dialect.language_id(), task.id),
         ))
         .context("build Lash core")?;
-    let session_id = format!("toolbench-{run}-{}-{}", dialect.language_id(), task.id);
+    let session_id = SessionId::from(format!(
+        "toolbench-{run}-{}-{}",
+        dialect.language_id(),
+        task.id
+    ));
     let session_builder = core.session(session_id);
     let session_builder = if channel == crate::ChannelSelection::Standard {
         session_builder

@@ -15,6 +15,7 @@
 use axum::Json;
 use axum::extract::{Path as AxumPath, State};
 use lash::LashCore;
+use lash::SessionId;
 use lash::persistence::{SessionLeaseDiagnostics, SessionLeaseRenewal};
 use serde::Serialize;
 
@@ -51,7 +52,7 @@ pub(crate) enum LeaseTriage {
 /// disagree with the classification without re-reading the store.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct LeaseTriageReport {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) triage: LeaseTriage,
     /// What to do next, in one line. The lease row never authorizes a kill.
     pub(crate) next_step: &'static str,
@@ -98,12 +99,12 @@ impl LeaseTriageReport {
     /// `None` is the absent-session answer, which the facade reports distinctly
     /// from a session whose lane is merely unheld.
     pub(crate) fn classify(
-        session_id: &str,
+        session_id: &SessionId,
         diagnostics: Option<&SessionLeaseDiagnostics>,
     ) -> Self {
         let Some(diagnostics) = diagnostics else {
             return Self {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 triage: LeaseTriage::NoSession,
                 next_step: LeaseTriage::NoSession.next_step(),
                 observed_at_epoch_ms: None,
@@ -147,7 +148,7 @@ impl LeaseTriageReport {
     }
 
     /// Read the lane and classify it in one step.
-    pub(crate) async fn read(core: &LashCore, session_id: &str) -> lash::Result<Self> {
+    pub(crate) async fn read(core: &LashCore, session_id: &SessionId) -> lash::Result<Self> {
         let diagnostics = core.session_lease_diagnostics(session_id).await?;
         Ok(Self::classify(session_id, diagnostics.as_ref()))
     }
@@ -169,7 +170,9 @@ pub(crate) async fn chat_lease_triage(
     State(state): State<AppStateData>,
     AxumPath(chat_id): AxumPath<String>,
 ) -> AppResult<Json<LeaseTriageReport>> {
-    Ok(Json(LeaseTriageReport::read(state.core(), &chat_id).await?))
+    Ok(Json(
+        LeaseTriageReport::read(state.core(), &SessionId::from(chat_id)).await?,
+    ))
 }
 
 #[cfg(test)]
@@ -189,10 +192,10 @@ mod tests {
         LeaseOwnerIdentity::opaque(owner_id, incarnation)
     }
 
-    fn store_request(session_id: &str) -> SessionStoreCreateRequest {
+    fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
         SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: lash::persistence::SessionRelation::default(),
             policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
         }
@@ -233,7 +236,7 @@ mod tests {
     /// it, then hand back the store the lease lane lives on.
     async fn materialized_store(
         factory: &Arc<dyn SessionStoreFactory>,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Arc<dyn lash::persistence::RuntimePersistence> {
         factory
             .create_store(&store_request(session_id))
@@ -246,7 +249,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("scratch dir");
         let (core, _factory) = durable_core(dir.path()).await;
 
-        let report = LeaseTriageReport::read(&core, "never-created")
+        let report = LeaseTriageReport::read(&core, &SessionId::from("never-created"))
             .await
             .expect("diagnostic read of an unknown session");
         assert_eq!(report.triage, LeaseTriage::NoSession);
@@ -268,10 +271,10 @@ mod tests {
         // which is exactly the answer that redirects triage to the provider.
         let dir = tempfile::tempdir().expect("scratch dir");
         let (core, factory) = durable_core(dir.path()).await;
-        let store = materialized_store(&factory, SESSION_ID).await;
+        let store = materialized_store(&factory, &SessionId::from(SESSION_ID)).await;
         let held = store
             .try_claim_session_execution_lease_with_token(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner("worker-a", "worker-a:boot-1"),
                 "worker-a-runtime-open-1",
                 &LeaseClaimNonce::for_testing("worker-a-runtime-open-1-claim"),
@@ -282,7 +285,7 @@ mod tests {
             .acquired()
             .expect("an unheld lane is acquirable");
 
-        let report = LeaseTriageReport::read(&core, SESSION_ID)
+        let report = LeaseTriageReport::read(&core, &SessionId::from(SESSION_ID))
             .await
             .expect("diagnostic read of a held lane");
         assert_eq!(report.triage, LeaseTriage::ProviderHangShape);
@@ -315,7 +318,7 @@ mod tests {
             .as_ref()
             .expect("a held lane reports a holder");
         let row = store
-            .get_session_execution_lease(SESSION_ID)
+            .get_session_execution_lease(&SessionId::from(SESSION_ID))
             .await
             .expect("store-level diagnostic read")
             .lease
@@ -337,12 +340,12 @@ mod tests {
     async fn a_lapsed_holder_reads_as_lease_loss_and_refuses_to_authorize_a_kill() {
         let dir = tempfile::tempdir().expect("scratch dir");
         let (core, factory) = durable_core(dir.path()).await;
-        let store = materialized_store(&factory, SESSION_ID).await;
+        let store = materialized_store(&factory, &SessionId::from(SESSION_ID)).await;
         // TTL 0: the lane is held by a named owner whose renewals have already
         // stopped. This is the ambiguous state the procedure must not force.
         let stalled = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner("worker-a", "worker-a:boot-1"),
                 "a-lapsed-holder-reads-as-lease-loss-and-refuses-to-authorize-a-kill-executor",
                 0,
@@ -352,7 +355,7 @@ mod tests {
             .acquired()
             .expect("lapsed lane acquired");
 
-        let report = LeaseTriageReport::read(&core, SESSION_ID)
+        let report = LeaseTriageReport::read(&core, &SessionId::from(SESSION_ID))
             .await
             .expect("diagnostic read of a lapsed lane");
         assert_eq!(report.triage, LeaseTriage::LeaseLost);
@@ -371,10 +374,10 @@ mod tests {
     async fn a_takeover_advances_the_generation_the_operator_reads() {
         let dir = tempfile::tempdir().expect("scratch dir");
         let (core, factory) = durable_core(dir.path()).await;
-        let store = materialized_store(&factory, SESSION_ID).await;
+        let store = materialized_store(&factory, &SessionId::from(SESSION_ID)).await;
         let displaced = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner("worker-a", "worker-a:boot-1"),
                 "a-takeover-advances-the-generation-the-operator-reads-executor",
                 0,
@@ -383,13 +386,13 @@ mod tests {
             .expect("claim an immediately lapsed lane")
             .acquired()
             .expect("lapsed lane acquired");
-        let before = LeaseTriageReport::read(&core, SESSION_ID)
+        let before = LeaseTriageReport::read(&core, &SessionId::from(SESSION_ID))
             .await
             .expect("read before takeover");
 
         let successor = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner("worker-b", "worker-b:boot-1"),
                 "a-takeover-advances-the-generation-the-operator-reads-executor-2",
                 60_000,
@@ -398,7 +401,7 @@ mod tests {
             .expect("peer claim of a lapsed lane")
             .acquired()
             .expect("a lapsed lane is claimable");
-        let after = LeaseTriageReport::read(&core, SESSION_ID)
+        let after = LeaseTriageReport::read(&core, &SessionId::from(SESSION_ID))
             .await
             .expect("read after takeover");
 
@@ -419,10 +422,10 @@ mod tests {
     async fn releasing_the_lane_reads_as_unheld_rather_than_absent() {
         let dir = tempfile::tempdir().expect("scratch dir");
         let (core, factory) = durable_core(dir.path()).await;
-        let store = materialized_store(&factory, SESSION_ID).await;
+        let store = materialized_store(&factory, &SessionId::from(SESSION_ID)).await;
         let held = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner("worker-a", "worker-a:boot-1"),
                 "releasing-the-lane-reads-as-unheld-rather-than-absent-executor",
                 60_000,
@@ -436,7 +439,7 @@ mod tests {
             .await
             .expect("release the lane the way a committing turn does");
 
-        let report = LeaseTriageReport::read(&core, SESSION_ID)
+        let report = LeaseTriageReport::read(&core, &SessionId::from(SESSION_ID))
             .await
             .expect("diagnostic read after release");
         assert_eq!(report.triage, LeaseTriage::Unheld);
@@ -457,10 +460,10 @@ mod tests {
         // claims, renews, or releases, so the holder's fence still works after.
         let dir = tempfile::tempdir().expect("scratch dir");
         let (core, factory) = durable_core(dir.path()).await;
-        let store = materialized_store(&factory, SESSION_ID).await;
+        let store = materialized_store(&factory, &SessionId::from(SESSION_ID)).await;
         let held = store
             .try_claim_session_execution_lease(
-                SESSION_ID,
+                &SessionId::from(SESSION_ID),
                 &owner("worker-a", "worker-a:boot-1"),
                 "the-diagnostic-read-does-not-disturb-the-holder-it-reports-executor",
                 60_000,
@@ -471,7 +474,7 @@ mod tests {
             .expect("an unheld lane is acquirable");
 
         for _ in 0..3 {
-            let report = LeaseTriageReport::read(&core, SESSION_ID)
+            let report = LeaseTriageReport::read(&core, &SessionId::from(SESSION_ID))
                 .await
                 .expect("repeated diagnostic reads");
             assert_eq!(report.generation, Some(held.fencing_token));

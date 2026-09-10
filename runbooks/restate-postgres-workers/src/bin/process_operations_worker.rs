@@ -1,4 +1,6 @@
 use anyhow::{Context, Result, bail};
+use lash::ProcessId;
+use lash::SessionId;
 use lash::persistence::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft, QueuedWorkStore as _,
 };
@@ -55,7 +57,7 @@ fn registration() -> ProcessRegistration {
             ..ProcessEventSemanticsSpec::default()
         },
     }])
-    .with_wake_session_id(Some(SESSION_ID.to_string()))
+    .with_wake_session_id(Some(SessionId::from(SESSION_ID.to_string())))
 }
 
 fn wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
@@ -99,7 +101,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
@@ -129,13 +131,13 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                     ..ProcessEventSemanticsSpec::default()
                 },
             }])
-            .with_wake_session_id(Some(OLD_SESSION_ID.to_string())),
+            .with_wake_session_id(Some(SessionId::from(OLD_SESSION_ID.to_string()))),
         )
         .await
         .context("register retarget process")?;
     let old_wake = registry
         .append_event(
-            RETARGET_PROCESS_ID,
+            &ProcessId::from(RETARGET_PROCESS_ID),
             ProcessEventAppendRequest::new(EVENT_TYPE, json!({"wake_input": "old target"})),
         )
         .await
@@ -143,7 +145,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         .wake_delivery
         .context("old-target wake outbox row was not created")?;
     registry
-        .retarget_subscription(RETARGET_PROCESS_ID, Some(NEW_SESSION_ID))
+        .retarget_subscription(&ProcessId::from(RETARGET_PROCESS_ID), Some(NEW_SESSION_ID))
         .await
         .context("retarget process subscription")?;
     let old_delivery = registry
@@ -164,7 +166,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
 
     let new_wake = registry
         .append_event(
-            RETARGET_PROCESS_ID,
+            &ProcessId::from(RETARGET_PROCESS_ID),
             ProcessEventAppendRequest::new(EVENT_TYPE, json!({"wake_input": "new target"})),
         )
         .await
@@ -191,16 +193,16 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     );
     let old_batches = storage
         .session_store(OLD_SESSION_ID)
-        .list_queued_work(OLD_SESSION_ID)
+        .list_queued_work(&SessionId::from(OLD_SESSION_ID))
         .await
         .context("list old-target receiver rows")?;
     let new_batches = storage
         .session_store(NEW_SESSION_ID)
-        .list_queued_work(NEW_SESSION_ID)
+        .list_queued_work(&SessionId::from(NEW_SESSION_ID))
         .await
         .context("list new-target receiver rows")?;
     let audit_present = registry
-        .events_after(RETARGET_PROCESS_ID, 0)
+        .events_after(&ProcessId::from(RETARGET_PROCESS_ID), 0)
         .await
         .context("read retarget audit events")?
         .iter()
@@ -236,7 +238,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
         .session_store_factory_with_shared_process_registry()
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SESSION_ID.to_string(),
+            session_id: SessionId::from(SESSION_ID.to_string()),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
@@ -249,7 +251,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
         .context("register crash-recovery process")?;
     let append = registry
         .append_event(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             ProcessEventAppendRequest::new(
                 EVENT_TYPE,
                 json!({"wake_input": "deliver exactly once after worker restart"}),
@@ -347,13 +349,16 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
         .context("recovered sender row is absent")?;
     let batches = storage
         .session_store(SESSION_ID)
-        .list_queued_work(SESSION_ID)
+        .list_queued_work(&SessionId::from(SESSION_ID))
         .await
         .context("list recovered receiver rows")?
         .into_iter()
         .filter(|batch| {
             batch.source_key.as_deref()
-                == Some(process_wake_source_key(PROCESS_ID, delivery.wake.sequence).as_str())
+                == Some(
+                    process_wake_source_key(&ProcessId::from(PROCESS_ID), delivery.wake.sequence)
+                        .as_str(),
+                )
         })
         .collect::<Vec<_>>();
 

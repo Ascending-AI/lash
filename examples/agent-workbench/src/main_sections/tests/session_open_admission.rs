@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 #[derive(Default)]
 pub(crate) struct SessionOpenAdmissionGateState {
@@ -9,7 +10,7 @@ pub(crate) struct SessionOpenAdmissionGateState {
 }
 
 pub(crate) struct SessionOpenAdmissionGate {
-    pub(super) session_id: String,
+    pub(super) session_id: SessionId,
     pub(super) state: std::sync::Mutex<SessionOpenAdmissionGateState>,
     pub(super) admitted: tokio::sync::Notify,
     pub(super) contended: tokio::sync::Notify,
@@ -21,7 +22,7 @@ pub(crate) struct SessionOpenAdmissionGate {
 }
 
 impl SessionOpenAdmissionGate {
-    pub(super) fn new(session_id: impl Into<String>) -> Self {
+    pub(super) fn new(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
             state: std::sync::Mutex::new(SessionOpenAdmissionGateState::default()),
@@ -55,7 +56,7 @@ impl SessionOpenAdmissionGate {
 
     pub(super) fn observe_claim(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         outcome: &lash::persistence::SessionExecutionLeaseClaimOutcome,
     ) {
         use std::sync::atomic::Ordering;
@@ -176,9 +177,9 @@ impl SessionOpenAdmissionGate {
 }
 
 pub(crate) fn registered_session_open_admission_gates()
--> &'static std::sync::Mutex<BTreeMap<String, Arc<SessionOpenAdmissionGate>>> {
+-> &'static std::sync::Mutex<BTreeMap<SessionId, Arc<SessionOpenAdmissionGate>>> {
     static GATES: std::sync::OnceLock<
-        std::sync::Mutex<BTreeMap<String, Arc<SessionOpenAdmissionGate>>>,
+        std::sync::Mutex<BTreeMap<SessionId, Arc<SessionOpenAdmissionGate>>>,
     > = std::sync::OnceLock::new();
     GATES.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
 }
@@ -190,7 +191,7 @@ pub(crate) fn register_session_open_admission_gate(gate: Arc<SessionOpenAdmissio
         .insert(gate.session_id.clone(), gate);
 }
 
-pub(crate) fn arm_registered_session_open_admission_gate(session_id: &str, reason: &str) {
+pub(crate) fn arm_registered_session_open_admission_gate(session_id: &SessionId, reason: &str) {
     if reason != "queued_turn" {
         return;
     }
@@ -204,7 +205,7 @@ pub(crate) fn arm_registered_session_open_admission_gate(session_id: &str, reaso
     }
 }
 
-pub(crate) fn unregister_session_open_admission_gate(session_id: &str) {
+pub(crate) fn unregister_session_open_admission_gate(session_id: &SessionId) {
     registered_session_open_admission_gates()
         .lock()
         .unwrap_or_else(|error| error.into_inner())
@@ -226,7 +227,7 @@ impl lash::persistence::RuntimePersistenceDecorator for GatedRuntimePersistence 
 
     async fn try_claim_session_execution_lease(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         owner: &lash::persistence::LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
@@ -268,13 +269,13 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
         }))
     }
 
-    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }
 
     async fn delete_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }

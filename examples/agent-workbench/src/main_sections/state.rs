@@ -1,4 +1,6 @@
 use super::*;
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 
 #[derive(Clone)]
@@ -34,7 +36,7 @@ pub(crate) struct AppState {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) restate_admin_url: String,
     pub(crate) restate_http: reqwest::Client,
-    pub(crate) restate_cron_job_keys: Arc<Mutex<BTreeMap<String, BTreeSet<String>>>>,
+    pub(crate) restate_cron_job_keys: Arc<Mutex<BTreeMap<SessionId, BTreeSet<String>>>>,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) active_turns: ActiveTurns,
     pub(crate) authorization: WorkbenchAuthorization,
@@ -47,7 +49,7 @@ pub(crate) struct Settings {
     pub(crate) model_variant: Option<String>,
     pub(crate) web_configured: bool,
     pub(crate) model_variants: Vec<&'static str>,
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     /// The operator's name for this session, or its id when they gave none.
     pub(crate) session_name: String,
     /// The language id this session recorded, for the dialect badge.
@@ -102,19 +104,19 @@ impl std::ops::Deref for StateReadSnapshot {
 #[derive(Clone, Debug)]
 pub(crate) enum WorkbenchAuthorizationAction {
     Observe {
-        session_id: String,
+        session_id: SessionId,
     },
     EnqueueTurn {
-        session_id: String,
+        session_id: SessionId,
     },
     EnqueueTurnInput {
-        session_id: String,
+        session_id: SessionId,
     },
     CancelTurn {
-        session_id: String,
+        session_id: SessionId,
     },
     ManageQueuedWork {
-        session_id: String,
+        session_id: SessionId,
     },
     /// Deployment-wide operator policy. Approval decisions are deliberately
     /// separate from chat/session participation.
@@ -358,20 +360,20 @@ pub(crate) struct TurnInputReceipt {
 pub(crate) struct EventsQuery {
     pub(crate) cursor: Option<String>,
     #[serde(default)]
-    pub(crate) session_id: Option<String>,
+    pub(crate) session_id: Option<SessionId>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ProductEventsQuery {
     pub(crate) cursor: Option<u64>,
     #[serde(default)]
-    pub(crate) session_id: Option<String>,
+    pub(crate) session_id: Option<SessionId>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct SessionQuery {
     #[serde(default)]
-    pub(crate) session_id: Option<String>,
+    pub(crate) session_id: Option<SessionId>,
 }
 
 impl SessionQuery {
@@ -412,13 +414,13 @@ pub(crate) struct SessionCreateRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct SessionSelectRequest {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
 }
 
 /// One session as the selector renders it.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct SessionSummary {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) name: String,
     /// The dialect this session recorded, read back from the session itself.
     pub(crate) dialect: &'static str,
@@ -431,7 +433,7 @@ pub(crate) struct SessionSummary {
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct SessionListResponse {
     pub(crate) sessions: Vec<SessionSummary>,
-    pub(crate) current_session_id: String,
+    pub(crate) current_session_id: SessionId,
     /// Every registered RLM language id, from the substrate's own dialect
     /// enumeration rather than a list this host writes down.
     pub(crate) dialects: Vec<&'static str>,
@@ -572,7 +574,7 @@ pub(crate) const PRODUCT_EVENT_LOG_FORMAT_VERSION: u32 = 2;
 #[derive(Serialize)]
 pub(crate) struct PersistedProductEventLog<'a> {
     pub(crate) format_version: u32,
-    pub(crate) histories: &'a HashMap<String, ProductEventHistory>,
+    pub(crate) histories: &'a HashMap<SessionId, ProductEventHistory>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -609,7 +611,7 @@ pub(crate) struct ProductEventLogLoadError {
 
 pub(crate) fn decode_product_event_histories(
     bytes: &[u8],
-) -> Result<HashMap<String, ProductEventHistory>, ProductEventLogDecodeError> {
+) -> Result<HashMap<SessionId, ProductEventHistory>, ProductEventLogDecodeError> {
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(ProductEventLogDecodeError::InvalidJson)?;
     let root = value
@@ -638,7 +640,7 @@ pub(crate) fn decode_product_event_histories(
             .get("histories")
             .cloned()
             .ok_or(ProductEventLogDecodeError::MissingHistories)?;
-        return serde_json::from_value::<HashMap<String, ProductEventHistory>>(histories)
+        return serde_json::from_value::<HashMap<SessionId, ProductEventHistory>>(histories)
             .map(|histories| {
                 histories
                     .into_iter()
@@ -686,8 +688,8 @@ pub(crate) enum ObservationStreamItem {
 
 #[derive(Clone)]
 pub(crate) struct SessionEventRegistry {
-    pub(crate) histories: Arc<Mutex<HashMap<String, ProductEventHistory>>>,
-    pub(crate) senders: Arc<Mutex<HashMap<String, broadcast::Sender<ProductEvent>>>>,
+    pub(crate) histories: Arc<Mutex<HashMap<SessionId, ProductEventHistory>>>,
+    pub(crate) senders: Arc<Mutex<HashMap<SessionId, broadcast::Sender<ProductEvent>>>>,
     pub(crate) channel_capacity: usize,
     pub(crate) path: Option<Arc<PathBuf>>,
 }
@@ -725,22 +727,22 @@ impl SessionEventRegistry {
         })
     }
 
-    pub(crate) fn sender(&self, session_id: &str) -> broadcast::Sender<ProductEvent> {
+    pub(crate) fn sender(&self, session_id: &SessionId) -> broadcast::Sender<ProductEvent> {
         let mut senders = self.senders.lock_recover();
         senders
-            .entry(session_id.to_string())
+            .entry(SessionId::from(session_id.to_string()))
             .or_insert_with(|| broadcast::channel(self.channel_capacity).0)
             .clone()
     }
 
     #[cfg(test)]
-    pub(crate) fn subscribe(&self, session_id: &str) -> broadcast::Receiver<ProductEvent> {
+    pub(crate) fn subscribe(&self, session_id: &SessionId) -> broadcast::Receiver<ProductEvent> {
         self.sender(session_id).subscribe()
     }
 
     pub(crate) fn subscribe_after(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         cursor: u64,
     ) -> (Vec<ProductEvent>, broadcast::Receiver<ProductEvent>) {
         let receiver = self.sender(session_id).subscribe();
@@ -757,7 +759,7 @@ impl SessionEventRegistry {
     }
 
     #[cfg(test)]
-    pub(crate) fn publish(&self, session_id: &str, item: StreamItem) {
+    pub(crate) fn publish(&self, session_id: &SessionId, item: StreamItem) {
         self.publish_identified(
             session_id,
             format!("workbench-product-event:{}", uuid::Uuid::new_v4()),
@@ -767,14 +769,16 @@ impl SessionEventRegistry {
 
     pub(crate) fn publish_identified(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         event_id: impl Into<String>,
         item: StreamItem,
     ) -> bool {
         let event_id = event_id.into();
         let event = {
             let mut histories = self.histories.lock_recover();
-            let history = histories.entry(session_id.to_string()).or_default();
+            let history = histories
+                .entry(SessionId::from(session_id.to_string()))
+                .or_default();
             if !history.event_ids.insert(event_id.clone()) {
                 return false;
             }
@@ -792,7 +796,7 @@ impl SessionEventRegistry {
         true
     }
 
-    pub(crate) fn snapshot(&self, session_id: &str) -> ProductEventSnapshot {
+    pub(crate) fn snapshot(&self, session_id: &SessionId) -> ProductEventSnapshot {
         let history = self
             .histories
             .lock_recover()
@@ -807,7 +811,7 @@ impl SessionEventRegistry {
 
     pub(crate) fn reconcile_settled(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         committed_message_ids: &BTreeSet<String>,
         committed_input_turn_ids: &BTreeSet<TurnId>,
         active_turn_ids: &BTreeSet<TurnId>,
@@ -886,7 +890,11 @@ impl SessionEventRegistry {
     /// Retirement drops the events and keeps their identities, exactly as
     /// settlement compaction does: a Restate replay that re-publishes the same
     /// row must be a no-op, not a resurrection of the row this just retired.
-    pub(crate) fn retire_turn_rows(&self, session_id: &str, turn_id: &TurnId) -> BTreeSet<String> {
+    pub(crate) fn retire_turn_rows(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> BTreeSet<String> {
         let mut retired = BTreeSet::new();
         let mut histories = self.histories.lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
@@ -910,7 +918,7 @@ impl SessionEventRegistry {
         retired
     }
 
-    pub(crate) fn remove(&self, session_id: &str) {
+    pub(crate) fn remove(&self, session_id: &SessionId) {
         let mut histories = self.histories.lock_recover();
         histories.remove(session_id);
         self.persist_snapshot(&histories);
@@ -918,7 +926,7 @@ impl SessionEventRegistry {
         self.senders.lock_recover().remove(session_id);
     }
 
-    pub(crate) fn persist_snapshot(&self, histories: &HashMap<String, ProductEventHistory>) {
+    pub(crate) fn persist_snapshot(&self, histories: &HashMap<SessionId, ProductEventHistory>) {
         let Some(path) = self.path.as_deref() else {
             return;
         };
@@ -941,7 +949,7 @@ impl SessionEventRegistry {
     }
 
     #[cfg(test)]
-    pub(crate) fn contains(&self, session_id: &str) -> bool {
+    pub(crate) fn contains(&self, session_id: &SessionId) -> bool {
         self.senders.lock_recover().contains_key(session_id)
     }
 }
@@ -991,14 +999,14 @@ pub(crate) struct TriggerMutationResponse {
 #[derive(Clone, Default)]
 pub(crate) struct ActiveTurns {
     inner: Arc<Mutex<ActiveTurnLedger>>,
-    pub(crate) prompts: Arc<Mutex<BTreeMap<(String, TurnId), ActiveTurnPrompt>>>,
+    pub(crate) prompts: Arc<Mutex<BTreeMap<(SessionId, TurnId), ActiveTurnPrompt>>>,
     pub(crate) path: Option<Arc<PathBuf>>,
 }
 
 #[derive(Default)]
 struct ActiveTurnLedger {
-    turns: BTreeSet<(String, TurnId)>,
-    retirements: BTreeMap<String, SessionRetirement>,
+    turns: BTreeSet<(SessionId, TurnId)>,
+    retirements: BTreeMap<SessionId, SessionRetirement>,
 }
 
 /// Where a session stands in retirement, as recorded by this process.
@@ -1045,17 +1053,17 @@ pub(crate) struct ActiveTurnPrompt {
 pub(crate) struct ActiveTurnSubmissionGuard {
     pub(crate) active_turns: ActiveTurns,
     pub(crate) failure_publisher: Option<AppState>,
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) turn_id: TurnId,
     pub(crate) armed: bool,
 }
 
 impl ActiveTurnSubmissionGuard {
-    pub(crate) fn user_turn(state: &AppState, session_id: &str, turn_id: &TurnId) -> Self {
+    pub(crate) fn user_turn(state: &AppState, session_id: &SessionId, turn_id: &TurnId) -> Self {
         Self {
             active_turns: state.active_turns.clone(),
             failure_publisher: Some(state.clone()),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             turn_id: TurnId::from(turn_id.to_string()),
             armed: true,
         }
@@ -1063,13 +1071,13 @@ impl ActiveTurnSubmissionGuard {
 
     pub(crate) fn queued_turn(
         active_turns: ActiveTurns,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Self {
         Self {
             active_turns,
             failure_publisher: None,
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             turn_id: TurnId::from(turn_id.to_string()),
             armed: true,
         }
@@ -1107,20 +1115,20 @@ impl Drop for ActiveTurnSubmissionGuard {
 
 #[derive(Deserialize)]
 pub(crate) struct PersistedActiveTurns {
-    pub(crate) turns: BTreeSet<(String, TurnId)>,
+    pub(crate) turns: BTreeSet<(SessionId, TurnId)>,
     #[serde(default)]
     pub(crate) prompts: Vec<PersistedActiveTurnPrompt>,
 }
 
 #[derive(Serialize)]
 pub(crate) struct PersistedActiveTurnsRef<'a> {
-    pub(crate) turns: &'a BTreeSet<(String, TurnId)>,
+    pub(crate) turns: &'a BTreeSet<(SessionId, TurnId)>,
     pub(crate) prompts: Vec<PersistedActiveTurnPromptRef<'a>>,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct PersistedActiveTurnPrompt {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) turn_id: TurnId,
     pub(crate) prompt: String,
     #[serde(default)]
@@ -1129,7 +1137,7 @@ pub(crate) struct PersistedActiveTurnPrompt {
 
 #[derive(Serialize)]
 pub(crate) struct PersistedActiveTurnPromptRef<'a> {
-    pub(crate) session_id: &'a str,
+    pub(crate) session_id: &'a SessionId,
     pub(crate) turn_id: &'a TurnId,
     pub(crate) prompt: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1190,14 +1198,14 @@ impl ActiveTurns {
     }
 
     #[cfg(test)]
-    pub(crate) fn insert(&self, session_id: impl Into<String>, turn_id: impl Into<TurnId>) {
+    pub(crate) fn insert(&self, session_id: impl Into<SessionId>, turn_id: impl Into<TurnId>) {
         self.insert_with_prompt(session_id, turn_id, None, None);
     }
 
     #[cfg(test)]
     pub(crate) fn insert_with_prompt(
         &self,
-        session_id: impl Into<String>,
+        session_id: impl Into<SessionId>,
         turn_id: impl Into<TurnId>,
         prompt: Option<String>,
         attachment_id: Option<String>,
@@ -1220,7 +1228,7 @@ impl ActiveTurns {
 
     pub(crate) fn try_insert_for_idle_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
     ) -> ActiveTurnClaim {
         self.try_insert_with_prompt_for_idle_session(session_id, turn_id, None, None)
@@ -1234,7 +1242,7 @@ impl ActiveTurns {
     /// lands first is a turn the delete will find in the registry and cancel.
     pub(crate) fn try_insert_with_prompt_for_idle_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
         prompt: Option<String>,
         attachment_id: Option<String>,
@@ -1250,7 +1258,7 @@ impl ActiveTurns {
         {
             return ActiveTurnClaim::Busy;
         }
-        let key = (session_id.to_string(), turn_id.clone());
+        let key = (session_id.clone(), turn_id.clone());
         let mut prompts = self.prompts.lock_recover();
         ledger.turns.insert(key.clone());
         if let Some(prompt) = prompt {
@@ -1266,8 +1274,8 @@ impl ActiveTurns {
         ActiveTurnClaim::Claimed
     }
 
-    pub(crate) fn remove(&self, session_id: &str, turn_id: &TurnId) {
-        let key = (session_id.to_string(), turn_id.clone());
+    pub(crate) fn remove(&self, session_id: &SessionId, turn_id: &TurnId) {
+        let key = (session_id.clone(), turn_id.clone());
         let mut ledger = self.inner.lock_recover();
         let mut prompts = self.prompts.lock_recover();
         ledger.turns.remove(&key);
@@ -1275,14 +1283,14 @@ impl ActiveTurns {
         self.persist_snapshot(&ledger.turns, &prompts);
     }
 
-    pub(crate) fn contains(&self, session_id: &str, turn_id: &TurnId) -> bool {
+    pub(crate) fn contains(&self, session_id: &SessionId, turn_id: &TurnId) -> bool {
         self.inner
             .lock_recover()
             .turns
-            .contains(&(session_id.to_string(), turn_id.clone()))
+            .contains(&(session_id.clone(), turn_id.clone()))
     }
 
-    pub(crate) fn for_session(&self, session_id: &str) -> Vec<lash::TurnAddress> {
+    pub(crate) fn for_session(&self, session_id: &SessionId) -> Vec<lash::TurnAddress> {
         self.inner
             .lock_recover()
             .turns
@@ -1295,36 +1303,36 @@ impl ActiveTurns {
     /// Mark `session_id` as retiring, so no new turn claims its slot while the
     /// delete runs. Idempotent: a session already retiring or retired keeps its
     /// mark, and the return value says whether this call placed one.
-    pub(crate) fn begin_retirement(&self, session_id: &str) -> bool {
+    pub(crate) fn begin_retirement(&self, session_id: &SessionId) -> bool {
         let mut ledger = self.inner.lock_recover();
         if ledger.retirements.contains_key(session_id) {
             return false;
         }
         ledger
             .retirements
-            .insert(session_id.to_string(), SessionRetirement::Retiring);
+            .insert(session_id.clone(), SessionRetirement::Retiring);
         true
     }
 
     /// Record that the durable tombstone for `session_id` is confirmed.
-    pub(crate) fn confirm_retirement(&self, session_id: &str) {
+    pub(crate) fn confirm_retirement(&self, session_id: &SessionId) {
         self.inner
             .lock_recover()
             .retirements
-            .insert(session_id.to_string(), SessionRetirement::Retired);
+            .insert(session_id.clone(), SessionRetirement::Retired);
     }
 
     /// Lift a retiring mark after the delete definitively failed and the
     /// session remains live. A confirmed retirement is never lifted: a deleted
     /// session id cannot come back.
-    pub(crate) fn abandon_retirement(&self, session_id: &str) {
+    pub(crate) fn abandon_retirement(&self, session_id: &SessionId) {
         let mut ledger = self.inner.lock_recover();
         if ledger.retirements.get(session_id) == Some(&SessionRetirement::Retiring) {
             ledger.retirements.remove(session_id);
         }
     }
 
-    pub(crate) fn retirement(&self, session_id: &str) -> Option<SessionRetirement> {
+    pub(crate) fn retirement(&self, session_id: &SessionId) -> Option<SessionRetirement> {
         self.inner
             .lock_recover()
             .retirements
@@ -1334,12 +1342,12 @@ impl ActiveTurns {
 
     pub(crate) fn prompt_for(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         turn_id: &TurnId,
     ) -> Option<ActiveTurnPrompt> {
         self.prompts
             .lock_recover()
-            .get(&(session_id.to_string(), turn_id.clone()))
+            .get(&(session_id.clone(), turn_id.clone()))
             .cloned()
     }
 
@@ -1351,8 +1359,8 @@ impl ActiveTurns {
 
     fn persist_snapshot(
         &self,
-        active: &BTreeSet<(String, TurnId)>,
-        prompts: &BTreeMap<(String, TurnId), ActiveTurnPrompt>,
+        active: &BTreeSet<(SessionId, TurnId)>,
+        prompts: &BTreeMap<(SessionId, TurnId), ActiveTurnPrompt>,
     ) {
         let Some(path) = self.path.as_deref() else {
             return;
@@ -1395,7 +1403,7 @@ pub(crate) struct CommandAccepted {
 pub(crate) struct ProcessCancelAccepted {
     pub(crate) accepted: bool,
     pub(crate) operation_id: String,
-    pub(crate) process_id: String,
+    pub(crate) process_id: ProcessId,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1419,7 +1427,7 @@ pub(crate) struct TurnCancelResponse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkerFaultNotice {
     pub(crate) kind: &'static str,
-    pub(crate) process_id: Option<String>,
+    pub(crate) process_id: Option<ProcessId>,
     pub(crate) operation: Option<String>,
     pub(crate) error: String,
 }
@@ -1528,7 +1536,7 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
     ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
         let session_id = request
             .session_id
-            .unwrap_or_else(|| self.sessions.current());
+            .unwrap_or_else(|| SessionId::from(self.sessions.current()));
         // A trigger process may finish while a foreground turn still owns this
         // session's ingress. Its wake stays in the durable queued-work store;
         // terminalization calls `claim_and_run_pending` again after releasing
@@ -1585,13 +1593,13 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
 impl WorkbenchQueuedWorkSubmitter {
     pub(crate) async fn has_queued_work(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> std::result::Result<bool, PluginError> {
         let store = self
             .store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: lash::persistence::SessionRelation::default(),
                 policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
             })
@@ -1650,7 +1658,7 @@ pub(crate) struct WorkItem {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct WorkProcess {
-    pub(crate) process_id: String,
+    pub(crate) process_id: ProcessId,
     pub(crate) graph_key: String,
     pub(crate) lifecycle: lash::process::ProcessStatus,
     pub(crate) status_label: String,
@@ -1660,7 +1668,7 @@ pub(crate) struct WorkProcess {
     pub(crate) updated_at_ms: u64,
     pub(crate) input: Value,
     pub(crate) external_ref: Option<Value>,
-    pub(crate) child_session_id: Option<String>,
+    pub(crate) child_session_id: Option<SessionId>,
     pub(crate) label: String,
 }
 
@@ -1674,7 +1682,7 @@ pub(crate) struct WorkEvent {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct WorkAwaitResult {
-    pub(crate) process_id: String,
+    pub(crate) process_id: ProcessId,
     pub(crate) outcome: lash::process::ProcessAwaitOutput,
     /// Reconciled from the durable log at terminal (ADR 0017): the authoritative,
     /// complete record, unlike the best-effort event sink.

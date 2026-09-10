@@ -1,4 +1,6 @@
 use super::*;
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 
 #[test]
@@ -168,7 +170,10 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     )
     .await;
     let session_id = harness.state.current_session_id();
-    let active_turns = harness.state.active_turns.for_session(&session_id);
+    let active_turns = harness
+        .state
+        .active_turns
+        .for_session(&SessionId::from(session_id.clone()));
     let [routed_address] = active_turns.as_slice() else {
         panic!("expected exactly one routed suspended turn")
     };
@@ -182,11 +187,14 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         .expect("open suspended turn session for durable address");
     let address = session.turn_address(&routed_address.turn_id);
     drop(session);
-    let mut events = harness.state.event_tx.subscribe(&session_id);
+    let mut events = harness
+        .state
+        .event_tx
+        .subscribe(&SessionId::from(session_id.clone()));
     let started = tokio::time::Instant::now();
     let receipts = harness
         .state
-        .cancel_turns_for_session(&session_id)
+        .cancel_turns_for_session(&SessionId::from(session_id.clone()))
         .await
         .expect("cancel suspended workbench turn");
     let [receipt] = receipts.as_slice() else {
@@ -238,7 +246,12 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     })
     .await
     .expect("late cancellation evidence must arrive on the SSE product stream");
-    wait_for_active_turns_empty(&harness.state, &session_id, Duration::from_secs(10)).await;
+    wait_for_active_turns_empty(
+        &harness.state,
+        &SessionId::from(session_id),
+        Duration::from_secs(10),
+    )
+    .await;
     println!("workbench suspended-sleep gate passed: post-suspension-cancel; late-SSE-evidence");
     let _ = std::fs::remove_dir_all(data_dir);
 }
@@ -318,7 +331,10 @@ finish (await handle)?
     let process_id =
         wait_for_running_process(&harness.state, "hold_for_stop", Duration::from_secs(20)).await;
     let session_id = harness.state.current_session_id();
-    let active_turns = harness.state.active_turns.for_session(&session_id);
+    let active_turns = harness
+        .state
+        .active_turns
+        .for_session(&SessionId::from(session_id.clone()));
     let [routed_address] = active_turns.as_slice() else {
         panic!("expected exactly one routed suspended turn")
     };
@@ -332,11 +348,14 @@ finish (await handle)?
         .expect("open suspended turn session for durable address");
     let address = session.turn_address(&routed_address.turn_id);
     drop(session);
-    let mut events = harness.state.event_tx.subscribe(&session_id);
+    let mut events = harness
+        .state
+        .event_tx
+        .subscribe(&SessionId::from(session_id.clone()));
     let started = tokio::time::Instant::now();
     let receipts = harness
         .state
-        .cancel_turns_for_session(&session_id)
+        .cancel_turns_for_session(&SessionId::from(session_id.clone()))
         .await
         .expect("cancel suspended workbench turn");
     let [receipt] = receipts.as_slice() else {
@@ -390,7 +409,11 @@ finish (await handle)?
     .expect("late cancellation evidence must arrive on the SSE product stream");
     let process_terminal = tokio::time::timeout(
         Duration::from_secs(10),
-        harness.state.core.processes().await_output(&process_id),
+        harness
+            .state
+            .core
+            .processes()
+            .await_output(&ProcessId::from(process_id)),
     )
     .await
     .expect("Stop-over-process must terminate the awaited process")
@@ -404,7 +427,12 @@ finish (await handle)?
         ),
         "Stop-over-process settled the process incorrectly: {process_terminal:#?}"
     );
-    wait_for_active_turns_empty(&harness.state, &session_id, Duration::from_secs(10)).await;
+    wait_for_active_turns_empty(
+        &harness.state,
+        &SessionId::from(session_id),
+        Duration::from_secs(10),
+    )
+    .await;
     println!(
         "workbench Stop-over-process gate passed: committed-Cancelled; process-Cancelled; late-SSE-evidence"
     );
@@ -466,7 +494,10 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     )
     .await;
     let session_id = harness.state.current_session_id();
-    let mut product_events = harness.state.event_tx.subscribe(&session_id);
+    let mut product_events = harness
+        .state
+        .event_tx
+        .subscribe(&SessionId::from(session_id));
     let (failed_invocation, failed_address) =
         submit_workbench_turn_via_restate(&harness.state, "trigger deterministic auth failure")
             .await;
@@ -577,12 +608,17 @@ async fn submit_workbench_turn_via_restate(
     let session_id = state.current_session_id();
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
-        session_id: session_id.clone(),
+        session_id: SessionId::from(session_id.clone()),
         text: text.to_string(),
         model: state.selected_model(),
         attachment_id: None,
     };
-    state.track_turn_prompt(&session_id, &turn_id, text.to_string(), None);
+    state.track_turn_prompt(
+        &SessionId::from(session_id.clone()),
+        &turn_id,
+        text.to_string(),
+        None,
+    );
     let session = state
         .core
         .session(&session_id)
@@ -887,7 +923,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     let session_id = harness.state.current_session_id();
     harness
         .state
-        .open_session(&session_id)
+        .open_session(&SessionId::from(session_id.clone()))
         .await
         .expect("materialize the session before its failed delete");
     harness
@@ -909,7 +945,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
             execution_scope,
         },
     )
@@ -944,14 +980,17 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
             .expect("read failed-delete tombstone fence")
     );
     assert_eq!(
-        harness.state.active_turns.retirement(&session_id),
+        harness
+            .state
+            .active_turns
+            .retirement(&SessionId::from(session_id.clone())),
         None,
         "a terminal delete failure lifts the in-process fence"
     );
     let _ = app_state(
         State(harness.state.clone()),
         Query(SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
     )
     .await
@@ -959,18 +998,21 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
 
     // Drop the orphan claim: the delete can now be retried through the same
     // route, and the fence admits the retry.
-    harness
-        .state
-        .active_turns
-        .remove(&session_id, &TurnId::from("held-delete-turn"));
+    harness.state.active_turns.remove(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("held-delete-turn"),
+    );
     let post_tombstone_turn = "turn-admitted-after-delete-snapshot";
-    fail_session_delete_retention_once(&session_id, &TurnId::from(post_tombstone_turn));
+    fail_session_delete_retention_once(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from(post_tombstone_turn),
+    );
     let Json(replacement) = Box::pin(tokio::time::timeout(
         Duration::from_secs(30),
         reset_chat(
             State(harness.state.clone()),
             Query(SessionQuery {
-                session_id: Some(session_id.clone()),
+                session_id: Some(SessionId::from(session_id.clone())),
             }),
         ),
     ))
@@ -978,10 +1020,10 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     .expect("post-tombstone retention redrive settles")
     .expect("retry succeeds after the orphan claim is released");
     assert_ne!(replacement.settings.session_id, session_id);
-    harness
-        .state
-        .active_turns
-        .remove(&session_id, &TurnId::from(post_tombstone_turn));
+    harness.state.active_turns.remove(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from(post_tombstone_turn),
+    );
     assert!(
         harness
             .state
@@ -1072,7 +1114,7 @@ finish (await handle)?
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: deleted_session_id.clone(),
+            session_id: SessionId::from(deleted_session_id.clone()),
             execution_scope,
         },
     )
@@ -1088,7 +1130,7 @@ finish (await handle)?
         .state
         .process_observer
         .clone()
-        .process(&process_id)
+        .process(&ProcessId::from(process_id.clone()))
         .await
         .expect("read process immediately after session revocation")
         .expect("session revocation keeps its process record");
@@ -1099,7 +1141,7 @@ finish (await handle)?
     let immediate_events = harness
         .state
         .process_observer
-        .events_after(&process_id, 0)
+        .events_after(&ProcessId::from(process_id.clone()), 0)
         .await
         .expect("read process events immediately after session revocation");
     assert!(
@@ -1134,7 +1176,11 @@ finish (await handle)?
     );
     let process_terminal = tokio::time::timeout(
         Duration::from_secs(45),
-        harness.state.core.processes().await_output(&process_id),
+        harness
+            .state
+            .core
+            .processes()
+            .await_output(&ProcessId::from(process_id.clone())),
     )
     .await
     .expect("revoked session must not stop the independent process")
@@ -1151,7 +1197,7 @@ finish (await handle)?
     let events = harness
         .state
         .process_observer
-        .events_after(&process_id, 0)
+        .events_after(&ProcessId::from(process_id), 0)
         .await
         .expect("read surviving process events");
     assert!(
@@ -1164,7 +1210,7 @@ finish (await handle)?
         harness
             .state
             .active_turns
-            .for_session(&deleted_session_id)
+            .for_session(&SessionId::from(deleted_session_id))
             .is_empty(),
         "deleted-session settlement left a routed foreground turn"
     );
@@ -1255,7 +1301,7 @@ finish "started lifecycle gates"
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: deleted_session_id.clone(),
+            session_id: SessionId::from(deleted_session_id.clone()),
             execution_scope,
         },
     )
@@ -1282,7 +1328,7 @@ finish "started lifecycle gates"
     }
 
     let Json(cancel_receipt) = cancel_work(
-        AxumPath(cancellable_id.clone()),
+        AxumPath(cancellable_id.to_string()),
         State(harness.state.clone()),
     )
     .await
@@ -1290,14 +1336,18 @@ finish "started lifecycle gates"
     assert!(cancel_receipt.accepted);
     wait_for_process_event(
         &harness.state,
-        &cancellable_id,
+        &ProcessId::from(cancellable_id.clone()),
         "process.cancel_requested",
         Duration::from_secs(20),
     )
     .await;
     let cancelled = tokio::time::timeout(
         Duration::from_secs(20),
-        harness.state.core.processes().await_output(&cancellable_id),
+        harness
+            .state
+            .core
+            .processes()
+            .await_output(&ProcessId::from(cancellable_id.clone())),
     )
     .await
     .expect("cancelled process terminal timeout")
@@ -1314,7 +1364,11 @@ finish "started lifecycle gates"
 
     let survived = tokio::time::timeout(
         Duration::from_secs(20),
-        harness.state.core.processes().await_output(&survivor_id),
+        harness
+            .state
+            .core
+            .processes()
+            .await_output(&ProcessId::from(survivor_id.clone())),
     )
     .await
     .expect("surviving process terminal timeout")
@@ -1349,7 +1403,7 @@ finish "started lifecycle gates"
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-async fn wait_for_running_process(state: &AppState, label: &str, timeout: Duration) -> String {
+async fn wait_for_running_process(state: &AppState, label: &str, timeout: Duration) -> ProcessId {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let processes = state
@@ -1380,7 +1434,7 @@ async fn wait_for_named_running_processes(
     state: &AppState,
     labels: &[&str],
     timeout: Duration,
-) -> (String, String) {
+) -> (ProcessId, ProcessId) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         let processes = state
@@ -1415,7 +1469,7 @@ async fn wait_for_named_running_processes(
 
 async fn wait_for_process_event(
     state: &AppState,
-    process_id: &str,
+    process_id: &ProcessId,
     event_type: &str,
     timeout: Duration,
 ) {
@@ -1511,7 +1565,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     let mut rendered_events = harness
         .state
         .event_tx
-        .subscribe(&harness.state.current_session_id());
+        .subscribe(&SessionId::from(harness.state.current_session_id()));
 
     let turn_invocation_id =
         run_workbench_turn_via_restate(&harness.state, "initial turn input_ingress_gate=true")
@@ -1564,7 +1618,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     let queued_turn = harness
         .state
         .active_turns
-        .for_session(&session_id)
+        .for_session(&SessionId::from(session_id.clone()))
         .into_iter()
         .find(|address| address.turn_id.starts_with("workbench-queued-"))
         .expect("queued-work driver must publish the queued turn address");
@@ -1616,8 +1670,11 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     admission_gate.arm();
     let state_for_holder = harness.state.clone();
     let session_id_for_holder = session_id.clone();
-    let held_open =
-        tokio::spawn(async move { state_for_holder.open_session(&session_id_for_holder).await });
+    let held_open = tokio::spawn(async move {
+        state_for_holder
+            .open_session(&SessionId::from(session_id_for_holder))
+            .await
+    });
     admission_gate.wait_until_admitted().await;
     let exhausted = Box::pin(app_state(
         State(harness.state.clone()),
@@ -1652,7 +1709,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
 
     let settled_session = harness
         .state
-        .open_session(&session_id)
+        .open_session(&SessionId::from(session_id.clone()))
         .await
         .expect("open settled ingress session through the host retry boundary");
     let read_view = settled_session.read_view();
@@ -1771,7 +1828,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         snapshot.pending_turn_inputs.is_empty(),
         "both ingress claims must settle"
     );
-    unregister_session_open_admission_gate(&session_id);
+    unregister_session_open_admission_gate(&SessionId::from(session_id));
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1812,9 +1869,9 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create recovery E2E data dir");
-    let session_id = format!("workbench-recovery-{backend}-e2e");
+    let session_id = SessionId::from(format!("workbench-recovery-{backend}-e2e"));
     let turn_id = TurnId::from(format!("workbench-turn-recovery-{backend}-e2e"));
-    std::fs::write(data_dir.join("session-id"), &session_id)
+    std::fs::write(data_dir.join("session-id"), session_id.as_str())
         .expect("write recovery E2E session id");
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))
         .expect("open recovery E2E active-turn routing");
@@ -2101,7 +2158,7 @@ async fn wait_for_workbench_restate_invocation_suspended(
     }
 }
 
-async fn wait_for_active_turns_empty(state: &AppState, session_id: &str, timeout: Duration) {
+async fn wait_for_active_turns_empty(state: &AppState, session_id: &SessionId, timeout: Duration) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         if state.active_turns.for_session(session_id).is_empty() {
@@ -2119,7 +2176,7 @@ async fn wait_for_active_turns_empty(state: &AppState, session_id: &str, timeout
 async fn session_lease_generation(
     data_dir: &std::path::Path,
     backend: &str,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> i64 {
     match backend {
         "sqlite" => {
@@ -2149,7 +2206,7 @@ async fn session_lease_generation(
                 "SELECT lease_fencing_token FROM lash_session_execution_leases
                  WHERE session_id = $1",
             )
-            .bind(session_id)
+            .bind(session_id.as_str())
             .fetch_one(&pool)
             .await
             .expect("read recovery E2E Postgres session lease generation")
@@ -2161,7 +2218,7 @@ async fn session_lease_generation(
 async fn wait_for_session_lease_generation(
     data_dir: &std::path::Path,
     backend: &str,
-    session_id: &str,
+    session_id: &SessionId,
     expected: i64,
     timeout: Duration,
 ) {

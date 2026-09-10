@@ -3,6 +3,8 @@ use super::{
     cron_occurrence_key, cron_session_disposition, emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -66,7 +68,7 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
 
     async fn delete_session_subscriptions(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<usize, lash::plugins::PluginError> {
         self.inner.delete_session_subscriptions(session_id).await
     }
@@ -105,7 +107,7 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
 
     async fn list_deliveries_by_process_id(
         &self,
-        process_id: &str,
+        process_id: &ProcessId,
     ) -> Result<Vec<lash::triggers::TriggerDeliveryReservation>, lash::plugins::PluginError> {
         self.inner.list_deliveries_by_process_id(process_id).await
     }
@@ -116,7 +118,9 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
         self.inner.list_deliveries().await
     }
 
-    async fn list_delivery_process_ids(&self) -> Result<Vec<String>, lash::plugins::PluginError> {
+    async fn list_delivery_process_ids(
+        &self,
+    ) -> Result<Vec<ProcessId>, lash::plugins::PluginError> {
         self.inner.list_delivery_process_ids().await
     }
 
@@ -129,14 +133,14 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
 
     async fn list_session_owner_ids_for_retention(
         &self,
-    ) -> Result<Vec<String>, lash::plugins::PluginError> {
+    ) -> Result<Vec<SessionId>, lash::plugins::PluginError> {
         self.inner.list_session_owner_ids_for_retention().await
     }
 
     async fn reconcile_trigger_retention(
         &self,
         candidates: &[lash::triggers::TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[String],
+        deleted_session_ids: &[SessionId],
     ) -> Result<lash::triggers::TriggerRetentionReconciliationReport, lash::plugins::PluginError>
     {
         self.inner
@@ -192,7 +196,7 @@ fn cron_occurrence_key_is_unique_per_tick() {
 fn cron_sync_classifies_permanent_errors_terminal_and_unknown_errors_retryable() {
     let deleted = classified_embed_handler_error(lash::EmbedError::Store(
         lash::persistence::StoreError::SessionDeleted {
-            session_id: "retired-session".to_string(),
+            session_id: SessionId::from("retired-session"),
         },
     ));
     let deleted_rendered =
@@ -240,14 +244,14 @@ fn runtime_shape_uses_the_shared_terminal_classifier() {
             "retired controller-owned session",
         )
         .with_cause(lash::runtime::RuntimeErrorCause::SessionDeleted {
-            session_id: "retired-session".to_string(),
+            session_id: SessionId::from("retired-session"),
         }),
     ));
 
     assert_eq!(error.verdict, crate::AppErrorVerdict::Terminal);
     assert_eq!(
         error.message,
-        crate::deleted_session_message("retired-session")
+        crate::deleted_session_message(&SessionId::from("retired-session"))
     );
 }
 
@@ -260,10 +264,13 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
     )
     .await;
     let session_id = state.current_session_id();
-    state.track_turn(&session_id, &TurnId::from("replacement-aborted-turn"));
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("replacement-aborted-turn"),
+    );
     let error = super::terminalize_turn_execution(
         &state,
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &TurnId::from("replacement-aborted-turn"),
         "replacement.aborted",
         Ok(Err(AppError::runtime(lash::EmbedError::Plugin(
@@ -294,11 +301,14 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
         "replacement abort must redact envelope hashes at the conflict boundary: {rendered}"
     );
     assert!(
-        state.active_turns.for_session(&session_id).is_empty(),
+        state
+            .active_turns
+            .for_session(&SessionId::from(session_id.clone()))
+            .is_empty(),
         "replacement abort must retire the active turn before returning"
     );
     let session = state
-        .open_session(&session_id)
+        .open_session(&SessionId::from(session_id))
         .await
         .expect("the settled replacement abort must leave the session reopenable");
     session
@@ -326,7 +336,7 @@ fn foreign_effect_controller_codes_remain_explicit_extensions() {
 #[test]
 fn nested_deleted_session_details_preserve_controller_store_context() {
     let source = lash::persistence::StoreError::SessionDeleted {
-        session_id: "retired-nested-context".to_string(),
+        session_id: SessionId::from("retired-nested-context"),
     };
     let error = lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(
         lash::runtime::RuntimeEffectControllerError::from(source),
@@ -349,7 +359,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: lash::persistence::SessionRelation::default(),
                 policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
             })
@@ -357,7 +367,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
             .expect("create session before retirement"),
     );
     store_factory
-        .delete_session(session_id)
+        .delete_session(&SessionId::from(session_id))
         .await
         .expect("retire queued-work session");
     let queued_work_driver =
@@ -370,7 +380,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         }));
 
     let error = queued_work_driver
-        .drain_session(session_id, "retired_session_regression")
+        .drain_session(&SessionId::from(session_id), "retired_session_regression")
         .await
         .expect_err("the queued-work wake must refuse the retired session");
     let classified = AppError::runtime(lash::EmbedError::Plugin(error.clone()));
@@ -378,7 +388,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
     assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);
     assert_eq!(
         classified.message,
-        crate::deleted_session_message(session_id)
+        crate::deleted_session_message(&SessionId::from(session_id))
     );
     assert_eq!(classified.verdict, crate::AppErrorVerdict::Terminal);
 
@@ -391,7 +401,9 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         "the retired-session refusal must be terminal: {rendered}"
     );
     assert!(
-        rendered.contains(&crate::deleted_session_message(session_id)),
+        rendered.contains(&crate::deleted_session_message(&SessionId::from(
+            session_id
+        ))),
         "the terminal must retain the canonical message: {rendered}"
     );
 
@@ -410,14 +422,14 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
 #[tokio::test]
 async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unknown_failures() {
     let session_id = "retired-cron-occurrence";
-    let canonical = crate::deleted_session_message(session_id);
+    let canonical = crate::deleted_session_message(&SessionId::from(session_id));
     let cases = [
         (
             "typed permanent refusal",
             lash::plugins::PluginError::RuntimeEffectController(
                 lash::runtime::RuntimeEffectControllerError::from(
                     lash::persistence::StoreError::SessionDeleted {
-                        session_id: session_id.to_string(),
+                        session_id: SessionId::from(session_id.to_string()),
                     },
                 ),
             ),
@@ -448,7 +460,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
         let error = match emit_cron_occurrence_with_effect_controller(
             state,
             WorkbenchCronRequest {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 source_key: "test-source".to_string(),
                 expr: "*/10 * * * * *".to_string(),
                 tz: Some("UTC".to_string()),
@@ -522,7 +534,7 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
     ));
     let controller = CountingProcessEffectController::default();
     let request = WorkbenchCronRequest {
-        session_id: "fig806-cron-session".to_string(),
+        session_id: SessionId::from("fig806-cron-session"),
         source_key: source_key.to_string(),
         expr: "*/10 * * * * *".to_string(),
         tz: Some("UTC".to_string()),
@@ -695,7 +707,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
 
 async fn counted_settlement_attempts(
     state: &crate::AppState,
-    session_id: &str,
+    session_id: &SessionId,
     code: lash::runtime::RuntimeErrorCode,
 ) -> usize {
     for attempt in 1..=2 {
@@ -732,7 +744,7 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
     assert_eq!(
         counted_settlement_attempts(
             &state,
-            "fig1058-terminal-settlement",
+            &SessionId::from("fig1058-terminal-settlement"),
             lash::runtime::RuntimeErrorCode::PostgresEffectReplayLeaseLost,
         )
         .await,
@@ -742,7 +754,7 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
     assert_eq!(
         counted_settlement_attempts(
             &state,
-            "fig1058-retryable-settlement",
+            &SessionId::from("fig1058-retryable-settlement"),
             lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,
         )
         .await,
@@ -752,7 +764,7 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
     assert_eq!(
         counted_settlement_attempts(
             &state,
-            "fig1058-decode-settlement",
+            &SessionId::from("fig1058-decode-settlement"),
             lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,
         )
         .await,
@@ -782,7 +794,7 @@ async fn turn_body_reader_treats_ambiguous_errors_as_terminal() {
 
     let error = super::terminalize_turn_execution(
         &state,
-        &session_id,
+        &SessionId::from(session_id),
         &TurnId::from("fig1858-ambiguous-turn-body"),
         "fig1858.ambiguous_turn_body",
         Ok(Err(AppError::internal("ambiguous turn failure"))),
@@ -818,7 +830,7 @@ mod cron_tests;
 trait QueuedWorkExt {
     async fn drain_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError>;
 }
@@ -827,12 +839,12 @@ trait QueuedWorkExt {
 impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
     async fn drain_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError> {
         lash::runtime::QueuedWorkSubstrate::drain_session_work(
             self,
-            lash::runtime::SessionWorkTarget::Session(session_id.to_string()),
+            lash::runtime::SessionWorkTarget::Session(SessionId::from(session_id.to_string())),
             reason,
         )
         .await

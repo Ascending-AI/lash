@@ -1,3 +1,4 @@
+use lash::ProcessId;
 use lashlang::{
     ProcessParam, ProcessSignalDecl, WorkflowNode, WorkflowNodeKind, WorkflowNodeNameSource,
     WorkflowProcess, WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
@@ -27,7 +28,7 @@ pub(super) fn process_from_data(
         return_ty: None,
         body: WorkflowSubgraph::default(),
     });
-    let process_id = process.id.to_string();
+    let process_id = ProcessId::from(process.id.to_string());
     let name = data.process_name.as_deref().unwrap_or(data.name.title());
     process.name = editable_identifier(&process_id, "name", name)?;
     process.display_name = data.name.title().to_string();
@@ -46,7 +47,10 @@ pub(super) fn process_from_data(
     Ok(process)
 }
 
-pub(super) fn seeded_process_body(process_id: &str, params: &[ProcessParam]) -> WorkflowSubgraph {
+pub(super) fn seeded_process_body(
+    process_id: &ProcessId,
+    params: &[ProcessParam],
+) -> WorkflowSubgraph {
     WorkflowSubgraph {
         nodes: vec![WorkflowNode {
             id: workflow_node_id(&format!("{process_id}:seed:finish")),
@@ -82,7 +86,7 @@ pub(super) fn editable_process_signal(signal: &ProcessSignalDecl) -> EditablePro
 }
 
 fn process_param_from_data(
-    process_id: &str,
+    process_id: &ProcessId,
     field: &EditableProcessField,
 ) -> Result<ProcessParam, RenderErrorResponse> {
     Ok(ProcessParam {
@@ -92,7 +96,7 @@ fn process_param_from_data(
 }
 
 fn process_signal_from_data(
-    process_id: &str,
+    process_id: &ProcessId,
     field: &EditableProcessField,
 ) -> Result<ProcessSignalDecl, RenderErrorResponse> {
     Ok(ProcessSignalDecl {
@@ -124,7 +128,7 @@ fn editable_identifier(
 }
 
 fn editable_process_type(
-    process_id: &str,
+    process_id: &ProcessId,
     field: &str,
     value: &str,
 ) -> Result<lashlang::TypeExpr, RenderErrorResponse> {

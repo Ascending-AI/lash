@@ -1,4 +1,6 @@
 use super::*;
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 
 pub(crate) async fn healthz() -> Json<serde_json::Value> {
@@ -17,12 +19,14 @@ pub(crate) async fn app_state(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    let active_turns = state.active_turns.for_session(&session_id);
+    let active_turns = state
+        .active_turns
+        .for_session(&SessionId::from(session_id.clone()));
     let StateProjectionReads {
         read_view,
         cursor,
@@ -30,7 +34,12 @@ pub(crate) async fn app_state(
         queued_work,
         turn_input_applications,
         usage,
-    } = read_state_projection(&state, &session_id, !active_turns.is_empty()).await?;
+    } = read_state_projection(
+        &state,
+        &SessionId::from(session_id.clone()),
+        !active_turns.is_empty(),
+    )
+    .await?;
     // The badge reads the dialect this session recorded, from the same read
     // view the transcript labels its cells from (FIG-1306).
     // Strict (FIG-1979): a recorded bag that does not decode is an error the
@@ -65,12 +74,14 @@ pub(crate) async fn app_state(
         pending_message_nodes.extend(node.children);
     }
     state.event_tx.reconcile_settled(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &committed_message_ids,
         &committed_input_turn_ids,
         &active_turn_ids,
     );
-    let product_events = state.event_tx.snapshot(&session_id);
+    let product_events = state
+        .event_tx
+        .snapshot(&SessionId::from(session_id.clone()));
     let product_messages = product_events
         .events
         .iter()
@@ -103,7 +114,8 @@ pub(crate) async fn app_state(
     Ok(Json(StateReadSnapshot {
         transcript,
         state: StateSnapshot {
-            settings: state.settings_for_session(session_id.clone(), recorded_dialect),
+            settings: state
+                .settings_for_session(SessionId::from(session_id.clone()), recorded_dialect),
             messages,
             observation,
             product_events,
@@ -238,11 +250,12 @@ pub(crate) async fn session_events(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
-    let (replay, mut product_events) = state
-        .event_tx
-        .subscribe_after(&session_id, query.cursor.unwrap_or(0));
+    let (replay, mut product_events) = state.event_tx.subscribe_after(
+        &SessionId::from(session_id.clone()),
+        query.cursor.unwrap_or(0),
+    );
     let event_registry = state.event_tx.clone();
     let (tx, rx) = mpsc::channel::<ProductStreamItem>(64);
     tokio::spawn(async move {
@@ -261,7 +274,7 @@ pub(crate) async fn session_events(
                 Err(broadcast::error::RecvError::Lagged(_count)) => {
                     let _ = tx
                         .send(ProductStreamItem::Resync {
-                            snapshot: event_registry.snapshot(&session_id),
+                            snapshot: event_registry.snapshot(&SessionId::from(session_id.clone())),
                         })
                         .await;
                 }
@@ -287,12 +300,18 @@ pub(crate) async fn session_observations(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
     let session = state
-        .open_session_for_observation(&session_id)
+        .open_session_for_observation(&SessionId::from(session_id.clone()))
         .await
-        .map_err(|error| state.session_admission_error(&session_id, "api.observations", error))?;
+        .map_err(|error| {
+            state.session_admission_error(
+                &SessionId::from(session_id.clone()),
+                "api.observations",
+                error,
+            )
+        })?;
     let cursor = match query
         .cursor
         .as_deref()
@@ -363,11 +382,11 @@ pub(crate) async fn send_turn(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
     // Last-active is a fact about use, so it moves when a turn is sent rather
     // than when a poll reads the session.
-    state.sessions.touch(&session_id);
+    state.sessions.touch(&SessionId::from(session_id.clone()));
     let attachment = match attachment_id.as_deref() {
         None => None,
         Some(attachment_id) => match state
@@ -396,7 +415,7 @@ pub(crate) async fn send_turn(
         request.model_variant.as_deref(),
     )?;
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.turn.request",
         json!({
             "text": text.clone(),
@@ -416,10 +435,14 @@ pub(crate) async fn send_turn(
     // The initial read selects the ordinary busy path without opening a runtime
     // session. The atomic reservation below rechecks after that open, closing
     // the race with another send or a queued-work runner.
-    if !state.active_turns.for_session(&session_id).is_empty() {
+    if !state
+        .active_turns
+        .for_session(&SessionId::from(session_id.clone()))
+        .is_empty()
+    {
         return admit_queued_send(
             &state,
-            &session_id,
+            &SessionId::from(session_id.clone()),
             text,
             attachment.map(|attachment| attachment.bytes),
         )
@@ -427,9 +450,15 @@ pub(crate) async fn send_turn(
     }
     drop(
         state
-            .open_session(&session_id)
+            .open_session(&SessionId::from(session_id.clone()))
             .await
-            .map_err(|error| state.session_admission_error(&session_id, "api.turn", error))?,
+            .map_err(|error| {
+                state.session_admission_error(
+                    &SessionId::from(session_id.clone()),
+                    "api.turn",
+                    error,
+                )
+            })?,
     );
     let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     let chat_attachments = attachment_id
@@ -437,10 +466,18 @@ pub(crate) async fn send_turn(
         .cloned()
         .map(ChatAttachment::from_id)
         .collect();
-    let cleanup = ActiveTurnSubmissionGuard::user_turn(&state, &session_id, &turn_id);
-    state.trace_for_session(&session_id, "api.turn.claim_ready", json!({}));
+    let cleanup = ActiveTurnSubmissionGuard::user_turn(
+        &state,
+        &SessionId::from(session_id.clone()),
+        &turn_id,
+    );
+    state.trace_for_session(
+        &SessionId::from(session_id.clone()),
+        "api.turn.claim_ready",
+        json!({}),
+    );
     match state.active_turns.try_insert_with_prompt_for_idle_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &turn_id,
         Some(text.clone()),
         attachment_id.clone(),
@@ -450,7 +487,7 @@ pub(crate) async fn send_turn(
             cleanup.complete();
             return admit_queued_send(
                 &state,
-                &session_id,
+                &SessionId::from(session_id.clone()),
                 text,
                 attachment.map(|attachment| attachment.bytes),
             )
@@ -461,7 +498,11 @@ pub(crate) async fn send_turn(
         // the admission read would have.
         ActiveTurnClaim::Refused(retirement) => {
             cleanup.complete();
-            return Err(state.retirement_fence_refusal(&session_id, "api.turn", retirement));
+            return Err(state.retirement_fence_refusal(
+                &SessionId::from(session_id.clone()),
+                "api.turn",
+                retirement,
+            ));
         }
     }
     tokio::spawn(commit_and_submit_user_turn(
@@ -469,7 +510,7 @@ pub(crate) async fn send_turn(
         cleanup,
         restate::WorkbenchTurnWorkflowRequest {
             turn_id,
-            session_id,
+            session_id: SessionId::from(session_id.clone()),
             text,
             model: ModelSelection::from_spec(&turn_model),
             attachment_id,
@@ -497,7 +538,7 @@ pub(crate) async fn button_trigger(
     let model = ModelSelection::from_spec(&turn_model);
     state.set_selected_model(model.clone());
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.button_trigger.request",
         json!({
             "button": request.button,
@@ -506,7 +547,7 @@ pub(crate) async fn button_trigger(
     );
     let pressed_at = Utc::now().to_rfc3339();
     state.push_message_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "event",
         format!("{} button trigger occurrence", request.button.lower()),
     );
@@ -514,7 +555,7 @@ pub(crate) async fn button_trigger(
         &state,
         restate::WorkbenchButtonTriggerWorkflowRequest {
             operation_id: format!("workbench-button-{}", uuid::Uuid::new_v4()),
-            session_id,
+            session_id: SessionId::from(session_id.clone()),
             button: request.button,
             model,
             pressed_at,
@@ -558,7 +599,12 @@ pub(crate) async fn set_trigger_enabled(
     Json(request): Json<TriggerEnabledRequest>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
     let session_id = state.admit_session(&query, "api.triggers.enable").await?;
-    let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
+    let record = trigger_record_for_session(
+        &state,
+        &SessionId::from(session_id.clone()),
+        &subscription_key,
+    )
+    .await?;
     let changed = record.enabled != request.enabled;
     let command = if request.enabled {
         lash::triggers::TriggerCommand::Enable {
@@ -597,7 +643,7 @@ pub(crate) async fn set_trigger_enabled(
         ));
     };
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.triggers.enabled",
         json!({
             "subscription_key": subscription_key,
@@ -610,7 +656,7 @@ pub(crate) async fn set_trigger_enabled(
     // A sync failure leaves the mutation durable and Restate stale; the next sync reconciles.
     restate::sync_cron_jobs_after_trigger_mutation(
         &state,
-        &session_id,
+        &SessionId::from(session_id.clone()),
         if request.enabled {
             "trigger_enabled"
         } else {
@@ -631,8 +677,18 @@ pub(crate) async fn delete_trigger(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
     let session_id = state.admit_session(&query, "api.triggers.delete").await?;
-    let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
-    restate::cancel_cron_job_before_trigger_delete(&state, &session_id, &record).await?;
+    let record = trigger_record_for_session(
+        &state,
+        &SessionId::from(session_id.clone()),
+        &subscription_key,
+    )
+    .await?;
+    restate::cancel_cron_job_before_trigger_delete(
+        &state,
+        &SessionId::from(session_id.clone()),
+        &record,
+    )
+    .await?;
     state
         .trigger_store
         .execute_command(
@@ -653,7 +709,7 @@ pub(crate) async fn delete_trigger(
         .map_err(AppError::internal)?;
     let changed = true;
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.triggers.delete",
         json!({ "subscription_key": subscription_key, "changed": changed }),
     );
@@ -665,7 +721,7 @@ pub(crate) async fn delete_trigger(
 
 pub(crate) async fn trigger_record_for_session(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     subscription_key: &str,
 ) -> Result<lash::triggers::TriggerSubscriptionRecord, AppError> {
     let mut filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
@@ -750,9 +806,16 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     reason: &str,
 ) -> Result<lash::SessionCommandReceipt, AppError> {
     let session_id = state.current_session_id();
-    let session = state.open_session(&session_id).await.map_err(|error| {
-        state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
-    })?;
+    let session = state
+        .open_session(&SessionId::from(session_id.clone()))
+        .await
+        .map_err(|error| {
+            state.session_admission_error(
+                &SessionId::from(session_id.clone()),
+                "mail.tool_catalog.refresh",
+                error,
+            )
+        })?;
     let receipt = session
         .admin()
         .commands()
@@ -769,7 +832,7 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
         .map_err(AppError::runtime)?;
     session.close().await.map_err(AppError::session_open)?;
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "mail.tool_catalog.refresh_enqueued",
         json!({
             "reason": reason,
@@ -804,12 +867,12 @@ pub(crate) async fn inject_message(
     let message = delivered.message;
     let delivery = delivered.delivery;
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.accounts.inject",
         json!({ "account": slug, "title": message.title }),
     );
     state.push_message_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "event",
         format!("message delivered to `inbox.{}`: {}", slug, message.title),
     );
@@ -817,7 +880,7 @@ pub(crate) async fn inject_message(
         &state,
         restate::WorkbenchMailReceivedWorkflowRequest {
             operation_id: format!("workbench-mail-{}", uuid::Uuid::new_v4()),
-            session_id,
+            session_id: SessionId::from(session_id.clone()),
             model,
             delivery,
         },
@@ -832,13 +895,16 @@ pub(crate) async fn reset_chat(
     let old_session_id = state
         .admit_session_for_delete(&query, "api.session.delete")
         .await?;
-    retire_session(&state, &old_session_id).await?;
-    state.event_tx.remove(&old_session_id);
-    let retired_dialect = state.requested_dialect(&old_session_id);
-    let (new_session_id, replaced_current) =
-        state.sessions.replace(&old_session_id, retired_dialect);
+    retire_session(&state, &SessionId::from(old_session_id.clone())).await?;
+    state
+        .event_tx
+        .remove(&SessionId::from(old_session_id.clone()));
+    let retired_dialect = state.requested_dialect(&SessionId::from(old_session_id.clone()));
+    let (new_session_id, replaced_current) = state
+        .sessions
+        .replace(&SessionId::from(old_session_id.clone()), retired_dialect);
     state.trace_for_session(
-        &old_session_id,
+        &SessionId::from(old_session_id.clone()),
         "api.reset",
         json!({
             "old_session_id": old_session_id,
@@ -847,7 +913,7 @@ pub(crate) async fn reset_chat(
         }),
     );
     let session = state
-        .open_session(&new_session_id)
+        .open_session(&SessionId::from(new_session_id.clone()))
         .await
         .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
@@ -870,9 +936,10 @@ pub(crate) async fn reset_chat(
     // The rotated session has committed nothing yet, so it has recorded no
     // dialect: the badge shows the dialect it will be opened with, which the
     // rotation carried over from the session it replaced.
-    let rotated_dialect = state.requested_dialect(&new_session_id);
+    let rotated_dialect = state.requested_dialect(&SessionId::from(new_session_id.clone()));
     Ok(Json(StateSnapshot {
-        settings: state.settings_for_session(new_session_id, rotated_dialect),
+        settings: state
+            .settings_for_session(SessionId::from(new_session_id.clone()), rotated_dialect),
         messages: Vec::new(),
         observation: session.observe().current_remote_observation(),
         product_events: ProductEventSnapshot::default(),
@@ -926,7 +993,7 @@ pub(crate) async fn list_work(
         .map(work_item_from_observed)
         .collect::<Vec<_>>();
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.work.response",
         json!({
             "count": work.len(),
@@ -950,13 +1017,17 @@ pub(crate) async fn list_queued_work(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
     let session = state
-        .open_session_for_observation(&session_id)
+        .open_session_for_observation(&SessionId::from(session_id.clone()))
         .await
         .map_err(|error| {
-            state.session_admission_error(&session_id, "api.queued_work.list", error)
+            state.session_admission_error(
+                &SessionId::from(session_id.clone()),
+                "api.queued_work.list",
+                error,
+            )
         })?;
     Ok(Json(
         session.queued_work().await.map_err(AppError::internal)?,
@@ -972,16 +1043,27 @@ pub(crate) async fn run_queued_work_batch(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
-    if !state.active_turns.for_session(&session_id).is_empty() {
+    if !state
+        .active_turns
+        .for_session(&SessionId::from(session_id.clone()))
+        .is_empty()
+    {
         return Err(AppError::conflict(
             "queued work cannot be run while this session has an active turn",
         ));
     }
-    let session = state.open_session(&session_id).await.map_err(|error| {
-        state.session_admission_error(&session_id, "api.queued_work.run", error)
-    })?;
+    let session = state
+        .open_session(&SessionId::from(session_id.clone()))
+        .await
+        .map_err(|error| {
+            state.session_admission_error(
+                &SessionId::from(session_id.clone()),
+                "api.queued_work.run",
+                error,
+            )
+        })?;
     if !session
         .queued_work()
         .await
@@ -997,16 +1079,19 @@ pub(crate) async fn run_queued_work_batch(
     let turn_id = TurnId::from(format!("workbench-queued-{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchQueuedTurnWorkflowRequest {
         turn_id: turn_id.clone(),
-        session_id: session_id.clone(),
+        session_id: SessionId::from(session_id.clone()),
         reason: "workbench_manual_batch_run".to_string(),
         batch_ids: vec![batch_id.clone()],
         drain_id: Some(format!("workbench-queued-batch:{batch_id}")),
     };
-    let cleanup =
-        ActiveTurnSubmissionGuard::queued_turn(state.active_turns.clone(), &session_id, &turn_id);
+    let cleanup = ActiveTurnSubmissionGuard::queued_turn(
+        state.active_turns.clone(),
+        &SessionId::from(session_id.clone()),
+        &turn_id,
+    );
     match state
         .active_turns
-        .try_insert_for_idle_session(&session_id, &turn_id)
+        .try_insert_for_idle_session(&SessionId::from(session_id.clone()), &turn_id)
     {
         ActiveTurnClaim::Claimed => {}
         ActiveTurnClaim::Busy => {
@@ -1018,7 +1103,7 @@ pub(crate) async fn run_queued_work_batch(
         ActiveTurnClaim::Refused(retirement) => {
             cleanup.complete();
             return Err(state.retirement_fence_refusal(
-                &session_id,
+                &SessionId::from(session_id.clone()),
                 "api.queued_work.run",
                 retirement,
             ));
@@ -1035,7 +1120,7 @@ pub(crate) async fn run_queued_work_batch(
         AppError::internal(format!("queued-turn submission task failed: {error}"))
     })??;
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.queued_work.run_submitted",
         json!({ "batch_id": batch_id, "turn_id": turn_id }),
     );
@@ -1056,11 +1141,18 @@ pub(crate) async fn cancel_queued_work_batch(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
-    let session = state.open_session(&session_id).await.map_err(|error| {
-        state.session_admission_error(&session_id, "api.queued_work.cancel", error)
-    })?;
+    let session = state
+        .open_session(&SessionId::from(session_id.clone()))
+        .await
+        .map_err(|error| {
+            state.session_admission_error(
+                &SessionId::from(session_id.clone()),
+                "api.queued_work.cancel",
+                error,
+            )
+        })?;
     if session
         .cancel_queued_work_batch(&batch_id)
         .await
@@ -1072,7 +1164,7 @@ pub(crate) async fn cancel_queued_work_batch(
         )));
     }
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.queued_work.cancelled",
         json!({ "batch_id": batch_id }),
     );
@@ -1088,7 +1180,7 @@ pub(crate) async fn cancel_work(
 ) -> Result<Json<ProcessCancelAccepted>, AppError> {
     let process = state
         .process_observer
-        .process(&process_id)
+        .process(&ProcessId::from(process_id.clone()))
         .await
         // Audited: process lookup reads the global registry, which has no session tombstone contract.
         .map_err(AppError::internal)?
@@ -1100,7 +1192,9 @@ pub(crate) async fn cancel_work(
     }
     let session_id = match &process.originator {
         lash::process::ProcessOriginator::Session { session_id, .. } => session_id.clone(),
-        lash::process::ProcessOriginator::Host { .. } => state.current_session_id(),
+        lash::process::ProcessOriginator::Host { .. } => {
+            SessionId::from(state.current_session_id())
+        }
     };
     let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());
     restate::submit_process_cancel(
@@ -1108,7 +1202,7 @@ pub(crate) async fn cancel_work(
         restate::WorkbenchProcessCancelWorkflowRequest {
             operation_id: operation_id.clone(),
             session_id: session_id.clone(),
-            process_id: process_id.clone(),
+            process_id: ProcessId::from(process_id.clone()),
         },
     )
     .await?;
@@ -1123,7 +1217,7 @@ pub(crate) async fn cancel_work(
     Ok(Json(ProcessCancelAccepted {
         accepted: true,
         operation_id,
-        process_id,
+        process_id: ProcessId::from(process_id.clone()),
     }))
 }
 
@@ -1144,7 +1238,10 @@ pub(crate) async fn await_work(
     const AWAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
     let outcome = match tokio::time::timeout(
         AWAIT_TIMEOUT,
-        state.core.processes().await_output(&process_id),
+        state
+            .core
+            .processes()
+            .await_output(&ProcessId::from(process_id.clone())),
     )
     .await
     {
@@ -1160,7 +1257,7 @@ pub(crate) async fn await_work(
     let events: Vec<WorkAwaitEvent> = state
         .core
         .processes()
-        .events(&process_id, 0)
+        .events(&ProcessId::from(process_id.clone()), 0)
         .await
         // Audited: process-event reads use the global registry and have no session tombstone contract.
         .map_err(AppError::internal)?
@@ -1179,7 +1276,7 @@ pub(crate) async fn await_work(
         }),
     );
     Ok(Json(WorkAwaitResult {
-        process_id,
+        process_id: ProcessId::from(process_id.clone()),
         outcome,
         events,
     }))
@@ -1192,7 +1289,7 @@ pub(crate) async fn list_lashlang_graphs(
     let session_id = state.admit_session(&query, "api.lashlang_graphs").await?;
     let index = execution_graphs::index_for_session(
         &state.process_observer,
-        &session_id,
+        &SessionId::from(session_id.clone()),
         state.lashlang_execution.graphs(),
     )
     .await?;
@@ -1207,7 +1304,7 @@ pub(crate) async fn lashlang_graph(
     let session_id = state.admit_session(&query, "api.lashlang_graph").await?;
     let graph = execution_graphs::visible_graph_by_key(
         &state.process_observer,
-        &session_id,
+        &SessionId::from(session_id.clone()),
         state.lashlang_execution.graphs(),
         &graph_key,
     )
@@ -1399,7 +1496,7 @@ pub(crate) fn fold_turn_activities<'a>(
 
 pub(crate) async fn enqueue_button_trigger_command(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     button: ButtonChoice,
     pressed_at: &str,
     operation_id: &str,
@@ -1444,7 +1541,7 @@ pub(crate) async fn enqueue_button_trigger_command(
 
 pub(crate) async fn enqueue_mail_received_trigger_command(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     message: &mail::MailDelivery,
     operation_id: &str,
     scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,

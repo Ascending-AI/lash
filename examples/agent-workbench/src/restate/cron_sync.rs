@@ -1,9 +1,10 @@
 use super::*;
+use lash::SessionId;
 
 pub(super) async fn sync_cron_jobs_with_context(
     state: &AppState,
     ctx: &WorkflowContext<'_>,
-    session_id: &str,
+    session_id: &SessionId,
     reason: &str,
 ) -> HandlerResult<()> {
     sync_cron_jobs(
@@ -93,7 +94,7 @@ impl CronJobSyncSurface for IngressCronJobSyncSurface {
 /// disabled job cancellable even when this process did not originally arm it.
 pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     reason: &str,
     affected_registration: &lash::triggers::TriggerSubscriptionRecord,
 ) -> Result<(), AppError> {
@@ -103,7 +104,7 @@ pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
     state
         .restate_cron_job_keys
         .lock_recover()
-        .entry(session_id.to_string())
+        .entry(SessionId::from(session_id.to_string()))
         .or_default()
         .insert(cron_job_key(session_id, &affected_registration.source_key));
     let surface = IngressCronJobSyncSurface {
@@ -122,7 +123,7 @@ pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
 /// for a later retry instead of orphaning a live external job.
 pub(crate) async fn cancel_cron_job_before_trigger_delete(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     affected_registration: &lash::triggers::TriggerSubscriptionRecord,
 ) -> Result<(), AppError> {
     if affected_registration.source_type != CRON_SCHEDULE_SOURCE_TYPE {
@@ -165,7 +166,7 @@ pub(super) struct CronSyncPlan {
 }
 
 pub(super) fn cron_sync_plan(
-    session_id: &str,
+    session_id: &SessionId,
     registrations: &[lash::triggers::TriggerRegistration],
     mut known: BTreeSet<String>,
 ) -> CronSyncPlan {
@@ -192,7 +193,7 @@ pub(super) fn cron_sync_plan(
 async fn sync_cron_jobs<S, Classify>(
     state: &AppState,
     surface: &S,
-    session_id: &str,
+    session_id: &SessionId,
     reason: &str,
     classify_embed_error: Classify,
 ) -> Result<(), S::Error>
@@ -267,7 +268,7 @@ where
     state
         .restate_cron_job_keys
         .lock_recover()
-        .insert(session_id.to_string(), active);
+        .insert(SessionId::from(session_id.to_string()), active);
     Ok(())
 }
 /// Idempotency key for one cron tick's trigger occurrence. Must be unique
@@ -378,7 +379,7 @@ pub(super) async fn journaled_now(
 pub(super) async fn journaled_workbench_trace(
     ctx: &ObjectContext<'_>,
     state: AppState,
-    session_id: String,
+    session_id: SessionId,
     name: &'static str,
     payload: Value,
     effect_name: &'static str,
@@ -418,6 +419,6 @@ fn next_cron_time(
         .map_err(|err| format!("cron expression `{expr}` has no next occurrence: {err}"))
 }
 
-pub(crate) fn cron_job_key(session_id: &str, source_key: &str) -> String {
+pub(crate) fn cron_job_key(session_id: &SessionId, source_key: &str) -> String {
     format!("{session_id}:{source_key}")
 }

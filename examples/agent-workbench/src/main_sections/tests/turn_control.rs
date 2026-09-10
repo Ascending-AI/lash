@@ -3,6 +3,7 @@ use super::tests::{
     spawn_restate_ingress_capture, text_response,
 };
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 struct ExpiringTerminalAttach {
@@ -172,7 +173,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(no_active.status, StatusCode::CONFLICT);
 
     state.track_turn_prompt(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &TurnId::from("running-turn"),
         "restored active prompt".to_string(),
         None,
@@ -248,9 +249,13 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(snapshot.pending_turn_inputs[0].input_id, injected.input_id);
     assert_eq!(snapshot.pending_turn_inputs[1].input_id, queued.input_id);
 
-    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("running-turn"))
-        .await
-        .expect("settle running turn");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("running-turn"),
+    )
+    .await
+    .expect("settle running turn");
     let session = state
         .core
         .session(session_id.clone())
@@ -265,14 +270,21 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     assert_eq!(after_settle[0].input_id, queued.input_id);
     session.close().await.expect("close session after settle");
 
-    state.track_turn(&session_id, &TurnId::from("settle-race-turn"));
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("settle-race-turn"),
+    );
     let checked_ingress = lash::persistence::TurnInputIngress::active_turn(
         "settle-race-turn",
         lash::persistence::TurnInputCheckpointBoundary::AfterWork,
     );
-    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("settle-race-turn"))
-        .await
-        .expect("settle turn between route check and enqueue");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("settle-race-turn"),
+    )
+    .await
+    .expect("settle turn between route check and enqueue");
     let raced = state
         .core
         .enqueue_turn_input(
@@ -421,14 +433,20 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     let admin_url = spawn_restate_admin_with_workflow_status(None).await;
     let state = turn_cancel_test_state(&data_dir, admin_url).await;
     let session_id = state.current_session_id();
-    let mut events = state.event_tx.subscribe(&session_id);
-    state.track_turn(&session_id, &TurnId::from("dangling-turn"));
+    let mut events = state
+        .event_tx
+        .subscribe(&SessionId::from(session_id.clone()));
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("dangling-turn"),
+    );
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);
     let receipts = tokio::time::timeout(Duration::from_secs(1), async {
+        let cancel_session = SessionId::from(session_id.clone());
         tokio::join!(
             state.cancel_turns_for_session_with_driver(
-                &session_id,
+                &cancel_session,
                 &driver,
                 WorkbenchTurnCancelMode::Abort
             ),
@@ -447,7 +465,12 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
             ..
         }]
     ));
-    assert!(state.active_turns.for_session(&session_id).is_empty());
+    assert!(
+        state
+            .active_turns
+            .for_session(&SessionId::from(session_id.clone()))
+            .is_empty()
+    );
     assert!(
         events.try_recv().is_err(),
         "pruning a route is not terminal evidence"
@@ -456,7 +479,11 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     assert!(ui::INDEX_HTML.contains("turn route cleared · terminal outcome unknown"));
     let recovered =
         ActiveTurns::persistent(data_dir.join("active-turns.json")).expect("reopen active turns");
-    assert!(recovered.for_session(&session_id).is_empty());
+    assert!(
+        recovered
+            .for_session(&SessionId::from(session_id))
+            .is_empty()
+    );
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -476,8 +503,13 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
     let admin_url = spawn_restate_admin_with_workflow_status(Some("suspended")).await;
     let state = turn_cancel_test_state(&data_dir, admin_url).await;
     let session_id = state.current_session_id();
-    let mut events = state.event_tx.subscribe(&session_id);
-    state.track_turn(&session_id, &TurnId::from("live-turn"));
+    let mut events = state
+        .event_tx
+        .subscribe(&SessionId::from(session_id.clone()));
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("live-turn"),
+    );
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);
     let response = tokio::time::timeout(Duration::from_secs(1), async {
@@ -486,7 +518,7 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
                 state.clone(),
                 TurnCancelQuery {
                     session: SessionQuery {
-                        session_id: Some(session_id.clone())
+                        session_id: Some(SessionId::from(session_id.clone()))
                     },
                     mode: WorkbenchTurnCancelMode::Abort,
                 },
@@ -535,14 +567,16 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
     assert!(cancellation.get("terminal").is_none());
     assert!(cancellation.get("terminal_error").is_none());
     assert_eq!(
-        state.active_turns.for_session(&session_id),
+        state
+            .active_turns
+            .for_session(&SessionId::from(session_id.clone())),
         vec![lash::TurnAddress::new(&session_id, "live-turn")],
         "an active Restate invocation remains routable while cancellation is pending"
     );
     let recovered =
         ActiveTurns::persistent(data_dir.join("active-turns.json")).expect("reopen active turns");
     assert_eq!(
-        recovered.for_session(&session_id),
+        recovered.for_session(&SessionId::from(session_id.clone())),
         vec![lash::TurnAddress::new(session_id, "live-turn")]
     );
     assert!(
@@ -707,7 +741,7 @@ finish (await handle)?
         State(state.clone()),
         Query(TurnCancelQuery {
             session: SessionQuery {
-                session_id: Some(session_id.clone()),
+                session_id: Some(SessionId::from(session_id.clone())),
             },
             mode: WorkbenchTurnCancelMode::Abort,
         }),
@@ -746,7 +780,12 @@ finish (await handle)?
             if !output.is_success()
                 && output.value_for_projection()["source"] == "cancellation"
     ));
-    assert!(state.active_turns.for_session(&session_id).is_empty());
+    assert!(
+        state
+            .active_turns
+            .for_session(&SessionId::from(session_id))
+            .is_empty()
+    );
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -806,8 +845,13 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
         let trace_path = data_dir.path().join("cancel.jsonl");
         state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
         let session_id = state.current_session_id();
-        state.track_turn(&session_id, &TurnId::from("concurrent-stop"));
-        let mut events = state.event_tx.subscribe(&session_id);
+        state.track_turn(
+            &SessionId::from(session_id.clone()),
+            &TurnId::from("concurrent-stop"),
+        );
+        let mut events = state
+            .event_tx
+            .subscribe(&SessionId::from(session_id.clone()));
         let driver =
             state
                 .core
@@ -821,7 +865,7 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
                 state.clone(),
                 TurnCancelQuery {
                     session: SessionQuery {
-                        session_id: Some(session_id.clone()),
+                        session_id: Some(SessionId::from(session_id.clone())),
                     },
                     mode: WorkbenchTurnCancelMode::Abort,
                 },
@@ -937,7 +981,10 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     // Stop before the turn starts: the start gate honours the after-step
     // request; the route forwards the same strength and attaches to the
     // stopped terminal.
-    state.track_turn(&session_id, &TurnId::from("stop-mode-turn"));
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("stop-mode-turn"),
+    );
     let seeded = state
         .core
         .turn_work_driver()
@@ -961,7 +1008,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
             State(state.clone()),
             Query(TurnCancelQuery {
                 session: SessionQuery {
-                    session_id: Some(session_id.clone()),
+                    session_id: Some(SessionId::from(session_id.clone())),
                 },
                 mode: WorkbenchTurnCancelMode::Stop,
             }),
@@ -1005,7 +1052,10 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
 
     // Escalate: a routed turn already holding an after-step request is
     // upgraded in place by the Abort control.
-    state.track_turn(&session_id, &TurnId::from("escalate-turn"));
+    state.track_turn(
+        &SessionId::from(session_id.clone()),
+        &TurnId::from("escalate-turn"),
+    );
     let seeded = state
         .core
         .turn_work_driver()
@@ -1025,9 +1075,10 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     ));
     let (driver, acknowledge) = expiring_terminal_driver(&state);
     let receipts = tokio::time::timeout(Duration::from_secs(1), async {
+        let cancel_session = SessionId::from(session_id.clone());
         tokio::join!(
             state.cancel_turns_for_session_with_driver(
-                &session_id,
+                &cancel_session,
                 &driver,
                 WorkbenchTurnCancelMode::Abort
             ),
@@ -1052,7 +1103,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     }
     let durable = state
         .session_store_factory
-        .open_existing_store_by_id(&session_id)
+        .open_existing_store_by_id(&SessionId::from(session_id))
         .await
         .expect("open store")
         .expect("store exists")

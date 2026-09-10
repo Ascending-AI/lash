@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 #[tokio::test]
@@ -88,9 +89,13 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
     )
     .await
     .expect("record initial multi-frame send");
-    crate::restate::settle_workbench_turn(&state, &session_id, &initial_turn_id)
-        .await
-        .expect("settle initial multi-frame send");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &SessionId::from(session_id.clone()),
+        &initial_turn_id,
+    )
+    .await
+    .expect("settle initial multi-frame send");
     session.close().await.expect("close after frame switches");
 
     let ordinary_prompt = "ordinary send inside the final follow frame";
@@ -147,7 +152,7 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
     )
     .await
     .expect("record ordinary follow-frame send");
-    crate::restate::settle_workbench_turn(&state, &session_id, &ordinary_turn_id)
+    crate::restate::settle_workbench_turn(&state, &SessionId::from(session_id), &ordinary_turn_id)
         .await
         .expect("settle ordinary follow-frame send");
 
@@ -286,7 +291,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         let prompt = format!("committed prompt before switch {index}");
         committed_turn_ids.insert(turn_id.clone());
         state.push_message_with_id_for_session(
-            &session_id,
+            &SessionId::from(session_id.clone()),
             workbench_turn_user_message_id(&turn_id),
             "user",
             &prompt,
@@ -307,7 +312,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         .await
         .expect("commit pre-switch user inputs");
     state.event_tx.reconcile_settled(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &BTreeSet::new(),
         &committed_turn_ids,
         &BTreeSet::new(),
@@ -316,13 +321,13 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     let switch_turn_id = "frame-switch-turn";
     let switch_prompt = "switch frames now";
     state.track_turn_prompt(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &TurnId::from(switch_turn_id),
         switch_prompt.to_string(),
         None,
     );
     state.push_message_with_id_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
         "user",
         switch_prompt,
@@ -355,7 +360,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     // no old-frame input ids. Once the workbench has observed a row's typed
     // durable provenance, that rebuild must not retire the UI-owned row.
     state.event_tx.reconcile_settled(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &BTreeSet::new(),
         &BTreeSet::new(),
         &BTreeSet::from([TurnId::from(switch_turn_id)]),
@@ -400,8 +405,12 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         "product user rows were retired at the switch"
     );
 
-    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(switch_turn_id))
-        .await
-        .expect("settle switched-frame turn");
+    crate::restate::settle_workbench_turn(
+        &state,
+        &SessionId::from(session_id),
+        &TurnId::from(switch_turn_id),
+    )
+    .await
+    .expect("settle switched-frame turn");
     session.close().await.expect("close frame-switch session");
 }

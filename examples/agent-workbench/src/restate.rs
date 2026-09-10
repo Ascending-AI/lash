@@ -3,6 +3,8 @@
     reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
 )]
 
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,7 +51,7 @@ const CRON_STATE_KEY: &str = "state";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchTurnWorkflowRequest {
     pub turn_id: TurnId,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub text: String,
     pub model: ModelSelection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,7 +61,7 @@ pub(crate) struct WorkbenchTurnWorkflowRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchQueuedTurnWorkflowRequest {
     pub turn_id: TurnId,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub reason: String,
     #[serde(default)]
     pub batch_ids: Vec<String>,
@@ -96,7 +98,7 @@ impl WorkbenchQueuedTurnWorkflowRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchButtonTriggerWorkflowRequest {
     pub operation_id: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub button: ButtonChoice,
     pub model: ModelSelection,
     pub pressed_at: String,
@@ -105,28 +107,28 @@ pub(crate) struct WorkbenchButtonTriggerWorkflowRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchSessionDeleteWorkflowRequest {
     pub operation_id: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub execution_scope: lash::runtime::ExecutionScope,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchProcessCancelWorkflowRequest {
     pub operation_id: String,
-    pub session_id: String,
-    pub process_id: String,
+    pub session_id: SessionId,
+    pub process_id: ProcessId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchMailReceivedWorkflowRequest {
     pub operation_id: String,
-    pub session_id: String,
+    pub session_id: SessionId,
     pub model: ModelSelection,
     pub delivery: crate::mail::MailDelivery,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct WorkbenchCronRequest {
-    session_id: String,
+    session_id: SessionId,
     source_key: String,
     expr: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,7 +167,7 @@ struct WorkbenchCronInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CronEmitReport {
-    started_process_ids: Vec<String>,
+    started_process_ids: Vec<ProcessId>,
 }
 
 impl From<&WorkbenchCronState> for WorkbenchCronInfo {
@@ -681,17 +683,17 @@ pub(crate) async fn submit_process_cancel(
 /// it and would keep firing into a deleted session forever.
 pub(crate) async fn cancel_cron_jobs_for_session(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     reason: &str,
 ) -> Result<(), AppError> {
     let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
-    policy.session_id = Some(session_id.to_string());
+    policy.session_id = Some(SessionId::from(session_id.to_string()));
     policy.model = model_spec_from_selection(state.selected_model());
     let store = state
         .session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
             relation: lash::persistence::SessionRelation::Root,
             policy,
         })
@@ -727,7 +729,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
             session_id,
             "cron.restate.cancel",
             lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
             }),
         ));
     }
@@ -1163,7 +1165,7 @@ async fn run_queued_turn_terminalized(
 
 pub(crate) async fn terminalize_turn_execution(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     trace_name: &str,
     result: Result<Result<(), AppError>, Box<dyn std::any::Any + Send>>,
@@ -1260,7 +1262,7 @@ pub(crate) async fn terminalize_turn_execution(
 
 pub(crate) async fn settle_workbench_turn(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<(), AppError> {
     let session = match state.open_session(session_id).await {
@@ -1394,7 +1396,7 @@ async fn record_turn_output_for_model(
     };
     let assistant_text = assistant_text_for_display(&output, &streamed_prose);
     state.trace_for_session(
-        &session.session_id(),
+        &SessionId::from(session.session_id()),
         trace_name,
         json!({
             "assistant_text": assistant_text.clone(),
@@ -1422,7 +1424,7 @@ async fn record_turn_output_for_model(
         .filter(|message| message.id.starts_with("m_ingress_"))
     {
         state.publish_for_session_identified(
-            &session.session_id(),
+            &SessionId::from(session.session_id()),
             format!("message:{}", message.id),
             crate::StreamItem::Message {
                 message: crate::chat_message_from_committed(message),
@@ -1433,7 +1435,7 @@ async fn record_turn_output_for_model(
         let call_id = record.call_id.0.clone();
         let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
         state.publish_for_session_identified(
-            &session.session_id(),
+            &SessionId::from(session.session_id()),
             format!("turn:{}:model-call:{call_id}", identity.turn_id),
             crate::StreamItem::ModelCallRecorded {
                 record: remote_record,
@@ -1444,7 +1446,7 @@ async fn record_turn_output_for_model(
         lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }) => {
             let message = format!("turn stopped · request {}", evidence.request_id);
             state.push_message_with_id_for_session(
-                &session.session_id(),
+                &SessionId::from(session.session_id()),
                 format!("turn:{}:cancelled", identity.turn_id),
                 "event",
                 message,
@@ -1453,7 +1455,7 @@ async fn record_turn_output_for_model(
         lash::TurnOutcome::Stopped(stop) => {
             let _ = stop;
             state.push_message_with_id_for_session(
-                &session.session_id(),
+                &SessionId::from(session.session_id()),
                 format!("turn:{}:failed", identity.turn_id),
                 "event",
                 crate::PUBLIC_TURN_FAILURE_MESSAGE,
@@ -1494,14 +1496,14 @@ async fn record_turn_output_for_model(
                 identity.turn_id.clone()
             };
             state.push_assistant_message_for_turn(
-                &session.session_id(),
+                &SessionId::from(session.session_id()),
                 workbench_turn_assistant_message_id(identity.turn_id),
                 &live_turn_id,
                 assistant_text,
             );
         }
     }
-    state.publish_turn_done(&session.session_id(), identity.turn_id);
+    state.publish_turn_done(&SessionId::from(session.session_id()), identity.turn_id);
     Ok(())
 }
 
@@ -1509,7 +1511,7 @@ mod cron_sync;
 pub(crate) use cron_sync::*;
 
 fn cron_request_from_registration(
-    session_id: &str,
+    session_id: &SessionId,
     registration: &lash::triggers::TriggerRegistration,
 ) -> Result<(String, WorkbenchCronRequest), String> {
     let source_type = registration.source_type.as_str();
@@ -1528,7 +1530,7 @@ fn cron_request_from_registration(
         .decode_as(&crate::workbench_lashlang_resources())
         .map_err(|err| err.to_string())?;
     let request = WorkbenchCronRequest {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         source_key: registration.source_key.clone(),
         expr: payload.expr,
         tz: payload.tz,
@@ -1549,7 +1551,7 @@ mod tests;
 trait QueuedWorkExt {
     async fn drain_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError>;
 }
@@ -1558,13 +1560,13 @@ trait QueuedWorkExt {
 impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
     async fn drain_session(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError> {
         use lash::runtime::QueuedWorkSubstrate as _;
 
         self.drain_session_work(
-            lash::runtime::SessionWorkTarget::Session(session_id.to_string()),
+            lash::runtime::SessionWorkTarget::Session(SessionId::from(session_id.to_string())),
             reason,
         )
         .await

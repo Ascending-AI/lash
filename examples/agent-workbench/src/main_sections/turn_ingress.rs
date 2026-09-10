@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 // The workbench's turn-input ingress admission.
 //
@@ -20,11 +21,13 @@ pub(crate) async fn enqueue_turn_input(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
     let ingress = match request.ingress {
         TurnInputIngressRequest::ActiveTurn => {
-            let active = state.active_turns.for_session(&session_id);
+            let active = state
+                .active_turns
+                .for_session(&SessionId::from(session_id.clone()));
             let [address] = active.as_slice() else {
                 return Err(AppError::conflict(
                     "inject now requires exactly one running turn",
@@ -39,7 +42,7 @@ pub(crate) async fn enqueue_turn_input(
     };
     let receipt = admit_turn_input(
         &state,
-        &session_id,
+        &SessionId::from(session_id.clone()),
         text.clone(),
         lash::TurnInput::text(text),
         ingress,
@@ -51,14 +54,14 @@ pub(crate) async fn enqueue_turn_input(
 
 pub(crate) async fn admit_queued_send(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     text: String,
     attachment_bytes: Option<Vec<u8>>,
 ) -> Result<Json<TurnAccepted>, AppError> {
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
-            session_id: session_id.to_string(),
+            session_id: SessionId::from(session_id.to_string()),
         })?;
     let mut input = lash::TurnInput::text(text.clone());
     if let Some(attachment_bytes) = attachment_bytes {
@@ -89,7 +92,7 @@ pub(crate) async fn admit_queued_send(
 /// is told about an accepted input.
 pub(crate) async fn admit_turn_input(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     text: String,
     input: lash::TurnInput,
     ingress: lash::persistence::TurnInputIngress,

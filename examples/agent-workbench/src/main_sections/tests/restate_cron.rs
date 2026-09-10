@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 const LIVE_RESTATE_CRON_SCHEDULE_INTERVAL: Duration = Duration::from_secs(2);
 const LIVE_RESTATE_CRON_JITTER_MARGIN: Duration = Duration::from_secs(60);
@@ -98,7 +99,7 @@ pub(crate) struct LiveRestateCronScenario {
     pub(super) data_dir: PathBuf,
     pub(super) state: AppState,
     pub(super) trace_path: PathBuf,
-    pub(super) cron_session_id: String,
+    pub(super) cron_session_id: SessionId,
     pub(super) cron_job_key: String,
 }
 
@@ -219,15 +220,15 @@ pub(crate) async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCron
     assert_restate_cron_job_cancelled(&scenario.state, &scenario.cron_job_key).await;
 }
 
-fn rotate_cron_session_out_of_current(state: &AppState) -> String {
-    let cron_session_id = state.current_session_id();
+fn rotate_cron_session_out_of_current(state: &AppState) -> SessionId {
+    let cron_session_id = SessionId::from(state.current_session_id());
     let (rotated_session_id, new_current_session_id) = state.sessions.rotate();
     assert_eq!(rotated_session_id, cron_session_id);
     assert_ne!(new_current_session_id, cron_session_id);
     cron_session_id
 }
 
-fn cron_job_key_for_session(state: &AppState, session_id: &str) -> String {
+fn cron_job_key_for_session(state: &AppState, session_id: &SessionId) -> String {
     let guard = state.restate_cron_job_keys.lock_recover();
     let matching = guard
         .get(session_id)
@@ -247,7 +248,7 @@ fn cron_job_key_for_session(state: &AppState, session_id: &str) -> String {
 pub(crate) fn cron_trace_records_for_job(
     trace_path: &std::path::Path,
     name: &str,
-    session_id: &str,
+    session_id: &SessionId,
     job_key: &str,
 ) -> Vec<Value> {
     std::fs::read_to_string(trace_path)
@@ -267,7 +268,7 @@ pub(crate) fn cron_trace_records_for_job(
 
 fn cron_trace_timeline_for_job(
     trace_path: &std::path::Path,
-    session_id: &str,
+    session_id: &SessionId,
     job_key: &str,
 ) -> String {
     let timeline = std::fs::read_to_string(trace_path)
@@ -311,7 +312,7 @@ fn cron_trace_timeline_for_job(
 pub(crate) async fn wait_for_cron_workbench_message(
     state: &AppState,
     trace_path: &std::path::Path,
-    session_id: &str,
+    session_id: &SessionId,
     job_key: &str,
     needle: &str,
     timeout: Duration,
@@ -338,7 +339,7 @@ pub(crate) async fn wait_for_cron_workbench_message(
 pub(crate) async fn wait_for_cron_trace_record_count(
     trace_path: &std::path::Path,
     name: &str,
-    session_id: &str,
+    session_id: &SessionId,
     job_key: &str,
     count: usize,
     timeout: Duration,
@@ -361,7 +362,7 @@ pub(crate) async fn wait_for_cron_trace_record_count(
 
 pub(crate) fn assert_live_non_current_cron_trace(
     trace_path: &std::path::Path,
-    session_id: &str,
+    session_id: &SessionId,
     job_key: &str,
 ) {
     let records = cron_trace_records_for_job(
@@ -388,7 +389,7 @@ pub(crate) fn assert_live_non_current_cron_trace(
 pub(crate) async fn retire_cron_session_and_assert_zombie(
     state: &AppState,
     trace_path: &std::path::Path,
-    cron_session_id: &str,
+    cron_session_id: &SessionId,
     job_key: &str,
 ) {
     let execution_scope = state
@@ -400,7 +401,7 @@ pub(crate) async fn retire_cron_session_and_assert_zombie(
         state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: cron_session_id.to_string(),
+            session_id: SessionId::from(cron_session_id.to_string()),
             execution_scope,
         },
     )

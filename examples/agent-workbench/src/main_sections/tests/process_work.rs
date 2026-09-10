@@ -3,6 +3,8 @@ use super::tests::{
     spawn_restate_ingress_capture,
 };
 use super::*;
+use lash::ProcessId;
+use lash::SessionId;
 use lash::process::{
     ProcessEventLog as _, ProcessLeases as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
     ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
@@ -123,14 +125,14 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         .expect("register process");
     watched
         .append_event(
-            "await-route-proc",
+            &ProcessId::from("await-route-proc"),
             lash::process::ProcessEventAppendRequest::new("progress", json!({ "step": 1 })),
         )
         .await
         .expect("append progress event");
     watched
         .complete_process(
-            "await-route-proc",
+            &ProcessId::from("await-route-proc"),
             lash::process::ProcessAwaitOutput::from_tool_output(
                 lash::tools::ToolCallOutput::success(json!("done")),
             ),
@@ -194,7 +196,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         .expect("register failed process");
     watched
         .complete_process(
-            "failed-work-rail-proc",
+            &ProcessId::from("failed-work-rail-proc"),
             lash::process::ProcessAwaitOutput::from_tool_output(
                 lash::tools::ToolCallOutput::failure(lash::tools::ToolFailure::runtime(
                     lash::tools::ToolFailureClass::External,
@@ -316,14 +318,14 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         .expect("register process");
     process_registry
         .add_observer(
-            &session_id,
-            process_id,
+            &SessionId::from(&session_id),
+            &ProcessId::from(process_id),
             lash::process::ProcessObserverBy::host("workbench-session-delete"),
         )
         .await
         .expect("observe process");
     let deletion = process_registry
-        .delete_session_process_state(&session_id)
+        .delete_session_process_state(&SessionId::from(session_id.clone()))
         .await
         .expect("delete session process edges");
     assert_eq!(deletion.removed_observer_count, 1);
@@ -383,7 +385,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     };
     let registry = lash::testing::TestLocalProcessRegistry::default();
     let process_id = "invoice-export";
-    let frame_node_id = lash::testing::frame_node_id("session-finance", "frame-review");
+    let frame_node_id =
+        lash::testing::frame_node_id(&SessionId::from("session-finance"), "frame-review");
     let scope = SessionScope::for_agent_frame("session-finance", frame_node_id.clone());
     assert_eq!(
         scope.id().as_str(),
@@ -470,7 +473,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         payload_schema: lash::triggers::LashSchema::any(),
         semantics: Default::default(),
     }])
-    .with_wake_session_id(Some("session-finance".to_string()));
+    .with_wake_session_id(Some(SessionId::from("session-finance")));
     assert_eq!(registration.id, process_id);
     assert_eq!(registration.disposition, RecoveryContract::Rerunnable);
     assert_eq!(registration.max_attempts, Some(3));
@@ -500,7 +503,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     let stored_cursor = ProcessChangeCursor::from_store_sequence(9);
     assert_eq!(stored_cursor.store_sequence(), 9);
     let replay_registration = registration.clone();
-    let initial_observers = ["session-finance".to_string(), "session-ops".to_string()];
+    let initial_observers = [
+        SessionId::from("session-finance"),
+        SessionId::from("session-ops"),
+    ];
     let record = registry
         .register_process_with_observers(registration, &initial_observers)
         .await
@@ -519,7 +525,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert_eq!(
         record.provenance.originator,
         ProcessOriginator::Session {
-            session_id: "session-finance".to_string(),
+            session_id: SessionId::from("session-finance"),
             agent_frame_id: Some(frame_node_id.clone()),
         }
     );
@@ -552,7 +558,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     let replay = registry
         .register_process_with_observers(
             replay_registration,
-            &["session-ops".to_string(), "session-finance".to_string()],
+            &[
+                SessionId::from("session-ops"),
+                SessionId::from("session-finance"),
+            ],
         )
         .await
         .expect("replay process registration by lookup id");
@@ -563,36 +572,39 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     );
 
     let observers = registry
-        .observers_for_process(process_id)
+        .observers_for_process(&ProcessId::from(process_id))
         .await
         .expect("list initial observers");
     assert_eq!(observers, ["session-finance", "session-ops"]);
     assert!(
         registry
-            .is_observer("session-finance", process_id)
+            .is_observer(
+                &SessionId::from("session-finance"),
+                &ProcessId::from(process_id)
+            )
             .await
             .expect("read observer edge")
     );
     registry
         .transfer_observers(
-            "session-ops",
-            "session-audit",
-            &[process_id.to_string()],
+            &SessionId::from("session-ops"),
+            &SessionId::from("session-audit"),
+            &[ProcessId::from(process_id.to_string())],
             ProcessObserverBy::host("audit-handoff"),
         )
         .await
         .expect("transfer observer");
     assert_eq!(
         registry
-            .observers_for_process(process_id)
+            .observers_for_process(&ProcessId::from(process_id))
             .await
             .expect("list transferred observers"),
         ["session-audit", "session-finance"]
     );
     registry
         .remove_observer(
-            "session-audit",
-            process_id,
+            &SessionId::from("session-audit"),
+            &ProcessId::from(process_id),
             ProcessObserverBy::ForkInheritance,
         )
         .await
@@ -606,7 +618,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         metadata: Some(json!({ "region": "eu-central-1" })),
     };
     let record = registry
-        .set_external_ref(process_id, external_ref)
+        .set_external_ref(&ProcessId::from(process_id), external_ref)
         .await
         .expect("bind backend work");
     assert_eq!(record.external_ref.as_ref().unwrap().backend, "restate");
@@ -634,12 +646,12 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         "invoice-export:progress:8"
     );
     let first_progress = registry
-        .append_event(process_id, progress.clone())
+        .append_event(&ProcessId::from(process_id), progress.clone())
         .await
         .expect("append progress");
     let replayed_progress = registry
         .append_event(
-            process_id,
+            &ProcessId::from(process_id),
             progress.with_optional_replay(first_progress.event.invocation.replay.clone()),
         )
         .await
@@ -654,14 +666,18 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(replayed_progress.wake_delivery.is_none());
     assert_eq!(
         registry
-            .count_events_through(process_id, "progress", first_progress.event.sequence)
+            .count_events_through(
+                &ProcessId::from(process_id),
+                "progress",
+                first_progress.event.sequence
+            )
             .await
             .expect("count progress events"),
         1
     );
     assert_eq!(
         registry
-            .recent_events(process_id, 1)
+            .recent_events(&ProcessId::from(process_id), 1)
             .await
             .expect("read event tail")[0]
             .event_type,
@@ -670,7 +686,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
 
     let owner = lash::persistence::LeaseOwnerIdentity::opaque("worker-berlin", "boot-9");
     let lease = match registry
-        .claim_process_lease(process_id, &owner, 60_000)
+        .claim_process_lease(&ProcessId::from(process_id), &owner, 60_000)
         .await
         .expect("claim process lease")
     {
@@ -690,7 +706,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(lease.expires_at_epoch_ms > lease.claimed_at_epoch_ms);
     assert_eq!(
         registry
-            .get_process_lease(process_id)
+            .get_process_lease(&ProcessId::from(process_id))
             .await
             .expect("read lease")
             .as_ref()
@@ -718,7 +734,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     }));
 
     let running = registry
-        .get_process(process_id)
+        .get_process(&ProcessId::from(process_id))
         .await
         .expect("read running process")
         .expect("registered process remains visible");
@@ -777,8 +793,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert_eq!(
         registry
             .filter_unregistered_process_ids(&[
-                process_id.to_string(),
-                "never-registered".to_string(),
+                ProcessId::from(process_id.to_string()),
+                ProcessId::from("never-registered"),
             ])
             .await
             .expect("filter recovery candidates"),
@@ -803,7 +819,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     let completed = (*completion).clone();
     assert!(
         registry
-            .get_process_lease(process_id)
+            .get_process_lease(&ProcessId::from(process_id))
             .await
             .expect("read released lease")
             .is_none()
@@ -888,7 +904,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     ));
     let external_completion = registry
         .complete_process(
-            external_id,
+            &ProcessId::from(external_id),
             ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::failure(
                 batch_failure,
             )),
@@ -922,9 +938,9 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert_eq!(
         registry
             .filter_tombstoned_process_ids(&[
-                process_id.to_string(),
-                external_id.to_string(),
-                "never-registered".to_string(),
+                ProcessId::from(process_id.to_string()),
+                ProcessId::from(external_id.to_string()),
+                ProcessId::from("never-registered"),
             ])
             .await
             .expect("filter pruned process ids"),
@@ -1029,8 +1045,8 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
-    let deleted_session_id = state.current_session_id();
-    let surviving_session_id = format!("{deleted_session_id}-survivor");
+    let deleted_session_id = SessionId::from(state.current_session_id());
+    let surviving_session_id = SessionId::from(format!("{deleted_session_id}-survivor"));
     let reclaimed = "trigger-delivery-of-deleted-session".to_string();
 
     // Four rows the work rail can render: the deleted session's finished
@@ -1073,7 +1089,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     ] {
         process_registry
             .complete_process(
-                process_id,
+                &ProcessId::from(process_id),
                 lash::process::ProcessAwaitOutput::from_tool_output(
                     lash::tools::ToolCallOutput::success(json!({ "delivered": true })),
                 ),
@@ -1137,7 +1153,9 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     );
     assert!(
         matches!(
-            process_registry.get_process(&reclaimed).await,
+            process_registry
+                .get_process(&ProcessId::from(reclaimed))
+                .await,
             Err(lash::plugins::PluginError::ProcessNoLongerRetained { .. })
         ),
         "the reclaimed row must read as a payload-free tombstone"
@@ -1180,7 +1198,7 @@ async fn rendered_worker_fault(fault: lash::process::ProcessWorkerFault) -> Stri
 
 async fn worker_faults_reach_the_workbench_sink_as_rendered_notices_inner() {
     let backend_fault = lash::process::ProcessWorkerFault::RecoveryBackendError {
-        process_id: "workbench-faulted-row".to_string(),
+        process_id: ProcessId::from("workbench-faulted-row"),
         operation: lash::durability::ProcessRecoveryOperation::WriteTerminal,
         error: "terminal write rejected by the store".to_string(),
     };
@@ -1190,7 +1208,7 @@ async fn worker_faults_reach_the_workbench_sink_as_rendered_notices_inner() {
     );
 
     let run_failure = lash::process::ProcessWorkerFault::RecoveryRunFailed {
-        process_id: "workbench-failed-run".to_string(),
+        process_id: ProcessId::from("workbench-failed-run"),
         error: "engine run failed".to_string(),
     };
     assert_eq!(
@@ -1233,7 +1251,7 @@ async fn work_rail_process_ids(state: &AppState) -> Vec<String> {
         .expect("list runtime-wide work");
     let mut ids = work
         .into_iter()
-        .map(|item| item.process.process_id)
+        .map(|item| item.process.process_id.to_string())
         .collect::<Vec<_>>();
     ids.sort();
     ids

@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 /// Outer bound on one workbench turn: how many model calls a single send may
 /// spend. Generous, because a real workbench task legitimately takes many
@@ -163,7 +164,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // lists it and every later open asks for the same dialect it was created
     // with. A roster row that already exists wins: it is what the session's
     // durable pin was created from.
-    sessions.ensure(&sessions.current(), rlm_dialect);
+    sessions.ensure(&SessionId::from(sessions.current()), rlm_dialect);
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
     let restate_http = lash_http_transport::build_http_client();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;

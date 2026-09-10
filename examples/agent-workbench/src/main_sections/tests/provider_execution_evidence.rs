@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 async fn run_provider_evidence_turn(
@@ -6,7 +7,7 @@ async fn run_provider_evidence_turn(
     session: &lash::LashSession,
     turn_id: &TurnId,
 ) -> (lash::TurnReport, Arc<Mutex<TurnStreamState>>) {
-    state.track_turn(&session.session_id(), turn_id);
+    state.track_turn(&SessionId::from(session.session_id()), turn_id);
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .turn(lash::TurnInput::text("answer directly"))
@@ -100,11 +101,11 @@ pub(crate) async fn next_terminal_replacement(
     .expect("provider terminal replacement timeout")
 }
 
-async fn provider_state_snapshot(state: &AppState, session_id: &str) -> serde_json::Value {
+async fn provider_state_snapshot(state: &AppState, session_id: &SessionId) -> serde_json::Value {
     let Json(snapshot) = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(session_id.to_string()),
+            session_id: Some(SessionId::from(session_id.to_string())),
         }),
     )
     .await
@@ -289,8 +290,11 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         )
         .await
         .expect("workbench publishes the first runtime turn output");
-        state.active_turns.remove(&session_id, &first_turn_id);
-        let first_snapshot = provider_state_snapshot(&state, &session_id).await;
+        state
+            .active_turns
+            .remove(&SessionId::from(session_id.clone()), &first_turn_id);
+        let first_snapshot =
+            provider_state_snapshot(&state, &SessionId::from(session_id.clone())).await;
 
         let second_turn_id = TurnId::from(format!("{provider_kind}-evidence-turn-2"));
         let (second_observation_line, second_terminal_replacement_line, second_execution) = tokio::join!(
@@ -322,8 +326,10 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         )
         .await
         .expect("workbench publishes the second runtime turn output");
-        state.active_turns.remove(&session_id, &second_turn_id);
-        let final_snapshot = provider_state_snapshot(&state, &session_id).await;
+        state
+            .active_turns
+            .remove(&SessionId::from(session_id.clone()), &second_turn_id);
+        let final_snapshot = provider_state_snapshot(&state, &SessionId::from(session_id)).await;
 
         let product_records = final_snapshot
             .pointer("/product_events/events")

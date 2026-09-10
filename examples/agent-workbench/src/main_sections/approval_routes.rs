@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 // The approval routes: listing pending tool approvals, and submitting operator
 // approve / deny decisions that resolve parked durable tool completions.
@@ -76,7 +77,7 @@ pub(crate) async fn decide_approval(
         .mark_decided(key_id, decision)
         .map_err(AppError::internal)?;
     state.trace_for_session(
-        &pending.requesting_session,
+        &SessionId::from(pending.requesting_session),
         "approval.decided",
         json!({
             "key": key_id,

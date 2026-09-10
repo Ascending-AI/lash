@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 // Operator-only maintenance surface: destructive, deployment-wide verbs that
 // no chat participant may reach and that nothing schedules.
@@ -130,7 +131,7 @@ pub(crate) struct RunStoreMaintenanceRequest {
     /// reclaiming a particular session's settled rows is the one that knows the
     /// session is not about to be resumed.
     #[serde(default)]
-    pub(crate) vacuum_session_ids: Vec<String>,
+    pub(crate) vacuum_session_ids: Vec<SessionId>,
     /// The attachment sweep, omitted when this pass is vacuum-only.
     #[serde(default)]
     pub(crate) reclaim_attachments: Option<ReclaimAttachmentsRequest>,
@@ -187,7 +188,7 @@ pub(crate) struct RunStoreMaintenanceResponse {
 /// which session actually grew.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct SessionVacuumReport {
-    pub(crate) session_id: String,
+    pub(crate) session_id: SessionId,
     pub(crate) removed_node_count: usize,
     pub(crate) removed_pending_turn_input_tombstone_count: usize,
     /// Which arm of the maintenance outcome contract this pass landed on. Zero
@@ -415,11 +416,11 @@ pub(crate) fn trace_store_maintenance(
 /// unknown session is a `404` and never a freshly created empty store.
 pub(crate) async fn vacuum_session_store(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
 ) -> Result<SessionVacuumReport, AppError> {
     let request = lash::persistence::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         relation: lash::persistence::SessionRelation::Root,
         policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
     };
@@ -464,11 +465,11 @@ pub(crate) async fn vacuum_bound_store(
 
 /// Project one session's vacuum report onto the wire.
 pub(crate) fn session_vacuum_report(
-    session_id: &str,
+    session_id: &SessionId,
     report: lash::persistence::VacuumReport,
 ) -> SessionVacuumReport {
     SessionVacuumReport {
-        session_id: session_id.to_string(),
+        session_id: SessionId::from(session_id.to_string()),
         sweep: lash::persistence::MaintenanceReport::sweep(&report).into(),
         removed_node_count: report.removed_node_count,
         removed_pending_turn_input_tombstone_count: report

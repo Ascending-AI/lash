@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "outcome", content = "cancellation", rename_all = "snake_case")]
@@ -102,13 +103,17 @@ pub(crate) async fn cancel_turn_with_driver(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::CancelTurn {
-            session_id: session_id.clone(),
+            session_id: SessionId::from(session_id.clone()),
         })?;
     let cancellations = state
-        .cancel_turns_for_session_with_driver(&session_id, driver, query.mode)
+        .cancel_turns_for_session_with_driver(
+            &SessionId::from(session_id.clone()),
+            driver,
+            query.mode,
+        )
         .await?;
     state.trace_for_session(
-        &session_id,
+        &SessionId::from(session_id.clone()),
         "api.turn.cancel",
         json!({
             "session_id": session_id,

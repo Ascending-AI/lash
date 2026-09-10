@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 use lash::triggers::TriggerStore as _;
 
 use axum::extract::FromRequest;
@@ -49,7 +50,9 @@ async fn inject_message_scopes_emission_to_requested_session() {
     state.restate_ingress_url = restate_ingress_url;
 
     let scoped_session_id = "scoped-session-test";
-    state.sessions.ensure(scoped_session_id, state.rlm_dialect);
+    state
+        .sessions
+        .ensure(&SessionId::from(scoped_session_id), state.rlm_dialect);
 
     let account_summary = state
         .mail_world
@@ -92,7 +95,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
         AxumPath(slug.clone()),
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(scoped_session_id.to_string()),
+            session_id: Some(SessionId::from(scoped_session_id.to_string())),
         }),
         Json(InjectMessageRequest {
             title: "Important Update".to_string(),
@@ -131,7 +134,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
 
     let report = enqueue_mail_received_trigger_command(
         &state,
-        req_session_id,
+        &SessionId::from(req_session_id),
         &delivery,
         operation_id,
         scoped_effect_controller,

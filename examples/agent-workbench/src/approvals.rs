@@ -4,6 +4,7 @@
 //! product policy around that primitive: which tool requires approval, the
 //! operator ledger, and the approve/deny decision.
 
+use lash::SessionId;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -85,7 +86,7 @@ impl WorkbenchApprovals {
         &self,
         key: &lash::AwaitEventKey,
         args: &Value,
-        session_id: &str,
+        session_id: &SessionId,
     ) -> Result<(), ApprovalError> {
         let connection = self
             .connection
@@ -102,7 +103,7 @@ impl WorkbenchApprovals {
                 serde_json::to_string(key)?,
                 APPROVAL_TOOL_NAME,
                 serde_json::to_string(args)?,
-                session_id,
+                session_id.as_str(),
                 chrono::Utc::now().timestamp_millis(),
             ],
         )?;
@@ -244,9 +245,9 @@ impl ToolProvider for ApprovalToolProvider {
             Ok(key) => key,
             Err(error) => return ToolOutcome::err_fmt(error),
         };
-        if let Err(error) = self
-            .approvals
-            .record(&key, call.args, call.context.session_id())
+        if let Err(error) =
+            self.approvals
+                .record(&key, call.args, &SessionId::from(call.context.session_id()))
         {
             return ToolOutcome::err_fmt(error);
         }
@@ -288,7 +289,7 @@ mod tests {
             .record(
                 &key,
                 &json!({ "target": "demo", "change": "enable safe mode" }),
-                "approval-session",
+                &SessionId::from("approval-session"),
             )
             .expect("record approval");
 

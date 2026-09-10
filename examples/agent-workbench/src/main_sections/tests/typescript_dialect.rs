@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 /// One turn through the workbench's own session-opening path.
@@ -8,7 +9,7 @@ use lash::TurnId;
 /// the very code this file exists to test.
 pub(crate) async fn run_turn_through_the_workbench_open_path(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     text: &str,
 ) {
@@ -347,7 +348,7 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
 
     run_turn_through_the_workbench_open_path(
         &state,
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &TurnId::from("typescript-dialect-turn"),
         "say the canonical answer",
     )
@@ -394,7 +395,7 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
     let Json(projected) = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
     )
     .await
@@ -436,7 +437,7 @@ async fn a_lashlang_workbench_still_serves_lashlang_turns() {
 
     run_turn_through_the_workbench_open_path(
         &state,
-        &session_id,
+        &SessionId::from(session_id.clone()),
         &TurnId::from("lashlang-dialect-turn"),
         "say the canonical answer",
     )
@@ -472,7 +473,7 @@ async fn a_lashlang_workbench_still_serves_lashlang_turns() {
     let Json(projected) = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(session_id.clone()),
+            session_id: Some(SessionId::from(session_id.clone())),
         }),
     )
     .await
@@ -644,7 +645,7 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
             Duration::from_secs(60),
             run_turn_through_the_workbench_open_path(
                 &state,
-                &session_id,
+                &SessionId::from(session_id.clone()),
                 &TurnId::from("code-failure-turn"),
                 "run the deterministic code failure",
             ),
@@ -660,7 +661,7 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
         let Json(projected) = app_state(
             State(state.clone()),
             Query(SessionQuery {
-                session_id: Some(session_id.clone()),
+                session_id: Some(SessionId::from(session_id.clone())),
             }),
         )
         .await
@@ -769,7 +770,7 @@ async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
         {
             run_turn_through_the_workbench_open_path(
                 &state,
-                &session_id,
+                &SessionId::from(session_id.clone()),
                 &TurnId::from(format!("session-globals-{}-{index}", dialect.language_id())),
                 prompt,
             )
@@ -782,7 +783,7 @@ async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
         let Json(projected) = app_state(
             State(state.clone()),
             Query(SessionQuery {
-                session_id: Some(session_id.clone()),
+                session_id: Some(SessionId::from(session_id.clone())),
             }),
         )
         .await
@@ -828,7 +829,7 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
             let session_id = state.current_session_id();
             run_turn_through_the_workbench_open_path(
                 &state,
-                &session_id,
+                &SessionId::from(session_id.clone()),
                 &TurnId::from("bind it"),
                 "bind it",
             )
@@ -845,7 +846,7 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
         state.rlm_dialect = dialect;
         run_turn_through_the_workbench_open_path(
             &state,
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &TurnId::from("read after restart"),
             "read it back",
         )
@@ -854,7 +855,7 @@ async fn a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects(
         let Json(projected) = app_state(
             State(state.clone()),
             Query(SessionQuery {
-                session_id: Some(session_id.clone()),
+                session_id: Some(SessionId::from(session_id.clone())),
             }),
         )
         .await
@@ -900,7 +901,7 @@ async fn a_name_no_one_has_is_still_refused_in_both_dialects() {
         let session_id = state.current_session_id();
         run_turn_through_the_workbench_open_path(
             &state,
-            &session_id,
+            &SessionId::from(session_id.clone()),
             &TurnId::from("unknown-name-turn"),
             "read a name nobody has",
         )
@@ -909,7 +910,7 @@ async fn a_name_no_one_has_is_still_refused_in_both_dialects() {
         let Json(projected) = app_state(
             State(state.clone()),
             Query(SessionQuery {
-                session_id: Some(session_id.clone()),
+                session_id: Some(SessionId::from(session_id.clone())),
             }),
         )
         .await

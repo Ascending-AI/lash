@@ -25,6 +25,8 @@
 //! Every phase prints one JSON `checkpoint` line; the shell runner asserts on
 //! those lines and keeps them as artifacts.
 
+use lash::ProcessId;
+use lash::SessionId;
 use lash::TurnId;
 use std::sync::Arc;
 
@@ -336,7 +338,7 @@ fn wake_event_type() -> ProcessEventType {
     }
 }
 
-fn wake_registration(process_id: &str, wake_session_id: &str) -> ProcessRegistration {
+fn wake_registration(process_id: &ProcessId, wake_session_id: &SessionId) -> ProcessRegistration {
     ProcessRegistration::new(
         process_id,
         ProcessInput::External {
@@ -351,7 +353,7 @@ fn wake_registration(process_id: &str, wake_session_id: &str) -> ProcessRegistra
             .with_definition(Some(json!({"scenario": "version-bump-recreation"}))),
     )
     .with_extra_event_types([wake_event_type()])
-    .with_wake_session_id(Some(wake_session_id.to_string()))
+    .with_wake_session_id(Some(SessionId::from(wake_session_id.to_string())))
 }
 
 async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
@@ -360,7 +362,7 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
         factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: session_id.to_string(),
+                session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
@@ -372,7 +374,11 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
 
 /// One real turn against the store under test: the provider is deterministic, the
 /// commit is not. Returns the turn id whose commit row proves the turn landed.
-async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str) -> Result<String> {
+async fn commit_one_turn(
+    storage: &PostgresStorage,
+    session_id: &SessionId,
+    tag: &str,
+) -> Result<String> {
     let attachments = tempfile::tempdir().context("attachment dir for version-bump turn")?;
     // The row's dialect decides the scripted cell *and* the session's pin: a
     // TypeScript row that commits a Lashlang cell cannot execute it, and the
@@ -468,17 +474,17 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
 
 /// Durable evidence that a turn landed: the session head advanced past its
 /// created revision and the committed graph carries nodes.
-async fn committed_session_facts(pool: &PgPool, session_id: &str) -> Result<(i64, i64)> {
+async fn committed_session_facts(pool: &PgPool, session_id: &SessionId) -> Result<(i64, i64)> {
     let head_revision: i64 =
         sqlx::query_scalar("SELECT head_revision FROM lash_sessions WHERE session_id = $1")
-            .bind(session_id)
+            .bind(session_id.as_str())
             .fetch_one(pool)
             .await
             .context("read committed session head revision")?;
     let nodes: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM lash_graph_nodes WHERE session_id = $1 AND NOT tombstoned",
     )
-    .bind(session_id)
+    .bind(session_id.as_str())
     .fetch_one(pool)
     .await
     .context("count committed session graph nodes")?;
@@ -492,7 +498,7 @@ struct FiredTrigger {
     subscription_id: String,
     occurrence_id: String,
     reservations: usize,
-    process_id: String,
+    process_id: ProcessId,
     process_status: String,
 }
 
@@ -567,7 +573,10 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
     // ends in durable work, not just a reservation row.
     let registry = Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>;
     registry
-        .register_process(wake_registration(&process_id, SESSION_IDS[0]))
+        .register_process(wake_registration(
+            &process_id,
+            &SessionId::from(SESSION_IDS[0]),
+        ))
         .await
         .context("register the trigger-delivered process")?;
     registry
@@ -606,12 +615,13 @@ async fn seed(database_url: &str) -> Result<()> {
     create_sessions(&storage).await?;
     let mut turn_ids = Vec::new();
     for session_id in SESSION_IDS {
-        turn_ids.push(commit_one_turn(&storage, session_id, "seed").await?);
+        turn_ids.push(commit_one_turn(&storage, &SessionId::from(session_id), "seed").await?);
     }
     let mut committed_sessions = 0;
     let mut committed_nodes = 0;
     for session_id in SESSION_IDS {
-        let (head_revision, nodes) = committed_session_facts(&pool, session_id).await?;
+        let (head_revision, nodes) =
+            committed_session_facts(&pool, &SessionId::from(session_id)).await?;
         if head_revision > 0 && nodes > 0 {
             committed_sessions += 1;
         }
@@ -623,13 +633,16 @@ async fn seed(database_url: &str) -> Result<()> {
     let registry = storage.process_registry();
     lash_core::ProcessRegistrar::register_process(
         &registry,
-        wake_registration(PROCESS_ID, SESSION_IDS[0]),
+        wake_registration(
+            &ProcessId::from(PROCESS_ID),
+            &SessionId::from(SESSION_IDS[0]),
+        ),
     )
     .await
     .context("register the live pre-bump process")?;
     let pending_wake = lash_core::ProcessEventLog::append_event(
         &registry,
-        PROCESS_ID,
+        &ProcessId::from(PROCESS_ID),
         ProcessEventAppendRequest::new(WAKE_EVENT_TYPE, json!({"wake_input": "pre-bump"})),
     )
     .await
@@ -638,10 +651,11 @@ async fn seed(database_url: &str) -> Result<()> {
     .context("pre-bump wake outbox row was not created")?;
 
     let trigger_report = fire_trigger(&storage, "seed").await?;
-    let live_process = lash_core::ProcessQuery::get_process(&registry, PROCESS_ID)
-        .await
-        .context("read the live pre-bump process")?
-        .context("live pre-bump process row is absent")?;
+    let live_process =
+        lash_core::ProcessQuery::get_process(&registry, &ProcessId::from(PROCESS_ID))
+            .await
+            .context("read the live pre-bump process")?
+            .context("live pre-bump process row is absent")?;
     anyhow::ensure!(
         live_process.outcome.is_none(),
         "the seeded process is not live: {:?}",
@@ -1003,8 +1017,9 @@ async fn health(database_url: &str) -> Result<()> {
     let mut committed_sessions = 0;
     let mut committed_nodes = 0;
     for session_id in SESSION_IDS {
-        commit_one_turn(&storage, session_id, "health").await?;
-        let (head_revision, nodes) = committed_session_facts(&pool, session_id).await?;
+        commit_one_turn(&storage, &SessionId::from(session_id), "health").await?;
+        let (head_revision, nodes) =
+            committed_session_facts(&pool, &SessionId::from(session_id)).await?;
         if head_revision > 0 && nodes > 0 {
             committed_sessions += 1;
         }
@@ -1017,12 +1032,15 @@ async fn health(database_url: &str) -> Result<()> {
     let registry = Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>;
     let target_session = SESSION_IDS[1];
     registry
-        .register_process(wake_registration(PROCESS_ID, target_session))
+        .register_process(wake_registration(
+            &ProcessId::from(PROCESS_ID),
+            &SessionId::from(target_session),
+        ))
         .await
         .context("register the post-bump process")?;
     let wake = registry
         .append_event(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             ProcessEventAppendRequest::new(WAKE_EVENT_TYPE, json!({"wake_input": "post-bump"})),
         )
         .await
@@ -1041,17 +1059,21 @@ async fn health(database_url: &str) -> Result<()> {
     .context("drive the post-bump wake")?;
     let delivered = storage
         .session_store(target_session)
-        .list_queued_work(target_session)
+        .list_queued_work(&SessionId::from(target_session))
         .await
         .context("list post-bump receiver rows")?
         .into_iter()
         .any(|batch| {
             batch.source_key.as_deref()
-                == Some(process_wake_source_key(PROCESS_ID, wake.sequence)).as_deref()
+                == Some(process_wake_source_key(
+                    &ProcessId::from(PROCESS_ID),
+                    wake.sequence,
+                ))
+                .as_deref()
         });
     registry
         .complete_process(
-            PROCESS_ID,
+            &ProcessId::from(PROCESS_ID),
             ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(json!(
                 "post-bump process finished"
             ))),
@@ -1060,7 +1082,7 @@ async fn health(database_url: &str) -> Result<()> {
         .await
         .context("complete the post-bump process")?;
     let terminal = registry
-        .get_process(PROCESS_ID)
+        .get_process(&ProcessId::from(PROCESS_ID))
         .await
         .context("read the post-bump process")?
         .context("post-bump process row is absent")?;

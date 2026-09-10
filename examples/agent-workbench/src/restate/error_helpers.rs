@@ -1,9 +1,10 @@
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 pub(super) fn record_turn_failure(
     state: &AppState,
-    session_id: &str,
+    session_id: &SessionId,
     turn_id: &TurnId,
     trace_name: &str,
     message: &str,
