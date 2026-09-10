@@ -775,9 +775,11 @@ jobs:
           compiler_digest="$(rustc -vV | sha256sum | cut -d ' ' -f 1)"
           settings_digest="$(printf '%s\0%s\0' "${RUSTFLAGS}" "${LASH_CI_FEATURES}" | sha256sum | cut -d ' ' -f 1)"
           source_digest="$(python3 scripts/ci_workspace_cache.py digest)"
-          echo "compiler=${compiler_digest}" >> "${GITHUB_OUTPUT}"
-          echo "settings=${settings_digest}" >> "${GITHUB_OUTPUT}"
-          echo "source=${source_digest}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "compiler=${compiler_digest}"
+            echo "settings=${settings_digest}"
+            echo "source=${source_digest}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Restore cargo cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
