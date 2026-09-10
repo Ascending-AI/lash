@@ -541,9 +541,25 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
 pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
     block_on(async {
         let mut state = RlmExecutionState::new();
+        let registration = lash_core::ProcessRegistration::new(
+            "unscoped-host-process",
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        );
+        let context = lash_core::testing::code_execution_context_for_process(&registration);
+        let owner_error = context
+            .trigger_owner_scope()
+            .expect_err("a bare host process must not have a trigger owner namespace");
+        assert!(
+            owner_error.to_string().contains("bare host authority"),
+            "{owner_error}"
+        );
         let response = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(),
+            context,
             ExecRequest {
                 language: "lashlang".to_string(),
                 code: "finish 42".to_string(),
