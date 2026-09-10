@@ -7,12 +7,37 @@ import argparse
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import sys
 from typing import Mapping
 
 
 FAMILIES = ("rust", "confidence", "stores", "functional_e2e", "workers_e2e")
 CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
+
+# Constants whose value decides Lashlang artifact identity: the semantic hash
+# version feeds every `resource_operation:<hex>` id and the
+# `tool-intent:v2:blake3:` digests derived from them, and the bytecode format
+# version moves the compiled artifact those ids are taken over. Moving either
+# invalidates literal pins that only execute under PostgreSQL 16 -- the runtime
+# agent scenario, the cross-backend differential, and the postgres-store
+# package suites -- none of which a PG14-only pull-request matrix can run. Three
+# trunk outages in one night came from exactly that blind spot, so a diff that
+# moves one of these widens the PostgreSQL matrix on the run that carries it.
+IDENTITY_VERSION_CONSTANTS = (
+    "LASHLANG_SEMANTIC_HASH_VERSION",
+    "BYTECODE_FORMAT_VERSION",
+)
+
+# Matches an added or removed *definition* line for one of those constants, on
+# either side of the diff. Keying on `const <NAME> ... =` rather than on the
+# file path is deliberate: a constant that moves to another module still shows
+# a removed definition line, and a bare `pub use ...::<NAME>;` re-export does
+# not match, so the signal follows the definition wherever it lives.
+IDENTITY_VERSION_DEFINITION = re.compile(
+    r"^[+-](?!\+\+|--)"
+    r".*\bconst\s+(?:" + "|".join(IDENTITY_VERSION_CONSTANTS) + r")\b[^=\n]*="
+)
 
 GATED_JOBS = {
     "nextest-archive": "rust",
@@ -180,6 +205,7 @@ def fail_open(reason: str) -> dict[str, str]:
         "workflows_only": "false",
         "e2e_relevant": "false",
         "scripts_gates": "false",
+        "identity_versions": "true",
         "fail_open": "true",
         "reason": reason,
     }
@@ -187,7 +213,20 @@ def fail_open(reason: str) -> dict[str, str]:
     return outputs
 
 
-def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
+def detect_identity_version_change(diff_text: str) -> bool:
+    """True when the exact diff adds or removes an identity-constant definition."""
+
+    for line in diff_text.splitlines():
+        if not line or line[0] not in "+-":
+            continue
+        if IDENTITY_VERSION_DEFINITION.match(line):
+            return True
+    return False
+
+
+def classify(
+    changes: list[tuple[str, str]], diff_text: str | None = None
+) -> dict[str, str]:
     if not changes:
         raise PlanError("the exact diff was empty")
     unknown_statuses = sorted({status for status, _ in changes if status not in CHANGE_STATUSES})
@@ -213,6 +252,11 @@ def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
         "workflows_only": str(all(path.startswith(".github/workflows/") for path in paths)).lower(),
         "e2e_relevant": str(any(path.startswith(("examples/", "runbooks/")) or "e2e" in PurePosixPath(path).parts for path in paths)).lower(),
         "scripts_gates": str(any(path.startswith("scripts/") or path in {"justfile", "deny.toml"} for path in paths)).lower(),
+        # No diff content means no exact content signal, so widen rather than
+        # guess: the expensive matrix is the safe side of this call.
+        "identity_versions": (
+            "true" if diff_text is None else str(detect_identity_version_change(diff_text)).lower()
+        ),
         "fail_open": str(bool(ambiguous)).lower(),
         "reason": (
             "docs deletion"
@@ -258,10 +302,15 @@ def evaluate_conclusion(
 
     docs_only = plan_outputs.get("docs_only")
     fail_open_output = plan_outputs.get("fail_open")
+    identity_versions = plan_outputs.get("identity_versions")
     if docs_only not in {"true", "false"}:
         problems.append(f"plan output docs_only is {docs_only!r}, expected 'true' or 'false'")
     if fail_open_output not in {"true", "false"}:
         problems.append(f"plan output fail_open is {fail_open_output!r}, expected 'true' or 'false'")
+    if identity_versions not in {"true", "false"}:
+        problems.append(
+            f"plan output identity_versions is {identity_versions!r}, expected 'true' or 'false'"
+        )
     for family in FAMILIES:
         expectation = plan_outputs.get(family)
         required = docs_only != "true" or fail_open_output == "true"
@@ -296,11 +345,21 @@ def evaluate_conclusion(
                     f" {event_name} event, expected skipped"
                 )
             continue
-        if job == "postgres-store" and event_name in DEFERRED_EVENTS:
+        # A diff that moves a Lashlang identity version must not be able to
+        # conclude green off a skipped or failed PostgreSQL job: the 14/16/18
+        # matrix is where its literal pins execute, and it runs on this head in
+        # this run -- never on a separate dispatch of some other commit.
+        if job == "postgres-store" and (
+            event_name in DEFERRED_EVENTS or identity_versions == "true"
+        ):
             if result != "success":
-                problems.append(
-                    f"{job} ended with {result!r} on a {event_name} event, expected success"
+                reason = (
+                    "the diff moves a Lashlang identity version, so the full "
+                    "PostgreSQL matrix must run on this head"
+                    if identity_versions == "true"
+                    else f"a {event_name} event"
                 )
+                problems.append(f"{job} ended with {result!r} and {reason}, expected success")
             continue
         if result in {"failure", "cancelled"}:
             problems.append(f"{job} ended with {result}")
@@ -350,6 +409,7 @@ def main() -> int:
 
     classify_parser = subparsers.add_parser("classify")
     classify_parser.add_argument("--paths-file", type=Path, required=True)
+    classify_parser.add_argument("--diff-file", type=Path)
 
     fail_parser = subparsers.add_parser("fail-open")
     fail_parser.add_argument("--reason", required=True)
@@ -359,7 +419,16 @@ def main() -> int:
 
     if args.command == "classify":
         try:
-            outputs = classify(_read_nul_changes(args.paths_file))
+            diff_text = (
+                # Diffs carry binary hunks and paths that are not valid UTF-8;
+                # a replaced byte cannot hide a `const NAME =` definition line,
+                # while a decode error here would fail the whole classification
+                # open and buy the expensive matrix for nothing.
+                args.diff_file.read_bytes().decode("utf-8", errors="replace")
+                if args.diff_file is not None
+                else None
+            )
+            outputs = classify(_read_nul_changes(args.paths_file), diff_text)
         except (OSError, UnicodeError, PlanError) as error:
             outputs = fail_open(f"classification error: {error}")
         _write_outputs(outputs)
