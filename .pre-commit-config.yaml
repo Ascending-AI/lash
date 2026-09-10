@@ -20,11 +20,12 @@ repos:
 
   - repo: local
     hooks:
-      # Mirrors CI Lint "Check formatting" — whole workspace, check-only.
-      - id: cargo-fmt-check
-        name: cargo fmt --all --check
+      # Apply the formatter before CI checks it. If files change, prek stops
+      # the commit so the author can review and restage them.
+      - id: cargo-fmt
+        name: cargo fmt --all
         language: system
-        entry: cargo fmt --all --check
+        entry: cargo fmt --all
         files: '\.rs$'
         pass_filenames: false
 
@@ -36,12 +37,12 @@ repos:
         entry: actionlint -no-color
         files: '^\.github/workflows/.*\.ya?ml$'
         pass_filenames: true
-      # Mirrors CI Lint "Check formatting" for the files `cargo fmt` cannot
-      # see, because `include!` splices text rather than declaring a module.
+      # Apply rustfmt to the files `cargo fmt` cannot see, because `include!`
+      # splices text rather than declaring a module.
       - id: included-file-formatting
         name: include!d file formatting
         language: system
-        entry: python3 scripts/check_included_file_formatting.py
+        entry: python3 scripts/check_included_file_formatting.py --fix
         files: '\.rs$'
         pass_filenames: false
 
