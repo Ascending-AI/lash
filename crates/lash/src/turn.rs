@@ -821,14 +821,14 @@ impl QueuedTurnBuilder {
     ) -> Result<QueuedTurnDrain<TurnReport>> {
         self.validate_scope_identity_configuration()?;
         let turn_id = self.resolved_turn_id(Some(&scoped_effect_controller));
-        if let Some(turn_id) = turn_id.as_deref()
+        if let Some(turn_id) = turn_id.as_ref()
             && !scoped_effect_controller
                 .execution_scope()
                 .validates_turn_trace_id()
         {
             let scoped_turn_controller = ScopedEffectController::borrowed(
                 scoped_effect_controller.controller(),
-                self.turn_scope(&TurnId::from(turn_id)),
+                self.turn_scope(turn_id),
             )?;
             return self
                 .stream_to_with_resolved_scope(events, scoped_turn_controller)
@@ -1005,14 +1005,14 @@ impl SelectedQueuedTurnBuilder {
         let turn_id = self
             .builder
             .resolved_turn_id(Some(&scoped_effect_controller));
-        if let Some(turn_id) = turn_id.as_deref()
+        if let Some(turn_id) = turn_id.as_ref()
             && !scoped_effect_controller
                 .execution_scope()
                 .validates_turn_trace_id()
         {
             let scoped_turn_controller = ScopedEffectController::borrowed(
                 scoped_effect_controller.controller(),
-                self.builder.turn_scope(&TurnId::from(turn_id)),
+                self.builder.turn_scope(turn_id),
             )?;
             return self
                 .stream_to_with_resolved_scope(events, scoped_turn_controller)

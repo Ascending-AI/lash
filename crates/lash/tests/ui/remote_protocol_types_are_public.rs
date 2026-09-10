@@ -1,3 +1,5 @@
+use lash::TurnId;
+
 fn main() {
     let input = lash::remote::turn_input::RemoteTurnInput::text("hello");
     let request = lash::remote::Envelope::new(lash::remote::turn_input::RemoteTurnRequest {
