@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 
 #[derive(Clone, Debug)]
@@ -33,14 +34,14 @@ pub(in crate::runtime::session_manager) struct ChannelEventSink {
 
 #[derive(Clone)]
 pub(in crate::runtime::session_manager) struct LiveChildUsageForwarder {
-    pub(in crate::runtime::session_manager) turn_id: String,
+    pub(in crate::runtime::session_manager) turn_id: TurnId,
     pub(in crate::runtime::session_manager) session_id: String,
     pub(in crate::runtime::session_manager) source: String,
     pub(in crate::runtime::session_manager) model: String,
     pub(in crate::runtime::session_manager) token_ledger:
         Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     pub(in crate::runtime::session_manager) child_turn_live_usage:
-        Arc<std::sync::Mutex<HashMap<String, TokenUsage>>>,
+        Arc<std::sync::Mutex<HashMap<TurnId, TokenUsage>>>,
     pub(in crate::runtime::session_manager) relay: Option<ChildUsageEventRelay>,
     /// Set by the turn's `ManagedTurnLease` when it releases the live-usage
     /// entry. An emit still in flight at that moment must not report, because

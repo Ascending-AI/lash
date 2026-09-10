@@ -4,6 +4,7 @@
 
 #![allow(dead_code, unreachable_code, unused_variables)]
 
+use lash::TurnId;
 fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}
@@ -584,7 +585,7 @@ pub(crate) fn store_area_facade_witnesses() {
     });
     // FIG-2105-WITNESS-0154: lash::persistence::RuntimeCommit::deferring_interrupted_turn_inputs [function]
     member_witness(
-        |commit: lash::persistence::RuntimeCommit, turn_id: String| {
+        |commit: lash::persistence::RuntimeCommit, turn_id: TurnId| {
             commit.deferring_interrupted_turn_inputs(turn_id)
         },
     );

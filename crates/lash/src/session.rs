@@ -1,3 +1,4 @@
+use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -624,7 +625,7 @@ impl LashSession {
     /// Build the execution scope for a turn in this opened session.
     ///
     /// Durable and store-less sessions use the same host-provided session id.
-    pub fn turn_scope(&self, turn_id: impl Into<String>) -> lash_core::ExecutionScope {
+    pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash_core::ExecutionScope {
         lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope(
             &self.runtime.observe().persisted_state,
             turn_id,
@@ -634,7 +635,7 @@ impl LashSession {
     /// Build the cancellation and terminal-observation address for a turn.
     pub fn turn_address(
         &self,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
     ) -> lash_core::facade_support::TurnAddress {
         let observation = self.runtime.observe();
         lash_core::facade_support::TurnAddress::new(observation.session_id(), turn_id)
@@ -705,7 +706,7 @@ impl LashSession {
     /// to choose a different disposition.
     pub async fn request_turn_cancel(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         request_id: impl Into<String>,
         origin: Option<String>,
         reason: Option<String>,
@@ -733,7 +734,7 @@ impl LashSession {
     /// the addressed turn.
     pub async fn request_turn_cancel_with_disposition(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         request_id: impl Into<String>,
         origin: Option<String>,
         reason: Option<String>,
@@ -764,7 +765,7 @@ impl LashSession {
     /// on Lash's behalf; that is host policy.
     pub async fn request_turn_cancel_with_mode(
         &self,
-        turn_id: &str,
+        turn_id: &TurnId,
         request_id: impl Into<String>,
         origin: Option<String>,
         reason: Option<String>,

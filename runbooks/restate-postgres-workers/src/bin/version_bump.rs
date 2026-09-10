@@ -25,6 +25,7 @@
 //! Every phase prints one JSON `checkpoint` line; the shell runner asserts on
 //! those lines and keeps them as artifacts.
 
+use lash::TurnId;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -450,7 +451,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
             .await
             .with_context(|| format!("open session `{session_id}`"))?
     };
-    let turn_id = format!("version-bump-{tag}-{session_id}");
+    let turn_id = TurnId::from(format!("version-bump-{tag}-{session_id}"));
     let output = session
         .turn(lash::TurnInput::text(TURN_PROMPT))
         .turn_id(turn_id.clone())
@@ -462,7 +463,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         "turn on `{session_id}` did not finish with the scripted value: {:?}",
         output.final_value()
     );
-    Ok(turn_id)
+    Ok(turn_id.to_string())
 }
 
 /// Durable evidence that a turn landed: the session head advanced past its

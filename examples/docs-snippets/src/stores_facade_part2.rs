@@ -4,6 +4,7 @@
 
 #![allow(dead_code, unreachable_code, unused_variables)]
 
+use lash::TurnId;
 fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}
@@ -1063,10 +1064,12 @@ pub(crate) fn store_area_facade_witnesses() {
             let _ = session_id;
         }
     });
-    // FIG-2105-WITNESS-0427: lash::persistence::StoreError::RuntimeTurnCommitConflict::turn_id [field]
+    // FIG-2105-WITNESS-0427: lash::persistence::StoreError::RuntimeTurnCommitConflict::operation_key [field]
     field_witness(|value: &lash::persistence::StoreError| {
-        if let lash::persistence::StoreError::RuntimeTurnCommitConflict { turn_id, .. } = value {
-            let _ = turn_id;
+        if let lash::persistence::StoreError::RuntimeTurnCommitConflict { operation_key, .. } =
+            value
+        {
+            let _ = operation_key;
         }
     });
     // FIG-2105-WITNESS-0428: lash::persistence::StoreError::SessionBindingMismatch [variant]
@@ -1436,10 +1439,10 @@ pub(crate) fn store_area_facade_witnesses() {
     });
     // FIG-2105-WITNESS-0477: lash::persistence::StoreError::variant_name [function]
     member_witness(lash::persistence::StoreError::variant_name);
-    // FIG-2105-WITNESS-0478: lash::persistence::TurnId [struct]
-    type_witness::<lash::persistence::TurnId>();
-    // FIG-2105-WITNESS-0479: lash::persistence::TurnId::as_str [function]
-    member_witness(lash::persistence::TurnId::as_str);
-    // FIG-2105-WITNESS-0480: lash::persistence::TurnId::into_inner [function]
-    member_witness(lash::persistence::TurnId::into_inner);
+    // FIG-2105-WITNESS-0478: lash::TurnId [struct]
+    type_witness::<lash::TurnId>();
+    // FIG-2105-WITNESS-0479: lash::TurnId::as_str [function]
+    member_witness(lash::TurnId::as_str);
+    // FIG-2105-WITNESS-0480: lash::TurnId::into_inner [function]
+    member_witness(lash::TurnId::into_inner);
 }

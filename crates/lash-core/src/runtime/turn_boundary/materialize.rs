@@ -1,3 +1,4 @@
+use crate::TurnId;
 use crate::facade_support::AgentFrameReasonFacadeOps;
 use std::collections::BTreeSet;
 
@@ -84,7 +85,7 @@ pub(super) fn materialize_terminal_output(
     state: &mut RuntimeSessionState,
     outcome: &TurnOutcome,
     clock: &dyn crate::Clock,
-    turn_id: &str,
+    turn_id: &TurnId,
     message_id: &str,
     protocol_output: &ProtocolTerminalOutput,
 ) {
@@ -107,7 +108,7 @@ pub(super) fn materialize_terminal_output(
             role: MessageRole::Assistant,
             parts: shared_parts(vec![Part::prose(format!("{id}.p0"), text.clone(), None)]),
             origin: Some(crate::MessageOrigin::TurnOutput {
-                turn_id: turn_id.to_string(),
+                turn_id: turn_id.clone(),
                 source: crate::TurnOutputSource::Runtime,
             }),
         }],
@@ -304,7 +305,7 @@ mod tests {
             &mut state,
             &reply("first response"),
             &crate::SystemClock,
-            TURN_ID,
+            &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &protocol_output,
         );
@@ -331,7 +332,7 @@ mod tests {
                 MessageRole::Assistant,
                 "first response",
                 Some(crate::MessageOrigin::TurnOutput {
-                    turn_id: TURN_ID.to_string(),
+                    turn_id: TurnId::from(TURN_ID.to_string()),
                     source: crate::TurnOutputSource::Plugin {
                         plugin_id: "proto".to_string(),
                     },
@@ -349,7 +350,7 @@ mod tests {
             &mut state,
             &reply("first response"),
             &crate::SystemClock,
-            TURN_ID,
+            &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
         );
@@ -367,7 +368,7 @@ mod tests {
         assert_eq!(
             terminal.origin,
             Some(crate::MessageOrigin::TurnOutput {
-                turn_id: TURN_ID.to_string(),
+                turn_id: TurnId::from(TURN_ID.to_string()),
                 source: crate::TurnOutputSource::Runtime,
             })
         );
@@ -383,7 +384,7 @@ mod tests {
                 MessageRole::Assistant,
                 "first response",
                 Some(crate::MessageOrigin::TurnOutput {
-                    turn_id: TURN_ID.to_string(),
+                    turn_id: TurnId::from(TURN_ID.to_string()),
                     source: crate::TurnOutputSource::Runtime,
                 }),
             ),
@@ -399,7 +400,7 @@ mod tests {
             &mut state,
             &reply("first response"),
             &crate::SystemClock,
-            TURN_ID,
+            &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
         );
@@ -419,7 +420,7 @@ mod tests {
             &mut state,
             &TurnOutcome::Stopped(crate::TurnStop::MaxTurns),
             &crate::SystemClock,
-            TURN_ID,
+            &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
         );

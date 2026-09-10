@@ -1,4 +1,5 @@
 use super::support::*;
+use lash_sansio::TurnId;
 
 // Focused RLM driver mechanics: malformed options, driver-state ownership, and checkpoint restore internals.
 
@@ -1587,7 +1588,7 @@ fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
 
     // A second turn, on the same session path, with its own turn id.
     let mut config = config_with_no_progress_budget(3);
-    config.turn_id = "second-turn".to_string();
+    config.turn_id = TurnId::from("second-turn".to_string());
     let mut second = TurnMachine::new(
         config,
         vec![user_message("try again")],
@@ -1611,7 +1612,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
     let mut carried: Vec<lash_core::SessionHistoryRecord> = Vec::new();
     for index in 0..prose_turns {
         let mut config = config_with_no_progress_budget(3);
-        config.turn_id = format!("prose-turn-{index}");
+        config.turn_id = TurnId::from(format!("prose-turn-{index}"));
         let mut machine = TurnMachine::new(
             config,
             vec![user_message("just talk to me")],
@@ -1653,7 +1654,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
     );
 
     let mut config = config_with_no_progress_budget(3);
-    config.turn_id = "code-turn".to_string();
+    config.turn_id = TurnId::from("code-turn".to_string());
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("now run something")],

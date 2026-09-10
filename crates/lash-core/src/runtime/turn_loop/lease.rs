@@ -6,6 +6,7 @@
 //! it dies before its commit could settle the rows it claimed.
 
 use super::*;
+use crate::TurnId;
 
 struct SessionExecutionLaneProbe {
     store: Arc<dyn crate::store::RuntimePersistence>,
@@ -374,7 +375,7 @@ impl LashRuntime {
         &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
         fence: &crate::SessionExecutionLeaseAuthority,
-        resumable_turn_id: &str,
+        resumable_turn_id: &TurnId,
     ) -> usize {
         match store
             .defer_orphaned_active_turn_inputs(
@@ -439,7 +440,7 @@ impl LashRuntime {
     /// must not replace its error.
     pub(in crate::runtime) async fn defer_orphaned_turn_inputs_after_teardown(
         &self,
-        trace_turn_id: &str,
+        trace_turn_id: &TurnId,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
     ) {
         let Some(store) = self

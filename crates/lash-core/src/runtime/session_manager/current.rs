@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl CurrentSessionCapability {
@@ -21,7 +22,7 @@ impl CurrentSessionCapability {
         &self,
         managed: &ManagedSessionCapability,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, crate::PluginError> {
         if session_id == self.session_id {
             return Ok(self.snapshot.to_runtime_state().turn_scope(turn_id));

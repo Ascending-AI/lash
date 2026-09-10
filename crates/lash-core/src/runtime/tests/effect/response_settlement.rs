@@ -109,7 +109,7 @@ fn protocol_factory(executor: Arc<SettlementExecutor>) -> Arc<dyn crate::PluginF
 fn turn_scope<'a>(
     controller: &'a dyn crate::RuntimeEffectController,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> crate::ScopedEffectController<'a> {
     crate::ScopedEffectController::borrowed(
         controller,
@@ -198,7 +198,11 @@ async fn bare_cancelled_token_after_mid_cell_lease_loss_is_not_a_cancelled_termi
             .run_turn_assembled(
                 input,
                 cancel_for_turn,
-                turn_scope(&controller_for_turn, "root", "lease-loss-mid-cell"),
+                turn_scope(
+                    &controller_for_turn,
+                    "root",
+                    &TurnId::from("lease-loss-mid-cell"),
+                ),
             )
             .await
     });
@@ -259,7 +263,7 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
             .run_turn_assembled(
                 TurnInput::text("run the first cell"),
                 CancellationToken::new(),
-                turn_scope(&controller, "root", turn_id),
+                turn_scope(&controller, "root", &TurnId::from(turn_id)),
             )
             .await
     });
@@ -313,7 +317,7 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
             .run_turn_assembled(
                 TurnInput::text("abort the first cell handoff"),
                 CancellationToken::new(),
-                turn_scope(&controller_for_first, "root", turn_id),
+                turn_scope(&controller_for_first, "root", &TurnId::from(turn_id)),
             )
             .await;
         (runtime, result)
@@ -340,7 +344,11 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         .run_turn_assembled(
             TurnInput::text("run the next cell"),
             CancellationToken::new(),
-            turn_scope(&controller, "root", "response-handoff-next-cell"),
+            turn_scope(
+                &controller,
+                "root",
+                &TurnId::from("response-handoff-next-cell"),
+            ),
         )
         .await
         .expect("the next cell executes after settlement");

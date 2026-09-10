@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 
 impl TurnProtocol for UnitTurnProtocol {
     type Event = ();
@@ -413,7 +414,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.protocol_run_offset
     }
 
-    pub fn turn_id(&self) -> &str {
+    pub fn turn_id(&self) -> &TurnId {
         &self.config.turn_id
     }
 
@@ -612,7 +613,7 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub system_prompt: Arc<str>,
     pub session_id: String,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,
     pub turn_limit_final_message: crate::TurnLimitFinalMessage,

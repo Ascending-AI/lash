@@ -1,6 +1,7 @@
 //! Durable failed-generation evidence shared by every session-store backend.
 
 use super::session_store_factory::session_store_request;
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -100,7 +101,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         .scoped(crate::ExecutionScope::turn(SESSION_ID, turn_id))
         .expect("scope failure-evidence conformance turn");
     let mut input = crate::TurnInput::text("trigger a paid mid-stream failure");
-    input.trace_turn_id = Some(turn_id.to_string());
+    input.trace_turn_id = Some(TurnId::from(turn_id.to_string()));
     let turn = runtime
         .stream_turn(
             input,
@@ -116,7 +117,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         .scoped(crate::ExecutionScope::turn(SESSION_ID, later_turn_id))
         .expect("scope later failure-evidence conformance turn");
     let mut later_input = crate::TurnInput::text("trigger a later paid mid-stream failure");
-    later_input.trace_turn_id = Some(later_turn_id.to_string());
+    later_input.trace_turn_id = Some(TurnId::from(later_turn_id.to_string()));
     let later_turn = runtime
         .stream_turn(
             later_input,

@@ -43,7 +43,7 @@ pub(crate) fn native_scope(scope: crate::ExecutionScope) -> crate::ScopedEffectC
 
 pub(crate) fn named_turn_scope(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> crate::ScopedEffectController<'static> {
     native_scope(crate::ExecutionScope::turn(session_id, turn_id))
 }
@@ -1033,7 +1033,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Ch
             .sessions()
             .start_turn(
                 &child.session_id,
-                "subagent-child-turn",
+                &TurnId::from("subagent-child-turn"),
                 TurnInput {
                     items: vec![InputItem::Text {
                         text: "child turn".to_string(),

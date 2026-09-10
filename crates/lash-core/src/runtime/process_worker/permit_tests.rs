@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 
 struct SemaphoreSlotSupplier(Arc<Semaphore>);
 
@@ -186,7 +187,7 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
                 runtime.run_turn_assembled(
                     crate::TurnInput::text("park the run's permit"),
                     cancel,
-                    named_turn_scope("root", "permit-cancel-grace-turn"),
+                    named_turn_scope("root", &TurnId::from("permit-cancel-grace-turn")),
                 ),
             )
             .await

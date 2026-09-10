@@ -4,6 +4,7 @@ use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
 use lash_core::QueuedWorkStore as _;
 use lash_core::SessionExecutionLeaseStore as _;
+use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::collections::BTreeSet;
 
@@ -22,7 +23,7 @@ impl RecordingTurnIds {
 impl TurnActivitySink for RecordingTurnIds {
     async fn emit(&self, _activity: TurnActivity) {}
 
-    async fn emit_for_turn(&self, turn_id: &str, _activity: TurnActivity) {
+    async fn emit_for_turn(&self, turn_id: &TurnId, _activity: TurnActivity) {
         self.turn_ids.lock().await.push(turn_id.to_string());
     }
 }
@@ -365,7 +366,7 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
 #[derive(Clone, Debug)]
 struct DurableEffectInvocation {
     kind: lash_core::RuntimeEffectKind,
-    turn_id: Option<String>,
+    turn_id: Option<TurnId>,
     replay_key: Option<String>,
 }
 
@@ -1073,10 +1074,10 @@ async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Resu
     assert_eq!(
         effect_turn_ids,
         BTreeSet::from([
-            "durable-stream-to".to_string(),
-            "durable-run".to_string(),
-            "durable-stream".to_string(),
-            "durable-queue-drain".to_string(),
+            TurnId::from("durable-stream-to"),
+            TurnId::from("durable-run"),
+            TurnId::from("durable-stream"),
+            TurnId::from("durable-queue-drain"),
         ])
     );
     Ok(())
@@ -1176,7 +1177,7 @@ async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallback() -> Re
         .collect::<BTreeSet<_>>();
     assert_eq!(
         turn_ids,
-        BTreeSet::from(["builder-turn".to_string(), "fallback-turn".to_string()])
+        BTreeSet::from([TurnId::from("builder-turn"), TurnId::from("fallback-turn")])
     );
     Ok(())
 }
@@ -1316,7 +1317,7 @@ async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<(
     Ok(())
 }
 
-fn assert_turn_started_first(activities: &[TurnActivity], expected_turn_id: &str) {
+fn assert_turn_started_first(activities: &[TurnActivity], expected_turn_id: &TurnId) {
     let starts = activities
         .iter()
         .filter_map(|activity| match &activity.event {
@@ -1355,7 +1356,10 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
         .run()
         .await?
         .expect("automatic queued turn");
-    assert_turn_started_first(&automatic.activities, "automatic-queued-turn");
+    assert_turn_started_first(
+        &automatic.activities,
+        &TurnId::from("automatic-queued-turn"),
+    );
 
     session
         .enqueue(TurnInput::text("scoped automatic queued builder"))
@@ -1368,7 +1372,10 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
         .run_with_effects(&controller)
         .await?
         .expect("scoped automatic queued turn");
-    assert_turn_started_first(&scoped_automatic.activities, "scoped-automatic-queued-turn");
+    assert_turn_started_first(
+        &scoped_automatic.activities,
+        &TurnId::from("scoped-automatic-queued-turn"),
+    );
 
     let store = store_factory
         .raw_store_for_testing(session_id)
@@ -1395,7 +1402,10 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
         .await?
         .turn
         .expect("selected queued turn");
-    assert_turn_started_first(&selected_output.activities, "selected-queued-turn");
+    assert_turn_started_first(
+        &selected_output.activities,
+        &TurnId::from("selected-queued-turn"),
+    );
 
     let scoped_selected = store
         .enqueue_queued_work(
@@ -1421,7 +1431,7 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
         .expect("scoped selected queued turn");
     assert_turn_started_first(
         &scoped_selected_output.activities,
-        "scoped-selected-queued-turn",
+        &TurnId::from("scoped-selected-queued-turn"),
     );
     Ok(())
 }
@@ -1461,7 +1471,7 @@ async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Result<()> {
 
     let receipt = session
         .request_turn_cancel(
-            "pre-cancelled-queued-turn-id",
+            &TurnId::from("pre-cancelled-queued-turn-id"),
             "pre-dispatch-cancel-request",
             Some("test-host".to_string()),
             Some("cancel before queued dispatch".to_string()),
@@ -2850,7 +2860,7 @@ async fn selected_queued_turn_with_effects_preserves_batch_ids_and_scope() -> Re
         .await?;
     assert_turn_started_first(
         &outcome.turn.expect("selected turn").activities,
-        "selected-handler-drain",
+        &TurnId::from("selected-handler-drain"),
     );
     assert_eq!(
         outcome.satisfied,
@@ -4533,7 +4543,7 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     let first_session = first_core.session(session_id).open().await?;
     let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
     first_session.observe().runtime.record_turn_activity(
-        Some("before-restart-turn"),
+        Some(&TurnId::from("before-restart-turn")),
         TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "before replay-store restart".into(),
         }),
@@ -4582,7 +4592,7 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     ));
 
     second_session.observe().runtime.record_turn_activity(
-        Some("after-restart-turn"),
+        Some(&TurnId::from("after-restart-turn")),
         TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "after replay-store restart".into(),
         }),
@@ -4720,7 +4730,7 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
 
     for text in ["lag one", "lag two", "lag three"] {
         session.observe().runtime.record_turn_activity(
-            Some("lagged-turn"),
+            Some(&TurnId::from("lagged-turn")),
             TurnActivity::independent(TurnEvent::AssistantProseDelta { text: text.into() }),
         );
     }
@@ -4741,7 +4751,7 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
     ));
 
     session.observe().runtime.record_turn_activity(
-        Some("after-lag-turn"),
+        Some(&TurnId::from("after-lag-turn")),
         TurnActivity::independent(TurnEvent::AssistantProseDelta {
             text: "after lag".into(),
         }),
@@ -4974,7 +4984,7 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
         .admin()
         .injection()
         .inject_turn_input(
-            "queued-input-turn",
+            &TurnId::from("queued-input-turn"),
             Some("queue-1".to_string()),
             lash_core::PluginMessage::text(lash_core::MessageRole::User, "queued follow-up"),
         )
@@ -5642,7 +5652,7 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
 
 async fn assert_session_turn_cancel_disposition(
     session_id: &'static str,
-    turn_id: &'static str,
+    turn_id: &TurnId,
     disposition: lash_core::facade_support::TurnCancelDisposition,
     use_legacy_method: bool,
 ) -> Result<()> {
@@ -5755,7 +5765,7 @@ async fn assert_session_turn_cancel_disposition(
 async fn request_turn_cancel_with_disposition_drops_undelivered_active_input() -> Result<()> {
     assert_session_turn_cancel_disposition(
         "session-cancel-explicit-drop",
-        "session-cancel-explicit-drop:turn",
+        &TurnId::from("session-cancel-explicit-drop:turn"),
         lash_core::facade_support::TurnCancelDisposition::Drop,
         false,
     )
@@ -5766,7 +5776,7 @@ async fn request_turn_cancel_with_disposition_drops_undelivered_active_input() -
 async fn request_turn_cancel_legacy_method_defers_undelivered_active_input() -> Result<()> {
     assert_session_turn_cancel_disposition(
         "session-cancel-legacy-defer",
-        "session-cancel-legacy-defer:turn",
+        &TurnId::from("session-cancel-legacy-defer:turn"),
         lash_core::facade_support::TurnCancelDisposition::Defer,
         true,
     )
@@ -8785,7 +8795,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         .await?;
 
     assert_eq!(output.assistant_message(), Some("done after frame switch"));
-    let follow_turn_id = format!("{root_turn_id}:agent-frame:1");
+    let follow_turn_id = TurnId::from(format!("{root_turn_id}:agent-frame:1"));
     let activities = activities.snapshot().await;
     let started = activities
         .iter()
@@ -8814,7 +8824,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
     llm_turn_ids.dedup();
     assert_eq!(
         llm_turn_ids,
-        vec![root_turn_id.to_string(), follow_turn_id.clone()]
+        vec![root_turn_id.to_string(), follow_turn_id.clone().to_string()]
     );
     let replay_keys = controller
         .invocations()
@@ -8826,7 +8836,9 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         "root turn replay keys should include {root_turn_id}: {replay_keys:?}"
     );
     assert!(
-        replay_keys.iter().any(|key| key.contains(&follow_turn_id)),
+        replay_keys
+            .iter()
+            .any(|key| key.contains(follow_turn_id.as_str())),
         "follow turn replay keys should include {follow_turn_id}: {replay_keys:?}"
     );
 
@@ -8853,7 +8865,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         .collect::<Vec<_>>();
     assert_eq!(
         turn_commit_ids,
-        vec![root_turn_id.to_string(), follow_turn_id]
+        vec![root_turn_id.to_string(), follow_turn_id.to_string()]
     );
     Ok(())
 }

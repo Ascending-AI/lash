@@ -5,6 +5,7 @@
 //! commit already happened and cannot be taken back.
 
 use super::*;
+use crate::TurnId;
 
 pub(super) struct PostCommitDelivery {
     pub(super) turn: AssembledTurn,
@@ -22,7 +23,7 @@ impl LashRuntime {
         &self,
         returned_turn: &AssembledTurn,
         scoped_effect_controller: &ScopedEffectController<'_>,
-        trace_turn_id: &str,
+        trace_turn_id: &TurnId,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<Option<crate::PluginError>, RuntimeError> {
         let Some(session) = self.session.as_ref() else {

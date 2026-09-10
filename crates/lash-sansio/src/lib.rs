@@ -3,6 +3,7 @@ pub mod causal;
 #[doc(hidden)]
 pub mod core_support;
 mod frame_key;
+pub mod identity;
 pub mod llm;
 pub mod plugin;
 pub mod prompt;
@@ -29,6 +30,7 @@ pub use attachment::{
 };
 pub use causal::CausalRef;
 pub use frame_key::{FrameKey, FrameKeyError};
+pub use identity::{BatchId, InputId, NodeId, ProcessId, SessionId, TurnId};
 pub use llm::capability::{
     ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
     ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::TurnId;
 
 impl From<lash_core::TokenLedgerEntry> for RemoteTokenLedgerEntry {
     fn from(value: lash_core::TokenLedgerEntry) -> Self {
@@ -86,7 +87,7 @@ impl From<RemoteLedgerUsageDisposition> for lash_core::LedgerUsageDisposition {
 impl RemoteTurnReport {
     pub fn from_core(
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
         turn: lash_core::facade_support::AssembledTurn,
         activities: impl IntoIterator<Item = RemoteTurnActivity>,
     ) -> Self {

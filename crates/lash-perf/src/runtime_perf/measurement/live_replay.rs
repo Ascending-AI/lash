@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::TurnId;
 
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
 const LIVE_REPLAY_MAIN_CAPACITY: usize = 256;
@@ -43,7 +44,7 @@ pub(super) async fn run_once_live_replay_pressure(
         let mut phase_profile = BTreeMap::new();
         let session_id = format!("runtime-perf-live-replay-{turn_index}");
         let revision = SessionRevision::new(turn_index as u64 + 1);
-        let turn_id = format!("turn-{turn_index}");
+        let turn_id = TurnId::from(format!("turn-{turn_index}"));
         let start_cursor = store.current_cursor(&session_id, revision);
 
         let ((first_cursor, replay_incarnation_id), append_phase) =
@@ -151,7 +152,7 @@ pub(super) async fn run_once_live_replay_pressure(
                     Duration::from_secs(120),
                 );
                 let trim_session_id = format!("runtime-perf-live-replay-trim-{turn_index}");
-                let trim_turn_id = format!("trim-turn-{turn_index}");
+                let trim_turn_id = TurnId::from(format!("trim-turn-{turn_index}"));
                 let trim_start = trim_store.current_cursor(&trim_session_id, revision);
                 for event_index in 0..(LIVE_REPLAY_TRIM_CAPACITY * 3) {
                     publish_one(
@@ -347,7 +348,7 @@ fn publish_one(
     store: &impl lash_core::LiveReplayStore,
     session_id: &str,
     revision: SessionRevision,
-    turn_id: Option<&str>,
+    turn_id: Option<&TurnId>,
     payload: SessionObservationEventPayload,
 ) -> anyhow::Result<Arc<lash_core::SessionObservationEvent>> {
     let prepared = store.prepare_publication(

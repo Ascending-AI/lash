@@ -386,6 +386,7 @@ fn direct_trace_context(
 #[cfg(test)]
 mod tests {
     use crate::RuntimeEffectKind;
+    use crate::TurnId;
 
     #[test]
     fn direct_effect_invocation_preserves_runtime_scope() {
@@ -413,7 +414,7 @@ mod tests {
             "s",
             "tool",
             "request:k".to_string(),
-            Some("turn"),
+            Some(&TurnId::from("turn")),
             None,
         );
 

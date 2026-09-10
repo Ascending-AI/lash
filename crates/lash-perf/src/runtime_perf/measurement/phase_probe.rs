@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::TurnId;
 
 #[derive(Clone, Copy)]
 struct PhaseStart {
@@ -554,7 +555,7 @@ async fn run_once_inner(
         if let Some(turn_id) = deep_turn_id.as_deref() {
             runtime
                 .enqueue_active_turn_input(
-                    turn_id,
+                    &TurnId::from(turn_id),
                     TurnInput::text("deep composition ingress marker"),
                     &format!("deep-composition-ingress-{}", turn_index + 1),
                 )
@@ -592,7 +593,7 @@ async fn run_once_inner(
         let mut trigger_delivery_observation = None;
         let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
             let effect_controller = ScopedPerfEffectController;
-            let turn_id = format!("runtime-perf-scoped-{}", turn_index + 1);
+            let turn_id = TurnId::from(format!("runtime-perf-scoped-{}", turn_index + 1));
             let scoped_effect_controller = lash::runtime::ScopedEffectController::borrowed(
                 &effect_controller,
                 runtime.turn_scope(&turn_id),
@@ -607,10 +608,10 @@ async fn run_once_inner(
             )
             .await
         } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-            let turn_id = format!(
+            let turn_id = TurnId::from(format!(
                 "runtime-perf-cancel-round-trip-{}",
                 lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-            );
+            ));
             let (turn, duration) = runtime_perf_timed(
                 scenario,
                 turn_index,
@@ -635,10 +636,10 @@ async fn run_once_inner(
             );
             Ok(turn)
         } else if matches!(scenario, RuntimePerfScenario::IngressClaimProjection) {
-            let turn_id = format!(
+            let turn_id = TurnId::from(format!(
                 "runtime-perf-ingress-projection-{}",
                 lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
-            );
+            ));
             let (turn, duration) = runtime_perf_timed(
                 scenario,
                 turn_index,
@@ -668,7 +669,7 @@ async fn run_once_inner(
                 turn_index,
                 "run_turn",
                 Some(cancel.clone()),
-                runtime.run_turn_with_id(turn_input, turn_id, cancel),
+                runtime.run_turn_with_id(turn_input, &TurnId::from(turn_id), cancel),
             )
             .await
         } else if trigger_end_to_end {

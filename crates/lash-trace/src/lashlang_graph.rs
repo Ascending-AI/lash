@@ -470,6 +470,7 @@ fn duration_ms(first: &str, last: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
+    use lash_sansio::TurnId;
 
     use super::*;
     use crate::{
@@ -481,7 +482,7 @@ mod tests {
         LanguageIdentity {
             scope: TraceRuntimeScope {
                 session_id: "session-1".to_string(),
-                turn_id: Some("turn-1".to_string()),
+                turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
             },

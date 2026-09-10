@@ -8,12 +8,13 @@
 //! not Lash checkpoint reload.
 //!
 //! ```rust,ignore
+//! use lash_core::TurnId;
 //! use lash_restate::RestateRuntimeEffectController;
 //! use restate_sdk::prelude::*;
 //!
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct TurnRequest {
-//! #     turn_id: String,
+//! #     turn_id: TurnId,
 //! # }
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct TurnResponse;

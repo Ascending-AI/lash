@@ -15,7 +15,7 @@ mod turn_cancel_modes;
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
-    turn_id: Option<String>,
+    turn_id: Option<TurnId>,
     replay_key: String,
 }
 
@@ -243,7 +243,7 @@ pub(super) fn runtime_host_config_with_native_controller(
 
 pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> ScopedEffectController<'a> {
     ScopedEffectController::borrowed(
         controller,
@@ -743,7 +743,7 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "standard-effects"),
+            scoped_test_turn(&recorder, &TurnId::from("standard-effects")),
         )
         .await
         .expect("turn");
@@ -796,7 +796,7 @@ async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
         .run_turn_assembled(
             TurnInput::text(large_marker.clone()),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "checkpoint-envelope"),
+            scoped_test_turn(&recorder, &TurnId::from("checkpoint-envelope")),
         )
         .await
         .expect("turn");
@@ -920,7 +920,7 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     )
     .await;
 
-    let scoped_effect_controller = scoped_test_turn(&recorder, "stable-scoped-turn");
+    let scoped_effect_controller = scoped_test_turn(&recorder, &TurnId::from("stable-scoped-turn"));
     let turn = runtime
         .stream_turn(
             TurnInput::text("hello"),
@@ -1026,7 +1026,8 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
     )
     .await;
 
-    let scoped_effect_controller = scoped_test_turn(&scoped_recorder, "scoped-tool-direct");
+    let scoped_effect_controller =
+        scoped_test_turn(&scoped_recorder, &TurnId::from("scoped-tool-direct"));
     let turn = runtime
         .stream_turn(
             TurnInput::text("use direct tool"),
@@ -1679,7 +1680,7 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
     )
     .await;
 
-    let scoped_effect_controller = scoped_test_turn(&recorder, "scoped-retry-sleep");
+    let scoped_effect_controller = scoped_test_turn(&recorder, &TurnId::from("scoped-retry-sleep"));
     let turn = runtime
         .stream_turn(
             TurnInput::text("use retry tool"),
@@ -1766,7 +1767,7 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "tool-replay-effects"),
+            scoped_test_turn(&recorder, &TurnId::from("tool-replay-effects")),
         )
         .await
         .expect("turn");
@@ -1861,7 +1862,7 @@ async fn tool_batch_serializes_child_attempts_when_controller_disallows_concurre
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            scoped_test_turn(&controller, "serial-tool-batch-effects"),
+            scoped_test_turn(&controller, &TurnId::from("serial-tool-batch-effects")),
         )
         .await
         .expect("turn");
@@ -1915,7 +1916,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "exec-surface-effects"),
+            scoped_test_turn(&recorder, &TurnId::from("exec-surface-effects")),
         )
         .await
         .expect("turn");
@@ -1968,7 +1969,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "exec-without-executor"),
+            named_turn_scope("root", &TurnId::from("exec-without-executor")),
         )
         .await
         .expect("turn");
@@ -2095,7 +2096,7 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     let manager = runtime.runtime_session_services().expect("session manager");
     let direct = manager.direct_completion_client(
         RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
-        Some("turn-direct".to_string()),
+        Some(TurnId::from("turn-direct".to_string())),
     );
     let completion = direct
         .direct_completion(
@@ -2151,11 +2152,11 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
     let manager = runtime.runtime_session_services().expect("session manager");
     let first = manager.direct_completion_client(
         RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
-        Some("turn-direct".to_string()),
+        Some(TurnId::from("turn-direct".to_string())),
     );
     let second = manager.direct_completion_client(
         RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
-        Some("turn-direct".to_string()),
+        Some(TurnId::from("turn-direct".to_string())),
     );
 
     first
@@ -2205,7 +2206,7 @@ async fn direct_concurrency_requires_keys_and_releases_unkeyed_guard() {
     let manager = runtime.runtime_session_services().expect("session manager");
     let client = manager.direct_completion_client(
         RuntimeEffectControllerHandle::shared(Arc::new(recorder)),
-        Some("turn-direct".to_string()),
+        Some(TurnId::from("turn-direct".to_string())),
     );
 
     let first_client = client.clone();

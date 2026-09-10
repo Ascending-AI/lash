@@ -284,7 +284,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             }
             return Err(lash_core::store::StoreError::RuntimeTurnCommitConflict {
                 session_id,
-                turn_id: operation_key,
+                operation_key,
             });
         }
         if let lash_core::AppendRequestIdentity::Append {

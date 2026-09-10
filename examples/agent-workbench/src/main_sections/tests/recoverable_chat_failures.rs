@@ -38,7 +38,7 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
     crate::restate::record_turn_output(
         &state,
         &session,
-        "provider-failure-turn",
+        &TurnId::from("provider-failure-turn"),
         output,
         turn_state,
         "test.provider.failed",

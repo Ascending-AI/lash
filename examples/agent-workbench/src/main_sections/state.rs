@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -176,7 +177,7 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum ChatMessageProvenance {
-    TurnOutput { turn_id: String },
+    TurnOutput { turn_id: TurnId },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -219,7 +220,7 @@ pub(crate) fn attachment_retrieve_url(attachment_id: &str) -> String {
 /// The runtime's committed copy of the same text keeps its runtime-minted id
 /// and is correlated by `MessageOrigin::TurnInput`, never by id shape
 /// (FIG-972).
-pub(crate) fn workbench_turn_user_message_id(turn_id: &str) -> String {
+pub(crate) fn workbench_turn_user_message_id(turn_id: &TurnId) -> String {
     format!("workbench-user:{turn_id}")
 }
 
@@ -235,7 +236,7 @@ pub(crate) fn workbench_turn_id_from_user_message_id(message_id: &str) -> Option
 /// predicts, so this row retires from the product-event log when its turn stops
 /// running rather than when a committed message happens to share its id
 /// (FIG-984).
-pub(crate) fn workbench_turn_assistant_message_id(turn_id: &str) -> String {
+pub(crate) fn workbench_turn_assistant_message_id(turn_id: &TurnId) -> String {
     format!("workbench-assistant:{turn_id}")
 }
 
@@ -495,7 +496,7 @@ pub(crate) enum StreamItem {
     },
     Done {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
         /// How the turn ended. A viewer that already rendered this turn's
         /// UI-owned rows needs this to know whether they still stand for
         /// anything (FIG-1000): a failed turn's rows have been retired from the
@@ -551,7 +552,7 @@ pub(crate) struct ProductEventHistory {
     /// provenance. This survives frame-scoped read models, which may no longer
     /// expose the old frame's messages on a later `/api/state` read.
     #[serde(default)]
-    pub(crate) committed_user_turn_ids: BTreeSet<String>,
+    pub(crate) committed_user_turn_ids: BTreeSet<TurnId>,
 }
 
 impl ProductEventHistory {
@@ -808,8 +809,8 @@ impl SessionEventRegistry {
         &self,
         session_id: &str,
         committed_message_ids: &BTreeSet<String>,
-        committed_input_turn_ids: &BTreeSet<String>,
-        active_turn_ids: &BTreeSet<String>,
+        committed_input_turn_ids: &BTreeSet<TurnId>,
+        active_turn_ids: &BTreeSet<TurnId>,
     ) {
         let mut histories = self.histories.lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
@@ -827,7 +828,7 @@ impl SessionEventRegistry {
                 | StreamItem::Done { .. } => None,
             })
             .filter(|turn_id| committed_input_turn_ids.contains(*turn_id))
-            .map(str::to_owned)
+            .map(TurnId::from)
             .collect::<BTreeSet<_>>();
         let committed_status_before = history.committed_user_turn_ids.len();
         history
@@ -885,7 +886,7 @@ impl SessionEventRegistry {
     /// Retirement drops the events and keeps their identities, exactly as
     /// settlement compaction does: a Restate replay that re-publishes the same
     /// row must be a no-op, not a resurrection of the row this just retired.
-    pub(crate) fn retire_turn_rows(&self, session_id: &str, turn_id: &str) -> BTreeSet<String> {
+    pub(crate) fn retire_turn_rows(&self, session_id: &str, turn_id: &TurnId) -> BTreeSet<String> {
         let mut retired = BTreeSet::new();
         let mut histories = self.histories.lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
@@ -990,13 +991,13 @@ pub(crate) struct TriggerMutationResponse {
 #[derive(Clone, Default)]
 pub(crate) struct ActiveTurns {
     inner: Arc<Mutex<ActiveTurnLedger>>,
-    pub(crate) prompts: Arc<Mutex<BTreeMap<(String, String), ActiveTurnPrompt>>>,
+    pub(crate) prompts: Arc<Mutex<BTreeMap<(String, TurnId), ActiveTurnPrompt>>>,
     pub(crate) path: Option<Arc<PathBuf>>,
 }
 
 #[derive(Default)]
 struct ActiveTurnLedger {
-    turns: BTreeSet<(String, String)>,
+    turns: BTreeSet<(String, TurnId)>,
     retirements: BTreeMap<String, SessionRetirement>,
 }
 
@@ -1045,27 +1046,31 @@ pub(crate) struct ActiveTurnSubmissionGuard {
     pub(crate) active_turns: ActiveTurns,
     pub(crate) failure_publisher: Option<AppState>,
     pub(crate) session_id: String,
-    pub(crate) turn_id: String,
+    pub(crate) turn_id: TurnId,
     pub(crate) armed: bool,
 }
 
 impl ActiveTurnSubmissionGuard {
-    pub(crate) fn user_turn(state: &AppState, session_id: &str, turn_id: &str) -> Self {
+    pub(crate) fn user_turn(state: &AppState, session_id: &str, turn_id: &TurnId) -> Self {
         Self {
             active_turns: state.active_turns.clone(),
             failure_publisher: Some(state.clone()),
             session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
+            turn_id: TurnId::from(turn_id.to_string()),
             armed: true,
         }
     }
 
-    pub(crate) fn queued_turn(active_turns: ActiveTurns, session_id: &str, turn_id: &str) -> Self {
+    pub(crate) fn queued_turn(
+        active_turns: ActiveTurns,
+        session_id: &str,
+        turn_id: &TurnId,
+    ) -> Self {
         Self {
             active_turns,
             failure_publisher: None,
             session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
+            turn_id: TurnId::from(turn_id.to_string()),
             armed: true,
         }
     }
@@ -1102,21 +1107,21 @@ impl Drop for ActiveTurnSubmissionGuard {
 
 #[derive(Deserialize)]
 pub(crate) struct PersistedActiveTurns {
-    pub(crate) turns: BTreeSet<(String, String)>,
+    pub(crate) turns: BTreeSet<(String, TurnId)>,
     #[serde(default)]
     pub(crate) prompts: Vec<PersistedActiveTurnPrompt>,
 }
 
 #[derive(Serialize)]
 pub(crate) struct PersistedActiveTurnsRef<'a> {
-    pub(crate) turns: &'a BTreeSet<(String, String)>,
+    pub(crate) turns: &'a BTreeSet<(String, TurnId)>,
     pub(crate) prompts: Vec<PersistedActiveTurnPromptRef<'a>>,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct PersistedActiveTurnPrompt {
     pub(crate) session_id: String,
-    pub(crate) turn_id: String,
+    pub(crate) turn_id: TurnId,
     pub(crate) prompt: String,
     #[serde(default)]
     pub(crate) attachment_id: Option<String>,
@@ -1125,7 +1130,7 @@ pub(crate) struct PersistedActiveTurnPrompt {
 #[derive(Serialize)]
 pub(crate) struct PersistedActiveTurnPromptRef<'a> {
     pub(crate) session_id: &'a str,
-    pub(crate) turn_id: &'a str,
+    pub(crate) turn_id: &'a TurnId,
     pub(crate) prompt: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) attachment_id: Option<&'a str>,
@@ -1185,7 +1190,7 @@ impl ActiveTurns {
     }
 
     #[cfg(test)]
-    pub(crate) fn insert(&self, session_id: impl Into<String>, turn_id: impl Into<String>) {
+    pub(crate) fn insert(&self, session_id: impl Into<String>, turn_id: impl Into<TurnId>) {
         self.insert_with_prompt(session_id, turn_id, None, None);
     }
 
@@ -1193,7 +1198,7 @@ impl ActiveTurns {
     pub(crate) fn insert_with_prompt(
         &self,
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
         prompt: Option<String>,
         attachment_id: Option<String>,
     ) {
@@ -1216,7 +1221,7 @@ impl ActiveTurns {
     pub(crate) fn try_insert_for_idle_session(
         &self,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
     ) -> ActiveTurnClaim {
         self.try_insert_with_prompt_for_idle_session(session_id, turn_id, None, None)
     }
@@ -1230,7 +1235,7 @@ impl ActiveTurns {
     pub(crate) fn try_insert_with_prompt_for_idle_session(
         &self,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
         prompt: Option<String>,
         attachment_id: Option<String>,
     ) -> ActiveTurnClaim {
@@ -1245,7 +1250,7 @@ impl ActiveTurns {
         {
             return ActiveTurnClaim::Busy;
         }
-        let key = (session_id.to_string(), turn_id.to_string());
+        let key = (session_id.to_string(), turn_id.clone());
         let mut prompts = self.prompts.lock_recover();
         ledger.turns.insert(key.clone());
         if let Some(prompt) = prompt {
@@ -1261,8 +1266,8 @@ impl ActiveTurns {
         ActiveTurnClaim::Claimed
     }
 
-    pub(crate) fn remove(&self, session_id: &str, turn_id: &str) {
-        let key = (session_id.to_string(), turn_id.to_string());
+    pub(crate) fn remove(&self, session_id: &str, turn_id: &TurnId) {
+        let key = (session_id.to_string(), turn_id.clone());
         let mut ledger = self.inner.lock_recover();
         let mut prompts = self.prompts.lock_recover();
         ledger.turns.remove(&key);
@@ -1270,11 +1275,11 @@ impl ActiveTurns {
         self.persist_snapshot(&ledger.turns, &prompts);
     }
 
-    pub(crate) fn contains(&self, session_id: &str, turn_id: &str) -> bool {
+    pub(crate) fn contains(&self, session_id: &str, turn_id: &TurnId) -> bool {
         self.inner
             .lock_recover()
             .turns
-            .contains(&(session_id.to_string(), turn_id.to_string()))
+            .contains(&(session_id.to_string(), turn_id.clone()))
     }
 
     pub(crate) fn for_session(&self, session_id: &str) -> Vec<lash::TurnAddress> {
@@ -1327,10 +1332,14 @@ impl ActiveTurns {
             .copied()
     }
 
-    pub(crate) fn prompt_for(&self, session_id: &str, turn_id: &str) -> Option<ActiveTurnPrompt> {
+    pub(crate) fn prompt_for(
+        &self,
+        session_id: &str,
+        turn_id: &TurnId,
+    ) -> Option<ActiveTurnPrompt> {
         self.prompts
             .lock_recover()
-            .get(&(session_id.to_string(), turn_id.to_string()))
+            .get(&(session_id.to_string(), turn_id.clone()))
             .cloned()
     }
 
@@ -1342,8 +1351,8 @@ impl ActiveTurns {
 
     fn persist_snapshot(
         &self,
-        active: &BTreeSet<(String, String)>,
-        prompts: &BTreeMap<(String, String), ActiveTurnPrompt>,
+        active: &BTreeSet<(String, TurnId)>,
+        prompts: &BTreeMap<(String, TurnId), ActiveTurnPrompt>,
     ) {
         let Some(path) = self.path.as_deref() else {
             return;
@@ -1536,7 +1545,7 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
             return Ok(());
         }
         let workflow_request = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: format!("workbench-queued-{}", uuid::Uuid::new_v4()),
+            turn_id: TurnId::from(format!("workbench-queued-{}", uuid::Uuid::new_v4())),
             session_id: session_id.clone(),
             reason: request.reason,
             batch_ids: Vec::new(),

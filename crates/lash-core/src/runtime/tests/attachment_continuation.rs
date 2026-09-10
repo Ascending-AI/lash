@@ -143,7 +143,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .run_turn_assembled(
             TurnInput::text("fetch the workspace badge"),
             CancellationToken::new(),
-            named_turn_scope("root", "unsupported-attachment-turn"),
+            named_turn_scope("root", &TurnId::from("unsupported-attachment-turn")),
         )
         .await
         .expect("artifact turn assembles");
@@ -154,7 +154,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
         .run_turn_assembled(
             TurnInput::text("answer this text-only follow-up"),
             CancellationToken::new(),
-            named_turn_scope("root", "text-after-unsupported-attachment"),
+            named_turn_scope("root", &TurnId::from("text-after-unsupported-attachment")),
         )
         .await
         .expect("text-only continuation assembles");
@@ -228,7 +228,7 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
         .run_turn_assembled(
             TurnInput::text("fetch the accepted image"),
             CancellationToken::new(),
-            named_turn_scope("root", "accepted-attachment-turn"),
+            named_turn_scope("root", &TurnId::from("accepted-attachment-turn")),
         )
         .await
         .expect("accepted attachment turn");

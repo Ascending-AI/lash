@@ -123,7 +123,7 @@ fn journaled_raw_completion(recorder: &RecordingEffectController) -> LlmResponse
 async fn drive_turn(
     runtime: &mut LashRuntime,
     recorder: &RecordingEffectController,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> Result<AssembledTurn, RuntimeError> {
     runtime
         .stream_prepared_turn(
@@ -143,7 +143,7 @@ async fn drive_turn(
             None,
             crate::TurnContext::default(),
             Vec::new(),
-            turn_id.to_string(),
+            TurnId::from(turn_id.to_string()),
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
@@ -174,9 +174,13 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
     )
     .await;
 
-    let failed = drive_turn(&mut runtime, &recorder, "response-hook-failure")
-        .await
-        .expect("a failing hook is an assembled failed turn, not a runtime abort");
+    let failed = drive_turn(
+        &mut runtime,
+        &recorder,
+        &TurnId::from("response-hook-failure"),
+    )
+    .await
+    .expect("a failing hook is an assembled failed turn, not a runtime abort");
 
     assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.hook_calls.load(Ordering::SeqCst), 1);
@@ -229,9 +233,13 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
         crate::AttemptOutcome::Completed
     );
 
-    let redriven = drive_turn(&mut runtime, &recorder, "response-hook-failure")
-        .await
-        .expect("the redrive completes from the recorded completion");
+    let redriven = drive_turn(
+        &mut runtime,
+        &recorder,
+        &TurnId::from("response-hook-failure"),
+    )
+    .await
+    .expect("the redrive completes from the recorded completion");
 
     assert_eq!(
         fixture.provider_calls.load(Ordering::SeqCst),
@@ -265,7 +273,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
     )
     .await;
 
-    let crashed = drive_turn(&mut runtime, &recorder, "phase-crash")
+    let crashed = drive_turn(&mut runtime, &recorder, &TurnId::from("phase-crash"))
         .await
         .expect("the crashed phase is an assembled failed turn");
 
@@ -282,7 +290,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
         "phase 1 was durable before the crash window opened"
     );
 
-    let redriven = drive_turn(&mut runtime, &recorder, "phase-crash")
+    let redriven = drive_turn(&mut runtime, &recorder, &TurnId::from("phase-crash"))
         .await
         .expect("the redrive completes phase 2 from the recorded completion");
 
@@ -313,7 +321,7 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
     )
     .await;
 
-    let first = drive_turn(&mut runtime, &recorder, "hook-events")
+    let first = drive_turn(&mut runtime, &recorder, &TurnId::from("hook-events"))
         .await
         .expect("turn completes");
     assert_eq!(first.assistant_output.safe_text, "paid completion 1");
@@ -342,7 +350,7 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
         crate::PluginRuntimeEvent::Custom { name, .. } if name == "derived-0"
     ));
 
-    let replayed = drive_turn(&mut runtime, &recorder, "hook-events")
+    let replayed = drive_turn(&mut runtime, &recorder, &TurnId::from("hook-events"))
         .await
         .expect("replay of both phases");
     assert_eq!(

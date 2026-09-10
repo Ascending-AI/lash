@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 
 /// Stable caller-selected identity for one durable commit operation.
 ///
@@ -1042,7 +1043,7 @@ mod append_request_identity_tests {
         let causal_cases = [
             crate::CausalRef::Turn {
                 session_id: "s".to_string(),
-                turn_id: "t".to_string(),
+                turn_id: TurnId::from("t"),
             },
             crate::CausalRef::Effect {
                 session_id: "s".to_string(),
@@ -1294,7 +1295,7 @@ impl OperationId {
     /// key to both session and turn IDs.
     pub fn turn(
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
         key: impl Into<String>,
     ) -> Self {
         Self::new(crate::ExecutionScope::turn(session_id, turn_id), key)
@@ -1315,7 +1316,7 @@ impl OperationId {
 
     /// Exposes turn id to store, effect-host, and protocol implementors while materializing,
     /// executing, or persisting a session turn. Returns `None` when no turn id is present.
-    pub fn turn_id(&self) -> Option<&str> {
+    pub fn turn_id(&self) -> Option<&TurnId> {
         self.scope.turn_id()
     }
 }
@@ -1337,7 +1338,7 @@ struct RuntimeCommitIntent<'a> {
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,
-    interrupted_turn_input_turn_id: Option<&'a str>,
+    interrupted_turn_input_turn_id: Option<&'a TurnId>,
     committed_attachment_ids: &'a [crate::AttachmentId],
 }
 
@@ -1373,7 +1374,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 .iter()
                 .map(QueuedBatchIntent::from)
                 .collect(),
-            interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_deref(),
+            interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_ref(),
             committed_attachment_ids: &commit.committed_attachment_ids,
         }
     }

@@ -4,6 +4,7 @@ use super::turn_loop::{
     TurnLeaseScope, TurnPrepareContext, TurnSinks, TurnStopwatch,
 };
 use super::*;
+use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 pub(super) const MAX_AGENT_FRAME_SWITCHES: usize = 16;
@@ -41,7 +42,7 @@ impl LogicalTurnClaims {
         &self,
         outcome: &TurnOutcome,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     ) -> LogicalTurnCommitEffects {
         let claimed = !self.is_empty();
@@ -108,7 +109,7 @@ pub(super) struct PreparedLogicalTurn {
     pub(super) protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
     pub(super) turn_context: crate::TurnContext,
     pub(super) initial_turn_causes: Vec<crate::TurnCause>,
-    pub(super) trace_turn_id: String,
+    pub(super) trace_turn_id: TurnId,
     pub(super) turn_index: usize,
 }
 
@@ -123,13 +124,16 @@ impl LogicalTurnStart {
     ) -> (
         Option<crate::ProtocolTurnOptions>,
         crate::TurnContext,
-        String,
+        TurnId,
     ) {
         match self {
             Self::Input(input) => (
                 input.protocol_turn_options.clone(),
                 input.turn_context.clone(),
-                input.trace_turn_id.clone().unwrap_or_default(),
+                input
+                    .trace_turn_id
+                    .clone()
+                    .unwrap_or_else(|| TurnId::from("")),
             ),
             Self::Prepared(prepared) => (
                 prepared.protocol_turn_options.clone(),
@@ -143,7 +147,7 @@ impl LogicalTurnStart {
 impl LashRuntime {
     async fn emit_physical_turn_start(
         turn_events: &dyn TurnActivitySink,
-        turn_id: &str,
+        turn_id: &TurnId,
         claims: &LogicalTurnClaims,
     ) {
         super::turn_loop::emit_turn_started_to_sink(turn_events, turn_id).await;
@@ -187,7 +191,7 @@ impl LashRuntime {
         let (follow_protocol_turn_options, follow_turn_context, supplied_trace_turn_id) =
             start.continuation_state();
         let root_trace_turn_id = if supplied_trace_turn_id.is_empty() {
-            scoped_effect_controller.scope_id().to_string()
+            TurnId::from(scoped_effect_controller.scope_id())
         } else {
             supplied_trace_turn_id
         };
@@ -532,12 +536,12 @@ pub(super) fn turn_input_from_text(text: String) -> TurnInput {
 }
 
 pub(super) fn agent_frame_follow_turn_id(
-    root_turn_id: &str,
+    root_turn_id: &TurnId,
     completed_turn_count: usize,
-) -> String {
+) -> TurnId {
     if completed_turn_count == 0 {
-        root_turn_id.to_string()
+        root_turn_id.clone()
     } else {
-        format!("{root_turn_id}:agent-frame:{completed_turn_count}")
+        TurnId::from(format!("{root_turn_id}:agent-frame:{completed_turn_count}"))
     }
 }

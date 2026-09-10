@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 #[cfg(test)]
 #[path = "tests/support.rs"]
@@ -212,7 +213,7 @@ fn turn_routing_state_survives_web_process_reconstruction() {
         vec![lash::TurnAddress::new(&session_id, "durable-stop-turn")]
     );
     let recovered_prompt = recovered_turns
-        .prompt_for(&session_id, "durable-stop-turn")
+        .prompt_for(&session_id, &TurnId::from("durable-stop-turn"))
         .expect("restored prompt");
     assert_eq!(recovered_prompt.text, "actual restored prompt");
     assert_eq!(recovered_prompt.attachment_id, None);
@@ -458,7 +459,7 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
 
-    state.publish_turn_done(&session_id, "transient-turn");
+    state.publish_turn_done(&session_id, &TurnId::from("transient-turn"));
 
     assert!(matches!(
         events.try_recv(),
@@ -540,7 +541,7 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
 
-    state.track_turn(&session_id, "foreground-turn");
+    state.track_turn(&session_id, &TurnId::from("foreground-turn"));
     state.publish_trigger_dispatch_done(&session_id, "trigger-running");
     assert!(
         matches!(
@@ -550,7 +551,9 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         "trigger dispatch must not publish Done while a foreground turn is active"
     );
 
-    state.active_turns.remove(&session_id, "foreground-turn");
+    state
+        .active_turns
+        .remove(&session_id, &TurnId::from("foreground-turn"));
     state.publish_trigger_dispatch_done(&session_id, "trigger-settled");
     assert!(matches!(
         events.try_recv(),
@@ -817,7 +820,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     };
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
-    state.track_turn(&session_id, "turn-cancel");
+    state.track_turn(&session_id, &TurnId::from("turn-cancel"));
     let session = state
         .core
         .session(&session_id)
@@ -864,7 +867,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     // The execution publisher owns the terminal event; the cancel route
     // publishes nothing for this core-run turn.
     assert!(events.try_recv().is_err(), "cancel route owns no terminal");
-    state.publish_turn_done(&session_id, "turn-cancel");
+    state.publish_turn_done(&session_id, &TurnId::from("turn-cancel"));
     assert!(matches!(
         events.try_recv(),
         Ok(ProductEvent {
@@ -1756,7 +1759,7 @@ async fn run_workbench_turn_via_restate(
     text: &str,
 ) -> lash_restate::RestateInvocationId {
     state.push_message("user", text);
-    let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
+    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
         session_id: state.current_session_id(),

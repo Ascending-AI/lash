@@ -500,14 +500,14 @@ fn attachment_put_transport() -> TestProvider {
         .build()
 }
 
-fn assert_turn_owned_attachment(store: &RecordingStore, turn_id: &str) {
+fn assert_turn_owned_attachment(store: &RecordingStore, turn_id: &TurnId) {
     let entries = store.attachment_manifest_entries();
     assert_eq!(entries.len(), 1);
     assert_eq!(
         entries[0].owner_kind,
         Some(crate::AttachmentOwnerKind::Turn)
     );
-    assert_eq!(entries[0].owner_id.as_deref(), Some(turn_id));
+    assert_eq!(entries[0].owner_id.as_deref(), Some(turn_id.as_str()));
 }
 
 fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
@@ -676,7 +676,7 @@ async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
             TurnInput::text("commit before delivering"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "commit-before-delivery"),
+                named_turn_scope("root", &TurnId::from("commit-before-delivery")),
             )
             .with_events(&sink),
         ),
@@ -700,7 +700,7 @@ async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
         .run_turn_assembled(
             TurnInput::text("continue after dropped host delivery"),
             CancellationToken::new(),
-            named_turn_scope("root", "after-dropped-host-delivery"),
+            named_turn_scope("root", &TurnId::from("after-dropped-host-delivery")),
         )
         .await
         .expect("the adopted resident state remains usable");
@@ -771,7 +771,7 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         .run_turn_assembled(
             TurnInput::text("switch frames"),
             CancellationToken::new(),
-            named_turn_scope("root", "post-commit-restore-failure"),
+            named_turn_scope("root", &TurnId::from("post-commit-restore-failure")),
         )
         .await
         .expect("a published commit must not become a whole-turn error");
@@ -871,7 +871,7 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
         .run_turn_assembled(
             TurnInput::text("use the reloaded state"),
             CancellationToken::new(),
-            named_turn_scope("root", "after-post-commit-restore-failure"),
+            named_turn_scope("root", &TurnId::from("after-post-commit-restore-failure")),
         )
         .await
         .expect("next use reloads durable resident state");
@@ -1010,7 +1010,7 @@ async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_tea
         .run_turn_assembled(
             crate::TurnInput::text("run the turn that will be fenced at commit"),
             CancellationToken::new(),
-            named_turn_scope(session_id, live_turn_id),
+            named_turn_scope(session_id, &TurnId::from(live_turn_id)),
         )
         .await
         .expect_err("a fenced commit must fail the turn");
@@ -1103,7 +1103,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
         .run_turn_assembled(
             TurnInput::text("commit the baseline"),
             CancellationToken::new(),
-            named_turn_scope("root", "execution-state-baseline"),
+            named_turn_scope("root", &TurnId::from("execution-state-baseline")),
         )
         .await
         .expect("baseline turn commits its execution state");
@@ -1113,7 +1113,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
         .run_turn_assembled(
             TurnInput::text("capture must fail"),
             CancellationToken::new(),
-            named_turn_scope("root", "execution-state-capture-failure"),
+            named_turn_scope("root", &TurnId::from("execution-state-capture-failure")),
         )
         .await
         .expect_err("dirty capture failure must abort before the turn commit");
@@ -1237,7 +1237,7 @@ async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_s
         .run_turn_assembled(
             TurnInput::text("redrive an already materialized frame switch"),
             CancellationToken::new(),
-            named_turn_scope("root", "already-current-frame-switch"),
+            named_turn_scope("root", &TurnId::from("already-current-frame-switch")),
         )
         .await
         .expect("an already-current frame switch remains an idempotent no-op");
@@ -1349,7 +1349,7 @@ async fn materialized_frame_switch_clears_checkpoint_and_resets_resident_executo
         .run_turn_assembled(
             TurnInput::text("switch to a distinct frame"),
             CancellationToken::new(),
-            named_turn_scope("root", "materialized-frame-switch"),
+            named_turn_scope("root", &TurnId::from("materialized-frame-switch")),
         )
         .await
         .expect("materialized frame switch commits");
@@ -1419,7 +1419,7 @@ async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
     let error = first
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "capture-abort-owner"),
+            named_turn_scope("root", &TurnId::from("capture-abort-owner")),
         ))
         .await
         .expect_err("dirty capture aborts before commit");
@@ -1452,7 +1452,7 @@ async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
     let reclaimed = peer
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "capture-abort-peer"),
+            named_turn_scope("root", &TurnId::from("capture-abort-peer")),
         ))
         .await
         .expect("peer reclaim must not wait for the lease TTL")
@@ -1534,7 +1534,7 @@ async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_re
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "follow-on-capture-failure"),
+            named_turn_scope("root", &TurnId::from("follow-on-capture-failure")),
         ))
         .await
         .expect("a follow-on pre-commit failure must not erase the committed frame")
@@ -1559,7 +1559,7 @@ async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_re
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "retry-safe-committed-handoff"),
+            named_turn_scope("root", &TurnId::from("retry-safe-committed-handoff")),
         ))
         .await
         .expect("retrying the logical queue call is safe")
@@ -1789,7 +1789,7 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
             TurnInput::text("rotate the frame"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "live-surface-frame-rotation"),
+                named_turn_scope("root", &TurnId::from("live-surface-frame-rotation")),
             ),
         )
         .await
@@ -2339,7 +2339,7 @@ fn request_contains_text(request: &crate::llm::types::LlmRequest, needle: &str) 
 async fn enqueue_turn_input_for_checkpoint(
     store: &RecordingStore,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     source_key: Option<String>,
     input: TurnInput,
 ) -> crate::PendingTurnInput {
@@ -2777,7 +2777,7 @@ async fn turn_provider_override_does_not_persist_into_session_policy_or_agent_fr
                 turn_context,
             },
             CancellationToken::new(),
-            named_turn_scope("root", "provider-override-turn"),
+            named_turn_scope("root", &TurnId::from("provider-override-turn")),
         )
         .await
         .expect("turn");
@@ -2842,7 +2842,7 @@ async fn plugin_before_turn_can_abort_and_inject_messages() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "plugin-extension-turn"),
+            named_turn_scope("root", &TurnId::from("plugin-extension-turn")),
         )
         .await
         .expect("turn");
@@ -2892,7 +2892,7 @@ async fn normal_turn_stores_effective_user_text_in_state() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "skill-command-visibility-turn"),
+            named_turn_scope("root", &TurnId::from("skill-command-visibility-turn")),
         )
         .await
         .expect("turn");
@@ -2914,7 +2914,7 @@ async fn normal_turn_stores_effective_user_text_in_state() {
     assert_eq!(
         user_message.origin,
         Some(crate::MessageOrigin::TurnInput {
-            turn_id: "skill-command-visibility-turn".to_string(),
+            turn_id: TurnId::from("skill-command-visibility-turn"),
             input_id: None,
         })
     );
@@ -2978,7 +2978,7 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "retryable-error-turn"),
+            named_turn_scope("root", &TurnId::from("retryable-error-turn")),
         )
         .await
         .expect("turn");
@@ -3027,7 +3027,7 @@ async fn provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "typed-provider-failure-turn"),
+            named_turn_scope("root", &TurnId::from("typed-provider-failure-turn")),
         )
         .await
         .expect("turn");
@@ -3079,7 +3079,7 @@ async fn assembled_turn_reports_turn_timing_from_injected_clock() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "turn-timing-turn"),
+            named_turn_scope("root", &TurnId::from("turn-timing-turn")),
         )
         .await
         .expect("turn");
@@ -3120,7 +3120,7 @@ async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
-        "queued-checkpoint-turn",
+        &TurnId::from("queued-checkpoint-turn"),
         None,
         TurnInput::text("one more thing"),
     )
@@ -3138,7 +3138,7 @@ async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "queued-checkpoint-turn"),
+            named_turn_scope("root", &TurnId::from("queued-checkpoint-turn")),
         )
         .await
         .expect("turn");
@@ -3217,7 +3217,7 @@ async fn queued_checkpoint_input_preserves_images() {
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
-        "image-attachment-turn",
+        &TurnId::from("image-attachment-turn"),
         None,
         TurnInput::text("see image").with_attachment(crate::AttachmentSource::inline(
             crate::MediaType::parse("image/png").unwrap(),
@@ -3238,7 +3238,7 @@ async fn queued_checkpoint_input_preserves_images() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "image-attachment-turn"),
+            named_turn_scope("root", &TurnId::from("image-attachment-turn")),
         )
         .await
         .expect("turn");
@@ -3324,7 +3324,7 @@ async fn checkpoint_hook_can_inject_messages() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "plugin-action-turn"),
+            named_turn_scope("root", &TurnId::from("plugin-action-turn")),
         )
         .await
         .expect("turn");
@@ -3388,7 +3388,7 @@ async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application
     let admitted = enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
-        "checkpoint-plugin-abort-turn",
+        &TurnId::from("checkpoint-plugin-abort-turn"),
         Some("host:checkpoint-plugin-abort".to_string()),
         TurnInput::text("must remain pending"),
     )
@@ -3400,7 +3400,7 @@ async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "checkpoint-plugin-abort-turn"),
+                named_turn_scope("root", &TurnId::from("checkpoint-plugin-abort-turn")),
             )
             .with_turn_events(&turn_events),
         )
@@ -3528,7 +3528,7 @@ async fn checkpoint_attachment_failure_leaves_active_input_pending_without_appli
     let admitted = enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
-        "checkpoint-attachment-failure-turn",
+        &TurnId::from("checkpoint-attachment-failure-turn"),
         Some("host:checkpoint-attachment-failure".to_string()),
         TurnInput::text("must remain pending after attachment failure"),
     )
@@ -3540,7 +3540,7 @@ async fn checkpoint_attachment_failure_leaves_active_input_pending_without_appli
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "checkpoint-attachment-failure-turn"),
+                named_turn_scope("root", &TurnId::from("checkpoint-attachment-failure-turn")),
             )
             .with_turn_events(&turn_events),
         )
@@ -3624,7 +3624,7 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
-        "injection-accepted-turn",
+        &TurnId::from("injection-accepted-turn"),
         Some("host:follow-up-id".to_string()),
         TurnInput::text("follow up"),
     )
@@ -3643,7 +3643,7 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "injection-accepted-turn"),
+                named_turn_scope("root", &TurnId::from("injection-accepted-turn")),
             )
             .with_events(&sink),
         )
@@ -3732,7 +3732,7 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
 async fn commit_checkpoint_injected_turn_for_redrive(
     store: Arc<RecordingStore>,
     controller: Arc<dyn crate::RuntimeEffectController>,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> (crate::TurnInput, crate::TurnInputAcceptanceReceipt) {
     let transport = mock_provider(vec![
         MockCall {
@@ -3798,7 +3798,7 @@ async fn commit_checkpoint_injected_turn_for_redrive(
 async fn redrive_checkpoint_injected_turn(
     store: Arc<dyn crate::RuntimePersistence>,
     controller: Arc<dyn crate::RuntimeEffectController>,
-    turn_id: &str,
+    turn_id: &TurnId,
     input: TurnInput,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -3821,7 +3821,7 @@ async fn redrive_checkpoint_injected_turn(
 
 #[tokio::test]
 async fn checkpoint_injected_turn_redrive_replays_the_original_commit_identity() {
-    let turn_id = "checkpoint-injected-redrive";
+    let turn_id = &TurnId::from("checkpoint-injected-redrive");
     let store = Arc::new(RecordingStore::default());
     let controller: Arc<dyn crate::RuntimeEffectController> =
         Arc::new(JournalReplayEffectController::default());
@@ -3875,7 +3875,7 @@ async fn checkpoint_injected_turn_redrive_replays_the_original_commit_identity()
 
 #[tokio::test]
 async fn checkpoint_injected_turn_redrive_refuses_when_application_history_is_unavailable() {
-    let turn_id = "checkpoint-injected-redrive-refusal";
+    let turn_id = &TurnId::from("checkpoint-injected-redrive-refusal");
     let store = Arc::new(RecordingStore::default());
     let controller: Arc<dyn crate::RuntimeEffectController> =
         Arc::new(JournalReplayEffectController::default());
@@ -3919,7 +3919,7 @@ async fn checkpoint_injected_turn_redrive_refuses_when_application_history_is_un
 
 #[tokio::test]
 async fn journaled_acceptance_applied_by_a_foreign_turn_refuses_before_commit() {
-    let turn_id = "checkpoint-injected-redrive-foreign-application";
+    let turn_id = &TurnId::from("checkpoint-injected-redrive-foreign-application");
     let store = Arc::new(RecordingStore::default());
     let controller: Arc<dyn crate::RuntimeEffectController> =
         Arc::new(JournalReplayEffectController::default());
@@ -3995,7 +3995,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
             .run_turn_assembled(
                 TurnInput::text("first turn input"),
                 CancellationToken::new(),
-                named_turn_scope("root", "after-last-call-turn"),
+                named_turn_scope("root", &TurnId::from("after-last-call-turn")),
             )
             .await
             .expect("first turn");
@@ -4011,7 +4011,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
-        "after-last-call-turn",
+        &TurnId::from("after-last-call-turn"),
         Some("host:late-active".to_string()),
         TurnInput::text("late active input"),
     )
@@ -4032,7 +4032,7 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
     runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "late-active-next-turn"),
+            named_turn_scope("root", &TurnId::from("late-active-next-turn")),
         ))
         .await
         .expect("drain deferred input")
@@ -4059,7 +4059,7 @@ async fn command_only_queued_work_drain_completes_without_turn() {
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "command-only-queue-drain"),
+            named_turn_scope("root", &TurnId::from("command-only-queue-drain")),
         ))
         .await
         .expect("command-only drain succeeds")
@@ -4184,7 +4184,7 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "next-input-before-wake-drain"),
+            named_turn_scope("root", &TurnId::from("next-input-before-wake-drain")),
         ))
         .await
         .expect("queued drain succeeds")
@@ -4290,7 +4290,7 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "selected-wake-drain"),
+                named_turn_scope("root", &TurnId::from("selected-wake-drain")),
             ),
             std::slice::from_ref(&wake_batch.batch_id),
         )
@@ -4414,7 +4414,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         std::time::Duration::from_secs(5),
         runtime.stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope(SESSION_ID, "cancel-claimed-wake-drain"),
+            named_turn_scope(SESSION_ID, &TurnId::from("cancel-claimed-wake-drain")),
         )),
     )
     .await
@@ -4448,7 +4448,7 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(SESSION_ID, "after-cancel-claimed-wake-drain"),
+                named_turn_scope(SESSION_ID, &TurnId::from("after-cancel-claimed-wake-drain")),
             ))
             .await
             .expect("post-cancel drain should succeed")
@@ -4595,7 +4595,7 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
         runtime.run_turn_assembled(
             TurnInput::text("long running user turn"),
             CancellationToken::new(),
-            named_turn_scope("root", "long-turn-queued-work-claim"),
+            named_turn_scope("root", &TurnId::from("long-turn-queued-work-claim")),
         ),
     )
     .await
@@ -4615,7 +4615,7 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "after-long-turn-queued-work-claim"),
+                named_turn_scope("root", &TurnId::from("after-long-turn-queued-work-claim")),
             ))
             .await
             .expect("post-turn queue check should succeed")
@@ -4704,7 +4704,7 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
     let first_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "queued-frame-chain"),
+            named_turn_scope("root", &TurnId::from("queued-frame-chain")),
         ))
         .await
         .expect("queued frame chain succeeds")
@@ -4735,7 +4735,7 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
     let second_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "second-queued-after-frame-chain"),
+            named_turn_scope("root", &TurnId::from("second-queued-after-frame-chain")),
         ))
         .await
         .expect("second queued turn succeeds")
@@ -4814,7 +4814,7 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
     let first = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "handoff-crash-window"),
+            named_turn_scope("root", &TurnId::from("handoff-crash-window")),
         ))
         .await
         .expect("the committed frame switch remains a successful public call")
@@ -4859,7 +4859,7 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "handoff-pump-recovery"),
+            named_turn_scope("root", &TurnId::from("handoff-pump-recovery")),
         ))
         .await
         .expect("pump recovery succeeds")
@@ -4923,7 +4923,7 @@ async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_hando
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope(SESSION_ID, "mid-chain-cancel"),
+            named_turn_scope(SESSION_ID, &TurnId::from("mid-chain-cancel")),
         ))
         .await
         .expect("cancelled chain assembles")
@@ -4981,7 +4981,7 @@ async fn claimed_normalization_failure_commits_and_settles_input() {
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "invalid-claimed-input"),
+            named_turn_scope("root", &TurnId::from("invalid-claimed-input")),
         ))
         .await
         .expect("invalid input assembles")
@@ -5038,7 +5038,7 @@ async fn claimed_plugin_abort_commits_and_settles_input() {
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "claimed-plugin-abort"),
+            named_turn_scope("root", &TurnId::from("claimed-plugin-abort")),
         ))
         .await
         .expect("plugin abort assembles")
@@ -5075,12 +5075,15 @@ async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
     runtime
         .stream_turn(
             TurnInput::text("store an attachment"),
-            TurnOptions::new(CancellationToken::new(), named_turn_scope("root", TURN_ID)),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", &TurnId::from(TURN_ID)),
+            ),
         )
         .await
         .expect("stream turn succeeds");
 
-    assert_turn_owned_attachment(store.as_ref(), TURN_ID);
+    assert_turn_owned_attachment(store.as_ref(), &TurnId::from(TURN_ID));
 }
 
 #[tokio::test]
@@ -5116,11 +5119,11 @@ async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
             None,
             crate::TurnContext::default(),
             Vec::new(),
-            TURN_ID.to_string(),
+            TurnId::from(TURN_ID.to_string()),
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            named_turn_scope("root", TURN_ID),
+            named_turn_scope("root", &TurnId::from(TURN_ID)),
             CancellationToken::new(),
             None,
             None,
@@ -5128,7 +5131,7 @@ async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
         .await
         .expect("prepared stream turn succeeds");
 
-    assert_turn_owned_attachment(store.as_ref(), TURN_ID);
+    assert_turn_owned_attachment(store.as_ref(), &TurnId::from(TURN_ID));
 }
 
 #[tokio::test]
@@ -5198,11 +5201,11 @@ async fn stream_prepared_turn_follows_agent_frame_switch() {
             None,
             crate::TurnContext::default(),
             Vec::new(),
-            "prepared-chain".to_string(),
+            TurnId::from("prepared-chain".to_string()),
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            named_turn_scope("root", "prepared-chain"),
+            named_turn_scope("root", &TurnId::from("prepared-chain")),
             CancellationToken::new(),
             None,
             None,
@@ -5287,7 +5290,7 @@ async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
             TurnInput::text("start finalized borrowed append probe"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "finalized-lapsed-borrow"),
+                named_turn_scope("root", &TurnId::from("finalized-lapsed-borrow")),
             ),
         )
         .await
@@ -5355,7 +5358,7 @@ async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
     let output = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "retained-service"),
+            named_turn_scope("root", &TurnId::from("retained-service")),
         ))
         .await
         .expect("queued switch succeeds")
@@ -5485,7 +5488,7 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
     let output = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "queued-lapsed-handoff"),
+            named_turn_scope("root", &TurnId::from("queued-lapsed-handoff")),
         ))
         .await
         .expect("the committed switch is returned with a loud follow-on failure")
@@ -5629,7 +5632,7 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
             TurnInput::text("start lapsed in-process handoff"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "inprocess-lapsed-handoff"),
+                named_turn_scope("root", &TurnId::from("inprocess-lapsed-handoff")),
             ),
         )
         .await
@@ -5750,7 +5753,7 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
             TurnInput::text("start retained lease chain"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "resident-chain"),
+                named_turn_scope("root", &TurnId::from("resident-chain")),
             ),
         )
         .await
@@ -5794,7 +5797,7 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
             TurnInput::text("turn after lease release"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "reacquired-turn"),
+                named_turn_scope("root", &TurnId::from("reacquired-turn")),
             ),
         )
         .await
@@ -5884,7 +5887,7 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
             TurnInput::text("lose the retained lease"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "lost-retained-lease"),
+                named_turn_scope("root", &TurnId::from("lost-retained-lease")),
             ),
         )
         .await
@@ -5919,7 +5922,7 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
             TurnInput::text("turn after lease loss"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "turn-after-lease-loss"),
+                named_turn_scope("root", &TurnId::from("turn-after-lease-loss")),
             ),
         )
         .await
@@ -5985,7 +5988,7 @@ async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "bounded-frame-chain"),
+            named_turn_scope("root", &TurnId::from("bounded-frame-chain")),
         ))
         .await
         .expect("bounded chain terminalizes")
@@ -6087,7 +6090,7 @@ async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "bounded-frame-capture-abort"),
+            named_turn_scope("root", &TurnId::from("bounded-frame-capture-abort")),
         ))
         .await
         .expect("a failed terminal capture preserves the last committed frame")
@@ -6141,7 +6144,7 @@ async fn leading_session_command_drains_before_queued_turn() {
         .stream_next_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "command-before-turn-drain"),
+                named_turn_scope("root", &TurnId::from("command-before-turn-drain")),
             )
             .with_turn_events(&turn_events),
         )
@@ -6194,7 +6197,10 @@ async fn idle_ordering_read_is_independent_of_pending_command_depth() {
         let drained = runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", &format!("depth-invariance-{backlog_depth}")),
+                named_turn_scope(
+                    "root",
+                    &TurnId::from(format!("depth-invariance-{backlog_depth}")),
+                ),
             ))
             .await
             .expect("depth-invariance drain succeeds")
@@ -6237,7 +6243,7 @@ async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "turn-before-command-drain"),
+            named_turn_scope("root", &TurnId::from("turn-before-command-drain")),
         ))
         .await
         .expect("queued turn drain succeeds")
@@ -6260,7 +6266,7 @@ async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let command_only = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "later-command-drain"),
+            named_turn_scope("root", &TurnId::from("later-command-drain")),
         ))
         .await
         .expect("later command drain succeeds")
@@ -6348,7 +6354,7 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
         .stream_next_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "queued-work-started-turn"),
+                named_turn_scope("root", &TurnId::from("queued-work-started-turn")),
             )
             .with_turn_events(&turn_events),
         )
@@ -6602,8 +6608,11 @@ async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_t
         runtime
             .stream_turn(
                 TurnInput::text("tear down after the cancellation watcher gives up"),
-                TurnOptions::new(turn_cancel, named_turn_scope("root", turn_id))
-                    .with_turn_events(&turn_events_for_task),
+                TurnOptions::new(
+                    turn_cancel,
+                    named_turn_scope("root", &TurnId::from(turn_id)),
+                )
+                .with_turn_events(&turn_events_for_task),
             )
             .await
     });
@@ -6720,7 +6729,7 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
                 TurnInput::text("cancel after partial stream"),
                 TurnOptions::new(
                     turn_cancel,
-                    named_turn_scope("root", "cancel-partial-provider-stream"),
+                    named_turn_scope("root", &TurnId::from("cancel-partial-provider-stream")),
                 )
                 .with_turn_events(&turn_events_for_task),
             )
@@ -6947,7 +6956,7 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "truncated-stream-retry"),
+                named_turn_scope("root", &TurnId::from("truncated-stream-retry")),
             ),
         )
         .await
@@ -7024,7 +7033,7 @@ async fn counted_provider_regeneration_emits_one_host_visible_attempt_reset() {
             TurnInput::text("retry a pre-response transport failure"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "counted-regeneration-reset"),
+                named_turn_scope("root", &TurnId::from("counted-regeneration-reset")),
             )
             .with_turn_events(&turn_events),
         )
@@ -7110,7 +7119,7 @@ async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset(
             TurnInput::text("defer to a provider retry-after"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "courtesy-regeneration-reset"),
+                named_turn_scope("root", &TurnId::from("courtesy-regeneration-reset")),
             )
             .with_turn_events(&turn_events),
         )
@@ -7223,7 +7232,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
             TurnInput::text("retry after paid output"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "paid-output-retry"),
+                named_turn_scope("root", &TurnId::from("paid-output-retry")),
             )
             .with_turn_events(&turn_events),
         )
@@ -7338,7 +7347,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
             TurnInput::text("follow up after the failed generation"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "paid-output-follow-up"),
+                named_turn_scope("root", &TurnId::from("paid-output-follow-up")),
             ),
         )
         .await
@@ -7415,7 +7424,7 @@ async fn foreground_turn_is_refused_when_session_lane_is_held() {
         .run_turn_assembled(
             TurnInput::text("foreground must wait"),
             CancellationToken::new(),
-            named_turn_scope("root", "foreground-busy-lane-turn"),
+            named_turn_scope("root", &TurnId::from("foreground-busy-lane-turn")),
         )
         .await
         .expect_err("a foreign lease holder refuses the foreground turn");
@@ -7470,7 +7479,7 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "queued-busy-turn"),
+            named_turn_scope("root", &TurnId::from("queued-busy-turn")),
         ))
         .await
         .expect("busy queued drain should not error")
@@ -7498,7 +7507,7 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "queued-after-busy-turn"),
+            named_turn_scope("root", &TurnId::from("queued-after-busy-turn")),
         ))
         .await
         .expect("queued drain after release should succeed")
@@ -7915,7 +7924,7 @@ async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires(
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "command-before-lease-ttl"),
+            named_turn_scope("root", &TurnId::from("command-before-lease-ttl")),
         ))
         .await
         .expect("busy command drain should not error")
@@ -7937,7 +7946,7 @@ async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires(
     let after_ttl = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "command-after-lease-ttl"),
+            named_turn_scope("root", &TurnId::from("command-after-lease-ttl")),
         ))
         .await
         .expect("command drain after TTL should succeed")
@@ -8008,7 +8017,7 @@ async fn idle_queued_work_claim_lease_expiry_surfaces_session_execution_lease_lo
     let err = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope("root", "idle-claim-lease-expiry-turn"),
+            named_turn_scope("root", &TurnId::from("idle-claim-lease-expiry-turn")),
         ))
         .await
         .expect_err("expired idle queued-work claim lease must fail as lease lost");
@@ -8073,7 +8082,7 @@ async fn concurrent_real_turn_commits_record_product_admission_waits() {
             .run_turn_assembled(
                 TurnInput::text("first concurrent commit"),
                 CancellationToken::new(),
-                named_turn_scope(session_id, "product-admission-first"),
+                named_turn_scope(session_id, &TurnId::from("product-admission-first")),
             )
             .await
     });
@@ -8094,7 +8103,7 @@ async fn concurrent_real_turn_commits_record_product_admission_waits() {
             .run_turn_assembled(
                 TurnInput::text("second concurrent commit"),
                 CancellationToken::new(),
-                named_turn_scope(session_id, "product-admission-second"),
+                named_turn_scope(session_id, &TurnId::from("product-admission-second")),
             )
             .await
     });
@@ -8221,7 +8230,7 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
             .run_turn_assembled(
                 TurnInput::text("emit evidence before losing CAS"),
                 CancellationToken::new(),
-                named_turn_scope("root", "cas-survivor-stale-turn"),
+                named_turn_scope("root", &TurnId::from("cas-survivor-stale-turn")),
             )
             .await
     });
@@ -8275,7 +8284,7 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
         .run_turn_assembled(
             TurnInput::text("take over and win the head"),
             CancellationToken::new(),
-            named_turn_scope("root", "cas-survivor-successor-turn"),
+            named_turn_scope("root", &TurnId::from("cas-survivor-successor-turn")),
         )
         .await
         .expect("successor wins the shared store head CAS");
@@ -8371,7 +8380,7 @@ async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_final_commit
             .run_turn_assembled(
                 TurnInput::text("lease can be lost"),
                 CancellationToken::new(),
-                named_turn_scope("root", "lease-loss-turn"),
+                named_turn_scope("root", &TurnId::from("lease-loss-turn")),
             )
             .await
     });
@@ -8457,7 +8466,7 @@ async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_final_commit
         .run_turn_assembled(
             TurnInput::text("continue after predecessor tail"),
             CancellationToken::new(),
-            named_turn_scope("root", "successor-after-landed-tail"),
+            named_turn_scope("root", &TurnId::from("successor-after-landed-tail")),
         )
         .await
         .expect("the successor should continue from the newly committed head");
@@ -8591,7 +8600,7 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "renewal-failure-mid-turn"),
+                named_turn_scope("root", &TurnId::from("renewal-failure-mid-turn")),
             ))
             .await
             .map(crate::facade_support::QueuedTurnDrain::ran)
@@ -8837,7 +8846,7 @@ async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry() {
         .run_turn_assembled(
             TurnInput::text("lease expires at commit"),
             CancellationToken::new(),
-            named_turn_scope("root", "final-commit-lease-expiry-turn"),
+            named_turn_scope("root", &TurnId::from("final-commit-lease-expiry-turn")),
         )
         .await
         .expect("head CAS must authorize final commit after advisory lease expiry");
@@ -8890,7 +8899,10 @@ async fn prepared_checkpoint_continues_after_advisory_lease_expiry() {
         .run_turn_assembled(
             TurnInput::text("lease expires at prepared checkpoint"),
             CancellationToken::new(),
-            named_turn_scope("root", "prepared-checkpoint-lease-expiry-turn"),
+            named_turn_scope(
+                "root",
+                &TurnId::from("prepared-checkpoint-lease-expiry-turn"),
+            ),
         )
         .await
         .expect("prepared checkpoint must continue after advisory lease expiry");
@@ -8982,7 +8994,7 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "process-wake-turn"),
+                named_turn_scope("root", &TurnId::from("process-wake-turn")),
             )
             .with_events(&sink)
             .with_turn_events(&turn_events),
@@ -9129,7 +9141,7 @@ async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_histor
         .run_turn_assembled(
             TurnInput::text("r".repeat(900)),
             CancellationToken::new(),
-            named_turn_scope("root", "seed-retained-history"),
+            named_turn_scope("root", &TurnId::from("seed-retained-history")),
         )
         .await
         .expect("seed retained history without queued work");
@@ -9177,7 +9189,7 @@ async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_histor
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "small-window-drain"),
+                named_turn_scope("root", &TurnId::from("small-window-drain")),
             ),
             &[batch_id],
         )
@@ -9283,7 +9295,7 @@ async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_default() {
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "paired-exact-drain"),
+                named_turn_scope("root", &TurnId::from("paired-exact-drain")),
             ),
             &batch_ids,
         )
@@ -9379,7 +9391,7 @@ async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "oversized-row"),
+                named_turn_scope("root", &TurnId::from("oversized-row")),
             ),
             std::slice::from_ref(&batch_id),
         )
@@ -9872,7 +9884,7 @@ async fn child_relation_does_not_replace_active_session() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "ordinary-child-parent-turn"),
+            named_turn_scope("root", &TurnId::from("ordinary-child-parent-turn")),
         )
         .await
         .expect("parent turn");
@@ -10113,7 +10125,7 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "alias-normalize-turn"),
+            named_turn_scope("root", &TurnId::from("alias-normalize-turn")),
         )
         .await
         .expect("turn");
@@ -10194,7 +10206,7 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "unsupported-effort-turn"),
+            named_turn_scope("root", &TurnId::from("unsupported-effort-turn")),
         )
         .await
         .expect("turn");
@@ -10253,7 +10265,7 @@ async fn session_generation_options_reach_every_provider_request() {
         .await
         .expect("update session config");
 
-    let run_turn = async |runtime: &mut LashRuntime, turn_id: &'static str| {
+    let run_turn = async |runtime: &mut LashRuntime, turn_id: &TurnId| {
         runtime
             .run_turn_assembled(
                 TurnInput {
@@ -10272,7 +10284,7 @@ async fn session_generation_options_reach_every_provider_request() {
             .expect("turn");
     };
 
-    run_turn(&mut runtime, "generation-default-turn").await;
+    run_turn(&mut runtime, &TurnId::from("generation-default-turn")).await;
 
     let requested = crate::GenerationOptions {
         output_token_cap: NonZeroUsize::new(64),
@@ -10288,7 +10300,7 @@ async fn session_generation_options_reach_every_provider_request() {
         })
         .await
         .expect("update session config");
-    run_turn(&mut runtime, "generation-requested-turn").await;
+    run_turn(&mut runtime, &TurnId::from("generation-requested-turn")).await;
 
     let seen = captured.lock_recover().clone();
     assert_eq!(seen.len(), 2, "each turn issues one provider call");
@@ -10370,7 +10382,7 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "generation-disposition-turn"),
+            named_turn_scope("root", &TurnId::from("generation-disposition-turn")),
         )
         .await
         .expect("turn");
@@ -10469,7 +10481,7 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "clamped-cap-turn"),
+            named_turn_scope("root", &TurnId::from("clamped-cap-turn")),
         )
         .await
         .expect("a cap above the model's capacity must not fail the turn");

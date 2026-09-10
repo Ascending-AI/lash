@@ -1,3 +1,4 @@
+use lash_core::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -439,7 +440,7 @@ fn text_response(text: &str) -> LlmResponse {
     }
 }
 
-fn turn_scope(session_id: &str, turn_id: &str) -> ScopedEffectController<'static> {
+fn turn_scope(session_id: &str, turn_id: &TurnId) -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
         Arc::new(NativeRuntimeEffectController::default()),
         ExecutionScope::turn(session_id, turn_id),
@@ -450,7 +451,7 @@ fn turn_scope(session_id: &str, turn_id: &str) -> ScopedEffectController<'static
 fn recording_turn_scope(
     controller: Arc<RecordingEffectController>,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> ScopedEffectController<'static> {
     ScopedEffectController::shared(controller, ExecutionScope::turn(session_id, turn_id))
         .expect("recording turn scope")
@@ -543,7 +544,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         .run_turn_assembled(
             TurnInput::text("call the tool"),
             CancellationToken::new(),
-            turn_scope("tool-panic-session", "tool-panic-turn"),
+            turn_scope("tool-panic-session", &TurnId::from("tool-panic-turn")),
         )
         .await
         .expect("turn survives tool panic");
@@ -560,7 +561,7 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         .run_turn_assembled(
             TurnInput::text("continue"),
             CancellationToken::new(),
-            turn_scope("tool-panic-session", "after-tool-panic"),
+            turn_scope("tool-panic-session", &TurnId::from("after-tool-panic")),
         )
         .await
         .expect("next turn");
@@ -626,7 +627,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
                 &child.session_id,
                 "panicking-child-turn",
                 TurnInput::text("panic"),
-                turn_scope(&child.session_id, "panicking-child-turn"),
+                turn_scope(&child.session_id, &TurnId::from("panicking-child-turn")),
             )
             .expect("child turn request"),
         )
@@ -642,7 +643,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
         .run_turn_assembled(
             TurnInput::text("continue parent"),
             CancellationToken::new(),
-            turn_scope("parent-session", "parent-after-child-panic"),
+            turn_scope("parent-session", &TurnId::from("parent-after-child-panic")),
         )
         .await
         .expect("parent survives child panic");
@@ -680,7 +681,10 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         .run_turn_assembled(
             TurnInput::text("panic provider"),
             CancellationToken::new(),
-            turn_scope("provider-panic-session", "provider-panic-turn"),
+            turn_scope(
+                "provider-panic-session",
+                &TurnId::from("provider-panic-turn"),
+            ),
         )
         .await
         .expect("provider panic terminates the turn cleanly");
@@ -707,7 +711,10 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         .run_turn_assembled(
             TurnInput::text("continue"),
             CancellationToken::new(),
-            turn_scope("provider-panic-session", "after-provider-panic"),
+            turn_scope(
+                "provider-panic-session",
+                &TurnId::from("after-provider-panic"),
+            ),
         )
         .await
         .expect("next turn");
@@ -750,7 +757,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
             recording_turn_scope(
                 Arc::clone(&quiet_controller),
                 "quiet-provider-record-session",
-                "quiet-provider-record-turn",
+                &TurnId::from("quiet-provider-record-turn"),
             ),
         )
         .await
@@ -786,7 +793,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         recording_turn_scope(
             Arc::clone(&loud_controller),
             "loud-provider-record-session",
-            "loud-provider-record-turn",
+            &TurnId::from("loud-provider-record-turn"),
         ),
     ))
     .catch_unwind()
@@ -831,7 +838,10 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
     let panic = std::panic::AssertUnwindSafe(runtime.run_turn_assembled(
         TurnInput::text("panic provider loudly"),
         CancellationToken::new(),
-        turn_scope("loud-provider-panic-session", "loud-provider-panic-turn"),
+        turn_scope(
+            "loud-provider-panic-session",
+            &TurnId::from("loud-provider-panic-turn"),
+        ),
     ))
     .catch_unwind()
     .await;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 
@@ -10,7 +11,7 @@ use std::collections::BTreeMap;
 struct RuntimeDirectSource<'run> {
     manager: Arc<RuntimeSessionServices>,
     effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-    turn_id: Option<String>,
+    turn_id: Option<TurnId>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -48,7 +49,7 @@ impl<'run> DirectCompletionClient<'run> {
     pub(super) fn runtime(
         manager: Arc<RuntimeSessionServices>,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
     ) -> Self {
         Self {
             source: DirectCompletionSource::Runtime(RuntimeDirectSource {
@@ -231,7 +232,7 @@ impl<'run> RuntimeDirectSource<'run> {
             current: &self.manager.current,
             usage_capability: &self.manager.usage,
             effect_controller: self.effect_controller.controller(),
-            turn_id: self.turn_id.as_deref(),
+            turn_id: self.turn_id.as_ref(),
             position,
             replay_ordinals: self.manager.direct_replay_ordinals.as_ref(),
             unkeyed_in_flight: self.manager.direct_unkeyed_in_flight.as_ref(),
@@ -243,7 +244,7 @@ pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     current: &'a CurrentSessionCapability,
     usage_capability: &'a UsageCapability,
     effect_controller: &'a dyn crate::RuntimeEffectController,
-    turn_id: Option<&'a str>,
+    turn_id: Option<&'a TurnId>,
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
     unkeyed_in_flight: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,

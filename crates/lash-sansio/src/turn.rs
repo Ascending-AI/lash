@@ -1,3 +1,4 @@
+use crate::TurnId;
 use std::sync::Arc;
 
 use crate::MessageSequence;
@@ -7,7 +8,7 @@ use crate::turn_driver::TurnDriverPreamble;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub session_id: String,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub autonomous: bool,
     pub model: String,
     /// Model context-window size in tokens, if known. Threaded into the kernel
@@ -176,7 +177,7 @@ mod tests {
         });
         let prepared = build_turn(SansIoTurnInput {
             session_id: "session".to_string(),
-            turn_id: "turn".to_string(),
+            turn_id: TurnId::from("turn"),
             autonomous: false,
             model: "gpt-5".to_string(),
             max_context_tokens: None,

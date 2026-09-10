@@ -2,6 +2,7 @@
 //! results, process records and summaries, event semantics, execution
 //! environments, and runtime invocation provenance.
 
+use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
@@ -1124,7 +1125,7 @@ impl RemoteRuntimeInvocation {
 pub struct RemoteRuntimeScope {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

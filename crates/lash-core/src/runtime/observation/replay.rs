@@ -1,3 +1,4 @@
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
@@ -201,7 +202,7 @@ pub struct SessionObservation {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct SessionObservationEvent {
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     pub cursor: SessionCursor,
     pub payload: SessionObservationEventPayload,
 }
@@ -215,7 +216,7 @@ impl SessionObservationEvent {
     ///
     /// Integrator class (ADR 0051): **custom live-replay store implementors**.
     pub fn new(
-        turn_id: Option<String>,
+        turn_id: Option<TurnId>,
         cursor: SessionCursor,
         payload: SessionObservationEventPayload,
     ) -> Result<Self, SessionCursorError> {
@@ -333,7 +334,7 @@ pub enum LiveReplaySubscribeOutcome {
 /// One event in a cursor batch reserved by [`LiveReplayStore::prepare_publication`].
 #[derive(Clone, Debug)]
 pub struct LiveReplayEventDraft {
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     pub payload: SessionObservationEventPayload,
 }
 
@@ -342,7 +343,7 @@ impl LiveReplayEventDraft {
     ///
     /// Integrator class (ADR 0051): **custom live-replay store implementors**.
     pub fn new(
-        turn_id: Option<impl Into<String>>,
+        turn_id: Option<impl Into<TurnId>>,
         payload: SessionObservationEventPayload,
     ) -> Self {
         Self {
@@ -1114,7 +1115,7 @@ mod tests {
             &self,
             session_id: &str,
             revision: SessionRevision,
-            turn_id: Option<&str>,
+            turn_id: Option<&TurnId>,
             payload: SessionObservationEventPayload,
         ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
             let prepared = self.prepare_publication(
@@ -1176,7 +1177,7 @@ mod tests {
     #[test]
     fn session_observation_event_accessors_return_cursor_facts() {
         let event = SessionObservationEvent::new(
-            Some("turn-1".to_string()),
+            Some(TurnId::from("turn-1".to_string())),
             SessionCursor::from_store_token("lashsc2:incarnation-1:7:42:session-1")
                 .expect("valid store cursor"),
             activity("valid"),

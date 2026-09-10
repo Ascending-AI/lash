@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 pub(crate) fn queued_work_test_draft(
     session_id: &str,
@@ -418,7 +419,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("enqueue later receiver wake");
 
         let later_request = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: "workbench-targeted-later".to_string(),
+            turn_id: TurnId::from("workbench-targeted-later"),
             session_id: session_id.clone(),
             reason: "test_targeted_later".to_string(),
             batch_ids: vec![later.batch_id.clone()],
@@ -664,7 +665,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         // drain-everything would run work nobody asked for, and the operator
         // would see it as the one batch they clicked.
         let stale_selection = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: "workbench-stale-selection".to_string(),
+            turn_id: TurnId::from("workbench-stale-selection"),
             session_id: session_id.clone(),
             reason: "test_stale_selection".to_string(),
             batch_ids: vec![later.batch_id.clone()],
@@ -694,7 +695,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         );
 
         let earlier_request = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: "workbench-targeted-earlier".to_string(),
+            turn_id: TurnId::from("workbench-targeted-earlier"),
             session_id: session_id.clone(),
             reason: "test_targeted_earlier".to_string(),
             batch_ids: vec![earlier.batch_id.clone()],
@@ -750,7 +751,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .await
             .expect("enqueue ordinary-drain second wake");
         let drain_all_output = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: "workbench-drain-all".to_string(),
+            turn_id: TurnId::from("workbench-drain-all"),
             session_id: session_id.clone(),
             reason: "test_drain_all".to_string(),
             batch_ids: Vec::new(),
@@ -895,10 +896,10 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("enqueue wake single-reply batch");
 
         let turn_id = "workbench-queued-wake-single-reply";
-        state.track_turn(&session_id, turn_id);
+        state.track_turn(&session_id, &TurnId::from(turn_id));
         let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
         let output = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: turn_id.to_string(),
+            turn_id: TurnId::from(turn_id.to_string()),
             session_id: session_id.clone(),
             reason: "test_wake_single_reply".to_string(),
             batch_ids: Vec::new(),
@@ -924,8 +925,8 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         crate::restate::record_turn_output_with_durable_turn_id(
             &state,
             &session,
-            turn_id,
-            &format!("{turn_id}-drain"),
+            &TurnId::from(turn_id),
+            &TurnId::from(format!("{turn_id}-drain")),
             output,
             turn_state,
             "test.wake_single_reply.completed",
@@ -971,7 +972,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             "the live snapshot must render the agent reply exactly once, \
              got {live_rendered_agent_rows:?}"
         );
-        crate::restate::settle_workbench_turn(&state, &session_id, turn_id)
+        crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(turn_id))
             .await
             .expect("settle wake single-reply turn");
         session
@@ -1164,7 +1165,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .expect("open wake keeps-previous session");
 
         let send_turn_id = "workbench-turn-reasoned-send";
-        state.track_turn(&session_id, send_turn_id);
+        state.track_turn(&session_id, &TurnId::from(send_turn_id));
         let send_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
         let send_output = session
             .turn(lash::TurnInput::text("answer with reasoning"))
@@ -1177,7 +1178,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         crate::restate::record_turn_output(
             &state,
             &session,
-            send_turn_id,
+            &TurnId::from(send_turn_id),
             send_output,
             send_turn_state,
             "test.wake_keeps_previous.send",
@@ -1201,7 +1202,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             "the live snapshot must keep the workbench-owned answer visible while the \
              RLM-owned durable reply is withheld, got {live_send_agent_rows:?}"
         );
-        crate::restate::settle_workbench_turn(&state, &session_id, send_turn_id)
+        crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(send_turn_id))
             .await
             .expect("settle reasoned send turn");
 
@@ -1264,10 +1265,10 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .expect("enqueue wake keeps-previous batch");
 
         let wake_turn_id = "workbench-queued-wake-keeps-previous";
-        state.track_turn(&session_id, wake_turn_id);
+        state.track_turn(&session_id, &TurnId::from(wake_turn_id));
         let wake_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
         let wake_output = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: wake_turn_id.to_string(),
+            turn_id: TurnId::from(wake_turn_id.to_string()),
             session_id: session_id.clone(),
             reason: "test_wake_keeps_previous".to_string(),
             batch_ids: Vec::new(),
@@ -1283,8 +1284,8 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         crate::restate::record_turn_output_with_durable_turn_id(
             &state,
             &session,
-            wake_turn_id,
-            &format!("{wake_turn_id}-drain"),
+            &TurnId::from(wake_turn_id),
+            &TurnId::from(format!("{wake_turn_id}-drain")),
             wake_output,
             wake_turn_state,
             "test.wake_keeps_previous.wake",
@@ -1300,7 +1301,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             "the wake turn must commit its cause as an event message, which is \
              the only boundary this projection can read"
         );
-        crate::restate::settle_workbench_turn(&state, &session_id, wake_turn_id)
+        crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(wake_turn_id))
             .await
             .expect("settle wake keeps-previous turn");
         session

@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::TurnId;
 
 pub(crate) use lash_core::store_backend_support::SessionMetaWrite;
 use lash_core::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
@@ -15,7 +16,9 @@ pub(crate) fn stored_relation_from_row(
         cause: CausalColumns {
             kind: row.get(3)?,
             session_id: row.get(4)?,
-            turn_id: row.get(5)?,
+            turn_id: row
+                .get::<_, Option<String>>(5)?
+                .map(lash_core::TurnId::from),
             effect_id: row.get(6)?,
             call_id: row.get(7)?,
             process_id: row.get(8)?,
@@ -130,7 +133,7 @@ pub(crate) fn write_session_meta(
                 stored.parent_session_id,
                 stored.cause.kind,
                 stored.cause.session_id,
-                stored.cause.turn_id,
+                stored.cause.turn_id.as_ref().map(TurnId::as_str),
                 stored.cause.effect_id,
                 stored.cause.call_id,
                 stored.cause.process_id,

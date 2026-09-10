@@ -1,5 +1,6 @@
 use super::*;
 use crate::AttachmentManifest;
+use crate::TurnId;
 use crate::store::{SessionCommitStore, SessionExecutionLeaseStore};
 
 struct AttachmentWritingEngine;
@@ -147,7 +148,10 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
                 crate::TurnInput::text("run nested turn"),
                 crate::TurnOptions::new(
                     CancellationToken::new(),
-                    crate::runtime::tests::helpers::named_turn_scope("root", "nested-engine-turn"),
+                    crate::runtime::tests::helpers::named_turn_scope(
+                        "root",
+                        &TurnId::from("nested-engine-turn"),
+                    ),
                 ),
             )
             .await

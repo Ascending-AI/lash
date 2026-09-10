@@ -18,6 +18,7 @@
 //! been without the append, and a turn rejected before its commit never hands
 //! its execution to the next ordinary turn (storeless and store-backed).
 
+use lash_sansio::TurnId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -511,7 +512,7 @@ fn continue_as_response() -> String {
     "<lashlang>\nawait control.continue_as({task: \"next\", seed: {baton: \"switched\", carried: projected_original}})?\n</lashlang>".to_string()
 }
 
-fn turn_scope(runtime: &LashRuntime, turn_id: &str) -> ScopedEffectController<'static> {
+fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
         Arc::new(NativeRuntimeEffectController::default()),
         ExecutionScope::turn(runtime.read_view().session_id(), turn_id),
@@ -545,7 +546,7 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
         .run_turn_assembled(
             TurnInput::text("switch"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, "fig2521-switch"),
+            turn_scope(&runtime, &TurnId::from("fig2521-switch")),
         )
         .await
         .expect("a follow-on failure is reported on the committed switch turn");
@@ -577,7 +578,7 @@ async fn follow_on_failure_then_resident_reload(backend: Backend) {
         .run_turn_assembled(
             TurnInput::text("continue"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, "fig2521-after-reload"),
+            turn_scope(&runtime, &TurnId::from("fig2521-after-reload")),
         )
         .await
         .unwrap_or_else(|error| {
@@ -659,7 +660,7 @@ async fn reopen_seed_receipt_replay(backend: Backend) {
         .run_turn_assembled(
             TurnInput::text("go"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, "fig2521-after-replay"),
+            turn_scope(&runtime, &TurnId::from("fig2521-after-replay")),
         )
         .await
         .expect("turn after replay");
@@ -756,7 +757,7 @@ async fn faulted_append_rollback(backend: Backend) {
         .run_turn_assembled(
             TurnInput::text("go"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, "fig2521-after-rollback"),
+            turn_scope(&runtime, &TurnId::from("fig2521-after-rollback")),
         )
         .await
         .unwrap_or_else(|error| panic!("{}: turn after rollback: {error:?}", backend.label));
@@ -826,7 +827,7 @@ async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) 
         .run_turn_assembled(
             TurnInput::text("switch"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, "fig2521-switch-mutating"),
+            turn_scope(&runtime, &TurnId::from("fig2521-switch-mutating")),
         )
         .await
         .expect("a follow-on failure is reported on the committed switch turn");
@@ -853,7 +854,7 @@ async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) 
         .run_turn_assembled(
             TurnInput::text("read"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(&runtime, "fig2521-after-follow-on-failure"),
+            turn_scope(&runtime, &TurnId::from("fig2521-after-follow-on-failure")),
         )
         .await
         .unwrap_or_else(|error| {
@@ -974,7 +975,7 @@ async fn turn(runtime: &mut LashRuntime, id: &str) -> lash_core::facade_support:
         .run_turn_assembled(
             TurnInput::text(id),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(runtime, id),
+            turn_scope(runtime, &TurnId::from(id)),
         )
         .await
         .unwrap_or_else(|error| panic!("turn `{id}`: {error:?}"))
@@ -1563,7 +1564,7 @@ async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
         .run_turn_assembled(
             TurnInput::text("reject-reassignment"),
             tokio_util::sync::CancellationToken::new(),
-            turn_scope(runtime, "reject-reassignment"),
+            turn_scope(runtime, &TurnId::from("reject-reassignment")),
         )
         .await
         .expect_err("the refused finalization fails the turn");

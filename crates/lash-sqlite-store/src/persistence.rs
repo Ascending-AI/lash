@@ -26,6 +26,7 @@
 use super::*;
 use lash_core::SelectedQueuedWorkClaimOutcome;
 use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
+use lash_sansio::TurnId;
 
 pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
      FROM runtime_turn_commits
@@ -34,6 +35,7 @@ pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, resu
      ORDER BY committed_at_ms, turn_id";
 
 struct CorruptTurnFailureReceipt {
+    /// Operation storage key of the corrupt receipt, not a turn identity.
     turn_id: String,
     error: String,
 }
@@ -432,7 +434,7 @@ impl SessionCommitStore for Store {
         for corrupt in corrupt_failure_receipts {
             tracing::warn!(
                 session_id = warning_session_id,
-                turn_id = corrupt.turn_id,
+                turn_id = corrupt.turn_id.as_str(),
                 error = corrupt.error,
                 "skipping corrupt runtime turn receipt while loading failure evidence"
             );
@@ -1135,7 +1137,7 @@ impl SessionCommitStore for Store {
                         }
                     }
                     let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
-                    if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
+                    if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
                         let disposition = load_turn_cancel_request_conn(tx, &commit.session_id, turn_id)?
                             .map(|record| record.request.undelivered)
                             .unwrap_or_default();
@@ -1219,7 +1221,7 @@ impl SessionCommitStore for Store {
                             params![
                                 now as i64,
                                 commit.session_id,
-                                turn_id,
+                                turn_id.as_str(),
                                 AttachmentOwnerKind::Turn.as_str()
                             ],
                         )
@@ -2596,7 +2598,7 @@ impl TurnInputStore for Store {
                             tx.execute(
                                 "UPDATE turn_cancel_requests SET record_json = ?3
                                  WHERE session_id = ?1 AND turn_id = ?2",
-                                params![session_id, turn_id, encode_json(&existing)?],
+                                params![session_id, turn_id.as_str(), encode_json(&existing)?],
                             )
                             .map_err(sqlite_error)?;
                         }
@@ -2609,7 +2611,7 @@ impl TurnInputStore for Store {
                     tx.execute(
                         "INSERT OR IGNORE INTO turn_cancel_requests
                          (session_id, turn_id, record_json) VALUES (?1, ?2, ?3)",
-                        params![session_id, turn_id, encode_json(&record)?],
+                        params![session_id, turn_id.as_str(), encode_json(&record)?],
                     )
                     .map_err(sqlite_error)?;
                     load_turn_cancel_request_conn(tx, &session_id, &turn_id)?.ok_or_else(|| {
@@ -3241,7 +3243,7 @@ async fn checkpoint_work_pending_sqlite(
     now: u64,
     session_id: &str,
     generation: u64,
-    turn_id: &str,
+    turn_id: &TurnId,
     checkpoint: lash_core::CheckpointKind,
     max_inputs: usize,
     max_batches: usize,
@@ -3250,7 +3252,7 @@ async fn checkpoint_work_pending_sqlite(
         return Ok(false);
     }
     let session_id = session_id.to_string();
-    let turn_id = turn_id.to_string();
+    let turn_id = TurnId::from(turn_id.to_string());
     conn.call(move |conn| {
         let outcome: Result<bool, StoreError> = (|| {
             let head_candidate = sqlite_queued_work_head_candidate_cte(
@@ -3296,7 +3298,7 @@ async fn checkpoint_work_pending_sqlite(
                         now as i64,
                         sql_session_lease_generation(generation)?,
                         lash_core::TurnInputState::PendingActive.as_str(),
-                        turn_id,
+                        turn_id.as_str(),
                         max_inputs as i64,
                         max_batches as i64,
                     ],
@@ -3861,17 +3863,17 @@ fn ensure_session_execution_lease_conn(
 /// An owned [`lash_core::OrphanedTurnInputScope`], because the write flow moves
 /// its work into a `'static` closure.
 enum OwnedOrphanedScope {
-    Turn(String),
-    LaneGeneration { resumable_turn_id: Option<String> },
+    Turn(TurnId),
+    LaneGeneration { resumable_turn_id: Option<TurnId> },
 }
 
 impl From<lash_core::OrphanedTurnInputScope<'_>> for OwnedOrphanedScope {
     fn from(scope: lash_core::OrphanedTurnInputScope<'_>) -> Self {
         match scope {
-            lash_core::OrphanedTurnInputScope::Turn(turn_id) => Self::Turn(turn_id.to_string()),
+            lash_core::OrphanedTurnInputScope::Turn(turn_id) => Self::Turn(turn_id.clone()),
             lash_core::OrphanedTurnInputScope::LaneGeneration { resumable_turn_id } => {
                 Self::LaneGeneration {
-                    resumable_turn_id: resumable_turn_id.map(str::to_string),
+                    resumable_turn_id: resumable_turn_id.cloned(),
                 }
             }
         }
@@ -3881,10 +3883,10 @@ impl From<lash_core::OrphanedTurnInputScope<'_>> for OwnedOrphanedScope {
 impl OwnedOrphanedScope {
     fn borrow(&self) -> lash_core::OrphanedTurnInputScope<'_> {
         match self {
-            Self::Turn(turn_id) => lash_core::OrphanedTurnInputScope::Turn(turn_id.as_str()),
+            Self::Turn(turn_id) => lash_core::OrphanedTurnInputScope::Turn(turn_id),
             Self::LaneGeneration { resumable_turn_id } => {
                 lash_core::OrphanedTurnInputScope::LaneGeneration {
-                    resumable_turn_id: resumable_turn_id.as_deref(),
+                    resumable_turn_id: resumable_turn_id.as_ref(),
                 }
             }
         }
@@ -3910,13 +3912,13 @@ fn decode_stored_json<T: serde::de::DeserializeOwned>(
 fn load_turn_cancel_request_conn(
     conn: &Connection,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let json = conn
         .query_row(
             "SELECT record_json FROM turn_cancel_requests
              WHERE session_id = ?1 AND turn_id = ?2",
-            params![session_id, turn_id],
+            params![session_id, turn_id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()
@@ -3928,7 +3930,7 @@ fn load_turn_cancel_request_conn(
 fn append_turn_cancel_outcome_conn(
     conn: &Connection,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     affected: lash_core::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
     let Some(mut record) = load_turn_cancel_request_conn(conn, session_id, turn_id)? else {
@@ -3942,7 +3944,7 @@ fn append_turn_cancel_outcome_conn(
     conn.execute(
         "UPDATE turn_cancel_requests SET record_json = ?3
          WHERE session_id = ?1 AND turn_id = ?2",
-        params![session_id, turn_id, encode_json(&record)?],
+        params![session_id, turn_id.as_str(), encode_json(&record)?],
     )
     .map_err(sqlite_error)?;
     Ok(())
@@ -4054,7 +4056,12 @@ fn defer_orphaned_active_turn_inputs_conn(
             payload,
             disposition,
         };
-        append_turn_cancel_outcome_conn(conn, session_id, &turn_id, affected.clone())?;
+        append_turn_cancel_outcome_conn(
+            conn,
+            session_id,
+            &TurnId::from(turn_id),
+            affected.clone(),
+        )?;
         outcome.affected_inputs.push(affected);
     }
     Ok(outcome)

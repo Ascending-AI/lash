@@ -6,6 +6,7 @@
 //! post-commit delivery cannot start before adoption.
 
 use super::*;
+use crate::TurnId;
 
 /// The attempts of a finished turn whose usage never arrived after an abort
 /// or failure, in call order, for the unreported ledger row and later
@@ -40,7 +41,7 @@ pub(super) struct TurnFinishInput {
     pub(super) new_messages: crate::MessageSequence,
     pub(super) policy: SessionPolicy,
     pub(super) turn_index: usize,
-    pub(super) trace_turn_id: String,
+    pub(super) trace_turn_id: TurnId,
 }
 
 struct PreparedTurn {
@@ -57,7 +58,7 @@ struct TurnCommitRequest<'commit> {
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
     session_execution_lease: Option<&'commit SessionExecutionLeaseGuard>,
     release_session_execution_lease: bool,
-    trace_turn_id: &'commit str,
+    trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
 }
 
@@ -146,7 +147,7 @@ impl PreparedTurn {
                 commit_effects.enqueued_queue_batches,
                 // Any active-turn input that missed the turn's final
                 // checkpoint must become the next ordinary user turn.
-                Some(trace_turn_id.to_string()),
+                Some(trace_turn_id.clone()),
                 recorded_attachment_intent_ids,
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
@@ -194,7 +195,7 @@ impl CommittedTurn {
     fn adopt(
         self,
         runtime: &mut LashRuntime,
-        trace_turn_id: &str,
+        trace_turn_id: &TurnId,
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<PostCommitDelivery, crate::StoreError> {
         let (enqueued_queue_batches, confirmed_usage) = self.accepted.into_parts();
@@ -250,14 +251,14 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) lease: TurnLeaseScope<'cancel>,
     pub(super) turn_control: &'cancel ActiveTurnControl,
     pub(super) turn_index: usize,
-    pub(super) trace_turn_id: String,
+    pub(super) trace_turn_id: TurnId,
 }
 
 /// The terminal turn a logical run commits when it refuses to switch agent
 /// frames again.
 pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
     pub(in crate::runtime) message: String,
-    pub(in crate::runtime) trace_turn_id: String,
+    pub(in crate::runtime) trace_turn_id: TurnId,
     pub(in crate::runtime) sinks: TurnSinks<'error>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) cancel: CancellationToken,
@@ -750,7 +751,7 @@ impl LashRuntime {
         &self,
         state: &SessionSnapshot,
         outcome: &TurnOutcome,
-        trace_turn_id: &str,
+        trace_turn_id: &TurnId,
     ) {
         if self.host.core.tracing.trace_sink.is_none() {
             return;

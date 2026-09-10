@@ -1,4 +1,5 @@
 use lash_core::llm::types::LlmRole;
+use lash_sansio::TurnId;
 /// These fixtures cover the Lashlang wording; the cross-dialect walker in
 /// `dialect::prompt_walker_tests` covers both.
 fn final_answer_format_prompt_test(options: &RlmTurnOptions) -> Option<String> {
@@ -170,7 +171,7 @@ pub(super) fn projection_test_config(
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from("stable RLM system prompt"),
         session_id: "prefix-stability".to_string(),
-        turn_id: "prefix-stability-turn".to_string(),
+        turn_id: TurnId::from("prefix-stability-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions::default())
             .expect("RLM options"),

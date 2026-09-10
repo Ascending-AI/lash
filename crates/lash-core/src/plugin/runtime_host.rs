@@ -1,3 +1,4 @@
+use crate::TurnId;
 use serde::{Deserialize, Serialize};
 
 use super::*;
@@ -9,7 +10,7 @@ pub trait SessionStateService: Send + Sync {
     async fn turn_scope(
         &self,
         _session_id: &str,
-        _turn_id: &str,
+        _turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, PluginError> {
         Err(PluginError::Session(
             "session turn scopes are unavailable in this runtime".to_string(),
@@ -158,7 +159,7 @@ pub struct DirectLlmCompletion {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionTurnInput {
     pub session_id: String,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub input: TurnInput,
 }
 
@@ -188,7 +189,7 @@ impl<'run> SessionTurnRequest<'run> {
     /// completes or when the running turn future is dropped.
     pub fn new(
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
         mut input: TurnInput,
         scoped_effect_controller: crate::ScopedEffectController<'run>,
     ) -> Result<Self, PluginError> {
@@ -199,7 +200,7 @@ impl<'run> SessionTurnRequest<'run> {
                 "session turns require a non-empty stable turn id".to_string(),
             ));
         }
-        if scoped_effect_controller.turn_id() != Some(turn_id.as_str()) {
+        if scoped_effect_controller.turn_id() != Some(&turn_id) {
             return Err(PluginError::Session(format!(
                 "session turn `{turn_id}` requires an effect turn scope with the same id"
             )));
@@ -246,7 +247,7 @@ impl<'run> SessionTurnRequest<'run> {
         &self.turn.session_id
     }
 
-    pub fn turn_id(&self) -> &str {
+    pub fn turn_id(&self) -> &TurnId {
         &self.turn.turn_id
     }
 

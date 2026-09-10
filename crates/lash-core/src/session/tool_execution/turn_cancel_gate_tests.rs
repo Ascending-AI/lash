@@ -6,6 +6,7 @@
 //! execution scope and inherited the executor's observing default, so the wait
 //! attached the very turn-cancel gate the process runner had switched off.
 
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -82,7 +83,7 @@ impl crate::ToolProvider for ScalarRetryTool {
 fn turn_scope() -> crate::ExecutionScope {
     crate::ExecutionScope::Turn {
         session_id: "test-session".to_string(),
-        turn_id: "turn-1".to_string(),
+        turn_id: TurnId::from("turn-1"),
     }
 }
 

@@ -1,5 +1,6 @@
 //! PostgreSQL cold-process recovery helper for durable waits and effect replay.
 
+use lash_sansio::TurnId;
 use std::sync::Arc;
 
 use lash_core::AwaitEventResolver as _;
@@ -128,7 +129,7 @@ async fn run_effect_action(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let storage = PostgresStorage::connect(database_url).await?;
     let session_id = format!("cold-process-effect-{nonce}-session");
-    let turn_id = format!("cold-process-effect-{nonce}-turn");
+    let turn_id = TurnId::from(format!("cold-process-effect-{nonce}-turn"));
     let controller = PostgresRuntimeEffectController::with_options(
         &storage,
         ExecutionScope::turn(&session_id, &turn_id),

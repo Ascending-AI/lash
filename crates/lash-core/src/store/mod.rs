@@ -1,4 +1,5 @@
 //! The runtime's settled-session persistence contract and shared store types.
+use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 mod attachment_manifest;
 mod checkpoint;
@@ -31,7 +32,6 @@ pub(crate) mod session_execution_lease;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
-mod turn_id;
 mod usage;
 mod work_claim;
 
@@ -98,7 +98,6 @@ pub use testing::{
     ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
     append_request_commit_with_clock_for_testing,
 };
-pub use turn_id::TurnId;
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};
 
@@ -446,7 +445,7 @@ impl RuntimeCommit {
         {
             return Err(StoreError::RuntimeTurnCommitConflict {
                 session_id: self.session_id.clone(),
-                turn_id: completed.operation.storage_key()?,
+                operation_key: completed.operation.storage_key()?,
             });
         }
         commit_identity::validate_receipt_identity(self)?;
@@ -773,7 +772,7 @@ impl RuntimeCommit {
 
     /// Marks one interrupted turn so store implementors atomically defer its unsettled active-turn
     /// inputs instead of losing or prematurely completing them.
-    pub fn deferring_interrupted_turn_inputs(mut self, turn_id: impl Into<String>) -> Self {
+    pub fn deferring_interrupted_turn_inputs(mut self, turn_id: impl Into<TurnId>) -> Self {
         self.interrupted_turn_input_turn_id = Some(turn_id.into());
         self
     }
@@ -1189,7 +1188,7 @@ pub enum OrphanedTurnInputScope<'a> {
     /// Exactly the rows pinned to one named turn, which the caller has just
     /// torn down without a commit. The turn id is the proof: that turn will
     /// never reach a final commit, so nothing it holds can be delivered.
-    Turn(&'a str),
+    Turn(&'a crate::TurnId),
     /// Every row not pinned to the caller's own live lane generation, which the
     /// repair reads from the fence the caller passes.
     ///
@@ -1208,7 +1207,9 @@ pub enum OrphanedTurnInputScope<'a> {
     /// delivered by it. `resumable_turn_id` is how a caller that *might* resume
     /// one names it: rows pinned to that turn id, or to one of its agent-frame
     /// follow-ons, are excluded however dead their claim generation looks.
-    LaneGeneration { resumable_turn_id: Option<&'a str> },
+    LaneGeneration {
+        resumable_turn_id: Option<&'a TurnId>,
+    },
 }
 
 /// Durable single-writer execution-lane capability, fenced by monotonic

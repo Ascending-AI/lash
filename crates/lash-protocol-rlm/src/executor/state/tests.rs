@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect};
+use lash_sansio::TurnId;
 use lashlang::{
     ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record as FlowRecord, Value as FlowValue,
@@ -79,7 +80,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     let resolution = Resolution::Resolved(Box::new(grant));
     let link_key = DeferredResolutionLinkKey {
         session_id: "session".to_string(),
-        turn_id: Some("turn".to_string()),
+        turn_id: Some(TurnId::from("turn")),
         turn_index: Some(7),
         protocol_iteration: Some(2),
         effect_id: "effect".to_string(),
@@ -789,7 +790,7 @@ fn version_17_root_encodes_to_golden_bytes() {
         deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord {
             link_key: Some(lash_lashlang_runtime::DeferredResolutionLinkKey {
                 session_id: "session-golden".to_string(),
-                turn_id: Some("turn-7".to_string()),
+                turn_id: Some(TurnId::from("turn-7")),
                 turn_index: Some(3),
                 protocol_iteration: Some(2),
                 effect_id: "effect-9".to_string(),

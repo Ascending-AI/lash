@@ -876,6 +876,10 @@ lash::TurnFinish::FinalValue::value
 lash::TurnFinish::ToolValue
 lash::TurnFinish::ToolValue::tool_name
 lash::TurnFinish::ToolValue::value
+lash::TurnId
+lash::TurnId::as_str
+lash::TurnId::into_inner
+lash::TurnId::new
 lash::TurnInput
 lash::TurnInput::empty
 lash::TurnInput::items
@@ -2888,8 +2892,8 @@ lash::persistence::StoreError::RecordEncodingFailed::record_kind
 lash::persistence::StoreError::RuntimeCommitLeaseAuthorityConflict
 lash::persistence::StoreError::RuntimeCommitLeaseAuthorityConflict::session_id
 lash::persistence::StoreError::RuntimeTurnCommitConflict
+lash::persistence::StoreError::RuntimeTurnCommitConflict::operation_key
 lash::persistence::StoreError::RuntimeTurnCommitConflict::session_id
-lash::persistence::StoreError::RuntimeTurnCommitConflict::turn_id
 lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition
 lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids
 lash::persistence::StoreError::SemanticBoundaryIdentityConflict
@@ -3001,9 +3005,6 @@ lash::persistence::StoredAttachment::bytes
 lash::persistence::StoredBlobRef
 lash::persistence::StoredBlobRef::id
 lash::persistence::StoredBlobRef::last_modified_epoch_ms
-lash::persistence::TurnId
-lash::persistence::TurnId::as_str
-lash::persistence::TurnId::into_inner
 lash::persistence::TurnInputCheckpointBoundary
 lash::persistence::TurnInputCheckpointBoundary::AfterWork
 lash::persistence::TurnInputCheckpointBoundary::BeforeCompletion

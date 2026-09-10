@@ -1,5 +1,6 @@
 //! Shared effect driver for SQLite/PostgreSQL cold-process recovery helpers.
 
+use lash_sansio::TurnId;
 use std::io::Write as _;
 
 // 10x the renewal cadence leaves stall margin on loaded runners; fencing is unchanged.
@@ -10,7 +11,7 @@ pub async fn run_effect_action<C>(
     controller: &C,
     action: &str,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     nonce: &str,
     marker: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>>
@@ -61,7 +62,7 @@ where
 
 fn effect_envelope(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     nonce: &str,
 ) -> lash_core::RuntimeEffectEnvelope {
     let replay_key = format!("cold-process-effect-{nonce}");

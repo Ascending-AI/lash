@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 // Where one turn's committed transcript ends and the next one's begins, for
 // the rule that admits a turn's protocol-authored reply (FIG-1406).
@@ -8,7 +9,7 @@ use super::*;
 // a stale active-turn entry that outlived its process — are properties of the
 // committed sequence, and the rule reads nothing else.
 
-fn probe_turn_input(turn_id: &str, message_id: &str) -> lash::messages::Message {
+fn probe_turn_input(turn_id: &TurnId, message_id: &str) -> lash::messages::Message {
     lash::messages::Message {
         id: message_id.to_string(),
         role: lash::messages::MessageRole::User,
@@ -18,7 +19,7 @@ fn probe_turn_input(turn_id: &str, message_id: &str) -> lash::messages::Message 
             None,
         )]),
         origin: Some(lash::messages::MessageOrigin::TurnInput {
-            turn_id: turn_id.to_string(),
+            turn_id: TurnId::from(turn_id.to_string()),
             input_id: None,
         }),
     }
@@ -80,7 +81,7 @@ fn probe_runtime_assistant(message_id: &str, prose: &str) -> lash::messages::Mes
 fn probe_replies(messages: Vec<lash::messages::Message>, running_turn_ids: &[&str]) -> Vec<String> {
     let running = running_turn_ids
         .iter()
-        .map(|turn_id| (*turn_id).to_string())
+        .map(|turn_id| TurnId::from(*turn_id))
         .collect::<BTreeSet<_>>();
     durable_rlm_reply_message_ids(&messages, &running)
         .into_iter()
@@ -97,7 +98,7 @@ fn a_cause_only_turn_settles_the_previous_turn_reply() {
     assert_eq!(
         probe_replies(
             vec![
-                probe_turn_input("t1", "m_turn_t1_input"),
+                probe_turn_input(&TurnId::from("t1"), "m_turn_t1_input"),
                 probe_plugin_prose("m_rlm_t1_0_assistant_response", "first answer"),
                 probe_turn_cause("m_cause_wake_1"),
                 probe_plugin_prose("m_rlm_wake_0_assistant_response", "wake answer"),
@@ -113,7 +114,7 @@ fn a_cause_only_turn_settles_the_previous_turn_reply() {
     assert_eq!(
         probe_replies(
             vec![
-                probe_turn_input("t1", "m_turn_t1_input"),
+                probe_turn_input(&TurnId::from("t1"), "m_turn_t1_input"),
                 probe_plugin_prose("m_rlm_t1_0_assistant_response", "first answer"),
                 probe_turn_cause("m_cause_wake_1"),
                 probe_runtime_assistant("m_turn_wake_assistant", "wake answer"),
@@ -134,9 +135,9 @@ fn an_injected_input_does_not_open_a_turn() {
     assert_eq!(
         probe_replies(
             vec![
-                probe_turn_input("t1", "m_turn_t1_input"),
+                probe_turn_input(&TurnId::from("t1"), "m_turn_t1_input"),
                 probe_plugin_prose("m_rlm_t1_0_assistant_content", "thinking out loud"),
-                probe_turn_input("t1", "m_ingress_injected"),
+                probe_turn_input(&TurnId::from("t1"), "m_ingress_injected"),
                 probe_plugin_prose("m_rlm_t1_1_assistant_response", "the answer"),
             ],
             &[],
@@ -156,7 +157,7 @@ fn an_injected_input_does_not_open_a_turn() {
 fn only_the_running_turns_own_candidate_is_withheld() {
     let one_reasoned_turn = || {
         vec![
-            probe_turn_input("t1", "m_turn_t1_input"),
+            probe_turn_input(&TurnId::from("t1"), "m_turn_t1_input"),
             probe_plugin_prose("m_rlm_t1_0_assistant_response", "the answer"),
         ]
     };
@@ -177,9 +178,9 @@ fn only_the_running_turns_own_candidate_is_withheld() {
     assert_eq!(
         probe_replies(
             vec![
-                probe_turn_input("t1", "m_turn_t1_input"),
+                probe_turn_input(&TurnId::from("t1"), "m_turn_t1_input"),
                 probe_plugin_prose("m_rlm_t1_0_assistant_response", "first answer"),
-                probe_turn_input("t2", "m_turn_t2_input"),
+                probe_turn_input(&TurnId::from("t2"), "m_turn_t2_input"),
                 probe_plugin_prose("m_rlm_t2_0_assistant_response", "second answer"),
             ],
             &["t1"],

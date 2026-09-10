@@ -1,3 +1,4 @@
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 pub(crate) mod replay;
 
@@ -417,7 +418,7 @@ impl RuntimeHandle {
         }
     }
 
-    pub fn record_turn_activity(&self, turn_id: Option<&str>, activity: crate::TurnActivity) {
+    pub fn record_turn_activity(&self, turn_id: Option<&TurnId>, activity: crate::TurnActivity) {
         let observation = self.observe();
         self.publish_live_events(
             observation.session_id(),
@@ -837,7 +838,7 @@ fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
 }
 
 impl LashRuntime {
-    fn last_committed_turn_id_for_revision(&self, revision: SessionRevision) -> Option<&str> {
+    fn last_committed_turn_id_for_revision(&self, revision: SessionRevision) -> Option<&TurnId> {
         self.resident_session
             .last_committed_turn_id_for_revision(revision.as_u64())
     }

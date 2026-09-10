@@ -1,5 +1,6 @@
 use crate::*;
 use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
+use lash_sansio::TurnId;
 
 pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
      FROM lash_runtime_turn_commits
@@ -506,7 +507,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 Err(error) => {
                     tracing::warn!(
                         session_id,
-                        turn_id,
+                        turn_id = turn_id.as_str(),
                         error = %error,
                         "skipping corrupt runtime turn receipt while loading failure evidence"
                     );
@@ -1074,7 +1075,7 @@ impl SessionCommitStore for PostgresSessionStore {
         complete_queued_work_claims_tx(&mut tx, &commit.completed_queue_claims).await?;
         complete_turn_input_claims_tx(&mut tx, &commit.completed_turn_input_claims).await?;
         let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
-        if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
+        if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
             let disposition = load_turn_cancel_request_tx(&mut tx, &commit.session_id, turn_id)
                 .await?
                 .map(|record| record.request.undelivered)
@@ -1166,7 +1167,7 @@ impl SessionCommitStore for PostgresSessionStore {
             )
             .bind(now as i64)
             .bind(&commit.session_id)
-            .bind(turn_id)
+            .bind(turn_id.as_str())
             .bind(AttachmentOwnerKind::Turn.as_str())
             .execute(&mut *tx)
             .await
@@ -2544,7 +2545,7 @@ impl TurnInputStore for PostgresSessionStore {
                      WHERE session_id = $1 AND turn_id = $2",
                 )
                 .bind(session_id)
-                .bind(turn_id)
+                .bind(turn_id.as_str())
                 .bind(&request.request_id)
                 .bind(&request.origin)
                 .bind(&request.reason)
@@ -2565,7 +2566,7 @@ impl TurnInputStore for PostgresSessionStore {
                      ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 )
                 .bind(session_id)
-                .bind(turn_id)
+                .bind(turn_id.as_str())
                 .bind(&request.request_id)
                 .bind(&request.origin)
                 .bind(&request.reason)
@@ -2748,7 +2749,7 @@ impl TurnInputStore for PostgresSessionStore {
         .map_err(store_sqlx_error)?;
         let mut commits = Vec::with_capacity(rows.len());
         for row in rows {
-            let turn_id: String = row.get(0);
+            let turn_id = row.get::<String, _>(0);
             let result_json: String = row.get(1);
             let result: RuntimeCommitReceipt =
                 store_decode_json(&result_json, "runtime turn commit result")?;
@@ -3207,7 +3208,7 @@ async fn checkpoint_work_pending_postgres(
     pool: &PgPool,
     session_id: &str,
     generation: u64,
-    turn_id: &str,
+    turn_id: &TurnId,
     checkpoint: lash_core::CheckpointKind,
     max_inputs: usize,
     max_batches: usize,
@@ -3254,7 +3255,7 @@ async fn checkpoint_work_pending_postgres(
     sqlx::query_scalar(&sql)
         .bind(session_id)
         .bind(sql_session_lease_generation(generation)?)
-        .bind(turn_id)
+        .bind(turn_id.as_str())
         .bind(max_inputs as i64)
         .bind(max_batches as i64)
         .fetch_one(&mut *connection)
@@ -3476,7 +3477,7 @@ async fn claim_ready_queued_work_postgres_tx(
 async fn load_turn_cancel_request_pg(
     pool: &sqlx::PgPool,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
     let row: Option<TurnCancelRequestRow> = sqlx::query_as(
@@ -3485,7 +3486,7 @@ async fn load_turn_cancel_request_pg(
          WHERE session_id = $1 AND turn_id = $2",
     )
     .bind(session_id)
-    .bind(turn_id)
+    .bind(turn_id.as_str())
     .fetch_optional(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
@@ -3506,7 +3507,7 @@ async fn load_turn_cancel_request_pg(
          ORDER BY affected.ordinal ASC",
     )
     .bind(session_id)
-    .bind(turn_id)
+    .bind(turn_id.as_str())
     .fetch_all(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
@@ -3516,7 +3517,7 @@ async fn load_turn_cancel_request_pg(
 async fn load_turn_cancel_request_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let row: Option<TurnCancelRequestRow> = sqlx::query_as(
         "SELECT request_id, origin, reason, disposition, mode
@@ -3524,7 +3525,7 @@ async fn load_turn_cancel_request_tx(
          WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
     )
     .bind(session_id)
-    .bind(turn_id)
+    .bind(turn_id.as_str())
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -3545,7 +3546,7 @@ async fn load_turn_cancel_request_tx(
          ORDER BY affected.ordinal ASC",
     )
     .bind(session_id)
-    .bind(turn_id)
+    .bind(turn_id.as_str())
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -3558,7 +3559,7 @@ type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, Str
 
 fn turn_cancel_record_from_rows(
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     row: TurnCancelRequestRow,
     affected_rows: Vec<(String, String, String)>,
 ) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
@@ -3626,7 +3627,7 @@ fn turn_cancel_disposition_wire(disposition: lash_core::TurnCancelDisposition) -
 async fn append_turn_cancel_outcome_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
-    turn_id: &str,
+    turn_id: &TurnId,
     affected: lash_core::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
     let Some(_) = load_turn_cancel_request_tx(tx, session_id, turn_id).await? else {
@@ -3639,7 +3640,7 @@ async fn append_turn_cancel_outcome_tx(
          WHERE session_id = $1 AND turn_id = $2",
     )
     .bind(session_id)
-    .bind(turn_id)
+    .bind(turn_id.as_str())
     .bind(&affected.input_id)
     .bind(turn_cancel_disposition_wire(affected.disposition))
     .execute(&mut **tx)
@@ -3742,7 +3743,8 @@ async fn defer_orphaned_active_turn_inputs_tx(
             payload,
             disposition,
         };
-        append_turn_cancel_outcome_tx(tx, session_id, &turn_id, affected.clone()).await?;
+        append_turn_cancel_outcome_tx(tx, session_id, &TurnId::from(turn_id), affected.clone())
+            .await?;
         outcome.affected_inputs.push(affected);
     }
     Ok(outcome)

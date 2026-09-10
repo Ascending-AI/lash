@@ -1,3 +1,4 @@
+use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -73,7 +74,7 @@ pub(crate) struct ForkChatRequest {
 #[derive(Debug, Serialize)]
 pub(crate) struct CancelTurnResponse {
     session_id: String,
-    turn_id: String,
+    turn_id: TurnId,
     outcome: TurnCancelOutcome,
 }
 
@@ -335,7 +336,7 @@ pub(crate) async fn send_message(
     let turn_model = model_spec_for_chat_selection(&model_selection)?;
     let session = state.open_session(&chat_id, turn_model).await?;
     let replay_cursor = session.observe().current_observation().cursor;
-    let turn_id = format!("agent-service-local-turn:{}", uuid::Uuid::new_v4());
+    let turn_id = TurnId::from(format!("agent-service-local-turn:{}", uuid::Uuid::new_v4()));
     let (tx, rx) = mpsc::channel::<StreamItem>(64);
     let mut replay = spawn_live_replay_forwarder(session.clone(), replay_cursor, tx.clone());
     let run_state = state.clone();
@@ -417,7 +418,7 @@ pub(crate) async fn send_message(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
-        .header("x-lash-turn-id", turn_id)
+        .header("x-lash-turn-id", turn_id.as_str())
         .body(Body::from_stream(stream))
         .expect("valid streaming response"))
 }
@@ -428,7 +429,7 @@ pub(crate) async fn send_message(
 /// local demo must authenticate the caller and authorize access to the chat.
 pub(crate) async fn cancel_turn(
     State(state): State<AppStateData>,
-    AxumPath((chat_id, turn_id)): AxumPath<(String, String)>,
+    AxumPath((chat_id, turn_id)): AxumPath<(String, TurnId)>,
     Json(request): Json<CancelTurnRequest>,
 ) -> AppResult<Json<CancelTurnResponse>> {
     state
@@ -462,7 +463,7 @@ pub(crate) async fn cancel_turn(
 pub(crate) struct ChannelTurnEvents {
     state: AppStateData,
     chat_id: String,
-    turn_id: Option<String>,
+    turn_id: Option<TurnId>,
     turn_state: Arc<Mutex<TurnPersistenceState>>,
 }
 
@@ -499,7 +500,7 @@ impl ChannelTurnEvents {
     pub(crate) fn outbox(
         state: AppStateData,
         chat_id: String,
-        turn_id: String,
+        turn_id: TurnId,
         turn_state: Arc<Mutex<TurnPersistenceState>>,
     ) -> Self {
         Self {

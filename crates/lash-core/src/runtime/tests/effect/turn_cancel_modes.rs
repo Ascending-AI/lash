@@ -22,7 +22,7 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
         .run_turn_assembled(
             TurnInput::text("cancel while the model is running"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "llm-cancel-boundary"),
+            scoped_test_turn(&recorder, &TurnId::from("llm-cancel-boundary")),
         )
         .await
         .expect("cancelled turn");
@@ -96,7 +96,7 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
         .run_turn_assembled(
             TurnInput::text("use the tool, then stop after the step"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "after-step-boundary"),
+            scoped_test_turn(&recorder, &TurnId::from("after-step-boundary")),
         )
         .await
         .expect("stopped turn");
@@ -169,7 +169,7 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
         .run_turn_assembled(
             TurnInput::text("use the tool, then escalate"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "escalated-after-llm"),
+            scoped_test_turn(&recorder, &TurnId::from("escalated-after-llm")),
         )
         .await
         .expect("aborted turn");
@@ -226,7 +226,7 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
         .run_turn_assembled(
             TurnInput::text("use the tool, then crash before the stop commits"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, "replayed-after-step"),
+            scoped_test_turn(&recorder, &TurnId::from("replayed-after-step")),
         )
         .await
         .expect("first owner stops");
@@ -253,7 +253,7 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
         .run_turn_assembled(
             TurnInput::text("use the tool, then crash before the stop commits"),
             CancellationToken::new(),
-            scoped_test_turn(&replaying, "replayed-after-step"),
+            scoped_test_turn(&replaying, &TurnId::from("replayed-after-step")),
         )
         .await
         .expect("replayed owner stops");

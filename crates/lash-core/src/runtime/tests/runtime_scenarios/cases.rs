@@ -623,7 +623,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .await
         .expect("register runtime scenario intent target");
 
-    let turn_scope = named_turn_scope("root", "runtime-scenario-intent-turn");
+    let turn_scope = named_turn_scope("root", &TurnId::from("runtime-scenario-intent-turn"));
     let wake_controller = turn_scope
         .owned_controller()
         .expect("runtime scenario turn owns its controller");

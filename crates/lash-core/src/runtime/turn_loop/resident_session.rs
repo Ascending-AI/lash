@@ -10,6 +10,7 @@
 //! once, and a full durable adoption settles the same four.
 
 use super::*;
+use crate::TurnId;
 
 /// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,7 +166,7 @@ pub(in crate::runtime) struct ResidentSessionContinuity {
     last_committed_lease_continuity: Option<SessionExecutionLeaseContinuity>,
     /// Most recent physical turn committed by this runtime, paired with the
     /// resulting session revision for observation-envelope attribution.
-    last_committed_observation_turn: Option<(u64, String)>,
+    last_committed_observation_turn: Option<(u64, TurnId)>,
 }
 
 impl ResidentSessionContinuity {
@@ -273,9 +274,9 @@ impl ResidentSessionContinuity {
     pub(in crate::runtime) fn record_committed_observation_turn(
         &mut self,
         revision: u64,
-        turn_id: &str,
+        turn_id: &TurnId,
     ) {
-        self.last_committed_observation_turn = Some((revision, turn_id.to_string()));
+        self.last_committed_observation_turn = Some((revision, turn_id.clone()));
     }
 
     /// The turn id this handle committed at `revision`, when it is the most
@@ -283,11 +284,11 @@ impl ResidentSessionContinuity {
     pub(in crate::runtime) fn last_committed_turn_id_for_revision(
         &self,
         revision: u64,
-    ) -> Option<&str> {
+    ) -> Option<&TurnId> {
         self.last_committed_observation_turn
             .as_ref()
             .filter(|(committed_revision, _)| *committed_revision == revision)
-            .map(|(_, turn_id)| turn_id.as_str())
+            .map(|(_, turn_id)| turn_id)
     }
 
     #[cfg(test)]

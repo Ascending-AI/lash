@@ -1,3 +1,4 @@
+use lash::TurnId;
 use std::path::Path;
 
 use axum::http::StatusCode;
@@ -144,7 +145,7 @@ impl AppDb {
 
     pub(crate) fn insert_turn_event<T: Serialize>(
         &mut self,
-        turn_id: &str,
+        turn_id: &TurnId,
         item: &T,
     ) -> AppResult<()> {
         let item_json =
@@ -152,7 +153,7 @@ impl AppDb {
         self.conn.execute(
             "INSERT INTO turn_events (turn_id, item_json, created_at)
              VALUES (?1, ?2, datetime('now'))",
-            params![turn_id, item_json],
+            params![turn_id.as_str(), item_json],
         )?;
         Ok(())
     }
@@ -160,7 +161,7 @@ impl AppDb {
     #[cfg(feature = "restate")]
     pub(crate) fn list_turn_events_after(
         &mut self,
-        turn_id: &str,
+        turn_id: &TurnId,
         last_id: i64,
     ) -> AppResult<Vec<TurnOutboxEvent>> {
         let mut stmt = self.conn.prepare(
@@ -169,7 +170,7 @@ impl AppDb {
              WHERE turn_id = ?1 AND id > ?2
              ORDER BY id ASC",
         )?;
-        let rows = stmt.query_map(params![turn_id, last_id], |row| {
+        let rows = stmt.query_map(params![turn_id.as_str(), last_id], |row| {
             Ok(TurnOutboxEvent {
                 id: row.get(0)?,
                 item_json: row.get(1)?,

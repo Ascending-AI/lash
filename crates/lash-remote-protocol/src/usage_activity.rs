@@ -1,5 +1,6 @@
 //! Token usage accounting and the streaming turn-activity event vocabulary.
 
+use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -169,7 +170,7 @@ pub struct RemoteCellFailure {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnEvent {
     TurnStarted {
-        turn_id: String,
+        turn_id: TurnId,
     },
     ModelRequestStarted {
         protocol_iteration: usize,

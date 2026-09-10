@@ -7,6 +7,7 @@
 //! the first-party default tool bundles from `lash-standard-plugins`,
 //! so standard lash sessions pick it up automatically.
 
+use lash_sansio::TurnId;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -204,8 +205,8 @@ fn compaction_threshold(max_context_tokens: usize) -> usize {
         .saturating_sub(ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
 }
 
-fn compaction_turn_id(parent_turn_id: &str) -> String {
-    format!("{parent_turn_id}:rolling-history-compaction")
+fn compaction_turn_id(parent_turn_id: &TurnId) -> TurnId {
+    TurnId::from(format!("{parent_turn_id}:rolling-history-compaction"))
 }
 
 fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
@@ -276,7 +277,7 @@ async fn summarize_compaction_prefix(
     };
     let prompt_text = with_instructions(&base_prompt, instructions);
 
-    let turn_id = compaction_turn_id(scoped_effect_controller.scope_id());
+    let turn_id = compaction_turn_id(&TurnId::from(scoped_effect_controller.scope_id()));
     let turn_scope = sessions
         .turn_scope(&handle.session_id, &turn_id)
         .await

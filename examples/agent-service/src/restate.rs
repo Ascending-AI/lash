@@ -30,7 +30,7 @@ use crate::state::{AppError, AppResult, AppStateData};
 #[cfg(feature = "restate")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct AgentServiceTurnWorkflowRequest {
-    turn_id: String,
+    turn_id: TurnId,
     chat_id: String,
     text: String,
     model: String,
@@ -39,7 +39,7 @@ pub(crate) struct AgentServiceTurnWorkflowRequest {
 
 impl AgentServiceTurnWorkflowRequest {
     fn new(
-        turn_id: String,
+        turn_id: TurnId,
         chat_id: String,
         text: String,
         model: String,
@@ -161,7 +161,7 @@ pub(crate) async fn send_message_restate(
 async fn stream_turn_outbox(
     state: AppStateData,
     chat_id: String,
-    turn_id: String,
+    turn_id: TurnId,
     replay_cursor: SessionCursor,
     model: lash::ModelSpec,
 ) -> AppResult<Response> {
@@ -529,7 +529,7 @@ mod restate_tests {
             })
             .await
             .expect("seed board");
-        let turn_id = format!("agent-service-e2e-{}", uuid::Uuid::new_v4());
+        let turn_id = TurnId::from(format!("agent-service-e2e-{}", uuid::Uuid::new_v4()));
         let request = AgentServiceTurnWorkflowRequest::new(
             turn_id.clone(),
             chat.id.clone(),
@@ -956,12 +956,12 @@ finish "done via Restate E2E"
         );
     }
 
-    async fn wait_for_turn_done(state: &AppStateData, turn_id: &str) {
+    async fn wait_for_turn_done(state: &AppStateData, turn_id: &TurnId) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             let events = state
                 .with_db({
-                    let turn_id = turn_id.to_string();
+                    let turn_id = TurnId::from(turn_id.to_string());
                     move |db| db.list_turn_events_after(&turn_id, 0)
                 })
                 .await

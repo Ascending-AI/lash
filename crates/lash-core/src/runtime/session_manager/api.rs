@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 
 #[async_trait::async_trait]
 impl crate::plugin::SessionReadService for RuntimeSessionStateService {
@@ -49,7 +50,7 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
     async fn turn_scope(
         &self,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, crate::PluginError> {
         self.services
             .current

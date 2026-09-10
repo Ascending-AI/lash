@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnId;
 use proptest::{
     collection::vec,
     prelude::*,
@@ -126,7 +127,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                         caused_by: None,
                     },
                     _ => crate::MessageOrigin::TurnInput {
-                        turn_id: format!("turn-{index}"),
+                        turn_id: TurnId::from(format!("turn-{index}")),
                         input_id: (index % 2 == 0).then(|| format!("input-{index}")),
                     },
                 },

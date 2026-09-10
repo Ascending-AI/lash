@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
@@ -572,7 +573,7 @@ async fn submit_workbench_turn_via_restate(
     text: &str,
 ) -> (lash_restate::RestateInvocationId, lash::TurnAddress) {
     state.push_message("user", text);
-    let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
+    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     let session_id = state.current_session_id();
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
@@ -961,9 +962,9 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     harness
         .state
         .active_turns
-        .remove(&session_id, "held-delete-turn");
+        .remove(&session_id, &TurnId::from("held-delete-turn"));
     let post_tombstone_turn = "turn-admitted-after-delete-snapshot";
-    fail_session_delete_retention_once(&session_id, post_tombstone_turn);
+    fail_session_delete_retention_once(&session_id, &TurnId::from(post_tombstone_turn));
     let Json(replacement) = Box::pin(tokio::time::timeout(
         Duration::from_secs(30),
         reset_chat(
@@ -980,7 +981,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     harness
         .state
         .active_turns
-        .remove(&session_id, post_tombstone_turn);
+        .remove(&session_id, &TurnId::from(post_tombstone_turn));
     assert!(
         harness
             .state
@@ -1677,7 +1678,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         .filter(|record| {
             record.get("name").and_then(Value::as_str) == Some("turn_input.completed")
                 && record.pointer("/context/turn_id").and_then(Value::as_str)
-                    == injected.ingress.active_turn_id()
+                    == injected.ingress.active_turn_id().map(TurnId::as_str)
                 && record
                     .pointer("/payload/claims")
                     .and_then(Value::as_array)
@@ -1812,7 +1813,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     ));
     std::fs::create_dir_all(&data_dir).expect("create recovery E2E data dir");
     let session_id = format!("workbench-recovery-{backend}-e2e");
-    let turn_id = format!("workbench-turn-recovery-{backend}-e2e");
+    let turn_id = TurnId::from(format!("workbench-turn-recovery-{backend}-e2e"));
     std::fs::write(data_dir.join("session-id"), &session_id)
         .expect("write recovery E2E session id");
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))

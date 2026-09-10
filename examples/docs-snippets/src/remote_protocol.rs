@@ -1,10 +1,11 @@
 //! Compiled sources for the Rust snippets on `docs/remote-protocol.html`.
 
+use lash::TurnId;
 fn remote_turn_request(
     chat_id: String,
-    turn_id: String,
+    turn_id: TurnId,
     idempotency_key: String,
-    trace_turn_id: String,
+    trace_turn_id: TurnId,
 ) -> anyhow::Result<()> {
     // docs:start:remote-turn-request
     use lash::remote::Envelope;
@@ -321,7 +322,7 @@ mod asserted_process_examples {
         RemoteRuntimeInvocation {
             scope: RemoteRuntimeScope {
                 session_id: "session-finance".to_string(),
-                turn_id: Some("turn-17".to_string()),
+                turn_id: Some(lash::TurnId::from("turn-17")),
                 turn_index: Some(4),
                 protocol_iteration: Some(2),
             },

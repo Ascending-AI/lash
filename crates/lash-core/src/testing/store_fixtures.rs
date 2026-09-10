@@ -3,14 +3,14 @@ use crate::*;
 use std::sync::Arc;
 pub fn durable_turn_scope(
     session_id: impl Into<String>,
-    turn_id: impl Into<String>,
+    turn_id: impl Into<TurnId>,
 ) -> ExecutionScope {
     ExecutionScope::turn(session_id, turn_id)
 }
 
 pub fn durable_turn_address(
     session_id: impl Into<String>,
-    turn_id: impl Into<String>,
+    turn_id: impl Into<TurnId>,
 ) -> crate::TurnAddress {
     crate::TurnAddress::new(session_id, turn_id)
 }

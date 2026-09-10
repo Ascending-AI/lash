@@ -259,7 +259,7 @@ impl RuntimeCommitPlanner {
             RuntimeCommitReceiptDecision::RuntimeCommitConflict => {
                 Err(StoreError::RuntimeTurnCommitConflict {
                     session_id: self.commit.session_id.clone(),
-                    turn_id: self.operation_key.clone(),
+                    operation_key: self.operation_key.clone(),
                 })
             }
             RuntimeCommitReceiptDecision::CorruptRequestedNodeCount { stored, attempted } => {

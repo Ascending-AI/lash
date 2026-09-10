@@ -7,6 +7,7 @@
 use super::*;
 use crate::runtime::LiveReplayEventDraft;
 use futures_util::StreamExt as _;
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 /// Run the full [`LiveReplayStore`] conformance suite against the backend
@@ -56,7 +57,7 @@ where
         &store,
         "capacity-session",
         revision,
-        Some("capacity-turn"),
+        Some(&TurnId::from("capacity-turn")),
         live_replay_text_payload("capacity one"),
     )
     .expect("append first capacity event");
@@ -64,7 +65,7 @@ where
         &store,
         "capacity-session",
         revision,
-        Some("capacity-turn"),
+        Some(&TurnId::from("capacity-turn")),
         live_replay_text_payload("capacity two"),
     )
     .expect("append second capacity event");
@@ -136,7 +137,7 @@ where
         &store,
         "ttl-session",
         revision,
-        Some("ttl-turn"),
+        Some(&TurnId::from("ttl-turn")),
         live_replay_text_payload("ttl expired"),
     )
     .expect("append ttl event");
@@ -201,7 +202,7 @@ pub async fn incarnation_change_invalidates_cursor(
         &original,
         session_id,
         revision,
-        Some("old-turn"),
+        Some(&TurnId::from("old-turn")),
         live_replay_text_payload("old incarnation"),
     )
     .expect("publish old-incarnation event");
@@ -210,7 +211,7 @@ pub async fn incarnation_change_invalidates_cursor(
         &fresh,
         session_id,
         revision,
-        Some("fresh-turn"),
+        Some(&TurnId::from("fresh-turn")),
         live_replay_text_payload("fresh incarnation numeric collision"),
     )
     .expect("publish fresh-incarnation event");
@@ -241,7 +242,7 @@ pub async fn incarnation_change_invalidates_cursor(
         &preserved,
         session_id,
         revision,
-        Some("continued-turn"),
+        Some(&TurnId::from("continued-turn")),
         live_replay_text_payload("preserved continuation"),
     )
     .expect("publish through reopened preserved store");
@@ -266,7 +267,7 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
         &store,
         "session-a",
         revision,
-        Some("alpha-turn"),
+        Some(&TurnId::from("alpha-turn")),
         live_replay_text_payload("alpha one"),
     )
     .expect("append first session-a event");
@@ -379,7 +380,7 @@ async fn live_replay_store_cursor_preserves_newer_revisions(store: Arc<dyn LiveR
         &store,
         "stale-snapshot-session",
         SessionRevision::new(2),
-        Some("worker-turn"),
+        Some(&TurnId::from("worker-turn")),
         live_replay_text_payload("newer worker commit"),
     )
     .expect("append newer worker event");
@@ -402,7 +403,7 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
         &store,
         "subscribe-session",
         revision,
-        Some("subscribe-turn"),
+        Some(&TurnId::from("subscribe-turn")),
         live_replay_text_payload("buffered one"),
     )
     .expect("append first buffered event");
@@ -410,7 +411,7 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
         &store,
         "subscribe-session",
         revision,
-        Some("subscribe-turn"),
+        Some(&TurnId::from("subscribe-turn")),
         live_replay_text_payload("buffered two"),
     )
     .expect("append second buffered event");
@@ -430,7 +431,7 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
         &store,
         "subscribe-session",
         revision,
-        Some("subscribe-turn"),
+        Some(&TurnId::from("subscribe-turn")),
         live_replay_text_payload("live three"),
     )
     .expect("append live event");
@@ -468,7 +469,7 @@ async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveRepla
         &store,
         "ahead-session",
         revision,
-        Some("ahead-turn"),
+        Some(&TurnId::from("ahead-turn")),
         live_replay_text_payload("existing"),
     )
     .expect("append existing event");
@@ -524,7 +525,7 @@ where
             &store,
             &session_id,
             revision,
-            Some("race-turn"),
+            Some(&TurnId::from("race-turn")),
             live_replay_text_payload("prior"),
         )
         .expect("append prior event");
@@ -545,7 +546,7 @@ where
                 &append_store,
                 &append_session_id,
                 revision,
-                Some("race-turn"),
+                Some(&TurnId::from("race-turn")),
                 live_replay_text_payload("raced"),
             )
         });
@@ -588,7 +589,7 @@ fn publish_one(
     store: &Arc<dyn LiveReplayStore>,
     session_id: &str,
     revision: SessionRevision,
-    turn_id: Option<&str>,
+    turn_id: Option<&TurnId>,
     payload: SessionObservationEventPayload,
 ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
     let prepared = store.prepare_publication(

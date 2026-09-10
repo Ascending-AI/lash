@@ -1,4 +1,5 @@
 use self::facade_ops::ScopedEffectControllerFacadeOps;
+use crate::TurnId;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,7 +29,7 @@ use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancel
 pub enum ExecutionScope {
     Turn {
         session_id: String,
-        turn_id: String,
+        turn_id: TurnId,
     },
     Process {
         process_id: String,
@@ -48,7 +49,7 @@ pub enum ExecutionScope {
 impl ExecutionScope {
     /// Constructs the stable session-and-turn scope effect-host implementors use to key one turn's
     /// durable effects.
-    pub fn turn(session_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
+    pub fn turn(session_id: impl Into<String>, turn_id: impl Into<TurnId>) -> Self {
         Self::Turn {
             session_id: session_id.into(),
             turn_id: turn_id.into(),
@@ -140,7 +141,7 @@ impl ExecutionScope {
         let scope = match wire.kind.as_str() {
             "turn" => Self::Turn {
                 session_id: wire.session_id?,
-                turn_id: wire.execution_id?,
+                turn_id: TurnId::from(wire.execution_id?),
             },
             "drain" => Self::QueueDrain {
                 session_id: wire.session_id?,
@@ -179,7 +180,7 @@ impl ExecutionScope {
     /// Exposes turn id to store and durable-substrate implementors and effect-host implementors
     /// while snapshotting or restoring durable session state. Returns `None` when no turn id is
     /// present.
-    pub fn turn_id(&self) -> Option<&str> {
+    pub fn turn_id(&self) -> Option<&TurnId> {
         match self {
             Self::Turn { turn_id, .. } => Some(turn_id),
             _ => None,
@@ -644,7 +645,7 @@ impl<'run> ScopedEffectController<'run> {
 
     /// Exposes turn id to effect-host implementors while scoping and journaling durable effects.
     /// Returns `None` when no turn id is present.
-    pub fn turn_id(&self) -> Option<&str> {
+    pub fn turn_id(&self) -> Option<&TurnId> {
         self.scope.turn_id()
     }
 

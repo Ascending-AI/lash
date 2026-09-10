@@ -476,6 +476,7 @@ fn short_graph_title(graph_key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::TurnId;
     use lash::process::ProcessInput as RuntimeInput;
     use lash::tracing::{TraceLanguageExecutionStatus, TraceLashlangGraphChildLink};
     use serde_json::json;
@@ -577,7 +578,7 @@ mod tests {
             graph_key: "effect:root:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: "root".to_string(),
-                turn_id: Some("turn-1".to_string()),
+                turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
             },
@@ -605,7 +606,7 @@ mod tests {
             graph_key: "effect:child-session:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: child_session_id.to_string(),
-                turn_id: Some("turn-1".to_string()),
+                turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
             },

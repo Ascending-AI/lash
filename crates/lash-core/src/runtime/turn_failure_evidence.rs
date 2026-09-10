@@ -147,7 +147,12 @@ impl TurnFailureEvidence {
 /// with `turn_id` as the deterministic tie-breaker on every store backend.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnFailureSettlement {
-    /// Store operation key of the turn settlement that owns this component.
+    /// Store operation key of the turn settlement that owns this component,
+    /// not a turn identity: every backend populates it from
+    /// [`crate::OperationId::storage_key`], which serializes the whole
+    /// operation. Typing it as a turn identity would let it address the wrong
+    /// thing at a typed turn seam, and the field name is durable, so it keeps
+    /// both its name and its `String` type.
     pub turn_id: String,
     /// Failed generations settled by this turn, in protocol order. Runtime
     /// derivation admits at most one component per sealed provider attempt.

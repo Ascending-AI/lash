@@ -76,7 +76,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
             .expect("commit pre-restart turn");
         crate::commit_assistant_transcript(
             &first_session,
-            turn_id,
+            &TurnId::from(turn_id),
             output
                 .final_value()
                 .and_then(serde_json::Value::as_str)
@@ -89,7 +89,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     }
     crate::commit_assistant_transcript(
         &first_session,
-        "resume-turn-one",
+        &TurnId::from("resume-turn-one"),
         "resume answer one".to_string(),
         None,
     )
@@ -308,7 +308,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .expect("commit resumed turn");
     crate::commit_assistant_transcript(
         &resumed_session,
-        "resume-turn-three",
+        &TurnId::from("resume-turn-three"),
         resumed_output
             .final_value()
             .and_then(serde_json::Value::as_str)

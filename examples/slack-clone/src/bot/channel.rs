@@ -19,6 +19,7 @@
 //! is idempotent: the admission by its Lash source key, the drain by its
 //! `drain_id`, and the post by the `event_id` its `metadata` carries.
 
+use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -1244,7 +1245,7 @@ impl Drop for SessionLockLease {
 /// than papering over.
 fn reply_from_transcript(session: &LashSession, input_id: &str) -> Option<String> {
     let read_view = session.read_view();
-    let mut turn_id: Option<String> = None;
+    let mut turn_id: Option<TurnId> = None;
     let mut answer: Option<String> = None;
     for entry in read_view.chronological_projection().into_entries() {
         let ChronologicalPayload::Message(message) = entry.payload else {
@@ -1260,7 +1261,7 @@ fn reply_from_transcript(session: &LashSession, input_id: &str) -> Option<String
         match (&turn_id, admitted_by) {
             // Our input's committed copy: remember which turn consumed it.
             (None, Some((turn, Some(admitted)))) if admitted == input_id => {
-                turn_id = Some(turn.to_string());
+                turn_id = Some(TurnId::from(turn.to_string()));
             }
             // Nothing found yet; keep scanning.
             (None, _) => {}

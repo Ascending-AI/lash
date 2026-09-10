@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::TurnId;
 use sqlx::Row as _;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,7 +9,7 @@ struct RawSessionMetaRow {
     parent_session_id: Option<String>,
     caused_by_kind: Option<String>,
     caused_by_session_id: Option<String>,
-    caused_by_turn_id: Option<String>,
+    caused_by_turn_id: Option<TurnId>,
     caused_by_effect_id: Option<String>,
     caused_by_call_id: Option<String>,
     caused_by_process_id: Option<String>,
@@ -108,14 +109,14 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 "layout-child-turn-literal",
                 Some(CausalRef::Turn {
                     session_id: "layout-cause-session-literal".to_string(),
-                    turn_id: "layout-cause-turn-literal".to_string(),
+                    turn_id: TurnId::from("layout-cause-turn-literal"),
                 }),
             ),
             row: RawSessionMetaRow {
                 parent_session_id: Some("layout-parent-literal".to_string()),
                 caused_by_kind: Some("turn".to_string()),
                 caused_by_session_id: Some("layout-cause-session-literal".to_string()),
-                caused_by_turn_id: Some("layout-cause-turn-literal".to_string()),
+                caused_by_turn_id: Some(TurnId::from("layout-cause-turn-literal")),
                 ..RawSessionMetaRow::literal("layout-child-turn-literal", "child")
             },
             pending_observer_intents: vec![],
@@ -145,7 +146,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 "layout-child-effect-with-turn-literal",
                 Some(CausalRef::Effect {
                     session_id: "layout-effect-session-literal".to_string(),
-                    turn_id: Some("layout-effect-turn-literal".to_string()),
+                    turn_id: Some(TurnId::from("layout-effect-turn-literal")),
                     effect_id: "layout-effect-id-literal".to_string(),
                 }),
             ),
@@ -153,7 +154,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 parent_session_id: Some("layout-parent-literal".to_string()),
                 caused_by_kind: Some("effect".to_string()),
                 caused_by_session_id: Some("layout-effect-session-literal".to_string()),
-                caused_by_turn_id: Some("layout-effect-turn-literal".to_string()),
+                caused_by_turn_id: Some(TurnId::from("layout-effect-turn-literal")),
                 caused_by_effect_id: Some("layout-effect-id-literal".to_string()),
                 ..RawSessionMetaRow::literal("layout-child-effect-with-turn-literal", "child")
             },
@@ -423,7 +424,7 @@ fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawS
         parent_session_id: row.get(2)?,
         caused_by_kind: row.get(3)?,
         caused_by_session_id: row.get(4)?,
-        caused_by_turn_id: row.get(5)?,
+        caused_by_turn_id: row.get::<_, Option<String>>(5)?.map(TurnId::from),
         caused_by_effect_id: row.get(6)?,
         caused_by_call_id: row.get(7)?,
         caused_by_process_id: row.get(8)?,
@@ -446,7 +447,7 @@ fn postgres_raw_session_meta_row(row: sqlx::postgres::PgRow) -> RawSessionMetaRo
         parent_session_id: row.get(2),
         caused_by_kind: row.get(3),
         caused_by_session_id: row.get(4),
-        caused_by_turn_id: row.get(5),
+        caused_by_turn_id: row.get::<Option<String>, _>(5).map(TurnId::from),
         caused_by_effect_id: row.get(6),
         caused_by_call_id: row.get(7),
         caused_by_process_id: row.get(8),
@@ -638,7 +639,7 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
                     case.row.parent_session_id,
                     case.row.caused_by_kind,
                     case.row.caused_by_session_id,
-                    case.row.caused_by_turn_id,
+                    case.row.caused_by_turn_id.as_ref().map(TurnId::as_str),
                     case.row.caused_by_effect_id,
                     case.row.caused_by_call_id,
                     case.row.caused_by_process_id,
@@ -726,7 +727,7 @@ async fn replace_postgres_session_meta_with_raw_rows(
         .bind(&case.row.parent_session_id)
         .bind(&case.row.caused_by_kind)
         .bind(&case.row.caused_by_session_id)
-        .bind(&case.row.caused_by_turn_id)
+        .bind(case.row.caused_by_turn_id.as_ref().map(TurnId::as_str))
         .bind(&case.row.caused_by_effect_id)
         .bind(&case.row.caused_by_call_id)
         .bind(&case.row.caused_by_process_id)

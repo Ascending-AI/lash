@@ -1,5 +1,6 @@
 //! Transport-neutral foreground-turn cancellation envelopes.
 
+use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +39,7 @@ impl RemoteTurnCancellationEvidence {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnCancelRequest {
     pub session_id: String,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub request_id: String,
     /// Opaque host-domain data; Lash never interprets this value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,14 +89,14 @@ impl RemoteTurnCancelOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnCancelReceipt {
     pub session_id: String,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub outcome: RemoteTurnCancelOutcome,
 }
 
 impl RemoteTurnCancelReceipt {
     pub fn new(
         session_id: impl Into<String>,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
         outcome: RemoteTurnCancelOutcome,
     ) -> Self {
         Self {

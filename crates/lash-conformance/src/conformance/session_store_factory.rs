@@ -9,6 +9,7 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
+use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 #[path = "session_store_factory_config_commands.rs"]
@@ -98,7 +99,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         parent_session_id: "read-only-session-parent".to_string(),
         caused_by: Some(crate::CausalRef::Turn {
             session_id: "read-only-session-parent".to_string(),
-            turn_id: "read-only-session-parent-turn".to_string(),
+            turn_id: TurnId::from("read-only-session-parent-turn"),
         }),
     };
     let request = session_store_request(
@@ -1361,7 +1362,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "child-turn",
             child(Some(crate::CausalRef::Turn {
                 session_id: "cause-session".to_string(),
-                turn_id: "cause-turn".to_string(),
+                turn_id: TurnId::from("cause-turn"),
             })),
         ),
         (
@@ -1376,7 +1377,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "child-effect-with-turn",
             child(Some(crate::CausalRef::Effect {
                 session_id: "cause-session".to_string(),
-                turn_id: Some("cause-turn".to_string()),
+                turn_id: Some(TurnId::from("cause-turn")),
                 effect_id: "cause-effect".to_string(),
             })),
         ),

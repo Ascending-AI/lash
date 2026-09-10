@@ -2,6 +2,7 @@ use super::{
     ProcessEventAppendPlan, prepare_process_event_append, prepare_process_registration,
     process_registration_fingerprint, validate_process_registration,
 };
+use crate::TurnId;
 use crate::{
     AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessIncarnation,
     ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStarted,
@@ -83,7 +84,7 @@ fn process_registration_identity_golden_corpus() {
     let causes = [
         crate::CausalRef::Turn {
             session_id: "s".to_string(),
-            turn_id: "t".to_string(),
+            turn_id: TurnId::from("t"),
         },
         crate::CausalRef::Effect {
             session_id: "s".to_string(),

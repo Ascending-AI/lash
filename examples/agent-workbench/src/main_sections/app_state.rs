@@ -1,4 +1,5 @@
 use super::*;
+use lash::TurnId;
 
 impl AppState {
     /// The dialect this session is opened with: its roster row's, or the
@@ -210,12 +211,12 @@ impl AppState {
         let _ = self.event_tx.publish_identified(session_id, event_id, item);
     }
 
-    pub(crate) fn publish_turn_done(&self, session_id: &str, turn_id: &str) {
+    pub(crate) fn publish_turn_done(&self, session_id: &str, turn_id: &TurnId) {
         self.publish_for_session_identified(
             session_id,
             format!("turn:{turn_id}:done"),
             StreamItem::Done {
-                turn_id: Some(turn_id.to_string()),
+                turn_id: Some(TurnId::from(turn_id.to_string())),
                 outcome: TurnDoneOutcome::Completed,
             },
         );
@@ -230,14 +231,14 @@ impl AppState {
     /// `Failed` outcome runs last so a viewer that already rendered those rows
     /// knows to re-derive from the authoritative snapshot instead of keeping a
     /// phantom whose commit was refused.
-    pub(crate) fn publish_turn_failed(&self, session_id: &str, turn_id: &str) {
+    pub(crate) fn publish_turn_failed(&self, session_id: &str, turn_id: &TurnId) {
         self.publish_turn_failed_with_message(session_id, turn_id, PUBLIC_TURN_FAILURE_MESSAGE);
     }
 
     pub(crate) fn publish_turn_failed_with_message(
         &self,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
         public_message: &str,
     ) {
         let retired = self.event_tx.retire_turn_rows(session_id, turn_id);
@@ -256,7 +257,7 @@ impl AppState {
             session_id,
             format!("turn:{turn_id}:done"),
             StreamItem::Done {
-                turn_id: Some(turn_id.to_string()),
+                turn_id: Some(TurnId::from(turn_id.to_string())),
                 outcome: TurnDoneOutcome::Failed,
             },
         );
@@ -276,7 +277,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    pub(crate) fn track_turn(&self, session_id: &str, turn_id: &str) {
+    pub(crate) fn track_turn(&self, session_id: &str, turn_id: &TurnId) {
         self.active_turns.insert(session_id, turn_id);
     }
 
@@ -284,7 +285,7 @@ impl AppState {
     pub(crate) fn track_turn_prompt(
         &self,
         session_id: &str,
-        turn_id: &str,
+        turn_id: &TurnId,
         prompt: String,
         attachment_id: Option<String>,
     ) {
@@ -627,7 +628,7 @@ impl AppState {
         &self,
         session_id: &str,
         id: impl Into<String>,
-        turn_id: &str,
+        turn_id: &TurnId,
         text: impl Into<String>,
     ) -> ChatMessage {
         self.push_message_with_id_and_attachments_and_provenance_for_session(
@@ -637,7 +638,7 @@ impl AppState {
             text,
             Vec::new(),
             Some(ChatMessageProvenance::TurnOutput {
-                turn_id: turn_id.to_string(),
+                turn_id: TurnId::from(turn_id.to_string()),
             }),
         )
     }
@@ -1139,7 +1140,7 @@ pub(crate) fn workbench_owns_committed_agent_reply(output: &TurnReport) -> bool 
 /// message. Only for turns `workbench_owns_committed_agent_reply` claims.
 pub(crate) async fn commit_assistant_transcript(
     session: &lash::LashSession,
-    turn_id: &str,
+    turn_id: &TurnId,
     assistant_text: String,
     model: Option<&str>,
 ) -> Result<(), AppError> {
@@ -1309,7 +1310,7 @@ pub(crate) static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 #[cfg(test)]
-pub(crate) fn fail_session_delete_retention_once(session_id: &str, turn_id: &str) {
+pub(crate) fn fail_session_delete_retention_once(session_id: &str, turn_id: &TurnId) {
     SESSION_DELETE_RETENTION_FAULTS
         .lock_recover()
         .insert(session_id.to_string(), turn_id.to_string());

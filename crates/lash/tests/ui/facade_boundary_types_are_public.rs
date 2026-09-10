@@ -7,6 +7,7 @@ use lash::direct::{
     GenerationOptions, LlmEventSender, LlmOutputPart, LlmUsage,
 };
 use lash::durability::RuntimeHostConfig;
+use lash::TurnId;
 use lash::messages::MessageRole;
 use lash::persistence::{
     CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity,
@@ -24,7 +25,7 @@ use lash::persistence::{
     SessionExecutionLeaseAuthority, SessionExecutionLeaseStore,
     SessionHeadMeta, SessionHeadPayload, SessionMeta,
     SessionNodeRecord, StoreError,
-    StoreMaintenance, TurnId, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
+    StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
     TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
     load_persisted_session_state,
 };

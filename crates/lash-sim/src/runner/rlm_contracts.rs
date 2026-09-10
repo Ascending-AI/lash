@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::TurnId;
 
 pub(super) fn rlm_protocol_contract_executions() -> Result<Vec<Value>, FixedScriptRunnerError> {
     Ok(vec![
@@ -742,7 +743,7 @@ fn rlm_contract_config_with_turn_options(
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: "rlm-contract".to_string(),
-        turn_id: "rlm-contract-turn".to_string(),
+        turn_id: TurnId::from("rlm-contract-turn"),
         emit_llm_trace: false,
         termination,
         turn_limit_final_message: Arc::new(contract_turn_limit_final_message),

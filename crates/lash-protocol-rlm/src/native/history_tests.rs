@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::{Part, SessionHistoryRecord};
 use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
+use lash_sansio::TurnId;
 
 fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
     RlmTrajectoryEntry {
@@ -121,7 +122,7 @@ fn terminal_suppression_is_atomic_only_after_transcript_commit() {
         role: lash_core::MessageRole::Assistant,
         parts: vec![Part::prose("answer.p0".to_string(), "1".to_string(), None)].into(),
         origin: Some(lash_core::MessageOrigin::TurnOutput {
-            turn_id: "turn".to_string(),
+            turn_id: TurnId::from("turn"),
             source: lash_core::TurnOutputSource::Runtime,
         }),
     };

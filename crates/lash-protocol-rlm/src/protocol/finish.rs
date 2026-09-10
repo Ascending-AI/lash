@@ -1,5 +1,6 @@
 use lash_core::facade_support::reasoning_part;
 use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
+use lash_sansio::TurnId;
 use serde_json::Value;
 
 use crate::dialect::RlmDialect;
@@ -41,7 +42,7 @@ pub(super) fn internal_assistant_prose_message(
 }
 
 pub(super) fn internal_assistant_prose_message_for_turn(
-    turn_id: &str,
+    turn_id: &TurnId,
     message_id: String,
     content: String,
     reasoning: &[RlmReasoningPart],
@@ -51,7 +52,7 @@ pub(super) fn internal_assistant_prose_message_for_turn(
         content,
         reasoning,
         Some(lash_core::MessageOrigin::TurnOutput {
-            turn_id: turn_id.to_string(),
+            turn_id: TurnId::from(turn_id.to_string()),
             source: lash_core::TurnOutputSource::Plugin {
                 plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             },

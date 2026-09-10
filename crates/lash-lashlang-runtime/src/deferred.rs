@@ -14,6 +14,7 @@
 //! again, and the flat Tool Catalog is never mutated — resolution is
 //! link-scoped only.
 
+use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -109,7 +110,7 @@ pub type SharedDeferredToolResolver = Arc<dyn DeferredToolResolver>;
 pub struct DeferredResolutionLinkKey {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

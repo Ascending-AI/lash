@@ -1,6 +1,7 @@
 //! Session observation: cursors, resumable observation events, and live
 //! replay gap envelopes.
 
+use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +18,7 @@ pub struct RemoteTurnInputApplication {
     pub input_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
-    pub turn_id: String,
+    pub turn_id: TurnId,
     pub committed_message_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint: Option<RemoteTurnInputCheckpoint>,
@@ -79,7 +80,7 @@ pub struct RemoteSessionObservationEvent {
     pub session_id: String,
     pub replay_incarnation_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
+    pub turn_id: Option<TurnId>,
     pub revision: u64,
     pub cursor: String,
     #[serde(flatten)]

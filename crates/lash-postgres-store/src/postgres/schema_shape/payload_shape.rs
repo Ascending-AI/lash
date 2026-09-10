@@ -683,6 +683,7 @@ fn json_value_type(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::TurnId;
 
     #[test]
     fn session_meta_shape_comes_from_all_fields_even_without_a_sample() {
@@ -889,7 +890,7 @@ mod tests {
         #[serde(tag = "type", rename_all = "snake_case")]
         #[allow(dead_code)]
         enum Before {
-            Turn { turn_id: String },
+            Turn { turn_id: TurnId },
             Effect { effect_id: String },
         }
         #[derive(JsonSchema)]
@@ -897,7 +898,7 @@ mod tests {
         #[allow(dead_code)]
         enum After {
             Effect { effect_id: String },
-            Turn { turn_id: String },
+            Turn { turn_id: TurnId },
         }
 
         assert_eq!(

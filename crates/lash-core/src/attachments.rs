@@ -1,3 +1,4 @@
+use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 mod file_store;
 
@@ -1154,9 +1155,12 @@ impl SessionAttachmentStore {
     /// Bind puts for the lifetime of a durable turn execution.
     pub fn bind_turn_scoped(
         self: &Arc<Self>,
-        turn_id: impl Into<String>,
+        turn_id: impl Into<TurnId>,
     ) -> AttachmentOwnerBinding {
-        self.bind_owner_scoped(crate::AttachmentOwnerKind::Turn, turn_id.into())
+        self.bind_owner_scoped(
+            crate::AttachmentOwnerKind::Turn,
+            turn_id.into().into_inner(),
+        )
     }
 
     /// Bind puts for the lifetime of a recovered ToolCall or Engine process.
@@ -1198,9 +1202,9 @@ impl SessionAttachmentStore {
     /// Returns the unique attachment intents recorded by the active durable
     /// turn. The runtime uses this turn-side evidence while assembling the
     /// commit budget; stores are never queried during admission.
-    pub(crate) fn recorded_turn_intent_ids(&self, turn_id: &str) -> BTreeSet<AttachmentId> {
+    pub(crate) fn recorded_turn_intent_ids(&self, turn_id: &TurnId) -> BTreeSet<AttachmentId> {
         let recorded = self.owner.lock_recover().as_ref().and_then(|owner| {
-            (owner.kind == crate::AttachmentOwnerKind::Turn && owner.id == turn_id)
+            (owner.kind == crate::AttachmentOwnerKind::Turn && owner.id == turn_id.as_str())
                 .then(|| Arc::clone(&owner.recorded_intent_ids))
         });
         recorded

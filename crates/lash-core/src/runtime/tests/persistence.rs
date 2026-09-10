@@ -45,7 +45,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         .run_turn_assembled(
             TurnInput::text("account this turn"),
             CancellationToken::new(),
-            named_turn_scope("root", "usage-overflow"),
+            named_turn_scope("root", &TurnId::from("usage-overflow")),
         )
         .await
         .expect_err("overflow must reject the durable commit");
@@ -61,7 +61,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         .run_turn_assembled(
             TurnInput::text("the poisoned ledger must fail closed again"),
             CancellationToken::new(),
-            named_turn_scope("root", "usage-overflow-next-turn"),
+            named_turn_scope("root", &TurnId::from("usage-overflow-next-turn")),
         )
         .await
         .expect_err("the unconfirmed overflowing row must poison the next turn");
@@ -124,7 +124,7 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         .run_turn_assembled(
             TurnInput::text("use the tool, then answer"),
             CancellationToken::new(),
-            named_turn_scope("root", "multi-call-usage-overflow"),
+            named_turn_scope("root", &TurnId::from("multi-call-usage-overflow")),
         )
         .await
         .expect_err("the second LLM usage event must reject cumulative overflow");
@@ -251,7 +251,7 @@ async fn standard_runtime_assembles_stream_only_text_response() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "stream-only-text-turn"),
+                named_turn_scope("root", &TurnId::from("stream-only-text-turn")),
             )
             .with_events(&sink),
         )
@@ -323,7 +323,7 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "recover-streamed-text-turn"),
+                named_turn_scope("root", &TurnId::from("recover-streamed-text-turn")),
             )
             .with_events(&sink),
         )
@@ -386,7 +386,7 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "text-part-no-duplicate-turn"),
+                named_turn_scope("root", &TurnId::from("text-part-no-duplicate-turn")),
             )
             .with_events(&sink),
         )
@@ -469,7 +469,7 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
                 turn_context: crate::TurnContext::default(),
             },
             cancel,
-            named_turn_scope("root", "cancel-tool-turn"),
+            named_turn_scope("root", &TurnId::from("cancel-tool-turn")),
         )
         .await;
     let elapsed = start.elapsed();
@@ -550,7 +550,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "terminal-tool-finish-turn"),
+                named_turn_scope("root", &TurnId::from("terminal-tool-finish-turn")),
             )
             .with_turn_events(&turn_events),
         )
@@ -647,7 +647,7 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "terminal-tool-fail-turn"),
+                named_turn_scope("root", &TurnId::from("terminal-tool-fail-turn")),
             )
             .with_turn_events(&turn_events),
         )
@@ -722,7 +722,7 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "streamed-tool-call-turn"),
+            named_turn_scope("root", &TurnId::from("streamed-tool-call-turn")),
         )
         .await
         .expect("turn");
@@ -773,7 +773,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope("root", "part-boundaries-turn"),
+                named_turn_scope("root", &TurnId::from("part-boundaries-turn")),
             )
             .with_events(&sink),
         )
@@ -833,7 +833,7 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "streamed-usage-turn"),
+            named_turn_scope("root", &TurnId::from("streamed-usage-turn")),
         )
         .await
         .expect("turn");
@@ -886,7 +886,7 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
                 turn_context: crate::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope("root", "final-usage-turn"),
+            named_turn_scope("root", &TurnId::from("final-usage-turn")),
         )
         .await
         .expect("turn");

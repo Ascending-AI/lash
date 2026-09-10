@@ -3,6 +3,7 @@
 //! `RuntimeSessionState` is the runtime-private mutable state shape. Public
 //! host/plugin reads use `SessionSnapshot` from the plugin API instead.
 
+use crate::TurnId;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 use lash_sansio::PromptUsage;
 
@@ -1235,7 +1236,7 @@ pub(crate) mod facade_ops {
         fn turn_state(&self) -> PersistedTurnState;
 
         // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
-        fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope;
+        fn turn_scope(&self, turn_id: impl Into<TurnId>) -> crate::ExecutionScope;
 
         // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
         fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope;
@@ -1256,7 +1257,7 @@ pub(crate) mod facade_ops {
             }
         }
 
-        fn turn_scope(&self, turn_id: impl Into<String>) -> crate::ExecutionScope {
+        fn turn_scope(&self, turn_id: impl Into<TurnId>) -> crate::ExecutionScope {
             crate::ExecutionScope::turn(&self.session_id, turn_id)
         }
 

@@ -53,7 +53,9 @@ impl RuntimeSessionServices {
             }
         };
         let child_session_id = child.session_id.clone();
-        let child_turn_id = registration.id.clone();
+        // The child session's first turn is deliberately scoped by the
+        // process identity that started it, so the crossing is spelled out.
+        let child_turn_id = crate::TurnId::from(registration.id.as_str());
         let child_scope = match self
             .current
             .turn_scope_by_id(&self.managed, &child_session_id, &child_turn_id)
@@ -494,7 +496,10 @@ mod tests {
                     foreign_registration,
                     foreign_create_request,
                     crate::TurnInput::text("must not run"),
-                    named_turn_scope(&foreign_session_id, &foreign_process_id),
+                    named_turn_scope(
+                        &foreign_session_id,
+                        &TurnId::from(foreign_process_id.as_str())
+                    ),
                     foreign_cancellation,
                 )
                 .await
@@ -532,7 +537,7 @@ mod tests {
             registration,
             create_request.clone(),
             crate::TurnInput::text("park the child turn"),
-            named_turn_scope(&child_session_id, &process_id),
+            named_turn_scope(&child_session_id, &TurnId::from(process_id.as_str())),
             cancellation.clone(),
         ));
         tokio::select! {
@@ -593,7 +598,7 @@ mod tests {
                 replay_registration,
                 create_request,
                 crate::TurnInput::text("replayed cancelled child turn"),
-                named_turn_scope(&child_session_id, &process_id),
+                named_turn_scope(&child_session_id, &TurnId::from(process_id.as_str())),
                 cancellation,
             )
             .await
@@ -721,7 +726,7 @@ mod tests {
                     registration,
                     request,
                     crate::TurnInput::text("park"),
-                    named_turn_scope("permit-child", "permit-process"),
+                    named_turn_scope("permit-child", &TurnId::from("permit-process")),
                     cancellation.clone(),
                 ));
                 tokio::select! {

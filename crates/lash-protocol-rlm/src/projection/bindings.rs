@@ -393,6 +393,7 @@ impl RlmTurnInputExt for TurnInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::TurnId;
     use lashlang::{ProjectedFuture, ProjectedReadRequest, ProjectedReadResponse};
 
     struct TestProjectedValue;
@@ -626,7 +627,7 @@ mod tests {
         let input = TurnInput {
             items: Vec::new(),
             protocol_turn_options: None,
-            trace_turn_id: Some("stable".to_string()),
+            trace_turn_id: Some(TurnId::from("stable")),
             protocol_extension: None,
             turn_context: lash_core::TurnContext::default(),
         }
@@ -650,7 +651,7 @@ mod tests {
         let first = TurnInput {
             items: Vec::new(),
             protocol_turn_options: None,
-            trace_turn_id: Some("same-trace".to_string()),
+            trace_turn_id: Some(TurnId::from("same-trace")),
             protocol_extension: None,
             turn_context: lash_core::TurnContext::default(),
         }
@@ -663,7 +664,7 @@ mod tests {
         let second = TurnInput {
             items: Vec::new(),
             protocol_turn_options: None,
-            trace_turn_id: Some("same-trace".to_string()),
+            trace_turn_id: Some(TurnId::from("same-trace")),
             protocol_extension: None,
             turn_context: lash_core::TurnContext::default(),
         }

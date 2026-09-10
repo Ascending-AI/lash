@@ -1,3 +1,4 @@
+use lash::TurnId;
 use lash::sync::MutexExt;
 use std::convert::Infallible;
 use std::io::{self, Write};
@@ -77,7 +78,7 @@ pub(crate) async fn stream_raw_activities(
 
     let turn_model = model_spec_for_chat_selection(&model_selection)?;
     let session = state.open_session(&chat_id, turn_model).await?;
-    let turn_id = format!("agent-service-raw-turn:{}", uuid::Uuid::new_v4());
+    let turn_id = TurnId::from(format!("agent-service-raw-turn:{}", uuid::Uuid::new_v4()));
     let turn = session
         .turn(TurnInput::text(text))
         .turn_id(turn_id.clone())
@@ -128,7 +129,7 @@ pub(crate) async fn stream_raw_activities(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
-        .header("x-lash-turn-id", turn_id)
+        .header("x-lash-turn-id", turn_id.as_str())
         .body(Body::from_stream(UnboundedReceiverStream::new(rx)))
         .expect("valid raw activity streaming response"))
 }
