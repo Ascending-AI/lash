@@ -40,6 +40,7 @@ graceful-drain = { tier = "deterministic", model = "scripted-provider" }
 process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-8; only the five FIG-1293 tool rows call a provider" }
 rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 session-lease-triage = { tier = "deterministic", model = "scripted-provider" }
+session-binding = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 version-bump-recreation = { tier = "deterministic", model = "scripted-provider" }
 workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro", deterministic_phases = "FIG-1346 four-variant async_completion_ nextest companion; Scenarios A-C remain live judged rows" }
