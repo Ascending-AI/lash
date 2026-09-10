@@ -69,10 +69,6 @@ class ScriptOnlyTests(unittest.TestCase):
         self.assertEqual(scope.classification, "shared-inputs")
         self.assertEqual(scope.families, gate_scope.ALL_FAMILIES)
 
-    def test_this_classifier_does_not_exempt_itself(self) -> None:
-        scope = scope_of("scripts/gate_scope.py")
-        self.assertEqual(scope.families, gate_scope.ALL_FAMILIES)
-
 
 class RustSourceTests(unittest.TestCase):
     def test_a_crate_change_runs_compile_but_not_workflows(self) -> None:

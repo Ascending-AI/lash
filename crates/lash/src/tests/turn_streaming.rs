@@ -4771,12 +4771,6 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
 }
 
 #[tokio::test]
-#[ignore = "the reservation surface still couples broadcast capacity to replay retention, so an independently retained missed suffix is not constructible"]
-async fn subscriber_lag_recovers_from_last_delivered_cursor() {
-    unreachable!("documented conformance-law placeholder")
-}
-
-#[tokio::test]
 async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
