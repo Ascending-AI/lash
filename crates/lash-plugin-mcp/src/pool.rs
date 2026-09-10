@@ -500,7 +500,7 @@ impl McpConnectionPool {
         #[cfg(test)]
         let hook = self.advertised_tools_hook.read_recover().clone();
         let mut tools = Vec::new();
-        for (index, entry) in entries.values().enumerate() {
+        for (_index, entry) in entries.values().enumerate() {
             tools.extend(
                 entry
                     .imported_tools
@@ -509,7 +509,7 @@ impl McpConnectionPool {
                     .map(|tool| tool.definition.clone()),
             );
             #[cfg(test)]
-            if index == 0
+            if _index == 0
                 && let Some(hook) = &hook
             {
                 hook();
