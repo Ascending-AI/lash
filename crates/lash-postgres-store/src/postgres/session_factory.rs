@@ -640,6 +640,12 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
             .collect()
     }
 
+    async fn list_condemnations(
+        &self,
+    ) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, lash_core::StoreError> {
+        crate::attachments::list_attachment_condemnations(&self.pool).await
+    }
+
     async fn has_live_attachment_ref(
         &self,
         id: &lash_core::AttachmentId,

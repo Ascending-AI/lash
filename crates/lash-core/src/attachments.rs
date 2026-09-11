@@ -318,6 +318,22 @@ pub trait AttachmentRootSet: Send + Sync {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<BTreeSet<AttachmentId>, StoreError>;
 
+    /// Enumerate the factory's durable condemnation authority in digest order.
+    ///
+    /// The result includes sweep-owned and restoring-write-owned rows in every
+    /// non-free phase. Restoring ownership exposes its session identity but
+    /// never the opaque write token. Implementations must fail closed when a
+    /// persisted phase or provenance combination is unknown or inconsistent.
+    /// This inspection-only operation neither adopts nor mutates rows;
+    /// generation-fenced adoption from ADR 0067 section 6 remains future work.
+    async fn list_condemnations(
+        &self,
+    ) -> Result<Vec<crate::store::AttachmentCondemnationRecord>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "AttachmentRootSet::list_condemnations",
+        })
+    }
+
     /// Whether a single id currently has a live root under the same age plus
     /// owner-reachability rule as [`Self::live_attachment_refs`].
     ///
