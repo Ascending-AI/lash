@@ -43,10 +43,19 @@ fn messagepack_string(value: &str) -> Vec<u8> {
 }
 
 fn messagepack_map(entries: Vec<(&str, Vec<u8>)>) -> Vec<u8> {
+    messagepack_raw_map(
+        entries
+            .into_iter()
+            .map(|(key, value)| (messagepack_string(key), value))
+            .collect(),
+    )
+}
+
+fn messagepack_raw_map(entries: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<u8> {
     assert!(entries.len() < 16);
     let mut encoded = vec![0x80 | entries.len() as u8];
     for (key, value) in entries {
-        encoded.extend(messagepack_string(key));
+        encoded.extend(key);
         encoded.extend(value);
     }
     encoded
@@ -68,6 +77,13 @@ fn messagepack_duplicate_owner() -> Vec<u8> {
         ("owner_id", messagepack_string("first")),
         ("owner_id", messagepack_string("last")),
         ("incarnation_id", messagepack_string("boot")),
+    ])
+}
+
+fn messagepack_indexed_owner(zero: Vec<u8>, one: Vec<u8>) -> Vec<u8> {
+    messagepack_raw_map(vec![
+        (zero, messagepack_string("worker")),
+        (one, messagepack_string("boot")),
     ])
 }
 
@@ -421,6 +437,134 @@ fn process_lease_nested_messagepack_maps_share_order_independent_compatibility()
             assert_eq!(decoded.lease_token, "tok");
         }
     }
+}
+
+#[test]
+fn process_lease_messagepack_owner_numeric_identifiers_match_derived_serde() {
+    let unsigned_indexes = [
+        (vec![0], vec![1]),
+        (vec![0xcc, 0], vec![0xcc, 1]),
+        (vec![0xcd, 0, 0], vec![0xcd, 0, 1]),
+        (vec![0xce, 0, 0, 0, 0], vec![0xce, 0, 0, 0, 1]),
+        (
+            vec![0xcf, 0, 0, 0, 0, 0, 0, 0, 0],
+            vec![0xcf, 0, 0, 0, 0, 0, 0, 0, 1],
+        ),
+    ];
+
+    for (zero, one) in unsigned_indexes {
+        for version_first in [true, false] {
+            let lease = messagepack_lease(
+                messagepack_indexed_owner(zero.clone(), one.clone()),
+                messagepack_string("tok"),
+                PROCESS_LEASE_SCHEMA_VERSION as u8,
+                version_first,
+                false,
+            );
+            assert_messagepack_fixture_decodes(&lease, u64::MAX);
+
+            for encoded in [
+                messagepack_map(vec![("Acquired", lease.clone())]),
+                messagepack_map(vec![(
+                    "Busy",
+                    messagepack_map(vec![("holder", lease.clone())]),
+                )]),
+            ] {
+                let decoded: ProcessLeaseClaimOutcome = rmp_serde::from_slice(&encoded)
+                    .expect("nested lease must accept numeric owner field identifiers");
+                let decoded = match decoded {
+                    ProcessLeaseClaimOutcome::Acquired(lease)
+                    | ProcessLeaseClaimOutcome::Busy { holder: lease } => lease,
+                };
+                assert_eq!(
+                    decoded.owner,
+                    crate::LeaseOwnerIdentity::opaque("worker", "boot")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn process_lease_messagepack_owner_numeric_identifier_edges_match_derived_serde() {
+    for version_first in [true, false] {
+        let owner_with_ignored_index = messagepack_raw_map(vec![
+            (vec![0], messagepack_string("worker")),
+            (vec![2], vec![0xc4, 1, 0xff]),
+            (vec![1], messagepack_string("boot")),
+        ]);
+        let lease = messagepack_lease(
+            owner_with_ignored_index,
+            messagepack_string("tok"),
+            PROCESS_LEASE_SCHEMA_VERSION as u8,
+            version_first,
+            false,
+        );
+        assert_messagepack_fixture_decodes(&lease, u64::MAX);
+
+        for duplicate_owner in [
+            messagepack_raw_map(vec![
+                (vec![0], messagepack_string("first")),
+                (messagepack_string("owner_id"), messagepack_string("last")),
+                (vec![1], messagepack_string("boot")),
+            ]),
+            messagepack_raw_map(vec![
+                (vec![0], messagepack_string("first")),
+                (vec![0], messagepack_string("last")),
+                (vec![1], messagepack_string("boot")),
+            ]),
+        ] {
+            let lease = messagepack_lease(
+                duplicate_owner,
+                messagepack_string("tok"),
+                PROCESS_LEASE_SCHEMA_VERSION as u8,
+                version_first,
+                false,
+            );
+            let error = rmp_serde::from_slice::<ProcessLease>(&lease)
+                .expect_err("duplicate numeric/text owner aliases must be rejected");
+            assert!(
+                error.to_string().contains("duplicate field"),
+                "unexpected duplicate-owner alias error: {error}"
+            );
+        }
+
+        for invalid_owner in [
+            messagepack_raw_map(vec![
+                (vec![0xff], vec![0]),
+                (vec![0], messagepack_string("worker")),
+                (vec![1], messagepack_string("boot")),
+            ]),
+            messagepack_raw_map(vec![
+                (vec![0xd0, 0], messagepack_string("worker")),
+                (vec![1], messagepack_string("boot")),
+            ]),
+        ] {
+            let lease = messagepack_lease(
+                invalid_owner,
+                messagepack_string("tok"),
+                PROCESS_LEASE_SCHEMA_VERSION as u8,
+                version_first,
+                false,
+            );
+            rmp_serde::from_slice::<ProcessLease>(&lease)
+                .expect_err("signed owner field identifiers must remain invalid");
+        }
+    }
+
+    let future = PROCESS_LEASE_SCHEMA_VERSION + 1;
+    let lease = messagepack_lease(
+        messagepack_indexed_owner(vec![0], vec![1]),
+        messagepack_string("tok"),
+        future as u8,
+        false,
+        false,
+    );
+    assert_version_error(
+        rmp_serde::from_slice::<ProcessLease>(&lease)
+            .expect_err("future version must precede numeric owner replay"),
+        future,
+    );
 }
 
 #[test]

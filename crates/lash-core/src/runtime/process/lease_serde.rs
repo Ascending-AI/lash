@@ -1,7 +1,7 @@
 use std::{borrow::Cow, fmt};
 
 use serde::Deserialize;
-use serde_content::{Data, Value};
+use serde_content::{Data, Number, Value};
 
 use super::model::{ProcessLease, ensure_process_lease_schema_version};
 
@@ -136,7 +136,7 @@ impl<'de> serde::de::Visitor<'de> for ProcessLeaseVisitor {
         Ok(ProcessLease {
             schema_version,
             process_id: decode_process_lease_field(process_id, "process_id", self.human_readable)?,
-            owner: decode_process_lease_field(owner, "owner", self.human_readable)?,
+            owner: decode_process_lease_owner(owner, self.human_readable)?,
             lease_token: decode_process_lease_field(
                 lease_token,
                 "lease_token",
@@ -203,6 +203,52 @@ where
         value => T::deserialize(content_deserializer(value, human_readable)),
     };
     decoded.map_err(serde::de::Error::custom)
+}
+
+fn decode_process_lease_owner<E>(
+    owner: Option<BufferedProcessLeaseField>,
+    human_readable: bool,
+) -> Result<crate::LeaseOwnerIdentity, E>
+where
+    E: serde::de::Error,
+{
+    decode_process_lease_field(
+        owner.map(normalize_lease_owner_identifiers),
+        "owner",
+        human_readable,
+    )
+}
+
+fn normalize_lease_owner_identifiers(value: Value<'static>) -> Value<'static> {
+    let Value::Map(entries) = value else {
+        return value;
+    };
+
+    Value::Map(
+        entries
+            .into_iter()
+            .filter_map(|(key, value)| match unsigned_lease_owner_identifier(&key) {
+                Some(0) => Some((Value::String(Cow::Borrowed("owner_id")), value)),
+                Some(1) => Some((Value::String(Cow::Borrowed("incarnation_id")), value)),
+                // Serde's derived struct visitor treats other unsigned indexes
+                // exactly like unknown named fields and ignores their values.
+                Some(_) => None,
+                // Signed and u128 identifiers remain untouched so replay keeps
+                // rejecting them instead of turning invalid keys into fields.
+                None => Some((key, value)),
+            })
+            .collect(),
+    )
+}
+
+fn unsigned_lease_owner_identifier(value: &Value<'_>) -> Option<u64> {
+    match value {
+        Value::Number(Number::U8(value)) => Some(u64::from(*value)),
+        Value::Number(Number::U16(value)) => Some(u64::from(*value)),
+        Value::Number(Number::U32(value)) => Some(u64::from(*value)),
+        Value::Number(Number::U64(value)) => Some(*value),
+        _ => None,
+    }
 }
 
 fn content_deserializer(
