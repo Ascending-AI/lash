@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 agent_workbench_port_open() {
   local host="$1" port="$2"
