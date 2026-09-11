@@ -636,10 +636,6 @@ impl RenderErrorResponse {
                 "unknown_node_reference",
                 json!({ "edgeId": edge_id, "endpoint": endpoint, "nodeId": node_id }),
             ),
-            GraphRenderError::MissingRequiredChild { node_id, child } => (
-                "missing_required_child",
-                json!({ "nodeId": node_id, "child": child }),
-            ),
             GraphRenderError::InvalidNodePayload { node_id, message } => (
                 "invalid_node_payload",
                 json!({ "nodeId": node_id, "reason": message }),
