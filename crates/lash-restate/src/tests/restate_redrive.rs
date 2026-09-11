@@ -617,18 +617,23 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     );
 }
 
+/// FIG-2083: a terminal segment whose durable handover is gone must fail hard.
+/// The removed FIG-811 shim replayed `record.outcome` and re-issued
+/// `complete_terminal` from a missing durable fact. Current deployments retain
+/// handovers until pruning, so this branch only fired on pre-window state or a
+/// genuine bug; a missing handover may not fabricate a terminal completion.
 #[tokio::test]
-pub(super) async fn fig811_post_terminal_redrive_replays_delivery_after_handover_cleanup() {
-    let process_id = "fig811-post-terminal-absorber";
+pub(super) async fn fig2083_terminal_segment_with_missing_handover_fails_hard() {
+    let process_id = "fig2083-missing-terminal-handover";
     let (registry, continuations) = process_stores();
     let registration = rerunnable_registration(process_id);
     registry
         .register_process(registration.clone())
         .await
-        .expect("register FIG-811 segmented process");
+        .expect("register FIG-2083 segmented process");
     let (execution_authority, started) = invocation_started(
         &ProcessId::from(process_id),
-        "fig811-post-terminal-execution",
+        "fig2083-missing-terminal-execution",
         1,
     );
     registry
@@ -652,7 +657,7 @@ pub(super) async fn fig811_post_terminal_redrive_replays_delivery_after_handover
             },
         )
         .await
-        .expect("persist FIG-811 ordinal-one handover");
+        .expect("persist FIG-2083 ordinal-one handover");
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -667,7 +672,7 @@ pub(super) async fn fig811_post_terminal_redrive_replays_delivery_after_handover
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
-        execution_id: Some("fig811-post-terminal-execution".to_string()),
+        execution_id: Some("fig2083-missing-terminal-execution".to_string()),
     };
 
     let suspended = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
@@ -681,29 +686,65 @@ pub(super) async fn fig811_post_terminal_redrive_replays_delivery_after_handover
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ]
     );
-    let stored = registry
-        .get_process(&ProcessId::from(process_id))
-        .await
-        .expect("read terminal process")
-        .expect("terminal process record")
-        .outcome
-        .expect("stored terminal outcome");
+    assert!(
+        registry
+            .get_process(&ProcessId::from(process_id))
+            .await
+            .expect("read terminal process")
+            .expect("terminal process record")
+            .outcome
+            .is_some(),
+        "the attempt commits a durable terminal outcome before its root delivery suspends"
+    );
     continuations
         .delete_segment_handovers(&ProcessId::from(process_id))
         .await
-        .expect("model crash after delivery and handover cleanup");
+        .expect("model a terminal segment whose handover is no longer durable");
 
+    // A fresh attempt on the same terminal input must refuse on the absent
+    // handover instead of replaying the stored terminal outcome.
+    let refused = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+        .await
+        .expect("the missing handover must render inside the invocation");
+    let rendered = restate_output_failure_message(&refused)
+        .expect("a terminal segment without a durable handover must fail hard");
+    assert!(
+        rendered.contains(&format!(
+            "missing persisted handover for process `{process_id}` segment 1"
+        )),
+        "a missing durable handover must not replay a terminal outcome: {rendered}"
+    );
+
+    // Redriving the already-deployed terminal-delivery journal must also refuse
+    // hard, never fabricating a terminal completion from the missing handover.
+    //
+    // Operator note: a pre-lazy-cleanup journal that still carries the delivered
+    // commands is permanently stranded here. The handler now refuses at the
+    // absent handover before consuming them, so Restate surfaces a terminal
+    // JOURNAL_MISMATCH rather than the explicit refusal. That mismatch is
+    // intended, not corruption: the journal is no longer replayable under the
+    // current handover contract, and the process already holds its durable
+    // terminal, so the invocation must not be retried or re-completed.
     let replay = encode_process_terminal_delivery_replay(process_id, &input, &suspended)
         .expect("splice the deployed terminal delivery");
-    let output = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
+    let redriven = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
         .await
-        .expect("post-terminal redrive must absorb after reconstructing delivery");
-    assert_eq!(
-        restate_output_json::<RestateProcessWorkflowOutput>(&output),
-        Some(RestateProcessWorkflowOutput::Terminal {
-            output: Box::new(stored),
-        })
+        .expect("the redrive must render its refusal inside the invocation");
+    assert!(
+        restate_output_json::<RestateProcessWorkflowOutput>(&redriven).is_none(),
+        "redriving a terminal segment without its handover must not fabricate a terminal outcome"
     );
+    let redriven_error = restate_error_message(&redriven)
+        .expect("redriving a terminal segment without its handover must fail hard");
+    assert!(
+        redriven_error.contains(&format!(
+            "missing persisted handover for process `{process_id}` segment 1"
+        )) || restate_error_code(&redriven) == Some(570),
+        "the redrive must refuse on the missing handover or a JOURNAL_MISMATCH, \
+         never a fabricated outcome: {redriven_error}"
+    );
+    // Error code 570 is verified only against the in-crate Restate endpoint
+    // harness; it is inferred, not observed, on a live Restate runtime.
 }
 
 #[tokio::test]
