@@ -103,6 +103,12 @@ impl ProcessDefinitionIdentity {
         &self,
         artifact: &ModuleArtifact,
     ) -> Result<crate::TypeExpr, ProcessDefinitionIdentityError> {
+        artifact
+            .verify()
+            .map_err(|source| ProcessDefinitionIdentityError::InvalidArtifact {
+                process: self.process_name.clone(),
+                message: source.to_string(),
+            })?;
         if !self.matches_artifact_export(artifact) {
             return Err(ProcessDefinitionIdentityError::ArtifactMismatch {
                 process: self.process_name.clone(),
@@ -132,6 +138,8 @@ pub enum ProcessDefinitionIdentityError {
     ArtifactMismatch { process: String },
     #[error("artifact process `{process}` has no complete signature")]
     MissingSignature { process: String },
+    #[error("artifact for process `{process}` failed identity verification: {message}")]
+    InvalidArtifact { process: String, message: String },
 }
 
 fn decode_field<T: serde::de::DeserializeOwned>(

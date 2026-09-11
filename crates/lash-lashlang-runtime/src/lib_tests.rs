@@ -597,21 +597,21 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         LashlangAbilities::default().with_processes(),
     );
     let matching = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process handler(event: str) -> bool { finish true }",
+        source: "process handler(event: str, other: str) -> bool { finish true }",
         environment: &environment,
         artifact_store: Some(store.as_ref()),
     })
     .await
     .expect("matching handler compiles");
     let mismatching = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process handler(payload: str) -> bool { finish true }",
+        source: "process handler(payload: str, other: str) -> bool { finish true }",
         environment: &environment,
         artifact_store: Some(store.as_ref()),
     })
     .await
     .expect("mismatching handler compiles");
     let wrong_type = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process handler(event: int) -> bool { finish true }",
+        source: "process handler(event: int, other: str) -> bool { finish true }",
         environment: &environment,
         artifact_store: Some(store.as_ref()),
     })
@@ -625,7 +625,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     .await
     .expect("wrong-order handler compiles");
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "type Handler = Process<(event: str), bool>\ntype Envelope = { handler: Handler }\nprocess install(envelope: Envelope) -> bool { finish true }",
+        source: "type Handler = Process<(event: str, other: str), bool>\ntype Envelope = { handler: Handler }\nprocess install(envelope: Envelope) -> bool { finish true }",
         environment: &environment,
         artifact_store: Some(store.as_ref()),
     })
@@ -698,7 +698,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             .unwrap(),
         ),
         (
-            "different parameter order and arity",
+            "different parameter order at the same arity",
             lashlang::ProcessDefinitionIdentity::from_artifact_export(
                 &wrong_order.artifact,
                 "handler",
@@ -729,14 +729,100 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         lashlang::ProcessRef::new(lashlang::ContentHash::new("wrong-process"), 0),
         valid.process_name,
     );
-    let error =
-        prepare_lashlang_process_start(artifact_store, "parent:root", start_with(wrong_ref))
-            .await
-            .expect_err("identity with a different process ref must fail");
+    let error = prepare_lashlang_process_start(
+        Arc::clone(&artifact_store),
+        "parent:root",
+        start_with(wrong_ref),
+    )
+    .await
+    .expect_err("identity with a different process ref must fail");
     assert!(matches!(
         error,
         LashlangRuntimeError::InvalidProcessArgument { ref path, .. }
             if path == "envelope.handler"
+    ));
+
+    let mismatching_identity =
+        lashlang::ProcessDefinitionIdentity::from_artifact_export(&mismatching.artifact, "handler")
+            .unwrap();
+    let mut forged = mismatching.artifact.clone();
+    let process = forged
+        .canonical_ir
+        .declarations
+        .iter_mut()
+        .find_map(|declaration| match declaration {
+            lashlang::Declaration::Process(process) if process.name == "handler" => Some(process),
+            _ => None,
+        })
+        .expect("handler declaration exists");
+    process.params[0].name = "event".into();
+    assert!(forged.verify().is_err(), "forged artifact must not verify");
+    store
+        .put_module_artifact(&forged)
+        .await
+        .expect("test store accepts public artifact values");
+    let error = prepare_lashlang_process_start(
+        Arc::clone(&artifact_store),
+        "parent:root",
+        start_with(mismatching_identity),
+    )
+    .await
+    .expect_err("forged signature with unchanged refs must fail before registration");
+    assert!(matches!(
+        error,
+        LashlangRuntimeError::InvalidProcessArgument { ref path, .. }
+            if path == "envelope.handler"
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_start_rejects_a_forged_receiving_artifact() {
+    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let environment = LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::default().with_processes(),
+    );
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process install(value: str) -> bool { finish true }",
+        environment: &environment,
+        artifact_store: Some(store.as_ref()),
+    })
+    .await
+    .expect("receiver compiles");
+    let mut forged = output.artifact.clone();
+    let process = forged
+        .canonical_ir
+        .declarations
+        .iter_mut()
+        .find_map(|declaration| match declaration {
+            lashlang::Declaration::Process(process) if process.name == "install" => Some(process),
+            _ => None,
+        })
+        .expect("install declaration exists");
+    process.params[0].name = "forged".into();
+    assert!(forged.verify().is_err(), "forged artifact must not verify");
+    store
+        .put_module_artifact(&forged)
+        .await
+        .expect("test store accepts public artifact values");
+    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let mut args = lashlang::Record::new();
+    args.insert("value".to_string(), lashlang::Value::String("value".into()));
+    let start = lashlang::ProcessStart {
+        module_ref: output.module_ref.clone(),
+        process_ref: output.artifact.process_ref("install").unwrap().clone(),
+        host_requirements_ref: output.host_requirements_ref.clone(),
+        start_site: test_start_site("child_process:install", 1),
+        process_name: "install".to_string(),
+        args,
+    };
+
+    let error = prepare_lashlang_process_start(artifact_store, "parent:root", start)
+        .await
+        .expect_err("forged receiving artifact must fail before registration");
+    assert!(matches!(
+        error,
+        LashlangRuntimeError::InvalidArtifact { .. }
     ));
 }
 

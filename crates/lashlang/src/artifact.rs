@@ -149,6 +149,10 @@ pub struct ModuleArtifact {
 }
 
 impl ModuleArtifact {
+    /// Builds a raw Lashlang artifact from already-complete program IR.
+    ///
+    /// Source programs whose process output is inferred must go through the
+    /// linker; this builder refuses an incomplete exported signature.
     pub fn from_program(program: Program) -> Result<Self, ModuleArtifactError> {
         let canonical_ir = canonical_program_ir(program);
         let requirements = host_requirements_for_program(&canonical_ir);
@@ -174,6 +178,16 @@ impl ModuleArtifact {
         compilation_dialect: crate::CompilationDialect,
     ) -> Result<Self, ModuleArtifactError> {
         crate::ast::validate_ast(&canonical_ir)?;
+        if let Some(process) = canonical_ir.declarations.iter().find_map(|declaration| {
+            let Declaration::Process(process) = declaration else {
+                return None;
+            };
+            process.return_ty.is_none().then_some(process)
+        }) {
+            return Err(ModuleArtifactError::IncompleteProcessSignature {
+                process: process.name.to_string(),
+            });
+        }
         let host_requirements_ref = host_requirements_ref(&requirements);
         let exports = module_exports(&canonical_ir);
         let module_ref = module_ref(
@@ -327,7 +341,7 @@ impl ModuleArtifact {
             Some("lashlang" | "typescript")
         );
         reject_future_shape(&raw)?;
-        let artifact: Self = serde_json::from_value(raw).map_err(|err| {
+        let artifact: Self = serde_json::from_slice(bytes).map_err(|err| {
             let message = err.to_string();
             if known_dialect && message.contains("unknown variant") {
                 ModuleArtifactError::FutureShape {
@@ -458,6 +472,10 @@ pub enum ModuleArtifactError {
         "module artifact uses the obsolete anonymous process type shape; recompile and republish the module"
     )]
     ObsoleteProcessTypeShape,
+    #[error(
+        "process `{process}` has no output type; link source to infer it before building an artifact"
+    )]
+    IncompleteProcessSignature { process: String },
     #[error("failed to encode module artifact: {0}")]
     Codec(String),
     #[error(
@@ -492,6 +510,9 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
                 "module artifact uses the obsolete anonymous process type shape; recompile and republish the module"
                     .to_string(),
             ),
+            ModuleArtifactError::IncompleteProcessSignature { .. } => {
+                Self::Decode(value.to_string())
+            }
             ModuleArtifactError::Codec(message) => Self::Decode(message),
             ModuleArtifactError::FutureShape { .. } => Self::Decode(value.to_string()),
             ModuleArtifactError::HashMismatch { .. } => Self::Decode(value.to_string()),
@@ -1226,6 +1247,58 @@ mod tests {
     }
 
     #[test]
+    fn artifact_decoder_refuses_duplicate_signature_fields_and_parameter_extras() {
+        let bytes = process_typed_artifact("event")
+            .to_store_bytes()
+            .expect("artifact encodes");
+        let source = String::from_utf8(bytes).expect("artifact encoding is JSON");
+        let canonical =
+            r#""Process":{"kind":"known","params":[{"name":"event","ty":"Str"}],"output":"Bool"}"#;
+        assert_eq!(source.matches(canonical).count(), 1);
+        let cases = [
+            (
+                "duplicate kind",
+                r#""Process":{"kind":"unknown","kind":"known","params":[{"name":"event","ty":"Str"}],"output":"Bool"}"#,
+            ),
+            (
+                "duplicate params",
+                r#""Process":{"kind":"known","params":[],"params":[{"name":"event","ty":"Str"}],"output":"Bool"}"#,
+            ),
+            (
+                "duplicate output",
+                r#""Process":{"kind":"known","params":[{"name":"event","ty":"Str"}],"output":"Str","output":"Bool"}"#,
+            ),
+            (
+                "unknown parameter field",
+                r#""Process":{"kind":"known","params":[{"name":"event","ty":"Str","extra":true}],"output":"Bool"}"#,
+            ),
+        ];
+
+        for (description, replacement) in cases {
+            let malformed = source.replacen(canonical, replacement, 1);
+            let error = ModuleArtifact::from_store_bytes(malformed.as_bytes())
+                .expect_err("malformed signature bytes must be refused");
+            assert!(
+                matches!(error, ModuleArtifactError::Codec(_)),
+                "{description}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_artifact_builder_refuses_an_incomplete_process_output() {
+        let program = crate::parse("process plain(message: str) { finish true }")
+            .expect("unannotated process source parses");
+        let error = ModuleArtifact::from_program(program)
+            .expect_err("raw artifact IR must carry a complete process output");
+        assert!(matches!(
+            error,
+            ModuleArtifactError::IncompleteProcessSignature { ref process }
+                if process == "plain"
+        ));
+    }
+
+    #[test]
     fn artifact_with_obsolete_trigger_manifest_field_is_explicitly_rejected() {
         let error = ModuleArtifact::from_store_bytes(
             include_str!("../tests/fixtures/module-artifact-old.json").as_bytes(),
@@ -1243,6 +1316,7 @@ mod tests {
         raw.as_object_mut()
             .expect("artifact is an object")
             .remove("trigger_key_manifest");
+        raw["canonical_ir"]["declarations"][0]["Process"]["return_ty"] = serde_json::json!("Str");
         let error = ModuleArtifact::from_store_bytes(
             &serde_json::to_vec(&raw).expect("legacy artifact should encode"),
         )

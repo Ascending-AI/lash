@@ -548,6 +548,7 @@ mod tests {
         raw.as_object_mut()
             .expect("artifact should be an object")
             .remove("trigger_key_manifest");
+        raw["canonical_ir"]["declarations"][0]["Process"]["return_ty"] = serde_json::json!("Str");
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(

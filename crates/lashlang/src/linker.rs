@@ -43,7 +43,7 @@ use type_helpers::{
     process_input_record_type, process_input_type, process_type_for_decl,
     shaping_builtin_return_type, shaping_comparable_type, shaping_list_item, shaping_number_type,
     shaping_record_type, shaping_text_type, strip_label_annotation, trigger_target_process_label,
-    trigger_target_process_name, union_type,
+    union_type,
 };
 mod facets;
 pub(crate) use facets::analyze_workflow_program;

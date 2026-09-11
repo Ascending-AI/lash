@@ -109,11 +109,16 @@ async fn module_artifact_surface_reads_the_persisted_json() {
         "../../lashlang/tests/fixtures/module-artifact-old.json"
     ))
     .expect("decode frozen artifact JSON");
-    let artifact = lashlang::ModuleArtifact::from_program(
+    let artifact = lashlang::LinkedModule::link(
         serde_json::from_value(frozen["canonical_ir"].clone())
             .expect("decode frozen artifact program"),
+        lashlang::LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::default(),
+            lashlang::LashlangAbilities::all(),
+        ),
     )
-    .expect("rebuild artifact with the current identity generation");
+    .expect("link the frozen source IR with a complete process signature")
+    .artifact;
     storage
         .lashlang_artifact_store()
         .put_module_artifact(&artifact)

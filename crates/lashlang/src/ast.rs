@@ -1132,9 +1132,16 @@ impl Serialize for ProcessType {
 enum ProcessTypeWire {
     Unknown,
     Known {
-        params: Vec<ProcessParam>,
+        params: Vec<ProcessParamWire>,
         output: TypeExpr,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessParamWire {
+    name: AstString,
+    ty: TypeExpr,
 }
 
 impl<'de> Deserialize<'de> for ProcessType {
@@ -1144,9 +1151,18 @@ impl<'de> Deserialize<'de> for ProcessType {
     {
         match ProcessTypeWire::deserialize(deserializer)? {
             ProcessTypeWire::Unknown => Ok(Self::unknown()),
-            ProcessTypeWire::Known { params, output } => ProcessSignature::try_new(params, output)
-                .map(Self::known)
-                .map_err(serde::de::Error::custom),
+            ProcessTypeWire::Known { params, output } => ProcessSignature::try_new(
+                params
+                    .into_iter()
+                    .map(|param| ProcessParam {
+                        name: param.name,
+                        ty: param.ty,
+                    })
+                    .collect(),
+                output,
+            )
+            .map(Self::known)
+            .map_err(serde::de::Error::custom),
         }
     }
 }
@@ -1401,6 +1417,7 @@ mod tests {
             r#"{"Process":{"kind":"known","params":[],"output":null}}"#,
             r#"{"Process":{"kind":"known","params":[],"params":[],"output":"Bool"}}"#,
             r#"{"Process":{"kind":"known","params":[],"output":"Bool","extra":true}}"#,
+            r#"{"Process":{"kind":"known","params":[{"name":"x","ty":"Str","extra":true}],"output":"Bool"}}"#,
             r#"{"Process":{"input":"Str","output":"Bool","input_count":1}}"#,
             r#"{"Process":{"kind":"known","params":[{"name":"x","ty":"Str"},{"name":"x","ty":"Int"}],"output":"Bool"}}"#,
             r#"{"Process":{"kind":"known","params":[{"name":"outer","ty":{"Process":{"kind":"known","params":[{"name":"x","ty":"Str"},{"name":"x","ty":"Int"}],"output":"Bool"}}}],"output":"Bool"}}"#,

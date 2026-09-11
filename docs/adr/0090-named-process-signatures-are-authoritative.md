@@ -49,6 +49,11 @@ a later arm from accepting the value. Existing trigger execution verification
 remains in place, as does the requirement that trigger registration map
 `trigger.event`, including for a zero-parameter target.
 
+Normal source compilation may omit a process result annotation because the
+linker infers and materializes the result before artifact construction. The
+public raw `ModuleArtifact::from_program` builder accepts only already-complete
+IR and refuses a process without an explicit output; it does not invent `any`.
+
 The process type has a new canonical wire and semantic hash encoding. The
 Lashlang semantic hash advances from v6 to v7, the workflow graph schema from 5
 to 6, and its type-facet schema from 1 to 2. The ModuleRef envelope remains v2.

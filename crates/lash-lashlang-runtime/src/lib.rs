@@ -721,6 +721,12 @@ pub async fn prepare_lashlang_process_start(
             module_ref: start.module_ref.to_string(),
             process: start.process_name.clone(),
         })?;
+    artifact
+        .verify()
+        .map_err(|source| LashlangRuntimeError::InvalidArtifact {
+            module_ref: start.module_ref.to_string(),
+            message: source.to_string(),
+        })?;
     if artifact.host_requirements_ref != start.host_requirements_ref {
         return Err(LashlangRuntimeError::ArtifactRequirementsMismatch {
             module_ref: start.module_ref.to_string(),

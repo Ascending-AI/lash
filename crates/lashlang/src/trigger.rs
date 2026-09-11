@@ -640,7 +640,8 @@ fn decode_process_definition_identity(
                     format!("invalid {field}: {message}")
                 }
                 other @ (ProcessDefinitionIdentityError::ArtifactMismatch { .. }
-                | ProcessDefinitionIdentityError::MissingSignature { .. }) => other.to_string(),
+                | ProcessDefinitionIdentityError::MissingSignature { .. }
+                | ProcessDefinitionIdentityError::InvalidArtifact { .. }) => other.to_string(),
             },
         }
     })
@@ -1130,6 +1131,16 @@ mod tests {
 
         let wide_output = process_type(&[("value", TypeExpr::Int)], TypeExpr::Any);
         assert!(is_resolved_type_assignable(&accepting_int, &wide_output));
+        let returning_int = process_type(&[("value", TypeExpr::Int)], TypeExpr::Int);
+        let returning_float = process_type(&[("value", TypeExpr::Int)], TypeExpr::Float);
+        assert!(is_resolved_type_assignable(
+            &returning_int,
+            &returning_float
+        ));
+        assert!(!is_resolved_type_assignable(
+            &returning_float,
+            &returning_int
+        ));
 
         let renamed = process_type(&[("payload", TypeExpr::Float)], TypeExpr::Str);
         assert!(!is_resolved_type_assignable(&accepting_float, &renamed));
