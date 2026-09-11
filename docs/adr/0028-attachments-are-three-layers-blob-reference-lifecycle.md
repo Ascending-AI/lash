@@ -94,8 +94,11 @@ byte-absence fact: adoption refuses it, while a fresh put claims it with its
 write-ahead intent, restores the bytes, and clears it only through a
 token-matched completion. The token is durably associated with the session whose
 uncommitted manifest intent belongs to that restoring attempt. A failed put
-releases only its own token and intent and preserves the exact prior `Condemned`
-or `Reclaimed` phase. A failed or abandoned delete still releases to `Free`.
+releases only its own token and uncommitted intent. It always preserves
+`Reclaimed`, because that phase is durable byte-absence evidence. It preserves
+`Condemned` unless the same intent became a committed root while the token was
+held; that newer root supersedes the old unarmed condemnation before the older
+sweep can arm it. A failed or abandoned delete still releases to `Free`.
 Whoever loses a CAS
 yields: a writer parks and retries, and a sweep that meets a peer's condemnation
 defers the digest to the next sweep. Nothing waits on a
@@ -112,9 +115,12 @@ policy under ADR 0014, exposed as
 only tokenless `Condemned` or `Deleting` state, so an older sweep cannot revoke a
 restoring writer that won the digest meanwhile. The separate
 `recover_abandoned_attachment_write` lever clears a writer token and its
-associated uncommitted intent while preserving the exact phase, but only after
-the host establishes that the writer is no longer running. A fresh re-put then
-claims the phase normally. lash expires neither state on a timer.
+associated uncommitted intent, but only after the host establishes that the
+writer is no longer running. It applies the same newer-root rule as failed-put
+settlement: preserve `Reclaimed`; preserve `Condemned` when the associated intent
+is still uncommitted, otherwise retire that old condemnation to `Free`. A fresh
+re-put then claims any retained phase normally. lash expires neither state on a
+timer.
 
 The freshness re-check survives as what it always was, a cheap pre-filter. It
 now runs only after the sweep arms the digest as `Deleting`; writers arriving in

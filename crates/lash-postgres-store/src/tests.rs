@@ -1105,12 +1105,19 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             // armed, and the sweeper issues no delete at all.
             (
                 lash_core::AttachmentDeleteArming::Revoked,
-                lash_core::AttachmentWriteFence::Granted(_),
+                lash_core::AttachmentWriteFence::Granted(permit),
             ) => {
                 assert!(
                     contains_ref,
                     "round {round}: a granted writer records its intent"
                 );
+                let completed_intent = intent();
+                lash_core::AttachmentManifest::complete_attachment_write(
+                    &*store,
+                    &completed_intent,
+                    permit,
+                )
+                .expect("complete the winning writer");
             }
             (armed, fence) => panic!(
                 "round {round}: arming and the writer must never both win \

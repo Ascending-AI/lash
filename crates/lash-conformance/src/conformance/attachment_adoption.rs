@@ -128,6 +128,79 @@ impl AttachmentStore for CoordinatedFailingPutStore {
     }
 }
 
+struct PausedCondemnationRoot {
+    inner: Arc<dyn SessionStoreFactory>,
+    condemned: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+}
+
+impl PausedCondemnationRoot {
+    fn new(inner: Arc<dyn SessionStoreFactory>) -> Self {
+        Self {
+            inner,
+            condemned: tokio::sync::Notify::new(),
+            resume: tokio::sync::Notify::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AttachmentRootSet for PausedCondemnationRoot {
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
+        self.inner
+            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
+            .await
+    }
+
+    fn fence(&self) -> AttachmentGcFence {
+        self.inner.fence()
+    }
+
+    async fn condemn_attachment(
+        &self,
+        id: &AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<AttachmentCondemnation, StoreError> {
+        let outcome = self
+            .inner
+            .condemn_attachment(id, intent_grace_cutoff_epoch_ms)
+            .await?;
+        if outcome == AttachmentCondemnation::Condemned {
+            self.condemned.notify_one();
+            self.resume.notified().await;
+        }
+        Ok(outcome)
+    }
+
+    async fn arm_attachment_delete(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<AttachmentDeleteArming, StoreError> {
+        self.inner.arm_attachment_delete(id).await
+    }
+
+    async fn release_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
+        self.inner.release_attachment_condemnation(id).await
+    }
+
+    async fn reclaim_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
+        self.inner.reclaim_attachment_condemnation(id).await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .has_live_attachment_ref(id, intent_grace_cutoff_epoch_ms)
+            .await
+    }
+}
+
 fn state(id: &str) -> RuntimeSessionState {
     let req = session_store_request(&SessionId::from(id), "probe", SessionRelation::Root);
     let mut state = RuntimeSessionState {
@@ -403,7 +476,7 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
     stale_sweep_release_cannot_revoke_restoring_writer(f.clone()).await;
     abandoned_writer_recovery_preserves_phase_and_unstrands_reput(f.clone()).await;
     stale_writer_abort_cannot_clobber_newer_reclamation(f.clone()).await;
-    committed_restoring_abort_preserves_root(f.clone()).await;
+    committed_restoring_settlement_preserves_root(f.clone()).await;
     sweep_adoption_race(f.clone()).await;
     sweep_reput_race(f).await;
 }
@@ -893,55 +966,133 @@ async fn stale_writer_abort_cannot_clobber_newer_reclamation(f: Arc<dyn SessionS
     ));
 }
 
-/// A matching restoring permit can outlive the turn commit that stamps its
-/// owner-bound intent. A later abort may restore the condemnation phase, but it
-/// must not delete the manifest row after that row became a committed root.
-async fn committed_restoring_abort_preserves_root(factory: Arc<dyn SessionStoreFactory>) {
-    let session_id = SessionId::from(format!(
-        "attachment-committed-restoring-abort-{}",
-        uuid::Uuid::new_v4()
-    ));
-    let turn_id = TurnId::from("attachment-committed-restoring-abort-turn");
-    let request = session_store_request(&session_id, "probe", SessionRelation::Root);
-    let store = factory.create_store(&request).await.unwrap();
-    let attachment_id = lash_core::attachments::content_id(b"committed restoring abort");
-    assert_eq!(
-        factory.condemn_attachment(&attachment_id, 0).await.unwrap(),
-        AttachmentCondemnation::Condemned
-    );
-    let intent = AttachmentIntent {
-        attachment_id: attachment_id.clone(),
-        session_id: session_id.clone(),
-        canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
-        intent_at_epoch_ms: 0,
-        owner_kind: Some(AttachmentOwnerKind::Turn),
-        owner_id: Some(turn_id.to_string()),
-    };
-    let permit = match store
-        .begin_attachment_write(intent.clone())
-        .expect("claim condemned digest for a turn-owned restoring write")
-    {
-        AttachmentWriteFence::Granted(permit) => permit,
-        AttachmentWriteFence::ReclamationInFlight => {
-            panic!("the first restoring writer must acquire the digest")
-        }
-    };
+#[derive(Clone, Copy, Debug)]
+enum CommittedRestoringSettlement {
+    Abort,
+    Recover,
+}
 
+/// A restoring token can outlive the turn commit that stamps its associated
+/// intent. Abort and explicit recovery must retain that root and retire an old
+/// unarmed `Condemned` phase before its sweeper can arm. `Reclaimed` remains
+/// intact because a graph root cannot overrule durable byte-absence evidence.
+async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionStoreFactory>) {
+    for settlement in [
+        CommittedRestoringSettlement::Abort,
+        CommittedRestoringSettlement::Recover,
+    ] {
+        for reclaimed in [false, true] {
+            let namespace = uuid::Uuid::new_v4();
+            let session_id = SessionId::from(format!(
+                "attachment-committed-restoring-{settlement:?}-{reclaimed}-{namespace}"
+            ));
+            let turn_id = TurnId::from(format!("attachment-restoring-turn-{namespace}"));
+            let request = session_store_request(&session_id, "probe", SessionRelation::Root);
+            let store = factory.create_store(&request).await.unwrap();
+            let attachment_id = lash_core::attachments::content_id(
+                format!("committed restoring {settlement:?} {reclaimed} {namespace}").as_bytes(),
+            );
+            assert_eq!(
+                factory.condemn_attachment(&attachment_id, 0).await.unwrap(),
+                AttachmentCondemnation::Condemned
+            );
+            if reclaimed {
+                assert_eq!(
+                    factory.arm_attachment_delete(&attachment_id).await.unwrap(),
+                    AttachmentDeleteArming::Armed
+                );
+                factory
+                    .reclaim_attachment_condemnation(&attachment_id)
+                    .await
+                    .unwrap();
+            }
+            let intent = AttachmentIntent {
+                attachment_id: attachment_id.clone(),
+                session_id: session_id.clone(),
+                canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
+                intent_at_epoch_ms: 0,
+                owner_kind: Some(AttachmentOwnerKind::Turn),
+                owner_id: Some(turn_id.to_string()),
+            };
+            let permit = match store
+                .begin_attachment_write(intent.clone())
+                .expect("claim the prior phase for a turn-owned restoring write")
+            {
+                AttachmentWriteFence::Granted(permit) => permit,
+                AttachmentWriteFence::ReclamationInFlight => {
+                    panic!("the first restoring writer must acquire the digest")
+                }
+            };
+            commit_turn_owned_intent(&store, &request, &turn_id, &attachment_id).await;
+
+            match settlement {
+                CommittedRestoringSettlement::Abort => store
+                    .abort_attachment_write(&intent, permit)
+                    .expect("settle the late matching abort"),
+                CommittedRestoringSettlement::Recover => {
+                    factory
+                        .recover_abandoned_attachment_write(&attachment_id)
+                        .await
+                        .expect("recover the quiescent committed restoring writer");
+                    store
+                        .abort_attachment_write(&intent, permit)
+                        .expect("the recovered permit is stale");
+                }
+            }
+            assert!(
+                factory
+                    .live_attachment_refs(u64::MAX)
+                    .await
+                    .unwrap()
+                    .contains(&attachment_id),
+                "{settlement:?} must retain the associated committed root"
+            );
+            if reclaimed {
+                let error = store
+                    .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+                    .expect_err("settlement must preserve Reclaimed byte-absence evidence");
+                assert!(matches!(
+                    error,
+                    StoreError::AttachmentBytesReclaimed { ref digest }
+                        if digest == &attachment_id
+                ));
+            } else {
+                assert_eq!(
+                    factory.arm_attachment_delete(&attachment_id).await.unwrap(),
+                    AttachmentDeleteArming::Revoked,
+                    "{settlement:?} must retire Condemned when its intent became committed"
+                );
+            }
+        }
+    }
+
+    committed_restoring_abort_survives_the_older_sweep(factory).await;
+}
+
+async fn commit_turn_owned_intent(
+    store: &Arc<dyn RuntimePersistence>,
+    request: &SessionStoreCreateRequest,
+    turn_id: &TurnId,
+    attachment_id: &AttachmentId,
+) {
     let mut state = RuntimeSessionState {
-        session_id: session_id.clone(),
-        ..RuntimeSessionState::new(request.policy)
+        session_id: request.session_id.clone(),
+        ..RuntimeSessionState::new(request.policy.clone())
     };
     state.ensure_agent_frame_initialized();
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.turn_commit = lash_core::store::RuntimeTurnCommitStamp::new(OperationId::turn(
-        &session_id,
-        &turn_id,
+        &request.session_id,
+        turn_id,
         "final",
     ));
     let lease = store
         .try_claim_session_execution_lease(
-            &session_id,
-            &LeaseOwnerIdentity::opaque("attachment-conformance", "committed-restoring-abort"),
+            &request.session_id,
+            &LeaseOwnerIdentity::opaque(
+                "attachment-conformance",
+                format!("committed-restoring-{attachment_id}"),
+            ),
             "attachment conformance",
             60_000,
         )
@@ -958,19 +1109,88 @@ async fn committed_restoring_abort_preserves_root(factory: Arc<dyn SessionStoreF
             .list_uncommitted(u64::MAX)
             .unwrap()
             .iter()
-            .all(|entry| entry.attachment_id != attachment_id),
+            .all(|entry| entry.attachment_id != *attachment_id),
         "the turn commit must stamp the restoring intent"
     );
+}
+
+async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn SessionStoreFactory>) {
+    let namespace = uuid::Uuid::new_v4();
+    let session_id = SessionId::from(format!("attachment-committed-sweep-{namespace}"));
+    let turn_id = TurnId::from(format!("attachment-committed-sweep-turn-{namespace}"));
+    let request = session_store_request(&session_id, "probe", SessionRelation::Root);
+    let store = factory.create_store(&request).await.unwrap();
+    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let reference = backend
+        .put(
+            format!("committed restoring sweep {namespace}").into_bytes(),
+            image_meta(),
+        )
+        .await
+        .unwrap();
+    let attachment_id = reference.id;
+    let paused_root = Arc::new(PausedCondemnationRoot::new(factory.clone()));
+    let sweep_root = paused_root.clone();
+    let sweep_backend = backend.clone();
+    let sweep = tokio::spawn(async move {
+        reclaim_unreferenced_attachments(
+            &*sweep_root,
+            &*sweep_backend,
+            AttachmentReclamationPolicy {
+                grace_period_ms: 0,
+                empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
+            },
+        )
+        .await
+    });
+    paused_root.condemned.notified().await;
+
+    let intent = AttachmentIntent {
+        attachment_id: attachment_id.clone(),
+        session_id: session_id.clone(),
+        canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
+        intent_at_epoch_ms: 0,
+        owner_kind: Some(AttachmentOwnerKind::Turn),
+        owner_id: Some(turn_id.to_string()),
+    };
+    let permit = match store
+        .begin_attachment_write(intent.clone())
+        .expect("claim the older sweep's condemnation")
+    {
+        AttachmentWriteFence::Granted(permit) => permit,
+        AttachmentWriteFence::ReclamationInFlight => panic!("restoring writer must win"),
+    };
+    commit_turn_owned_intent(&store, &request, &turn_id, &attachment_id).await;
     store
         .abort_attachment_write(&intent, permit)
-        .expect("settle the late matching abort");
+        .expect("abort after the intent became committed");
+    paused_root.resume.notify_one();
+
+    let report = sweep.await.expect("join the older sweep").expect("sweep");
+    assert_eq!(
+        report.reclaimed_count, 0,
+        "the rooted blob must not be deleted"
+    );
+    assert!(
+        report.deleted_while_referenced.is_empty(),
+        "the fence must prevent rather than merely detect root loss"
+    );
+    assert!(
+        report.condemn_deferred_ids.contains(&attachment_id),
+        "the older sweep must defer the digest whose condemnation was superseded"
+    );
     assert!(
         factory
             .live_attachment_refs(u64::MAX)
             .await
             .unwrap()
             .contains(&attachment_id),
-        "a late abort must retain an intent that the turn already committed"
+        "the turn-owned root remains live"
+    );
+    assert_eq!(
+        backend.get(&attachment_id).await.unwrap().bytes,
+        format!("committed restoring sweep {namespace}").into_bytes(),
+        "the older sweep must leave the rooted bytes readable"
     );
 }
 

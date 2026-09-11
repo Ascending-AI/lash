@@ -280,7 +280,8 @@ pub trait AttachmentRootSet: Send + Sync {
     ///    `Condemned` or `Deleting` sweep transition back to `Free`.
     /// 7. [`Self::recover_abandoned_attachment_write`] — a host-authorized,
     ///    quiescent recovery that clears one restoring writer's token and intent
-    ///    while preserving its `Condemned`/`Reclaimed` phase.
+    ///    while preserving `Reclaimed`, or `Condemned` unless the associated
+    ///    intent became a committed root while the token was held.
     /// 8. This method, answering [`AttachmentGcFence::Fenced`].
     ///
     /// A partial implementation is worse than none: it silences the sweep's
@@ -369,10 +370,14 @@ pub trait AttachmentRootSet: Send + Sync {
     /// clear a live writer's token. Before calling it, the host MUST establish
     /// that no restoring writer for this digest is running. The operation clears
     /// the token and precisely associated uncommitted manifest intent in one
-    /// mutation while preserving the exact `Condemned` or `Reclaimed` phase. A
-    /// fresh [`AttachmentManifest::begin_attachment_write`] can then claim that
-    /// phase and re-put the bytes; stale completion or abort from the recovered
-    /// attempt is a no-op. There is no TTL and no elapsed-time authority.
+    /// mutation. It preserves `Reclaimed`, because that is durable byte-absence
+    /// evidence. It preserves `Condemned` unless the associated intent became a
+    /// committed root while the token was held; that newer root supersedes the
+    /// old unarmed condemnation, which returns to `Free` before an older sweep
+    /// can arm it. A fresh [`AttachmentManifest::begin_attachment_write`] can
+    /// claim a retained phase and re-put the bytes; stale completion or abort
+    /// from the recovered attempt is a no-op. There is no TTL and no elapsed-time
+    /// authority.
     ///
     /// Fenced authorities must override this method in the same durable store as
     /// the writer half. The default fails loudly so a host never mistakes an
@@ -582,7 +587,9 @@ pub struct AttachmentReclamationPolicy {
 ///    abandoned or failed delete releases back to `Free`. A writer that arrives
 ///    while the delete is in flight records nothing and retries; after success
 ///    it claims `Reclaimed`, re-puts the content, and clears only its matching
-///    token after the bytes exist. A failed put preserves the prior phase.
+///    token after the bytes exist. A failed put preserves `Reclaimed`; it
+///    preserves `Condemned` unless its intent became a committed root while
+///    the token was held, in which case that root returns it to `Free`.
 ///    That is why no SQL/blob-store atomicity is needed: the authority's state
 ///    machine, not the backend, decides whether bytes may die.
 /// 4. **Skip on contention.** A digest another sweeper has already condemned is

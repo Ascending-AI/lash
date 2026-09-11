@@ -197,7 +197,7 @@ pub enum AttachmentWriteFence {
 ///                                                                v
 ///                                                          ┌───────────┐
 ///                 └──── put succeeds: token-matched clear ─┤ Reclaimed │
-///                        put fails: preserve phase          └───────────┘
+///                        put fails: preserve absence fact   └───────────┘
 /// ```
 ///
 /// * `Free` — the ordinary state. A writer records its intent and the digest is
@@ -206,7 +206,9 @@ pub enum AttachmentWriteFence {
 ///   physical delete yet. A writer arriving here claims the phase with a unique
 ///   token and records its intent in one mutation, so the sweeper's later arm
 ///   CAS fails. Success clears the token-matched phase after bytes exist;
-///   failure releases the token while preserving `Condemned`.
+///   failure releases the token while preserving `Condemned`, unless the same
+///   intent became committed while the token was held; that root returns the
+///   digest to `Free` before the old sweep can arm.
 /// * `Deleting` — the physical delete is in flight. A writer arriving here
 ///   cannot un-issue it, so it records nothing and retries.
 /// * `Reclaimed` — the physical delete succeeded and the bytes are known absent.
@@ -331,11 +333,14 @@ pub trait AttachmentManifest: Send + Sync {
     /// Abort a granted attachment write after the backend put fails.
     ///
     /// A restoring permit conditionally removes only this attempt's uncommitted
-    /// intent and releases its write token while preserving the exact prior
-    /// `Condemned` or `Reclaimed` phase. A stale token is a no-op: it must not
-    /// clobber a newer successful writer or sweep. An ordinary permit is a
-    /// no-op. Implementations that return restoring permits from
-    /// [`Self::begin_attachment_write`] must override this method atomically.
+    /// intent and releases its write token. `Reclaimed` is always preserved as
+    /// durable byte-absence evidence. `Condemned` is preserved unless the same
+    /// intent became a committed root while the token was held; that newer root
+    /// supersedes the old unarmed condemnation before an older sweep can arm it.
+    /// A stale token is a no-op: it must not clobber a newer successful writer or
+    /// sweep. An ordinary permit is a no-op. Implementations that return
+    /// restoring permits from [`Self::begin_attachment_write`] must override this
+    /// method atomically.
     fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,

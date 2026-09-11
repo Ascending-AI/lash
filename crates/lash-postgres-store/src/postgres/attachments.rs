@@ -152,8 +152,9 @@ pub(crate) async fn release_attachment_condemnation(
     tx.commit().await.map_err(store_sqlx_error)
 }
 
-/// Clear an abandoned restoring writer under explicit host quiescence,
-/// preserving its phase and removing only its associated uncommitted intent.
+/// Clear an abandoned restoring writer under explicit host quiescence.
+/// Preserve `Reclaimed`; retire `Condemned` only when its associated intent
+/// became committed, otherwise preserve it after removing that intent.
 pub(crate) async fn recover_abandoned_attachment_write(
     pool: &PgPool,
     attachment_id: &str,
@@ -182,16 +183,35 @@ pub(crate) async fn recover_abandoned_attachment_write(
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        sqlx::query(
-            "UPDATE lash_attachment_condemnations
-             SET write_token = NULL, write_session_id = NULL
-             WHERE attachment_id = $1 AND write_token = $2",
+        let condemned_superseded = sqlx::query(
+            "DELETE FROM lash_attachment_condemnations
+             WHERE attachment_id = $1 AND write_token = $2
+               AND phase = 'condemned'
+               AND EXISTS (
+                   SELECT 1 FROM lash_attachment_manifest
+                    WHERE attachment_id = $1 AND session_id = $3
+                      AND committed_at_ms IS NOT NULL
+               )",
         )
         .bind(attachment_id)
-        .bind(token)
+        .bind(&token)
+        .bind(&session_id)
         .execute(&mut *tx)
         .await
-        .map_err(store_sqlx_error)?;
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+        if condemned_superseded == 0 {
+            sqlx::query(
+                "UPDATE lash_attachment_condemnations
+                 SET write_token = NULL, write_session_id = NULL
+                 WHERE attachment_id = $1 AND write_token = $2",
+            )
+            .bind(attachment_id)
+            .bind(token)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        }
     }
     tx.commit().await.map_err(store_sqlx_error)
 }
@@ -434,16 +454,35 @@ impl AttachmentManifest for PostgresSessionStore {
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
-                sqlx::query(
-                    "UPDATE lash_attachment_condemnations
-                     SET write_token = NULL, write_session_id = NULL
-                     WHERE attachment_id = $1 AND write_token = $2",
+                let condemned_superseded = sqlx::query(
+                    "DELETE FROM lash_attachment_condemnations
+                     WHERE attachment_id = $1 AND write_token = $2
+                       AND phase = 'condemned'
+                       AND EXISTS (
+                           SELECT 1 FROM lash_attachment_manifest
+                            WHERE attachment_id = $1 AND session_id = $3
+                              AND committed_at_ms IS NOT NULL
+                       )",
                 )
                 .bind(&attachment_id)
                 .bind(&token)
+                .bind(session_id.as_str())
                 .execute(&mut *tx)
                 .await
-                .map_err(store_sqlx_error)?;
+                .map_err(store_sqlx_error)?
+                .rows_affected();
+                if condemned_superseded == 0 {
+                    sqlx::query(
+                        "UPDATE lash_attachment_condemnations
+                         SET write_token = NULL, write_session_id = NULL
+                         WHERE attachment_id = $1 AND write_token = $2",
+                    )
+                    .bind(&attachment_id)
+                    .bind(&token)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+                }
             }
             tx.commit().await.map_err(store_sqlx_error)
         })

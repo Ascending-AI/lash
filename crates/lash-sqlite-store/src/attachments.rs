@@ -578,8 +578,9 @@ impl Store {
         Ok(())
     }
 
-    /// Clear an abandoned restoring writer under explicit host quiescence,
-    /// preserving its phase and removing only its associated uncommitted intent.
+    /// Clear an abandoned restoring writer under explicit host quiescence.
+    /// Preserve `Reclaimed`; retire `Condemned` only when its associated intent
+    /// became committed, otherwise preserve it after removing that intent.
     pub(crate) async fn recover_abandoned_attachment_write(
         &self,
         attachment_id: &AttachmentId,
@@ -610,13 +611,28 @@ impl Store {
                         params![attachment_id, session_id],
                     )
                     .map_err(sqlite_error)?;
-                    tx.execute(
-                        "UPDATE attachment_condemnations
+                    let condemned_superseded = tx
+                        .execute(
+                            "DELETE FROM attachment_condemnations
+                             WHERE attachment_id = ?1 AND write_token = ?2
+                               AND phase = 'condemned'
+                               AND EXISTS (
+                                   SELECT 1 FROM attachment_manifest
+                                    WHERE attachment_id = ?1 AND session_id = ?3
+                                      AND committed_at_ms IS NOT NULL
+                               )",
+                            params![attachment_id, token, session_id],
+                        )
+                        .map_err(sqlite_error)?;
+                    if condemned_superseded == 0 {
+                        tx.execute(
+                            "UPDATE attachment_condemnations
                          SET write_token = NULL, write_session_id = NULL
                          WHERE attachment_id = ?1 AND write_token = ?2",
-                        params![attachment_id, token],
-                    )
-                    .map_err(sqlite_error)?;
+                            params![attachment_id, token],
+                        )
+                        .map_err(sqlite_error)?;
+                    }
                     Ok(())
                 })();
                 Ok(match outcome {
@@ -901,13 +917,28 @@ impl AttachmentManifest for Store {
                                 params![attachment_id, session_id.as_str()],
                             )
                             .map_err(sqlite_error)?;
-                            tx.execute(
-                                "UPDATE attachment_condemnations
+                            let condemned_superseded = tx
+                                .execute(
+                                    "DELETE FROM attachment_condemnations
+                                     WHERE attachment_id = ?1 AND write_token = ?2
+                                       AND phase = 'condemned'
+                                       AND EXISTS (
+                                           SELECT 1 FROM attachment_manifest
+                                            WHERE attachment_id = ?1 AND session_id = ?3
+                                              AND committed_at_ms IS NOT NULL
+                                       )",
+                                    params![attachment_id, token, session_id.as_str()],
+                                )
+                                .map_err(sqlite_error)?;
+                            if condemned_superseded == 0 {
+                                tx.execute(
+                                    "UPDATE attachment_condemnations
                                  SET write_token = NULL, write_session_id = NULL
                                  WHERE attachment_id = ?1 AND write_token = ?2",
-                                params![attachment_id, token],
-                            )
-                            .map_err(sqlite_error)?;
+                                    params![attachment_id, token],
+                                )
+                                .map_err(sqlite_error)?;
+                            }
                         }
                         Ok(())
                     })();

@@ -873,13 +873,24 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         };
         let key = (session_id, id.clone());
         let mut manifest = self.attachment_manifest.lock_recover();
-        if manifest
-            .get(&key)
-            .is_some_and(|entry| entry.committed_at_epoch_ms.is_none())
+        let committed = match manifest.get(&key) {
+            Some(entry) if entry.committed_at_epoch_ms.is_none() => {
+                manifest.remove(&key);
+                false
+            }
+            Some(_) => true,
+            None => false,
+        };
+        if committed
+            && matches!(
+                &recovered,
+                super::AttachmentCondemnationPhase::Condemned { .. }
+            )
         {
-            manifest.remove(&key);
+            condemnations.remove(id);
+        } else {
+            condemnations.insert(id.clone(), recovered);
         }
-        condemnations.insert(id.clone(), recovered);
         Ok(())
     }
 
