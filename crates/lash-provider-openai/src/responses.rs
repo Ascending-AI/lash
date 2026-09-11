@@ -10,16 +10,26 @@ impl OpenAiCompatibleProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
-        let serving_route = self.route_identity(&req.model);
-        self.build_responses_request_body_for_route(req, stream, &serving_route)
+        self.build_responses_request_body_with_cache_evidence(req, stream)
+            .map(|(body, _)| body)
     }
 
-    pub(crate) fn build_responses_request_body_for_route(
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn build_responses_request_body_with_cache_evidence(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+    ) -> Result<(Value, bool), LlmTransportError> {
+        let serving_route = self.route_identity(&req.model);
+        self.build_responses_request_body_for_route_with_cache_evidence(req, stream, &serving_route)
+    }
+
+    pub(crate) fn build_responses_request_body_for_route_with_cache_evidence(
         &self,
         req: &LlmRequest,
         stream: bool,
         serving_route: &ProviderRouteIdentity,
-    ) -> Result<Value, LlmTransportError> {
+    ) -> Result<(Value, bool), LlmTransportError> {
         let safe_request = req.replay_safe_for(serving_route);
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Responses")?;
@@ -98,13 +108,15 @@ impl OpenAiCompatibleProvider {
             }
             body["text"]["format"] = format;
         }
-        if policy.cache_retention != CacheRetention::None && compat.prompt_cache_key {
+        let cache_control_emitted =
+            policy.cache_retention != CacheRetention::None && compat.prompt_cache_key;
+        if cache_control_emitted {
             body["prompt_cache_key"] = json!(req.continuation_key());
         }
         if policy.cache_retention == CacheRetention::Long && compat.prompt_cache_retention {
             body["prompt_cache_retention"] = json!("24h");
         }
-        Ok(body)
+        Ok((body, cache_control_emitted))
     }
 
     pub(crate) fn response_parts_from_value(value: &Value) -> Vec<LlmOutputPart> {

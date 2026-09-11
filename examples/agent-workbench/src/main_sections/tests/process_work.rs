@@ -325,7 +325,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         .await
         .expect("observe process");
     let deletion = process_registry
-        .delete_session_process_state(&SessionId::from(session_id.clone()))
+        .delete_session_process_state(&session_id)
         .await
         .expect("delete session process edges");
     assert_eq!(deletion.removed_observer_count, 1);
@@ -1045,7 +1045,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
-    let deleted_session_id = SessionId::from(state.current_session_id());
+    let deleted_session_id = state.current_session_id();
     let surviving_session_id = SessionId::from(format!("{deleted_session_id}-survivor"));
     let reclaimed = "trigger-delivery-of-deleted-session".to_string();
 

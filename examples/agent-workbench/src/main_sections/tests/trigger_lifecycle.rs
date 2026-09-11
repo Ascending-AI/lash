@@ -58,11 +58,8 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .await
         .expect("open session");
     register_test_trigger(&session).await;
-    let trigger_records = assert_remote_trigger_subscription_records_round_trip(
-        &data_dir,
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    let trigger_records =
+        assert_remote_trigger_subscription_records_round_trip(&data_dir, &session_id).await;
     assert_eq!(trigger_records.len(), 1);
     let trigger_record = &trigger_records[0];
     let tool_names = session
@@ -189,7 +186,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     assert_remote_started_process_surface(
         &core,
         process_registry.as_ref(),
-        &SessionId::from(session_id.clone()),
+        &session_id,
         &first_report
             .started_process_ids()
             .into_iter()
@@ -235,14 +232,14 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     let session_store = session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,
             policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
         })
         .await
         .expect("open session store");
     let queued = session_store
-        .list_queued_work(&SessionId::from(session_id.clone()))
+        .list_queued_work(&session_id)
         .await
         .expect("list queued work");
     assert_eq!(queued.len(), 3);
@@ -269,7 +266,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     };
     lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
         &submitter,
-        Some(&SessionId::from(session_id.clone())),
+        Some(&session_id),
         "trigger_fired_mid_turn",
     )
     .await
@@ -280,13 +277,10 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
             .is_err(),
         "trigger wake must not submit a competing queued turn while the active turn owns ingress"
     );
-    active_turns.remove(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from("mid-turn-trigger-contract"),
-    );
+    active_turns.remove(&session_id, &TurnId::from("mid-turn-trigger-contract"));
     lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
         &submitter,
-        Some(&SessionId::from(session_id)),
+        Some(&session_id),
         "active_turn_settled",
     )
     .await
@@ -344,7 +338,7 @@ async fn host_cutoff_preserves_a_live_sessions_safe_redrive() {
     )
     .await;
     let session_id = state.current_session_id();
-    let register = workbench_receipt_register_command(&SessionId::from(session_id.clone()));
+    let register = workbench_receipt_register_command(&session_id);
     // Restate redrives this handler under one stable operation id.
     let register_operation_id = "workbench-receipt-register";
 

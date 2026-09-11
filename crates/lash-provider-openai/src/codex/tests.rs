@@ -9,8 +9,8 @@ use lash_core::llm::types::{
     LlmRole, LlmTerminalReason, LlmToolChoice, LlmToolSpec, ResponseTextMeta,
 };
 use lash_core::provider::{
-    ModelCapability, Provider, ProviderHandle, ReasoningCapability, RequestTimeout,
-    StreamTermination,
+    CacheRetention, ModelCapability, Provider, ProviderHandle, ProviderOptions,
+    ReasoningCapability, RequestTimeout, StreamTermination,
 };
 use lash_llm_transport::openai_terminal_reason_from_response_value;
 use lash_sansio::sync::MutexExt;
@@ -26,14 +26,11 @@ use ws_testing::{
     InjectedAcceptFault, ScriptedWsAction, assistant_item, spawn_scripted_websocket,
     spawn_scripted_websocket_with_injected_accept_faults,
 };
-
 #[path = "idle_timeout_tests.rs"]
 mod idle_timeout_tests;
-
 fn process_event(state: &mut CodexStreamState, event: Value) {
     CodexProvider::process_sse_event(&event.to_string(), state, None).unwrap();
 }
-
 fn process_event_with_parts(
     state: &mut CodexStreamState,
     event: Value,
@@ -41,11 +38,9 @@ fn process_event_with_parts(
 ) {
     CodexProvider::process_sse_event(&event.to_string(), state, Some(emitted_parts)).unwrap();
 }
-
 fn response_from_state(state: CodexStreamState) -> LlmResponse {
     shared::response_from_stream_state(state, None, "test".to_string())
 }
-
 fn reasoning_capability() -> ModelCapability {
     ModelCapability {
         instruction_role: Default::default(),
@@ -323,6 +318,9 @@ fn codex_request_body_omits_reasoning_without_capability() {
         .unwrap();
     assert!(body.get("reasoning").is_none());
 }
+
+#[path = "cache_emission_tests.rs"]
+mod cache_emission_tests;
 
 #[test]
 fn raw_codex_builder_strips_unstamped_and_foreign_replay_fields() {

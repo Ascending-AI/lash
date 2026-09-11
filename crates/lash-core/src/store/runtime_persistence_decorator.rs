@@ -36,6 +36,22 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().begin_attachment_write(intent)
     }
 
+    fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        self.inner().complete_attachment_write(intent, permit)
+    }
+
+    fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        self.inner().abort_attachment_write(intent, permit)
+    }
+
     fn commit_refs(
         &self,
         session_id: &SessionId,
@@ -504,6 +520,22 @@ where
         intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, StoreError> {
         RuntimePersistenceDecorator::begin_attachment_write(self, intent)
+    }
+
+    fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::complete_attachment_write(self, intent, permit)
+    }
+
+    fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::abort_attachment_write(self, intent, permit)
     }
 
     fn commit_refs(

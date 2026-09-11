@@ -63,9 +63,9 @@ pub(super) fn observed_stream_protocol_position(
     if text_streamed || !stream_accumulator.is_empty() {
         return crate::ProtocolPosition::OutputStarted;
     }
-    if stream_evidence.execution_evidence.is_some()
+    if stream_evidence.response_started
+        || stream_evidence.execution_evidence.is_some()
         || stream_evidence.provider_usage.is_some()
-        || stream_evidence.http_summary.is_some()
         || !stream_evidence.response_metadata.is_empty()
     {
         return crate::ProtocolPosition::ResponseObserved;

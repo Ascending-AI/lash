@@ -16,6 +16,8 @@ async fn postgres_cross_owner_attachment_adoption_conformance() {
 use std::future::Future;
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
+#[path = "conformance/attachment_recovery.rs"]
+mod attachment_recovery;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 #[path = "conformance/occurrence_listing.rs"]
@@ -1356,10 +1358,10 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 83, "Postgres component schema pin");
+    assert_eq!(current_version, 85, "Postgres component schema pin");
     assert_eq!(
         current_version - 1,
-        82,
+        83,
         "immediate predecessor adjacency pin"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(

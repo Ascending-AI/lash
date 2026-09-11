@@ -21,7 +21,9 @@ use sources::{OrchestratingToolSource, ToolBinding, ToolProviderSource};
 mod registry_types;
 pub use registry_types::{ReconfigureError, ToolRegistry, ToolRestoreReport};
 pub(crate) use registry_types::{ToolRegistrationKind, ToolSourceKey};
-use registry_types::{ToolRegistryEntry, ToolRegistryState, ToolSurface, ToolSurfaceInsertError};
+use registry_types::{
+    ToolRegistryEntry, ToolRegistryInner, ToolRegistryState, ToolSurface, ToolSurfaceInsertError,
+};
 mod rebind;
 mod registry_impl;
 mod restore_execute;
@@ -86,9 +88,19 @@ pub(crate) mod facade_ops {
             provider: Arc<dyn ToolProvider>,
         ) -> Result<ToolSourceHandle, ReconfigureError> {
             let source_id = {
-                let mut state = self.state.write_recover();
-                state.next_live_source_id += 1;
-                format!("live:{}", state.next_live_source_id)
+                let mut inner = self.inner.write_recover();
+                let next_live_source_id = inner
+                    .state
+                    .next_live_source_id
+                    .checked_add(1)
+                    .ok_or_else(|| {
+                        ReconfigureError::Validation("tool registry live source id overflow".into())
+                    })?;
+                let state_revision =
+                    super::registry_impl::checked_state_revision(inner.state_revision)?;
+                inner.state.next_live_source_id = next_live_source_id;
+                inner.state_revision = state_revision;
+                format!("live:{next_live_source_id}")
             };
             self.upsert_source(Arc::new(ToolProviderSource::new(
                 source_id.clone(),

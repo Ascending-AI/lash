@@ -101,6 +101,26 @@ pub(crate) struct LiveRestateCronScenario {
     pub(super) trace_path: PathBuf,
     pub(super) cron_session_id: SessionId,
     pub(super) cron_job_key: String,
+    endpoint: LiveRestateEndpoint,
+}
+
+impl LiveRestateCronScenario {
+    pub(crate) async fn shutdown(mut self) {
+        self.endpoint
+            .stop_after_producers_closed_and_drained(&self.state, Duration::from_secs(30))
+            .await;
+        std::fs::remove_dir_all(&self.data_dir).unwrap_or_else(|error| {
+            panic!(
+                "remove owned cron fixture {}: {error}",
+                self.data_dir.display()
+            )
+        });
+        assert!(
+            !self.data_dir.exists(),
+            "owned cron fixture data directory remained at {}",
+            self.data_dir.display()
+        );
+    }
 }
 
 pub(crate) async fn start_live_restate_cron_scenario(
@@ -115,18 +135,13 @@ pub(crate) async fn start_live_restate_cron_scenario(
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!("{data_dir_label}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let LiveWorkbenchRestateHarness {
         state,
         process_worker,
         process_deployment,
+        process_env_store: _,
         trace_path,
     } = live_workbench_restate_state_with_provider(
         &data_dir,
@@ -136,14 +151,13 @@ pub(crate) async fn start_live_restate_cron_scenario(
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         state.clone(),
         process_deployment,
         process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
     let turn_invocation_id = run_workbench_turn_via_restate(
         &state,
         "Register the cron trigger used by this cancellation-path test.",
@@ -160,6 +174,7 @@ pub(crate) async fn start_live_restate_cron_scenario(
         trace_path,
         cron_session_id,
         cron_job_key,
+        endpoint,
     }
 }
 
@@ -221,7 +236,7 @@ pub(crate) async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCron
 }
 
 fn rotate_cron_session_out_of_current(state: &AppState) -> SessionId {
-    let cron_session_id = SessionId::from(state.current_session_id());
+    let cron_session_id = state.current_session_id();
     let (rotated_session_id, new_current_session_id) = state.sessions.rotate();
     assert_eq!(rotated_session_id, cron_session_id);
     assert_ne!(new_current_session_id, cron_session_id);

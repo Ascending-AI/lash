@@ -264,13 +264,10 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
     )
     .await;
     let session_id = state.current_session_id();
-    state.track_turn(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from("replacement-aborted-turn"),
-    );
+    state.track_turn(&session_id, &TurnId::from("replacement-aborted-turn"));
     let error = super::terminalize_turn_execution(
         &state,
-        &SessionId::from(session_id.clone()),
+        &session_id,
         &TurnId::from("replacement-aborted-turn"),
         "replacement.aborted",
         Ok(Err(AppError::runtime(lash::EmbedError::Plugin(
@@ -301,14 +298,11 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
         "replacement abort must redact envelope hashes at the conflict boundary: {rendered}"
     );
     assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id.clone()))
-            .is_empty(),
+        state.active_turns.for_session(&session_id).is_empty(),
         "replacement abort must retire the active turn before returning"
     );
     let session = state
-        .open_session(&SessionId::from(session_id))
+        .open_session(&session_id)
         .await
         .expect("the settled replacement abort must leave the session reopenable");
     session
@@ -794,7 +788,7 @@ async fn turn_body_reader_treats_ambiguous_errors_as_terminal() {
 
     let error = super::terminalize_turn_execution(
         &state,
-        &SessionId::from(session_id),
+        &session_id,
         &TurnId::from("fig1858-ambiguous-turn-body"),
         "fig1858.ambiguous_turn_body",
         Ok(Err(AppError::internal("ambiguous turn failure"))),

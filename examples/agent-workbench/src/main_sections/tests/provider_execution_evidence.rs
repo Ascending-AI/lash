@@ -290,11 +290,8 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         )
         .await
         .expect("workbench publishes the first runtime turn output");
-        state
-            .active_turns
-            .remove(&SessionId::from(session_id.clone()), &first_turn_id);
-        let first_snapshot =
-            provider_state_snapshot(&state, &SessionId::from(session_id.clone())).await;
+        state.active_turns.remove(&session_id, &first_turn_id);
+        let first_snapshot = provider_state_snapshot(&state, &session_id).await;
 
         let second_turn_id = TurnId::from(format!("{provider_kind}-evidence-turn-2"));
         let (second_observation_line, second_terminal_replacement_line, second_execution) = tokio::join!(
@@ -326,10 +323,8 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         )
         .await
         .expect("workbench publishes the second runtime turn output");
-        state
-            .active_turns
-            .remove(&SessionId::from(session_id.clone()), &second_turn_id);
-        let final_snapshot = provider_state_snapshot(&state, &SessionId::from(session_id)).await;
+        state.active_turns.remove(&session_id, &second_turn_id);
+        let final_snapshot = provider_state_snapshot(&state, &session_id).await;
 
         let product_records = final_snapshot
             .pointer("/product_events/events")

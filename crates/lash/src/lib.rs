@@ -325,11 +325,12 @@ pub mod persistence {
     pub use lash_core::{
         AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,
         AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
-        AttachmentWriteFence, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,
-        StoredBlobRef, attachments::AttachmentReclamationFailure,
-        facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
-        facade_support::InMemoryAttachmentStore, facade_support::InMemoryProcessExecutionEnvStore,
-        facade_support::SessionAttachmentStore, facade_support::reclaim_unreferenced_attachments,
+        AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
+        ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
+        attachments::AttachmentReclamationFailure, facade_support::AttachmentGcFence,
+        facade_support::AttachmentReclamationReport, facade_support::InMemoryAttachmentStore,
+        facade_support::InMemoryProcessExecutionEnvStore, facade_support::SessionAttachmentStore,
+        facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
         BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,

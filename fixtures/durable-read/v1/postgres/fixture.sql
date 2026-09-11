@@ -35,6 +35,10 @@ SET default_table_access_method = heap;
 CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
     attachment_id text NOT NULL,
     phase text NOT NULL,
+    write_token text,
+    write_session_id text,
+    CONSTRAINT lash_attachment_condemnations_check CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
+    CONSTRAINT lash_attachment_condemnations_check1 CHECK (((write_token IS NULL) OR (phase = ANY (ARRAY['condemned'::text, 'reclaimed'::text])))),
     CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text, 'reclaimed'::text])))
 );
 
@@ -667,8 +671,10 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     reason text,
     disposition text DEFAULT 'defer'::text NOT NULL,
     mode text DEFAULT 'immediate'::text NOT NULL,
+    intent_revision bigint NOT NULL,
     affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
-    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL
+    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL,
+    CONSTRAINT lash_turn_cancel_requests_intent_revision_check CHECK ((intent_revision >= 1))
 );
 
 
@@ -965,7 +971,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 83);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 85);
 
 
 --

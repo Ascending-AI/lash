@@ -337,15 +337,15 @@ mod tests {
                 .values()
                 .any(|value| value == "hidden")
         );
-        assert!(events.lock_recover().iter().any(|event| {
-            matches!(
-                event,
-                LlmStreamEvent::Evidence(evidence)
-                    if evidence.response_metadata.get("header:x-request-cost")
+        let events = events.lock_recover();
+        assert!(matches!(
+            events.first(),
+            Some(LlmStreamEvent::Evidence(evidence))
+                if evidence.response_started
+                    && evidence.response_metadata.get("header:x-request-cost")
                         == Some(&json!("0.02"))
-                        && !evidence.response_metadata.contains_key("header:set-cookie")
-            )
-        }));
+                    && !evidence.response_metadata.contains_key("header:set-cookie")
+        ));
     }
 
     #[tokio::test]
@@ -986,7 +986,7 @@ mod tests {
         // across mixed models, but it is reported rather than invisible: the
         // host can see that its request was not honored.
         req.generation.seed = Some(11);
-        let pinned_disposition = AnthropicProvider::generation_disposition(&req, &body);
+        let pinned_disposition = AnthropicProvider::generation_disposition(&req, &body, false);
         assert_eq!(
             pinned_disposition.temperature,
             lash_core::llm::types::GenerationOptionOutcome::OmittedSamplingPinned
@@ -1003,7 +1003,7 @@ mod tests {
         let configurable = provider.build_request_body(&req).expect("body");
         assert_eq!(configurable["temperature"], json!(0.25));
         assert_eq!(
-            AnthropicProvider::generation_disposition(&req, &configurable).temperature,
+            AnthropicProvider::generation_disposition(&req, &configurable, false).temperature,
             lash_core::llm::types::GenerationOptionOutcome::Applied
         );
     }
@@ -1198,7 +1198,9 @@ mod tests {
             ],
         )]);
 
-        let body = provider.build_request_body(&req).expect("body");
+        let (body, cache_control_emitted) = provider
+            .build_request_body_with_cache_evidence(&req)
+            .expect("body");
 
         assert_eq!(
             body["messages"][0]["content"][0]["cache_control"],
@@ -1211,7 +1213,7 @@ mod tests {
         );
         assert_eq!(count_object_key(&body, "__lash_cache_breakpoint"), 0);
         assert_eq!(
-            AnthropicProvider::generation_disposition(&req, &body).cache,
+            AnthropicProvider::generation_disposition(&req, &body, cache_control_emitted).cache,
             lash_core::GenerationOptionOutcome::Applied,
         );
     }
@@ -1291,7 +1293,7 @@ mod tests {
 
         assert_eq!(body["stop_sequences"], json!(["</lashlang>"]));
         assert_eq!(
-            AnthropicProvider::generation_disposition(&req, &body).stop_sequences,
+            AnthropicProvider::generation_disposition(&req, &body, false).stop_sequences,
             lash_core::GenerationOptionOutcome::Applied
         );
     }

@@ -83,12 +83,15 @@ pub fn extract_error_detail(raw: &str) -> Option<String> {
     Some(trimmed.chars().take(200).collect())
 }
 
-/// Report whether explicit prompt-cache breakpoints in `request` survived in
-/// the assembled provider body. The recognized keys are the cache controls
-/// emitted by the first-party adapters.
+/// Report whether explicit prompt-cache breakpoints in `request` were honored
+/// by the adapter's request builder.
+///
+/// `cache_control_emitted` must come from the code path that wrote the
+/// provider-specific cache directive. Inspecting the completed JSON body is
+/// insufficient because host-owned tool schemas can contain identical keys.
 pub fn cache_intent_disposition(
     request: &LlmRequest,
-    provider_body: Option<&Value>,
+    cache_control_emitted: bool,
 ) -> GenerationOptionOutcome {
     let requested = request.messages.iter().any(|message| {
         message.blocks.iter().any(|block| {
@@ -101,24 +104,9 @@ pub fn cache_intent_disposition(
             )
         })
     });
-    let emitted = provider_body.is_some_and(|body| {
-        contains_object_key(body, "cache_control")
-            || contains_object_key(body, "prompt_cache_key")
-            || contains_object_key(body, "cachedContent")
-    });
-    if emitted {
+    if cache_control_emitted {
         GenerationOptionOutcome::applied(requested)
     } else {
         GenerationOptionOutcome::unsupported(requested)
-    }
-}
-
-fn contains_object_key(value: &Value, key: &str) -> bool {
-    match value {
-        Value::Object(fields) => {
-            fields.contains_key(key) || fields.values().any(|value| contains_object_key(value, key))
-        }
-        Value::Array(values) => values.iter().any(|value| contains_object_key(value, key)),
-        _ => false,
     }
 }

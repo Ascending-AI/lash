@@ -3,6 +3,9 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
+#[path = "restate_recovery/immutable_deployment.rs"]
+mod immutable_deployment;
+
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_process_llm_query_with_typed_output_succeeds() {
@@ -16,12 +19,6 @@ async fn live_restate_process_llm_query_with_typed_output_succeeds_inner() {
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-process-llm-query-e2e-{}",
         uuid::Uuid::new_v4()
@@ -74,14 +71,13 @@ finish (await handle)?
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let invocation =
         run_workbench_turn_via_restate(&harness.state, "Run the typed process llm_query repro.")
@@ -94,6 +90,9 @@ finish (await handle)?
         "outer turn plus exactly one in-attempt llm_query provider call"
     );
     println!("workbench process-llm-query gate passed: typed-output; provider-calls=2");
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -111,6 +110,69 @@ fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable() {
     });
 }
 
+#[cfg(unix)]
+#[test]
+fn restate_recovery_failure_reaps_child_before_aborting_process() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    const CHILD_ENV: &str = "AGENT_WORKBENCH_RECOVERY_FAILURE_SCOPE_CHILD";
+    const ROOT_ENV: &str = "AGENT_WORKBENCH_RECOVERY_FAILURE_SCOPE_ROOT";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let root = PathBuf::from(std::env::var(ROOT_ENV).expect("recovery failure probe root"));
+        let storage = root.join("retained-recovery-store");
+        std::fs::create_dir(&storage).expect("create recovery failure probe storage");
+        let _failure_scope = AbortRestateFixtureOnPanic::armed("recovery-child-owner");
+        let child = std::process::Command::new("sleep")
+            .arg("600")
+            .spawn()
+            .expect("spawn recovery failure probe child");
+        let _owned_child = OwnedFixtureChild::new(child);
+        std::fs::write(root.join("child-pid"), _owned_child.id().to_string())
+            .expect("record recovery failure probe child pid");
+        panic!("intentional recovery fixture failure-scope probe");
+    }
+
+    let root = tempfile::tempdir().expect("create recovery failure-scope parent directory");
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("resolve recovery failure-scope test executable"),
+    )
+    .arg(
+        "tests::restate_recovery_tests::restate_recovery_failure_reaps_child_before_aborting_process",
+    )
+    .arg("--exact")
+    .arg("--nocapture")
+    .env(CHILD_ENV, "1")
+    .env(ROOT_ENV, root.path())
+    .output()
+    .expect("run recovery failure-scope child");
+    assert_eq!(
+        output.status.signal(),
+        Some(6),
+        "recovery fixture failure must abort its libtest process: {output:#?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("intentional recovery fixture failure-scope probe")
+            && stderr.contains("after child teardown and before replay storage cleanup"),
+        "recovery failure-scope child missed its teardown/abort boundary: {stderr}"
+    );
+    let child_pid = std::fs::read_to_string(root.path().join("child-pid"))
+        .expect("read recovery failure probe child pid");
+    assert!(
+        !std::path::Path::new("/proc")
+            .join(child_pid.trim())
+            .exists(),
+        "recovery fixture failure left child {} alive",
+        child_pid.trim()
+    );
+    let retained = root.path().join("retained-recovery-store");
+    assert!(
+        retained.exists(),
+        "recovery fixture abort must retain replay storage for gate teardown"
+    );
+    std::fs::remove_dir(&retained).expect("remove recovery failure probe storage");
+}
+
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence() {
@@ -124,12 +186,6 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-suspended-sleep-cancel-e2e-{}",
         uuid::Uuid::new_v4()
@@ -152,14 +208,13 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let invocation_id =
         run_workbench_turn_via_restate(&harness.state, "cancel this suspended durable sleep").await;
@@ -170,10 +225,7 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     )
     .await;
     let session_id = harness.state.current_session_id();
-    let active_turns = harness
-        .state
-        .active_turns
-        .for_session(&SessionId::from(session_id.clone()));
+    let active_turns = harness.state.active_turns.for_session(&session_id);
     let [routed_address] = active_turns.as_slice() else {
         panic!("expected exactly one routed suspended turn")
     };
@@ -187,14 +239,11 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         .expect("open suspended turn session for durable address");
     let address = session.turn_address(&routed_address.turn_id);
     drop(session);
-    let mut events = harness
-        .state
-        .event_tx
-        .subscribe(&SessionId::from(session_id.clone()));
+    let mut events = harness.state.event_tx.subscribe(&session_id);
     let started = tokio::time::Instant::now();
     let receipts = harness
         .state
-        .cancel_turns_for_session(&SessionId::from(session_id.clone()))
+        .cancel_turns_for_session(&session_id)
         .await
         .expect("cancel suspended workbench turn");
     let [receipt] = receipts.as_slice() else {
@@ -247,13 +296,11 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     })
     .await
     .expect("late cancellation evidence must arrive on the SSE product stream");
-    wait_for_active_turns_empty(
-        &harness.state,
-        &SessionId::from(session_id),
-        Duration::from_secs(10),
-    )
-    .await;
+    wait_for_active_turns_empty(&harness.state, &session_id, Duration::from_secs(10)).await;
     println!("workbench suspended-sleep gate passed: post-suspension-cancel; late-SSE-evidence");
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -270,12 +317,6 @@ async fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evid
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-stop-over-process-await-e2e-{}",
         uuid::Uuid::new_v4()
@@ -309,14 +350,13 @@ finish (await handle)?
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let invocation_id = run_workbench_turn_via_restate(
         &harness.state,
@@ -332,10 +372,7 @@ finish (await handle)?
     let process_id =
         wait_for_running_process(&harness.state, "hold_for_stop", Duration::from_secs(20)).await;
     let session_id = harness.state.current_session_id();
-    let active_turns = harness
-        .state
-        .active_turns
-        .for_session(&SessionId::from(session_id.clone()));
+    let active_turns = harness.state.active_turns.for_session(&session_id);
     let [routed_address] = active_turns.as_slice() else {
         panic!("expected exactly one routed suspended turn")
     };
@@ -349,14 +386,11 @@ finish (await handle)?
         .expect("open suspended turn session for durable address");
     let address = session.turn_address(&routed_address.turn_id);
     drop(session);
-    let mut events = harness
-        .state
-        .event_tx
-        .subscribe(&SessionId::from(session_id.clone()));
+    let mut events = harness.state.event_tx.subscribe(&session_id);
     let started = tokio::time::Instant::now();
     let receipts = harness
         .state
-        .cancel_turns_for_session(&SessionId::from(session_id.clone()))
+        .cancel_turns_for_session(&session_id)
         .await
         .expect("cancel suspended workbench turn");
     let [receipt] = receipts.as_slice() else {
@@ -425,15 +459,13 @@ finish (await handle)?
         ),
         "Stop-over-process settled the process incorrectly: {process_terminal:#?}"
     );
-    wait_for_active_turns_empty(
-        &harness.state,
-        &SessionId::from(session_id),
-        Duration::from_secs(10),
-    )
-    .await;
+    wait_for_active_turns_empty(&harness.state, &session_id, Duration::from_secs(10)).await;
     println!(
         "workbench Stop-over-process gate passed: committed-Cancelled; process-Cancelled; late-SSE-evidence"
     );
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -492,10 +524,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     )
     .await;
     let session_id = harness.state.current_session_id();
-    let mut product_events = harness
-        .state
-        .event_tx
-        .subscribe(&SessionId::from(session_id));
+    let mut product_events = harness.state.event_tx.subscribe(&session_id);
     let (failed_invocation, failed_address) =
         submit_workbench_turn_via_restate(&harness.state, "trigger deterministic auth failure")
             .await;
@@ -596,7 +625,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     println!(
         "workbench auth-failure gate passed: failed terminal, visible error, next turn recovered"
     );
-    let _ = std::fs::remove_dir_all(data_dir);
+    harness.shutdown(data_dir).await;
 }
 
 async fn submit_workbench_turn_via_restate(
@@ -608,17 +637,12 @@ async fn submit_workbench_turn_via_restate(
     let session_id = state.current_session_id();
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
-        session_id: SessionId::from(session_id.clone()),
+        session_id: session_id.clone(),
         text: text.to_string(),
         model: state.selected_model(),
         attachment_id: None,
     };
-    state.track_turn_prompt(
-        &SessionId::from(session_id.clone()),
-        &turn_id,
-        text.to_string(),
-        None,
-    );
+    state.track_turn_prompt(&session_id, &turn_id, text.to_string(), None);
     let session = state
         .core
         .session(&session_id)
@@ -807,7 +831,7 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
     println!(
         "workbench rate-limit gate passed: retry succeeded and live/replay observers converged"
     );
-    let _ = std::fs::remove_dir_all(data_dir);
+    harness.shutdown(data_dir).await;
 }
 
 fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messages::Message]) {
@@ -872,12 +896,6 @@ async fn live_failure_path_harness_with_provider(
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-{label}-e2e-{}",
         uuid::Uuid::new_v4()
@@ -892,19 +910,34 @@ async fn live_failure_path_harness_with_provider(
     )
     .await;
     let state = harness.state.clone();
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
-    (LiveFailurePathHarness { state }, data_dir)
+    )
+    .await;
+    (LiveFailurePathHarness { state, endpoint }, data_dir)
 }
 
 struct LiveFailurePathHarness {
     pub(super) state: AppState,
+    endpoint: LiveRestateEndpoint,
+}
+
+impl LiveFailurePathHarness {
+    async fn shutdown(mut self, data_dir: PathBuf) {
+        self.endpoint
+            .stop_after_producers_closed_and_drained(&self.state, Duration::from_secs(30))
+            .await;
+        std::fs::remove_dir_all(&data_dir)
+            .unwrap_or_else(|error| panic!("remove owned fixture {}: {error}", data_dir.display()));
+        assert!(
+            !data_dir.exists(),
+            "owned fixture data directory remained at {}",
+            data_dir.display()
+        );
+    }
 }
 
 async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inner() {
@@ -924,7 +957,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     let session_id = harness.state.current_session_id();
     harness
         .state
-        .open_session(&SessionId::from(session_id.clone()))
+        .open_session(&session_id)
         .await
         .expect("materialize the session before its failed delete");
     harness
@@ -941,7 +974,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
             execution_scope,
         },
     )
@@ -962,7 +995,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
             .completion_failure
             .as_deref()
             .is_some_and(
-                |failure| failure.contains(&session_id) && failure.contains("remains live")
+                |failure| failure.contains(session_id.as_str()) && failure.contains("remains live")
             ),
         "the delete must fail with the session-remains-live refusal: {delete_status:#?}"
     );
@@ -976,17 +1009,14 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
             .expect("read failed-delete tombstone fence")
     );
     assert_eq!(
-        harness
-            .state
-            .active_turns
-            .retirement(&SessionId::from(session_id.clone())),
+        harness.state.active_turns.retirement(&session_id),
         None,
         "a terminal delete failure lifts the in-process fence"
     );
     let _ = app_state(
         State(harness.state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         }),
     )
     .await
@@ -994,21 +1024,18 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
 
     // Drop the orphan claim: the delete can now be retried through the same
     // route, and the fence admits the retry.
-    harness.state.active_turns.remove(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from("held-delete-turn"),
-    );
+    harness
+        .state
+        .active_turns
+        .remove(&session_id, &TurnId::from("held-delete-turn"));
     let post_tombstone_turn = "turn-admitted-after-delete-snapshot";
-    fail_session_delete_retention_once(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from(post_tombstone_turn),
-    );
+    fail_session_delete_retention_once(&session_id, &TurnId::from(post_tombstone_turn));
     let Json(replacement) = Box::pin(tokio::time::timeout(
         Duration::from_secs(30),
         reset_chat(
             State(harness.state.clone()),
             Query(SessionQuery {
-                session_id: Some(SessionId::from(session_id.clone())),
+                session_id: Some(session_id.clone()),
             }),
         ),
     ))
@@ -1016,10 +1043,10 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     .expect("post-tombstone retention redrive settles")
     .expect("retry succeeds after the orphan claim is released");
     assert_ne!(replacement.settings.session_id, session_id);
-    harness.state.active_turns.remove(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from(post_tombstone_turn),
-    );
+    harness
+        .state
+        .active_turns
+        .remove(&session_id, &TurnId::from(post_tombstone_turn));
     assert!(
         harness
             .state
@@ -1028,7 +1055,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
             .await
             .expect("read successful retry tombstone fence")
     );
-    let _ = std::fs::remove_dir_all(data_dir);
+    harness.shutdown(data_dir).await;
 }
 
 async fn live_restate_session_delete_revokes_process_await_without_cancelling_process_inner() {
@@ -1036,12 +1063,6 @@ async fn live_restate_session_delete_revokes_process_await_without_cancelling_pr
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-revoked-process-await-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1072,14 +1093,13 @@ finish (await handle)?
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let deleted_session_id = harness.state.current_session_id();
     let turn_invocation_id = run_workbench_turn_via_restate(
@@ -1105,7 +1125,7 @@ finish (await handle)?
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: SessionId::from(deleted_session_id.clone()),
+            session_id: deleted_session_id.clone(),
             execution_scope,
         },
     )
@@ -1201,13 +1221,16 @@ finish (await handle)?
         harness
             .state
             .active_turns
-            .for_session(&SessionId::from(deleted_session_id))
+            .for_session(&deleted_session_id)
             .is_empty(),
         "deleted-session settlement left a routed foreground turn"
     );
     println!(
         "workbench revoked-process-await gate passed: typed-SessionDeleted; no-process-cancel; process-survived"
     );
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1216,12 +1239,6 @@ async fn live_restate_processes_outlive_session_delete_and_cancel_globally_inner
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-process-lifecycle-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1257,14 +1274,13 @@ finish "started lifecycle gates"
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let deleted_session_id = harness.state.current_session_id();
     let turn_invocation_id =
@@ -1287,7 +1303,7 @@ finish "started lifecycle gates"
         &harness.state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: SessionId::from(deleted_session_id.clone()),
+            session_id: deleted_session_id.clone(),
             execution_scope,
         },
     )
@@ -1386,6 +1402,9 @@ finish "started lifecycle gates"
                 .iter()
                 .any(|event| event.event_type == "process.cancel_requested")
     }));
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1482,12 +1501,6 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-turn-ingress-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1539,19 +1552,18 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let mut rendered_events = harness
         .state
         .event_tx
-        .subscribe(&SessionId::from(harness.state.current_session_id()));
+        .subscribe(&harness.state.current_session_id());
 
     let turn_invocation_id =
         run_workbench_turn_via_restate(&harness.state, "initial turn input_ingress_gate=true")
@@ -1604,7 +1616,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     let queued_turn = harness
         .state
         .active_turns
-        .for_session(&SessionId::from(session_id.clone()))
+        .for_session(&session_id)
         .into_iter()
         .find(|address| address.turn_id.starts_with("workbench-queued-"))
         .expect("queued-work driver must publish the queued turn address");
@@ -1656,11 +1668,8 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     admission_gate.arm();
     let state_for_holder = harness.state.clone();
     let session_id_for_holder = session_id.clone();
-    let held_open = tokio::spawn(async move {
-        state_for_holder
-            .open_session(&SessionId::from(session_id_for_holder))
-            .await
-    });
+    let held_open =
+        tokio::spawn(async move { state_for_holder.open_session(&session_id_for_holder).await });
     admission_gate.wait_until_admitted().await;
     let exhausted = Box::pin(app_state(
         State(harness.state.clone()),
@@ -1695,7 +1704,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
 
     let settled_session = harness
         .state
-        .open_session(&SessionId::from(session_id.clone()))
+        .open_session(&session_id)
         .await
         .expect("open settled ingress session through the host retry boundary");
     let read_view = settled_session.read_view();
@@ -1814,7 +1823,10 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         snapshot.pending_turn_inputs.is_empty(),
         "both ingress claims must settle"
     );
-    unregister_session_open_admission_gate(&SessionId::from(session_id));
+    unregister_session_open_admission_gate(&session_id);
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1840,16 +1852,26 @@ fn recovery_e2e_lease_timings() -> lash::durability::LeaseTimings {
 }
 
 async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
+    // Declared before every child/store owner so unwinding kills and reaps those
+    // resources before this guard stops libtest from entering another fixture.
+    let mut failure_scope = AbortRestateFixtureOnPanic::armed("ingress-owner-restart");
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
+    let endpoint_bind_variable = match backend {
+        "sqlite" => "AGENT_WORKBENCH_E2E_ENDPOINT_BIND",
+        "postgres" => "AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND",
+        other => panic!("unsupported recovery E2E backend `{other}`"),
+    };
+    let endpoint_bind: SocketAddr = std::env::var(endpoint_bind_variable)
+        .unwrap_or_else(|_| {
+            panic!("{endpoint_bind_variable} must assign a distinct immutable recovery endpoint")
+        })
         .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
+        .unwrap_or_else(|error| panic!("valid {endpoint_bind_variable}: {error}"));
+    record_fixture_owned_endpoint(endpoint_bind);
+    let endpoint_url = format!("http://{endpoint_bind}");
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-recovery-{backend}-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1864,9 +1886,9 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     active_turns.insert(&session_id, &turn_id);
 
     let mut first = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
-    let first_pid = first.id().expect("first recovery child pid");
+    let first_pid = first.id();
     wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    let deployment_id = register_restate_deployment(&admin_url, &endpoint_url).await;
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),
@@ -1877,11 +1899,19 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         },
         attachment_id: None,
     };
-    lash_restate::RestateIngressClient::new(ingress_url.clone())
+    let invocation_id = lash_restate::RestateIngressClient::new(ingress_url.clone())
         .send_workflow_json("WorkbenchTurnWorkflow", &turn_id, "run", &request)
         .await
         .expect("submit recovery E2E turn");
     wait_for_provider_owner(&data_dir, first_pid, Duration::from_secs(20)).await;
+    let admitted = restate_invocation_status_with_deployment(&admin_url, &invocation_id)
+        .await
+        .expect("admitted recovery invocation status");
+    assert_eq!(
+        admitted.pinned_deployment_id.as_deref(),
+        Some(deployment_id.as_str()),
+        "recovery invocation must stay pinned to the original immutable deployment"
+    );
     wait_for_trace_event_count(
         &data_dir.join("trace.jsonl"),
         "llm_call_completed",
@@ -1892,14 +1922,15 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let first_generation = session_lease_generation(&data_dir, backend, &session_id).await;
 
-    first.kill().await.expect("kill first ingress owner");
-    first.wait().await.expect("reap first ingress owner");
+    first.stop_and_reap();
 
     let restart_started = tokio::time::Instant::now();
     let mut replacement = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
-    let _replacement_pid = replacement.id().expect("replacement recovery child pid");
+    let _replacement_pid = replacement.id();
     wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    // This is a process restart of the same configuration and storage at the
+    // same immutable endpoint. Keep the original Restate deployment identity;
+    // re-registering would turn the crash-recovery probe into a deployment update.
     wait_for_session_lease_generation(
         &data_dir,
         backend,
@@ -1942,7 +1973,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .await
         .expect("reopen recovery session catalog");
     let driver = lash_restate::RestateTurnDeployment::new(ingress_url)
-        .turn_work_driver(stores.session_store_factory);
+        .turn_work_driver(Arc::clone(&stores.session_store_factory));
     let receipt = driver
         .request_cancel(
             lash::TurnCancelRequest::new(
@@ -2012,10 +2043,54 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         done_count, 1,
         "owner replacement and Restate redelivery must settle the product projection once"
     );
-    replacement.kill().await.expect("stop replacement child");
-    replacement.wait().await.expect("reap replacement child");
+    wait_for_restate_deployment_and_unpinned_invocations_drained(
+        &admin_url,
+        &deployment_id,
+        Duration::from_secs(30),
+    )
+    .await;
+    replacement.stop_and_reap();
+    assert!(
+        tokio::net::TcpStream::connect(endpoint_bind).await.is_err(),
+        "recovery E2E endpoint {endpoint_bind} remained open after child teardown"
+    );
+    drop(driver);
+    drop(stores);
     println!("workbench ingress-owner restart gate passed: backend={backend}");
-    let _ = std::fs::remove_dir_all(data_dir);
+    std::fs::remove_dir_all(&data_dir).expect("remove drained recovery E2E data directory");
+    assert!(!data_dir.exists());
+    failure_scope.disarm();
+}
+
+async fn wait_for_restate_deployment_and_unpinned_invocations_drained(
+    admin_url: &str,
+    deployment_id: &str,
+    timeout: Duration,
+) {
+    let admin =
+        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let open = admin
+            .open_invocations_by_deployment()
+            .await
+            .expect("query recovery E2E Restate deployment drain")
+            .into_iter()
+            .filter(|row| {
+                row.pinned_deployment_id.is_none()
+                    || row.pinned_deployment_id.as_deref() == Some(deployment_id)
+            })
+            .map(|row| row.open_count)
+            .sum::<u64>();
+        if open == 0 {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "recovery E2E deployment {deployment_id} retained {open} pinned/unpinned Restate invocations within {timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 fn spawn_recovery_e2e_child(
@@ -2023,8 +2098,8 @@ fn spawn_recovery_e2e_child(
     endpoint_bind: SocketAddr,
     ingress_url: &str,
     backend: &str,
-) -> tokio::process::Child {
-    let mut command = tokio::process::Command::new(
+) -> OwnedFixtureChild {
+    let mut command = std::process::Command::new(
         std::env::current_exe().expect("resolve workbench test executable"),
     );
     command
@@ -2038,9 +2113,10 @@ fn spawn_recovery_e2e_child(
             "AGENT_WORKBENCH_RECOVERY_E2E_ENDPOINT_BIND",
             endpoint_bind.to_string(),
         )
-        .env("RESTATE_INGRESS_URL", ingress_url)
-        .kill_on_drop(true);
-    command.spawn().expect("spawn workbench recovery child")
+        .env("RESTATE_INGRESS_URL", ingress_url);
+    let child = command.spawn().expect("spawn workbench recovery child");
+    record_fixture_owned_child(child.id());
+    OwnedFixtureChild::new(child)
 }
 
 async fn live_restate_recovery_child() {
