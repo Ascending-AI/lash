@@ -110,6 +110,69 @@ fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable() {
     });
 }
 
+#[cfg(unix)]
+#[test]
+fn restate_recovery_failure_reaps_child_before_aborting_process() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    const CHILD_ENV: &str = "AGENT_WORKBENCH_RECOVERY_FAILURE_SCOPE_CHILD";
+    const ROOT_ENV: &str = "AGENT_WORKBENCH_RECOVERY_FAILURE_SCOPE_ROOT";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let root = PathBuf::from(std::env::var(ROOT_ENV).expect("recovery failure probe root"));
+        let storage = root.join("retained-recovery-store");
+        std::fs::create_dir(&storage).expect("create recovery failure probe storage");
+        let _failure_scope = AbortRestateFixtureOnPanic::armed("recovery-child-owner");
+        let child = std::process::Command::new("sleep")
+            .arg("600")
+            .spawn()
+            .expect("spawn recovery failure probe child");
+        let _owned_child = OwnedFixtureChild::new(child);
+        std::fs::write(root.join("child-pid"), _owned_child.id().to_string())
+            .expect("record recovery failure probe child pid");
+        panic!("intentional recovery fixture failure-scope probe");
+    }
+
+    let root = tempfile::tempdir().expect("create recovery failure-scope parent directory");
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("resolve recovery failure-scope test executable"),
+    )
+    .arg(
+        "tests::restate_recovery_tests::restate_recovery_failure_reaps_child_before_aborting_process",
+    )
+    .arg("--exact")
+    .arg("--nocapture")
+    .env(CHILD_ENV, "1")
+    .env(ROOT_ENV, root.path())
+    .output()
+    .expect("run recovery failure-scope child");
+    assert_eq!(
+        output.status.signal(),
+        Some(6),
+        "recovery fixture failure must abort its libtest process: {output:#?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("intentional recovery fixture failure-scope probe")
+            && stderr.contains("after child teardown and before replay storage cleanup"),
+        "recovery failure-scope child missed its teardown/abort boundary: {stderr}"
+    );
+    let child_pid = std::fs::read_to_string(root.path().join("child-pid"))
+        .expect("read recovery failure probe child pid");
+    assert!(
+        !std::path::Path::new("/proc")
+            .join(child_pid.trim())
+            .exists(),
+        "recovery fixture failure left child {} alive",
+        child_pid.trim()
+    );
+    let retained = root.path().join("retained-recovery-store");
+    assert!(
+        retained.exists(),
+        "recovery fixture abort must retain replay storage for gate teardown"
+    );
+    std::fs::remove_dir(&retained).expect("remove recovery failure probe storage");
+}
+
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence() {
@@ -1789,6 +1852,9 @@ fn recovery_e2e_lease_timings() -> lash::durability::LeaseTimings {
 }
 
 async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
+    // Declared before every child/store owner so unwinding kills and reaps those
+    // resources before this guard stops libtest from entering another fixture.
+    let mut failure_scope = AbortRestateFixtureOnPanic::armed("ingress-owner-restart");
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -1824,7 +1890,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     active_turns.insert(&session_id, &turn_id);
 
     let mut first = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
-    let first_pid = first.id().expect("first recovery child pid");
+    let first_pid = first.id();
     wait_for_endpoint_socket(endpoint_bind).await;
     let deployment_id = register_restate_deployment(&admin_url, &endpoint_url).await;
     let request = restate::WorkbenchTurnWorkflowRequest {
@@ -1860,12 +1926,11 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let first_generation = session_lease_generation(&data_dir, backend, &session_id).await;
 
-    first.kill().await.expect("kill first ingress owner");
-    first.wait().await.expect("reap first ingress owner");
+    first.stop_and_reap();
 
     let restart_started = tokio::time::Instant::now();
     let mut replacement = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
-    let _replacement_pid = replacement.id().expect("replacement recovery child pid");
+    let _replacement_pid = replacement.id();
     wait_for_endpoint_socket(endpoint_bind).await;
     // This is a process restart of the same configuration and storage at the
     // same immutable endpoint. Keep the original Restate deployment identity;
@@ -1988,8 +2053,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         Duration::from_secs(30),
     )
     .await;
-    replacement.kill().await.expect("stop replacement child");
-    replacement.wait().await.expect("reap replacement child");
+    replacement.stop_and_reap();
     assert!(
         tokio::net::TcpStream::connect(endpoint_bind).await.is_err(),
         "recovery E2E endpoint {endpoint_bind} remained open after child teardown"
@@ -1999,6 +2063,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     println!("workbench ingress-owner restart gate passed: backend={backend}");
     std::fs::remove_dir_all(&data_dir).expect("remove drained recovery E2E data directory");
     assert!(!data_dir.exists());
+    failure_scope.disarm();
 }
 
 async fn wait_for_restate_deployment_and_unpinned_invocations_drained(
@@ -2037,8 +2102,8 @@ fn spawn_recovery_e2e_child(
     endpoint_bind: SocketAddr,
     ingress_url: &str,
     backend: &str,
-) -> tokio::process::Child {
-    let mut command = tokio::process::Command::new(
+) -> OwnedFixtureChild {
+    let mut command = std::process::Command::new(
         std::env::current_exe().expect("resolve workbench test executable"),
     );
     command
@@ -2052,9 +2117,8 @@ fn spawn_recovery_e2e_child(
             "AGENT_WORKBENCH_RECOVERY_E2E_ENDPOINT_BIND",
             endpoint_bind.to_string(),
         )
-        .env("RESTATE_INGRESS_URL", ingress_url)
-        .kill_on_drop(true);
-    command.spawn().expect("spawn workbench recovery child")
+        .env("RESTATE_INGRESS_URL", ingress_url);
+    OwnedFixtureChild::new(command.spawn().expect("spawn workbench recovery child"))
 }
 
 async fn live_restate_recovery_child() {

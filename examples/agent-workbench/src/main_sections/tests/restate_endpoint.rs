@@ -257,12 +257,26 @@ fn restate_fixture_failure_aborts_process_before_storage_drop() {
             storage.path().as_os_str().as_encoded_bytes(),
         )
         .expect("record failure-scope probe storage path");
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind failure-scope endpoint probe");
+        let addr = listener.local_addr().expect("failure-scope probe address");
+        std::fs::write(root.join("endpoint-addr"), addr.to_string())
+            .expect("record failure-scope endpoint address");
+        let thread = std::thread::spawn(move || {
+            loop {
+                match listener.accept() {
+                    Ok((_stream, _peer)) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(error) => panic!("failure-scope endpoint accept: {error}"),
+                }
+            }
+        });
         let _endpoint = LiveRestateEndpoint {
-            addr: "127.0.0.1:0".parse().expect("failure probe address"),
-            endpoint_url: "http://127.0.0.1:0".to_string(),
+            addr,
+            endpoint_url: format!("http://{addr}"),
             deployment_id: "failure-probe".to_string(),
             shutdown: None,
-            thread: None,
+            thread: Some(thread),
         };
         panic!("intentional Restate fixture failure-scope probe");
     }
@@ -300,7 +314,99 @@ fn restate_fixture_failure_aborts_process_before_storage_drop() {
         retained_path.exists(),
         "aborted fixture process must retain replay storage for gate teardown"
     );
+    let endpoint_addr = String::from_utf8(
+        std::fs::read(root.path().join("endpoint-addr"))
+            .expect("read failure-scope endpoint address"),
+    )
+    .expect("failure-scope endpoint address UTF-8");
+    assert!(
+        std::net::TcpStream::connect(endpoint_addr).is_err(),
+        "aborting the fixture process must terminate its real endpoint listener"
+    );
     std::fs::remove_dir_all(&retained_path).expect("remove failure-scope probe storage");
+}
+
+pub(crate) struct AbortRestateFixtureOnPanic {
+    label: &'static str,
+    armed: bool,
+}
+
+impl AbortRestateFixtureOnPanic {
+    pub(crate) fn armed(label: &'static str) -> Self {
+        Self { label, armed: true }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for AbortRestateFixtureOnPanic {
+    fn drop(&mut self) {
+        if self.armed && std::thread::panicking() {
+            eprintln!(
+                "owned Restate fixture {} failed; aborting its test process after child teardown and before replay storage cleanup",
+                self.label
+            );
+            std::process::abort();
+        }
+    }
+}
+
+pub(crate) struct OwnedFixtureChild {
+    child: Option<std::process::Child>,
+}
+
+impl OwnedFixtureChild {
+    pub(crate) fn new(child: std::process::Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    pub(crate) fn id(&self) -> u32 {
+        self.child.as_ref().expect("owned fixture child").id()
+    }
+
+    pub(crate) fn stop_and_reap(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        match child.try_wait().expect("query owned fixture child") {
+            Some(_status) => {}
+            None => {
+                child.kill().expect("kill owned fixture child");
+                child.wait().expect("reap owned fixture child");
+            }
+        }
+    }
+}
+
+impl Drop for OwnedFixtureChild {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+pub(crate) fn record_fixture_owned_data_dir(path: &std::path::Path) {
+    let Some(manifest) = std::env::var_os("AGENT_WORKBENCH_FIXTURE_DATA_MANIFEST") else {
+        return;
+    };
+    let token = std::env::var("AGENT_WORKBENCH_FIXTURE_CLEANUP_TOKEN")
+        .expect("fixture data manifest requires cleanup token");
+    std::fs::write(path.join(".agent-workbench-fixture-owner"), &token)
+        .expect("record fixture data ownership token");
+    use std::io::Write as _;
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(manifest)
+            .expect("open fixture data manifest"),
+        "{}",
+        path.display()
+    )
+    .expect("append fixture data manifest");
 }
 
 #[derive(Deserialize)]
