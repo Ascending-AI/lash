@@ -393,6 +393,78 @@ async fn second_claim_on_held_batch_is_not_won() {
     let _ = claim_a;
 }
 
+#[tokio::test]
+async fn corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() {
+    for (case, prior_id, prior_token) in [
+        ("id-only", Some("prior-id"), None),
+        ("token-only", None, Some("prior-token")),
+    ] {
+        let path = unique_db_path(case);
+        let store = Store::open(&path).await.expect("open corruption fixture");
+        let session_id = SessionId::from(format!("corrupt-predecessor-{case}"));
+        let queued = store
+            .enqueue_queued_work(exclusive_draft(&session_id, case))
+            .await
+            .expect("enqueue corruption fixture");
+        let raw = rusqlite::Connection::open(&path).expect("open raw corruption fixture");
+        raw.execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("enable controlled corruption");
+        raw.execute(
+            "UPDATE queued_work_batches
+             SET claim_id = ?2, claim_token = ?3,
+                 claim_fencing_token = 7, claim_session_lease_generation = 0
+             WHERE batch_id = ?1",
+            rusqlite::params![queued.batch_id, prior_id, prior_token],
+        )
+        .expect("inject half predecessor pair");
+        drop(raw);
+
+        let owner = lease_owner(&format!("corrupt-owner-{case}"));
+        let executor_id = format!("corrupt-executor-{case}");
+        let lease = store
+            .try_claim_session_execution_lease(&session_id, &owner, &executor_id, 60_000)
+            .await
+            .expect("claim session lease")
+            .acquired()
+            .expect("session lease available");
+        let error = store
+            .claim_ready_queued_work(
+                &session_id,
+                &lease.fence(),
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                lash_core::testing::queued_work_claim_policy(1),
+            )
+            .await
+            .expect_err("half predecessor pair must refuse the claim");
+        assert!(matches!(
+            error,
+            StoreError::QueuedWorkPredecessorClaimCorrupt { .. }
+        ));
+
+        let raw = rusqlite::Connection::open(&path).expect("reopen corruption fixture");
+        let persisted: (Option<String>, Option<String>, i64, i64) = raw
+            .query_row(
+                "SELECT claim_id, claim_token, claim_fencing_token,
+                        claim_session_lease_generation
+                 FROM queued_work_batches WHERE batch_id = ?1",
+                [queued.batch_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read row after refusal");
+        assert_eq!(
+            persisted,
+            (
+                prior_id.map(str::to_string),
+                prior_token.map(str::to_string),
+                7,
+                0,
+            ),
+            "claim transaction changed the corrupt predecessor row"
+        );
+    }
+}
+
 // Finding 2 (concurrent): two owners on two connections race for the same
 // single ready batch. The claim is read-then-write, so without the
 // rows-affected check (and the `BEGIN IMMEDIATE` that serializes the read with
@@ -505,8 +577,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 54"),
-        "error must report the real expected version 54: {message}"
+        message.contains("schema version 55"),
+        "error must report the real expected version 55: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -542,7 +614,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 54);
+    assert_eq!(user_version, 55);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -656,7 +728,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         Err(error) => error.to_string(),
     };
     assert!(
-        error.contains("schema version 54") && error.contains("version 51"),
+        error.contains("schema version 55") && error.contains("version 51"),
         "{error}"
     );
     let conn = rusqlite::Connection::open(&path).unwrap();

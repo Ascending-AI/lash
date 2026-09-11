@@ -118,6 +118,7 @@ mod process_registry;
 mod process_registry_change;
 mod process_registry_completion;
 mod queued_work;
+mod required_constraints;
 mod schema;
 mod scope_fence;
 mod session_meta;
@@ -139,7 +140,11 @@ use conn::TxOutcome;
 pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
+pub use lash_core::store_backend_support::required_constraints::{
+    RequiredConstraintFinding, RequiredConstraintReport,
+};
 pub use preflight::{SqliteStorePreflight, verify_schema_at};
+pub use required_constraints::inspect_required_constraints_at;
 pub use schema::SqliteDatabase;
 
 use forks::*;

@@ -196,7 +196,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
             selected_batches,
             candidates[0].prior_claim_id.clone(),
             candidates[0].prior_claim_token.clone(),
-        ),
+        )?,
     })))
 }
 

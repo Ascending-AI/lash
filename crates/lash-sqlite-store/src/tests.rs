@@ -89,6 +89,34 @@ fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
     );
 }
 
+#[test]
+fn pending_turn_input_claim_id_and_token_must_be_paired() {
+    let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
+    connection
+        .execute_batch(crate::schema::SCHEMA)
+        .expect("apply SQLite schema to CHECK witness");
+    for fields in ["claim_id", "claim_token"] {
+        let error = connection
+            .execute(
+                &format!(
+                    "INSERT INTO pending_turn_inputs (
+                         input_id, session_id, ingress_json, state, input_json,
+                         enqueued_at_ms, {fields}
+                     ) VALUES ('input-{fields}', 'session', '{{\"scope\":\"next_turn\"}}',
+                               'deferred_next_turn', '{{}}', 0, 'half')"
+                ),
+                [],
+            )
+            .expect_err("a half-populated pending-input claim must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("ck_pending_turn_inputs_claim_id_token_all_or_none"),
+            "SQLite reported the wrong CHECK: {error}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn store_options_apply_connection_policy_on_connection_thread() {
     let dir = tempfile::tempdir().expect("tempdir");
