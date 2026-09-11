@@ -1,5 +1,6 @@
 use compact_str::CompactString;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
 use crate::lexer::Span;
@@ -72,6 +73,14 @@ pub enum InvalidAst {
     /// A JavaScript-style `return` appears outside a function body.
     #[error("`return` is used outside a function")]
     ReturnOutsideFunction,
+    #[error(transparent)]
+    InvalidProcessSignature {
+        #[from]
+        source: ProcessSignatureError,
+    },
+    /// A host-only unknown callable shape was placed in program-owned IR.
+    #[error("process type with unknown signature is only valid in host schemas")]
+    UnknownProcessSignature,
 }
 
 /// Rejects an AST the compiler cannot lower as written.
@@ -81,6 +90,7 @@ pub enum InvalidAst {
 /// typed error rather than a stack overflow or a panic deeper in the compiler.
 pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
     check_ast_nesting_depth(program)?;
+    check_program_process_types(program)?;
     check_loop_control(&program.main)?;
     for declaration in &program.declarations {
         match declaration {
@@ -92,6 +102,81 @@ pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
         }
     }
     Ok(())
+}
+
+fn check_program_process_types(program: &Program) -> Result<(), InvalidAst> {
+    for declaration in &program.declarations {
+        match declaration {
+            Declaration::Type(declaration) => check_process_type(&declaration.ty)?,
+            Declaration::Process(process) => {
+                ProcessSignature::try_new(process.params.clone(), TypeExpr::Any)?;
+                for param in &process.params {
+                    check_process_type(&param.ty)?;
+                }
+                for signal in &process.signals {
+                    check_process_type(&signal.ty)?;
+                }
+                if let Some(return_ty) = &process.return_ty {
+                    check_process_type(return_ty)?;
+                }
+                check_expr_process_types(&process.body)?;
+            }
+            Declaration::Function(function) => {
+                for param in &function.params {
+                    check_process_type(&param.ty)?;
+                }
+                check_process_type(&function.return_ty)?;
+                check_expr_process_types(&function.body)?;
+            }
+        }
+    }
+    check_expr_process_types(&program.main)
+}
+
+fn check_expr_process_types(expr: &Expr) -> Result<(), InvalidAst> {
+    if let Expr::TypeLiteral(ty) = expr {
+        check_process_type(ty)?;
+    }
+    for child in expr.children() {
+        check_expr_process_types(child)?;
+    }
+    Ok(())
+}
+
+fn check_process_type(ty: &TypeExpr) -> Result<(), InvalidAst> {
+    match ty {
+        TypeExpr::List(item) | TypeExpr::TriggerHandle(item) => check_process_type(item),
+        TypeExpr::Object(fields) => {
+            for field in fields {
+                check_process_type(&field.ty)?;
+            }
+            Ok(())
+        }
+        TypeExpr::Union(items) => {
+            for item in items {
+                check_process_type(item)?;
+            }
+            Ok(())
+        }
+        TypeExpr::Process(process) => {
+            let Some(signature) = process.as_signature() else {
+                return Err(InvalidAst::UnknownProcessSignature);
+            };
+            for param in signature.params() {
+                check_process_type(&param.ty)?;
+            }
+            check_process_type(signature.output())
+        }
+        TypeExpr::Any
+        | TypeExpr::Str
+        | TypeExpr::Int
+        | TypeExpr::Float
+        | TypeExpr::Bool
+        | TypeExpr::Dict
+        | TypeExpr::Null
+        | TypeExpr::Enum(_)
+        | TypeExpr::Ref(_) => Ok(()),
+    }
 }
 
 /// Walks one function body, tracking whether a loop encloses each node.
@@ -249,7 +334,7 @@ pub struct ProcessDecl {
     pub body: Expr,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessParam {
     pub name: AstString,
     pub ty: TypeExpr,
@@ -921,16 +1006,149 @@ pub enum TypeExpr {
     List(Box<TypeExpr>),
     Object(Vec<TypeField>),
     Ref(AstString),
-    Process {
-        input: Box<TypeExpr>,
-        output: Box<TypeExpr>,
-        input_count: usize,
-    },
+    Process(ProcessType),
     TriggerHandle(Box<TypeExpr>),
     /// Union of alternative type shapes, e.g. `str | int | null`.
     /// Always has two or more variants; single-variant parses collapse
     /// to the underlying `TypeExpr` in the parser.
     Union(Vec<TypeExpr>),
+}
+
+/// A checked, ordered process-call signature.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessSignature {
+    params: Vec<ProcessParam>,
+    output: Box<TypeExpr>,
+}
+
+impl ProcessSignature {
+    /// Builds a signature after validating source-level parameter names and uniqueness.
+    pub fn try_new(
+        params: Vec<ProcessParam>,
+        output: TypeExpr,
+    ) -> Result<Self, ProcessSignatureError> {
+        let mut names = std::collections::BTreeSet::new();
+        for param in &params {
+            if !crate::parser::is_source_identifier(
+                param.name.as_str(),
+                crate::parser::IdentifierPosition::Identifier,
+            ) {
+                return Err(ProcessSignatureError::InvalidParameterName {
+                    name: param.name.to_string(),
+                });
+            }
+            if !names.insert(param.name.as_str()) {
+                return Err(ProcessSignatureError::DuplicateParameter {
+                    name: param.name.to_string(),
+                });
+            }
+        }
+        Ok(Self {
+            params,
+            output: Box::new(output),
+        })
+    }
+
+    /// Returns parameters in invocation order.
+    pub fn params(&self) -> &[ProcessParam] {
+        &self.params
+    }
+
+    /// Returns the process result type.
+    pub fn output(&self) -> &TypeExpr {
+        &self.output
+    }
+
+    /// Returns the derived number of invocation parameters.
+    pub fn arity(&self) -> usize {
+        self.params.len()
+    }
+}
+
+/// Why an ordered process signature cannot be constructed.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ProcessSignatureError {
+    #[error("invalid process parameter name `{name}`")]
+    InvalidParameterName { name: String },
+    #[error("duplicate process parameter `{name}`")]
+    DuplicateParameter { name: String },
+}
+
+/// A process callable with either an authoritative signature or an honest host-only unknown shape.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessType(ProcessTypeKind);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProcessTypeKind {
+    Unknown,
+    Known(ProcessSignature),
+}
+
+impl ProcessType {
+    /// Wraps a checked authoritative process signature.
+    pub fn known(signature: ProcessSignature) -> Self {
+        Self(ProcessTypeKind::Known(signature))
+    }
+
+    /// Describes a process callable whose host schema makes no signature claim.
+    pub fn unknown() -> Self {
+        Self(ProcessTypeKind::Unknown)
+    }
+
+    /// Returns the authoritative signature when one is known.
+    pub fn as_signature(&self) -> Option<&ProcessSignature> {
+        match &self.0 {
+            ProcessTypeKind::Known(signature) => Some(signature),
+            ProcessTypeKind::Unknown => None,
+        }
+    }
+}
+
+impl Serialize for ProcessType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            ProcessTypeKind::Unknown => {
+                let mut state = serializer.serialize_struct("ProcessType", 1)?;
+                state.serialize_field("kind", "unknown")?;
+                state.end()
+            }
+            ProcessTypeKind::Known(signature) => {
+                let mut state = serializer.serialize_struct("ProcessType", 3)?;
+                state.serialize_field("kind", "known")?;
+                state.serialize_field("params", signature.params())?;
+                state.serialize_field("output", signature.output())?;
+                state.end()
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum ProcessTypeWire {
+    Unknown,
+    Known {
+        params: Vec<ProcessParam>,
+        output: TypeExpr,
+    },
+}
+
+impl<'de> Deserialize<'de> for ProcessType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match ProcessTypeWire::deserialize(deserializer)? {
+            ProcessTypeWire::Unknown => Ok(Self::unknown()),
+            ProcessTypeWire::Known { params, output } => ProcessSignature::try_new(params, output)
+                .map(Self::known)
+                .map_err(serde::de::Error::custom),
+        }
+    }
 }
 
 pub fn format_type_expr(ty: &TypeExpr) -> String {
@@ -968,13 +1186,19 @@ pub fn format_type_expr(ty: &TypeExpr) -> String {
             format!("{{ {fields} }}")
         }
         TypeExpr::Ref(name) => name.to_string(),
-        TypeExpr::Process { input, output, .. } => {
-            format!(
-                "Process<{}, {}>",
-                format_type_expr(input),
-                format_type_expr(output)
-            )
-        }
+        TypeExpr::Process(process) => match process.as_signature() {
+            Some(signature) => format!(
+                "Process<({}), {}>",
+                signature
+                    .params()
+                    .iter()
+                    .map(|param| format!("{}: {}", param.name, format_type_expr(&param.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                format_type_expr(signature.output())
+            ),
+            None => "Process".to_string(),
+        },
         TypeExpr::TriggerHandle(event) => {
             format!("TriggerHandle<{}>", format_type_expr(event))
         }
@@ -1106,6 +1330,95 @@ pub enum BinaryOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn param(name: &str, ty: TypeExpr) -> ProcessParam {
+        ProcessParam {
+            name: name.into(),
+            ty,
+        }
+    }
+
+    #[test]
+    fn process_signature_construction_and_wire_shape_are_checked() {
+        let process = TypeExpr::Process(ProcessType::known(
+            ProcessSignature::try_new(vec![param("message", TypeExpr::Str)], TypeExpr::Bool)
+                .expect("valid signature"),
+        ));
+        assert_eq!(
+            serde_json::to_value(&process).unwrap(),
+            serde_json::json!({
+                "Process": {
+                    "kind": "known",
+                    "params": [{"name": "message", "ty": "Str"}],
+                    "output": "Bool"
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<TypeExpr>(serde_json::to_value(&process).unwrap()).unwrap(),
+            process
+        );
+        assert_eq!(format_type_expr(&process), "Process<(message: str), bool>");
+
+        let unknown = TypeExpr::Process(ProcessType::unknown());
+        assert_eq!(
+            serde_json::to_value(&unknown).unwrap(),
+            serde_json::json!({"Process": {"kind": "unknown"}})
+        );
+        assert_eq!(format_type_expr(&unknown), "Process");
+    }
+
+    #[test]
+    fn process_signature_refuses_invalid_names_without_broadening_type_validation() {
+        assert!(matches!(
+            ProcessSignature::try_new(vec![param("1bad", TypeExpr::Str)], TypeExpr::Bool),
+            Err(ProcessSignatureError::InvalidParameterName { .. })
+        ));
+        assert!(matches!(
+            ProcessSignature::try_new(vec![param("if", TypeExpr::Str)], TypeExpr::Bool),
+            Err(ProcessSignatureError::InvalidParameterName { .. })
+        ));
+        assert!(matches!(
+            ProcessSignature::try_new(
+                vec![param("value", TypeExpr::Str), param("value", TypeExpr::Int)],
+                TypeExpr::Bool,
+            ),
+            Err(ProcessSignatureError::DuplicateParameter { .. })
+        ));
+        ProcessSignature::try_new(
+            vec![param("value", TypeExpr::Enum(Vec::new()))],
+            TypeExpr::Union(vec![TypeExpr::Str]),
+        )
+        .expect("FIG-2879 does not add unrelated TypeExpr restrictions");
+    }
+
+    #[test]
+    fn process_signature_decode_refuses_missing_duplicate_unknown_and_legacy_fields() {
+        for wire in [
+            r#"{"Process":{"params":[],"output":"Bool"}}"#,
+            r#"{"Process":{"kind":null}}"#,
+            r#"{"Process":{"kind":"known","params":null,"output":"Bool"}}"#,
+            r#"{"Process":{"kind":"known","params":[],"output":null}}"#,
+            r#"{"Process":{"kind":"known","params":[],"params":[],"output":"Bool"}}"#,
+            r#"{"Process":{"kind":"known","params":[],"output":"Bool","extra":true}}"#,
+            r#"{"Process":{"input":"Str","output":"Bool","input_count":1}}"#,
+            r#"{"Process":{"kind":"known","params":[{"name":"x","ty":"Str"},{"name":"x","ty":"Int"}],"output":"Bool"}}"#,
+            r#"{"Process":{"kind":"known","params":[{"name":"outer","ty":{"Process":{"kind":"known","params":[{"name":"x","ty":"Str"},{"name":"x","ty":"Int"}],"output":"Bool"}}}],"output":"Bool"}}"#,
+        ] {
+            assert!(serde_json::from_str::<TypeExpr>(wire).is_err(), "{wire}");
+        }
+    }
+
+    #[test]
+    fn unknown_process_type_is_refused_in_program_ir() {
+        let program = Program::block(vec![Expr::TypeLiteral(Box::new(TypeExpr::Process(
+            ProcessType::unknown(),
+        )))]);
+        assert!(matches!(
+            validate_ast(&program),
+            Err(InvalidAst::UnknownProcessSignature)
+        ));
+    }
 
     #[test]
     fn type_expr_formatting_covers_nested_shapes() {

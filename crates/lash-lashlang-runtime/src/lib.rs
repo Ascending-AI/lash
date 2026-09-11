@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 mod error;
@@ -733,12 +735,50 @@ pub async fn prepare_lashlang_process_start(
             process_ref: format!("{:?}", start.process_ref),
         });
     }
+    let process = artifact
+        .canonical_ir
+        .process(&start.process_name)
+        .ok_or_else(|| LashlangRuntimeError::ArtifactProcessMismatch {
+            module_ref: start.module_ref.to_string(),
+            process: start.process_name.clone(),
+            process_ref: format!("{:?}", start.process_ref),
+        })?;
     let args = match serde_json::to_value(lashlang::Value::Record(Arc::new(start.args)))
         .map_err(|source| LashlangRuntimeError::SerializeProcessArgs { source })?
     {
         serde_json::Value::Object(map) => map,
         _ => return Err(LashlangRuntimeError::ProcessArgsNotRecord),
     };
+    for name in args.keys() {
+        if !process
+            .params
+            .iter()
+            .any(|param| param.name.as_str() == name)
+        {
+            return Err(LashlangRuntimeError::InvalidProcessArgument {
+                path: name.clone(),
+                message: "argument is not declared by the target process".to_string(),
+            });
+        }
+    }
+    for param in &process.params {
+        let value = args.get(param.name.as_str()).ok_or_else(|| {
+            LashlangRuntimeError::InvalidProcessArgument {
+                path: param.name.to_string(),
+                message: "required argument is missing".to_string(),
+            }
+        })?;
+        let expected = artifact.resolve_type(&param.ty);
+        if type_contains_process(&expected) {
+            validate_process_claims(
+                artifact_store.as_ref(),
+                value,
+                &expected,
+                param.name.to_string(),
+            )
+            .await?;
+        }
+    }
     let signal_event_types = artifact
         .canonical_ir
         .process(&start.process_name)
@@ -775,6 +815,160 @@ pub async fn prepare_lashlang_process_start(
     Ok(PreparedLashlangProcessStart {
         registration,
         label: display_name,
+    })
+}
+
+fn type_contains_process(ty: &lashlang::TypeExpr) -> bool {
+    match ty {
+        lashlang::TypeExpr::Process(_) => true,
+        lashlang::TypeExpr::List(item) | lashlang::TypeExpr::TriggerHandle(item) => {
+            type_contains_process(item)
+        }
+        lashlang::TypeExpr::Object(fields) => {
+            fields.iter().any(|field| type_contains_process(&field.ty))
+        }
+        lashlang::TypeExpr::Union(items) => items.iter().any(type_contains_process),
+        lashlang::TypeExpr::Any
+        | lashlang::TypeExpr::Str
+        | lashlang::TypeExpr::Int
+        | lashlang::TypeExpr::Float
+        | lashlang::TypeExpr::Bool
+        | lashlang::TypeExpr::Dict
+        | lashlang::TypeExpr::Null
+        | lashlang::TypeExpr::Enum(_)
+        | lashlang::TypeExpr::Ref(_) => false,
+    }
+}
+
+fn validate_process_claims<'a>(
+    artifact_store: &'a dyn LashlangArtifactStore,
+    value: &'a serde_json::Value,
+    expected: &'a lashlang::TypeExpr,
+    path: String,
+) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {
+    Box::pin(async move {
+        let invalid = |message: String| LashlangRuntimeError::InvalidProcessArgument {
+            path: path.clone(),
+            message,
+        };
+        match expected {
+            lashlang::TypeExpr::Any => Ok(()),
+            lashlang::TypeExpr::Str => value
+                .is_string()
+                .then_some(())
+                .ok_or_else(|| invalid("expected string".to_string())),
+            lashlang::TypeExpr::Int => value
+                .as_i64()
+                .is_some()
+                .then_some(())
+                .ok_or_else(|| invalid("expected integer".to_string())),
+            lashlang::TypeExpr::Float => value
+                .is_number()
+                .then_some(())
+                .ok_or_else(|| invalid("expected number".to_string())),
+            lashlang::TypeExpr::Bool => value
+                .is_boolean()
+                .then_some(())
+                .ok_or_else(|| invalid("expected boolean".to_string())),
+            lashlang::TypeExpr::Null => value
+                .is_null()
+                .then_some(())
+                .ok_or_else(|| invalid("expected null".to_string())),
+            lashlang::TypeExpr::Enum(values) => value
+                .as_str()
+                .is_some_and(|value| values.iter().any(|item| item.as_str() == value))
+                .then_some(())
+                .ok_or_else(|| invalid("expected enum value".to_string())),
+            lashlang::TypeExpr::Dict => value
+                .is_object()
+                .then_some(())
+                .ok_or_else(|| invalid("expected object".to_string())),
+            lashlang::TypeExpr::List(item) => {
+                let items = value
+                    .as_array()
+                    .ok_or_else(|| invalid("expected list".to_string()))?;
+                for (index, item_value) in items.iter().enumerate() {
+                    validate_process_claims(
+                        artifact_store,
+                        item_value,
+                        item,
+                        format!("{path}[{index}]"),
+                    )
+                    .await?;
+                }
+                Ok(())
+            }
+            lashlang::TypeExpr::Object(fields) => {
+                let object = value
+                    .as_object()
+                    .ok_or_else(|| invalid("expected object".to_string()))?;
+                for field in fields {
+                    match object.get(field.name.as_str()) {
+                        Some(field_value) => {
+                            validate_process_claims(
+                                artifact_store,
+                                field_value,
+                                &field.ty,
+                                format!("{path}.{}", field.name),
+                            )
+                            .await?;
+                        }
+                        None if field.optional => {}
+                        None => {
+                            return Err(invalid(format!(
+                                "required field `{}` is missing",
+                                field.name
+                            )));
+                        }
+                    }
+                }
+                Ok(())
+            }
+            lashlang::TypeExpr::Union(items) => {
+                let mut errors = Vec::new();
+                for item in items {
+                    match validate_process_claims(artifact_store, value, item, path.clone()).await {
+                        Ok(()) => return Ok(()),
+                        Err(error) => errors.push(error.to_string()),
+                    }
+                }
+                Err(invalid(format!(
+                    "value matches no union variant ({})",
+                    errors.join("; ")
+                )))
+            }
+            lashlang::TypeExpr::Process(expected_process) => {
+                let expected_signature = expected_process.as_signature().ok_or_else(|| {
+                    invalid("program signature is unexpectedly unknown".to_string())
+                })?;
+                let identity = lashlang::ProcessDefinitionIdentity::from_process_value(value)
+                    .map_err(|error| invalid(error.to_string()))?;
+                let actual_artifact = artifact_store
+                    .get_module_artifact(&identity.module_ref)
+                    .await
+                    .map_err(|error| invalid(format!("failed to load process artifact: {error}")))?
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "missing process artifact `{}`",
+                            identity.module_ref
+                        ))
+                    })?;
+                let actual = identity
+                    .resolve_process_type(actual_artifact.as_ref())
+                    .map_err(|error| invalid(error.to_string()))?;
+                let expected = lashlang::TypeExpr::Process(lashlang::ProcessType::known(
+                    expected_signature.clone(),
+                ));
+                if lashlang::is_resolved_type_assignable(&actual, &expected) {
+                    Ok(())
+                } else {
+                    Err(invalid(format!(
+                        "immutable process signature `{actual}` is not assignable to `{expected}`"
+                    )))
+                }
+            }
+            lashlang::TypeExpr::TriggerHandle(_) | lashlang::TypeExpr::Ref(_) => Ok(()),
+        }
     })
 }
 

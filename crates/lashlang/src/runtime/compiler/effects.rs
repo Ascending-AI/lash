@@ -658,7 +658,7 @@ impl Compiler {
                 let keys = self.push_key_list([schema_keys::ANY_OF].into_iter());
                 self.code.push(Instruction::BuildRecord(keys));
             }
-            TypeExpr::Process { .. } | TypeExpr::TriggerHandle(_) => {
+            TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => {
                 let idx = self.push_const(interned_scalar_schema(None));
                 self.code.push(Instruction::PushConst(idx));
             }

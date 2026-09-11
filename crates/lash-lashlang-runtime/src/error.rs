@@ -171,6 +171,9 @@ pub enum LashlangRuntimeError {
     /// Process arguments did not serialize to a record.
     #[error("process args must serialize as a record")]
     ProcessArgsNotRecord,
+    /// Process arguments do not match the immutable target signature.
+    #[error("invalid process argument `{path}`: {message}")]
+    InvalidProcessArgument { path: String, message: String },
     /// Deriving the deterministic process identifier failed.
     #[error("failed to derive deterministic process id: {source}")]
     DeriveProcessId {

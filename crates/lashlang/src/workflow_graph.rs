@@ -36,7 +36,7 @@ pub use execution_sites::runtime_execution_site_for_workflow_site;
 pub use facets::*;
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 5;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 6;
 
 /// A deterministic node identifier minted from canonical source and AST position.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

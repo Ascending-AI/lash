@@ -776,16 +776,33 @@ impl<'a> SourceFormatter<'a> {
             TypeExpr::List(item) => Ok(format!("list[{}]", self.type_source(item)?)),
             TypeExpr::Object(fields) => self.object_type_source(fields),
             TypeExpr::Ref(name) => format_type_ref(name.as_str()),
-            TypeExpr::Process { input_count, .. } if *input_count != 1 => {
-                Err(CanonicalSourceError::NonSourceableType {
-                    kind: "multi-input process",
-                })
+            TypeExpr::Process(process) => {
+                let Some(signature) = process.as_signature() else {
+                    return Err(CanonicalSourceError::NonSourceableType {
+                        kind: "process with unknown signature",
+                    });
+                };
+                let params = signature
+                    .params()
+                    .iter()
+                    .map(|param| {
+                        Ok(format!(
+                            "{}: {}",
+                            format_identifier(
+                                "process type parameter",
+                                param.name.as_str(),
+                                IdentifierPosition::Identifier,
+                            )?,
+                            self.type_source(&param.ty)?
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, CanonicalSourceError>>()?;
+                Ok(format!(
+                    "Process<({}), {}>",
+                    params.join(", "),
+                    self.type_source(signature.output())?
+                ))
             }
-            TypeExpr::Process { input, output, .. } => Ok(format!(
-                "Process<{}, {}>",
-                self.type_source(input)?,
-                self.type_source(output)?
-            )),
             TypeExpr::TriggerHandle(event) => {
                 Ok(format!("TriggerHandle<{}>", self.type_source(event)?))
             }
@@ -1014,18 +1031,7 @@ fn format_receiver_path(
 }
 
 fn is_identifier(name: &str, position: IdentifierPosition) -> bool {
-    is_identifier_shape(name) && !crate::parser::is_parser_reserved_name(name, position)
-}
-
-fn is_identifier_shape(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    crate::parser::is_source_identifier(name, position)
 }
 
 fn is_bare_key(name: &str) -> bool {

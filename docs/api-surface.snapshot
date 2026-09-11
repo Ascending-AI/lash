@@ -7745,9 +7745,7 @@ lash::rlm::TypeExpr::Null
 lash::rlm::TypeExpr::Object
 lash::rlm::TypeExpr::Object::0
 lash::rlm::TypeExpr::Process
-lash::rlm::TypeExpr::Process::input
-lash::rlm::TypeExpr::Process::input_count
-lash::rlm::TypeExpr::Process::output
+lash::rlm::TypeExpr::Process::0
 lash::rlm::TypeExpr::Ref
 lash::rlm::TypeExpr::Ref::0
 lash::rlm::TypeExpr::Str

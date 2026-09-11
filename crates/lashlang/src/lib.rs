@@ -32,8 +32,9 @@ pub use ast::{
     ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst, JavaScriptBinaryOp,
     JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, ListComprehensionClause,
     MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl, ProcessParam, ProcessSignalDecl,
-    ProcessStartExpr, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    check_ast_nesting_depth, fold_expr_children, format_type_expr, validate_ast, walk_expr,
+    ProcessSignature, ProcessSignatureError, ProcessStartExpr, ProcessType, Program,
+    ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp, check_ast_nesting_depth,
+    fold_expr_children, format_type_expr, validate_ast, walk_expr,
 };
 
 /// Names of every source Lashlang builtin, in registry order.
@@ -117,8 +118,8 @@ pub use trigger::{
     TriggerCompatibilityError, TriggerCompatibilityRequest, TriggerHostOperation,
     TriggerInputBinding, TriggerInputTemplate, TriggerListRequest, TriggerPruneRequest,
     TriggerRegistrationRequest, add_trigger_resource_operations, check_trigger_compatibility,
-    event_type_for_source, is_trigger_resource_type, list_call_args, register_call_args,
-    trigger_event_placeholder_expr,
+    event_type_for_source, is_resolved_type_assignable, is_trigger_resource_type, list_call_args,
+    register_call_args, trigger_event_placeholder_expr,
 };
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{

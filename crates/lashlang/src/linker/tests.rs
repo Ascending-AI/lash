@@ -1005,6 +1005,59 @@ fn linked_module_accepts_button_trigger_source_constructor() {
 }
 
 #[test]
+fn named_process_signature_survives_parameter_return_container_branch_and_trigger_flow() {
+    let program = crate::parse(
+        r#"
+            process scan(event: timer.Tick) -> bool { finish true }
+            process install(handler: Process<(event: timer.Tick), bool>) -> Process<(event: timer.Tick), bool> {
+              handlers = [handler]
+              boxed = { target: handlers[0] }
+              selected = handler
+              if true { selected = boxed.target } else { selected = handler }
+              source = timer.Schedule({ expr: "0 8 * * *" })
+              await triggers.register({
+                source: source,
+                target: selected,
+                inputs: { event: trigger.event },
+                subscription_key: "indirect-handler"
+              })?
+              finish selected
+            }
+            finish start install(handler: scan)
+            "#,
+    )
+    .expect("parse indirect named process flow");
+
+    LinkedModule::link(program, full_host_environment())
+        .expect("named process signature should survive supported indirect flows");
+}
+
+#[test]
+fn zero_parameter_process_is_valid_but_trigger_registration_still_requires_event_mapping() {
+    let direct = crate::parse(
+        r#"
+            process idle() -> bool { finish true }
+            finish start idle()
+            "#,
+    )
+    .expect("parse zero parameter process");
+    LinkedModule::link(direct, full_host_environment()).expect("zero parameter start links");
+
+    let trigger = crate::parse(
+        r#"
+            process idle() -> bool { finish true }
+            source = timer.Schedule({ expr: "0 8 * * *" })
+            await triggers.register({ source: source, target: idle, inputs: {} })?
+            "#,
+    )
+    .expect("parse zero parameter trigger");
+    assert!(matches!(
+        LinkedModule::link(trigger, full_host_environment()),
+        Err(LinkError::MissingTriggerEventInput { .. })
+    ));
+}
+
+#[test]
 fn linked_module_rejects_bad_trigger_registry_bindings() {
     let missing = crate::parse(
         r#"

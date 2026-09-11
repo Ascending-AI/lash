@@ -166,7 +166,7 @@ fn validate_named_data_shape(ty: &TypeExpr) -> Result<(), NamedDataTypeError> {
         TypeExpr::Ref(name) => Err(NamedDataTypeError::NestedRef {
             name: name.to_string(),
         }),
-        TypeExpr::Process { .. } => Err(NamedDataTypeError::UnsupportedType { ty: "process" }),
+        TypeExpr::Process(_) => Err(NamedDataTypeError::UnsupportedType { ty: "process" }),
         TypeExpr::TriggerHandle(_) => Err(NamedDataTypeError::UnsupportedType {
             ty: "trigger handle",
         }),

@@ -113,7 +113,7 @@ impl<'module> Linker<'module> {
                     match name.as_str() {
                         "target" => {
                             let target_ty = self.infer_expr_type(expr, &mut scope.clone())?;
-                            if !matches!(target_ty, TypeExpr::Process { .. }) {
+                            if !matches!(target_ty, TypeExpr::Process(_)) {
                                 return Err(LinkError::InvalidTriggerTarget {
                                     actual: format_type_expr(&target_ty),
                                     span: scope.span,
@@ -171,7 +171,7 @@ impl<'module> Linker<'module> {
                     match name.as_str() {
                         "target" => {
                             let target_ty = self.infer_expr_type(expr, &mut scope.clone())?;
-                            if !matches!(target_ty, TypeExpr::Process { .. }) {
+                            if !matches!(target_ty, TypeExpr::Process(_)) {
                                 return Err(LinkError::InvalidTriggerTarget {
                                     actual: format_type_expr(&target_ty),
                                     span: scope.span,
@@ -350,29 +350,45 @@ impl<'module> Linker<'module> {
         {
             return Ok(process.params.clone());
         }
-        let TypeExpr::Process {
-            input, input_count, ..
-        } = target_ty
-        else {
-            return Err(LinkError::InvalidTriggerTarget {
-                actual: format_type_expr(target_ty),
-                span,
-            });
+        let resolved = self.resolve_type_aliases(target_ty);
+        let params = match &resolved {
+            TypeExpr::Process(process) => process
+                .as_signature()
+                .map(|signature| signature.params().to_vec()),
+            TypeExpr::Union(items) => {
+                let mut common: Option<Vec<ProcessParam>> = None;
+                for item in items {
+                    let TypeExpr::Process(process) = item else {
+                        return Err(LinkError::InvalidTriggerTarget {
+                            actual: format_type_expr(&resolved),
+                            span,
+                        });
+                    };
+                    let Some(signature) = process.as_signature() else {
+                        return Err(LinkError::InvalidTriggerTarget {
+                            actual: format_type_expr(&resolved),
+                            span,
+                        });
+                    };
+                    match &common {
+                        Some(params) if params != signature.params() => {
+                            return Err(LinkError::InvalidTriggerTarget {
+                                actual: format_type_expr(&resolved),
+                                span,
+                            });
+                        }
+                        Some(_) => {}
+                        None => common = Some(signature.params().to_vec()),
+                    }
+                }
+                common
+            }
+            _ => None,
         };
-        match (input_count, input.as_ref()) {
-            (0, _) => Ok(Vec::new()),
-            (count, TypeExpr::Object(fields)) if *count > 1 => Ok(fields
-                .iter()
-                .map(|field| ProcessParam {
-                    name: field.name.clone(),
-                    ty: field.ty.clone(),
-                })
-                .collect()),
-            _ => Err(LinkError::InvalidTriggerTarget {
-                actual: format_type_expr(target_ty),
-                span,
-            }),
-        }
+        params.ok_or_else(|| LinkError::InvalidTriggerTarget {
+            actual: format_type_expr(target_ty),
+            span,
+        })
     }
 
     pub(super) fn infer_process_output(
