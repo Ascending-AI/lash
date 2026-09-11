@@ -21,6 +21,7 @@ use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::http_server::HttpServer;
 use restate_sdk::serde::Json;
 
+use crate::durable_wait::arm_wait_registration_witness;
 use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
     payload_key, rank_wait_request, ready_wait_request,
@@ -33,8 +34,9 @@ use crate::{
     EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
     EffectGroupRecordSettlementResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
     EffectGroupShape, EffectGroupWaitResolution, LashDurableWaitIndex, LashDurableWaitWorkflow,
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateEffectGroupRetryPolicy,
-    RestateEffectGroupServices, RestateEffectHost, RestateIngressClient,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitRegistration,
+    RestateEffectGroupRetryPolicy, RestateEffectGroupServices, RestateEffectHost,
+    RestateIngressClient,
 };
 
 #[derive(Default)]
@@ -330,6 +332,111 @@ impl LiveConformanceHarness {
             .await
             .expect_err("the retired scope mints nothing");
         assert_eq!(fenced.code.as_str(), "await_event_unknown_or_revoked");
+    }
+
+    /// Prove both serialized orders between an await workflow's durable index
+    /// registration and scope retirement.
+    ///
+    /// The registration-first case uses the host's real await path. Its
+    /// test-only marker fires from the index handler after `ctx.set` is issued;
+    /// the following retirement is an exclusive call on that same virtual
+    /// object, so Restate orders it after registration. Refusal is the state
+    /// oracle: omitting the wait-row write would make retirement succeed and
+    /// this witness fail.
+    pub(super) async fn run_active_wait_registration_witnesses(
+        &self,
+        host: Arc<dyn lash_core::EffectHost>,
+    ) {
+        let suffix = nonce();
+        let scope =
+            ExecutionScope::runtime_operation(format!("restate-await-registration-first-{suffix}"));
+        let key = host
+            .await_event_key(
+                &scope,
+                lash_core::AwaitEventWaitIdentity::tool_completion("active-wait"),
+            )
+            .await
+            .expect("mint registration-first wait key");
+        let registered = arm_wait_registration_witness(&key);
+        let waiter_host = Arc::clone(&host);
+        let waiter_key = key.clone();
+        let waiter = lash_core::task::spawn(async move {
+            waiter_host
+                .await_await_event(&waiter_key, CancellationToken::new(), None)
+                .await
+        });
+        let registration = tokio::time::timeout(Duration::from_secs(30), registered)
+            .await
+            .expect("await workflow reached its index registration")
+            .expect("registration witness sender remained live");
+        assert_eq!(
+            registration,
+            RestateDurableWaitRegistration::Registered,
+            "the workflow registered an unresolved wait before retirement"
+        );
+
+        lash_conformance::effect_host_registered_wait_rejects_quiescent_retirement(
+            Arc::clone(&host),
+            scope,
+            key,
+            waiter,
+        )
+        .await;
+
+        // The opposite legal ordering: retirement fences an empty scope, then
+        // the real wait workflow reaches the same index and observes Revoked.
+        let retired_scope =
+            ExecutionScope::runtime_operation(format!("restate-retirement-first-{suffix}"));
+        let retired_key = host
+            .await_event_key(
+                &retired_scope,
+                lash_core::AwaitEventWaitIdentity::tool_completion("late-wait"),
+            )
+            .await
+            .expect("mint retirement-first wait key");
+        host.retire_effect_journal(
+            lash_core::EffectJournalRetirement::for_scope(&retired_scope)
+                .expect("runtime operations are retirable")
+                .when_quiescent(),
+        )
+        .await
+        .expect("an empty scope retires before registration");
+
+        let late_registration = arm_wait_registration_witness(&retired_key);
+        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let workflow_key = RestateDurableWaitAddress::for_key(&retired_key).workflow_key;
+        let late_workflow = lash_core::task::spawn(async move {
+            ingress
+                .call_workflow_json::<_, Resolution>(
+                    "LashDurableWaitWorkflow",
+                    &workflow_key,
+                    "await_resolution",
+                    &RestateDurableWaitAwaitRequest {
+                        key: retired_key,
+                        timeout_ms: None,
+                    },
+                )
+                .await
+        });
+        let late_registration = tokio::time::timeout(Duration::from_secs(30), late_registration)
+            .await
+            .expect("late workflow reached the retired index")
+            .expect("late registration witness sender remained live");
+        assert_eq!(
+            late_registration,
+            RestateDurableWaitRegistration::Revoked,
+            "retirement legitimately wins before durable registration"
+        );
+        let late_resolution = tokio::time::timeout(Duration::from_secs(30), late_workflow)
+            .await
+            .expect("late workflow completed after revoked registration")
+            .expect("late workflow task joins")
+            .expect("late workflow returns its terminal");
+        assert_eq!(late_resolution, Resolution::Cancelled);
+
+        println!(
+            "RESTATE_QUIESCENCE await_registration_orders=registered-first,retired-first PASS"
+        );
     }
 
     /// The crash cut between a registry's commit and its post-commit index
