@@ -392,6 +392,7 @@ jobs:
           python3 scripts/test_ci_plan.py
           python3 scripts/test_ci_plan_hygiene.py
           python3 scripts/test_ci_workspace_cache.py
+          python3 scripts/test_ci_artifact_provenance.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
           bash scripts/test-ci-reclaim-disk.sh
@@ -1642,6 +1643,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     needs: plan
+    outputs:
+      artifact_id: ${{ steps.upload-worker-binaries.outputs.artifact-id }}
+      artifact_name: ${{ steps.prepare-worker-binaries.outputs.artifact_name }}
+      producer_attempt: ${{ steps.prepare-worker-binaries.outputs.producer_attempt }}
     if: >-
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -1707,12 +1712,32 @@ jobs:
             -exec cp '{}' "${RUNNER_TEMP}/worker-artifacts/" \;
           tar -C "${RUNNER_TEMP}/worker-artifacts" -cf "${RUNNER_TEMP}/worker-binaries.tar" .
 
+      - name: Record worker binary provenance
+        id: prepare-worker-binaries
+        if: env.RUN_WORKER_ARTIFACTS == 'true'
+        env:
+          ARTIFACT_NAME: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+        run: |
+          python3 scripts/ci/artifact_provenance.py create \
+            --manifest "${RUNNER_TEMP}/worker-binaries.provenance.json" \
+            --payload-root "${RUNNER_TEMP}" \
+            --payload worker-binaries.tar \
+            --artifact-name "${ARTIFACT_NAME}" \
+            --producer-job worker-artifacts \
+            --producer-instance worker-binaries \
+            --producer-attempt "${GITHUB_RUN_ATTEMPT}"
+          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "producer_attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
       - name: Upload worker binaries
+        id: upload-worker-binaries
         if: env.RUN_WORKER_ARTIFACTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/worker-binaries.tar
+          name: ${{ steps.prepare-worker-binaries.outputs.artifact_name }}
+          path: |
+            ${{ runner.temp }}/worker-binaries.tar
+            ${{ runner.temp }}/worker-binaries.provenance.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -1936,16 +1961,37 @@ jobs:
 
       # Each recipe owns its dependencies and any container lifecycle, so the
       # matrix legs run independently without cross-job coordination.
+      - name: Require exact worker artifact selection
+        run: >-
+          python3 scripts/ci/artifact_provenance.py select
+          --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}"
+          --expected-artifact-name "worker-binaries-${GITHUB_SHA}-${{ needs.worker-artifacts.outputs.producer_attempt }}"
+          --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}"
+          --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}"
+          --current-attempt "${GITHUB_RUN_ATTEMPT}"
+
       - name: Download worker binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.worker-artifacts.outputs.artifact_id }}
           path: ${{ runner.temp }}/worker-download
 
-      - name: Extract worker binaries
+      - name: Verify and extract worker binaries
         run: |
-          mkdir -p "${RUNNER_TEMP}/worker-binaries"
-          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
+          python3 scripts/ci/artifact_provenance.py consume \
+            --manifest "${RUNNER_TEMP}/worker-download/worker-binaries.provenance.json" \
+            --payload-root "${RUNNER_TEMP}/worker-download" \
+            --require-payload worker-binaries.tar \
+            --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}" \
+            --producer-job worker-artifacts \
+            --producer-instance worker-binaries \
+            --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}" \
+            --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}" \
+            --current-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --receipt "${RUNNER_TEMP}/worker-binaries-consumption.json" \
+            --step-summary "${GITHUB_STEP_SUMMARY}" \
+            --extract-tar worker-binaries.tar \
+            --extract-to "${RUNNER_TEMP}/worker-binaries"
           echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
 
       - name: Run functional E2E
@@ -1977,6 +2023,13 @@ jobs:
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 75
     needs: [plan, worker-artifacts]
+    outputs:
+      segment_1_artifact_id: ${{ steps.upload-segment-1.outputs.artifact-id }}
+      segment_1_artifact_name: ${{ steps.prepare-segment-1.outputs.artifact_name }}
+      segment_1_producer_attempt: ${{ steps.prepare-segment-1.outputs.producer_attempt }}
+      segment_2_artifact_id: ${{ steps.upload-segment-2.outputs.artifact-id }}
+      segment_2_artifact_name: ${{ steps.prepare-segment-2.outputs.artifact_name }}
+      segment_2_producer_attempt: ${{ steps.prepare-segment-2.outputs.producer_attempt }}
     env:
       RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     strategy:
@@ -2041,18 +2094,40 @@ jobs:
         if: env.RUN_WORKERS_E2E == 'true'
         uses: ./.github/actions/setup-mold
 
+      - name: Require exact worker artifact selection
+        if: env.RUN_WORKERS_E2E == 'true'
+        run: >-
+          python3 scripts/ci/artifact_provenance.py select
+          --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}"
+          --expected-artifact-name "worker-binaries-${GITHUB_SHA}-${{ needs.worker-artifacts.outputs.producer_attempt }}"
+          --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}"
+          --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}"
+          --current-attempt "${GITHUB_RUN_ATTEMPT}"
+
       - name: Download worker binaries
         if: env.RUN_WORKERS_E2E == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: worker-binaries-${{ github.sha }}-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.worker-artifacts.outputs.artifact_id }}
           path: ${{ runner.temp }}/worker-download
 
-      - name: Extract worker binaries
+      - name: Verify and extract worker binaries
         if: env.RUN_WORKERS_E2E == 'true'
         run: |
-          mkdir -p "${RUNNER_TEMP}/worker-binaries"
-          tar -xf "${RUNNER_TEMP}/worker-download/worker-binaries.tar" -C "${RUNNER_TEMP}/worker-binaries"
+          python3 scripts/ci/artifact_provenance.py consume \
+            --manifest "${RUNNER_TEMP}/worker-download/worker-binaries.provenance.json" \
+            --payload-root "${RUNNER_TEMP}/worker-download" \
+            --require-payload worker-binaries.tar \
+            --artifact-name "${{ needs.worker-artifacts.outputs.artifact_name }}" \
+            --producer-job worker-artifacts \
+            --producer-instance worker-binaries \
+            --producer-attempt "${{ needs.worker-artifacts.outputs.producer_attempt }}" \
+            --selected-artifact-id "${{ needs.worker-artifacts.outputs.artifact_id }}" \
+            --current-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --receipt "target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}/worker-binaries-consumption.json" \
+            --step-summary "${GITHUB_STEP_SUMMARY}" \
+            --extract-tar worker-binaries.tar \
+            --extract-to "${RUNNER_TEMP}/worker-binaries"
           echo "LASH_E2E_PREBUILT_BIN_DIR=${RUNNER_TEMP}/worker-binaries" >> "$GITHUB_ENV"
 
       - name: Run distributed backend E2E
@@ -2082,12 +2157,60 @@ jobs:
           path: target/operator-flow-artifacts
           if-no-files-found: warn
 
-      - name: Upload completed workflow manifest
-        if: always() && env.RUN_WORKERS_E2E == 'true'
+      - name: Record segment 1 result provenance
+        id: prepare-segment-1
+        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
+        env:
+          ARTIFACT_NAME: restate-workers-e2e-segment-1-attempt-${{ github.run_attempt }}
+        run: |
+          python3 scripts/ci/artifact_provenance.py create \
+            --manifest target/restate-postgres-workers-e2e-manifests/segment-1/provenance.json \
+            --payload-root target/restate-postgres-workers-e2e-manifests/segment-1 \
+            --payload workflow-inventory.tsv \
+            --payload completed-workflows.txt \
+            --payload worker-binaries-consumption.json \
+            --artifact-name "${ARTIFACT_NAME}" \
+            --producer-job restate-postgres-workers \
+            --producer-instance segment-1 \
+            --producer-attempt "${GITHUB_RUN_ATTEMPT}"
+          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "producer_attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload segment 1 completed workflow manifest
+        id: upload-segment-1
+        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: restate-workers-e2e-segment-${{ matrix.segment }}-attempt-${{ github.run_attempt }}
-          path: target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}
+          name: ${{ steps.prepare-segment-1.outputs.artifact_name }}
+          path: target/restate-postgres-workers-e2e-manifests/segment-1
+          if-no-files-found: error
+
+      - name: Record segment 2 result provenance
+        id: prepare-segment-2
+        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 2
+        env:
+          ARTIFACT_NAME: restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}
+        run: |
+          python3 scripts/ci/artifact_provenance.py create \
+            --manifest target/restate-postgres-workers-e2e-manifests/segment-2/provenance.json \
+            --payload-root target/restate-postgres-workers-e2e-manifests/segment-2 \
+            --payload workflow-inventory.tsv \
+            --payload completed-workflows.txt \
+            --payload worker-binaries-consumption.json \
+            --artifact-name "${ARTIFACT_NAME}" \
+            --producer-job restate-postgres-workers \
+            --producer-instance segment-2 \
+            --producer-attempt "${GITHUB_RUN_ATTEMPT}"
+          echo "artifact_name=${ARTIFACT_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "producer_attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload segment 2 completed workflow manifest
+        id: upload-segment-2
+        if: always() && env.RUN_WORKERS_E2E == 'true' && matrix.segment == 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.prepare-segment-2.outputs.artifact_name }}
+          path: target/restate-postgres-workers-e2e-manifests/segment-2
           if-no-files-found: error
 
   restate-postgres-workers-summary:
@@ -2125,24 +2248,74 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      - name: Download completed workflow manifests
+      - name: Require exact segment result selections
+        if: env.RUN_WORKERS_E2E == 'true'
+        run: |
+          python3 scripts/ci/artifact_provenance.py select \
+            --artifact-name "${{ needs.restate-postgres-workers.outputs.segment_1_artifact_name }}" \
+            --expected-artifact-name "restate-workers-e2e-segment-1-attempt-${{ needs.restate-postgres-workers.outputs.segment_1_producer_attempt }}" \
+            --selected-artifact-id "${{ needs.restate-postgres-workers.outputs.segment_1_artifact_id }}" \
+            --producer-attempt "${{ needs.restate-postgres-workers.outputs.segment_1_producer_attempt }}" \
+            --current-attempt "${GITHUB_RUN_ATTEMPT}"
+          python3 scripts/ci/artifact_provenance.py select \
+            --artifact-name "${{ needs.restate-postgres-workers.outputs.segment_2_artifact_name }}" \
+            --expected-artifact-name "restate-workers-e2e-segment-2-attempt-${{ needs.restate-postgres-workers.outputs.segment_2_producer_attempt }}" \
+            --selected-artifact-id "${{ needs.restate-postgres-workers.outputs.segment_2_artifact_id }}" \
+            --producer-attempt "${{ needs.restate-postgres-workers.outputs.segment_2_producer_attempt }}" \
+            --current-attempt "${GITHUB_RUN_ATTEMPT}"
+
+      - name: Download segment 1 completed workflow manifest
         if: env.RUN_WORKERS_E2E == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: restate-workers-e2e-segment-*-attempt-${{ github.run_attempt }}
-          path: target/restate-postgres-workers-e2e-download
-          merge-multiple: false
+          artifact-ids: ${{ needs.restate-postgres-workers.outputs.segment_1_artifact_id }}
+          path: target/restate-postgres-workers-e2e-download/segment-1
+
+      - name: Download segment 2 completed workflow manifest
+        if: env.RUN_WORKERS_E2E == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.restate-postgres-workers.outputs.segment_2_artifact_id }}
+          path: target/restate-postgres-workers-e2e-download/segment-2
+
+      - name: Verify completed workflow manifest provenance
+        if: env.RUN_WORKERS_E2E == 'true'
+        run: |
+          for segment in 1 2; do
+            artifact_name="${{ needs.restate-postgres-workers.outputs.segment_1_artifact_name }}"
+            artifact_id="${{ needs.restate-postgres-workers.outputs.segment_1_artifact_id }}"
+            producer_attempt="${{ needs.restate-postgres-workers.outputs.segment_1_producer_attempt }}"
+            if [[ "${segment}" == 2 ]]; then
+              artifact_name="${{ needs.restate-postgres-workers.outputs.segment_2_artifact_name }}"
+              artifact_id="${{ needs.restate-postgres-workers.outputs.segment_2_artifact_id }}"
+              producer_attempt="${{ needs.restate-postgres-workers.outputs.segment_2_producer_attempt }}"
+            fi
+            python3 scripts/ci/artifact_provenance.py consume \
+              --manifest "target/restate-postgres-workers-e2e-download/segment-${segment}/provenance.json" \
+              --payload-root "target/restate-postgres-workers-e2e-download/segment-${segment}" \
+              --require-payload workflow-inventory.tsv \
+              --require-payload completed-workflows.txt \
+              --require-payload worker-binaries-consumption.json \
+              --artifact-name "${artifact_name}" \
+              --producer-job restate-postgres-workers \
+              --producer-instance "segment-${segment}" \
+              --producer-attempt "${producer_attempt}" \
+              --selected-artifact-id "${artifact_id}" \
+              --current-attempt "${GITHUB_RUN_ATTEMPT}" \
+              --receipt "${RUNNER_TEMP}/worker-segment-${segment}-consumption.json" \
+              --step-summary "${GITHUB_STEP_SUMMARY}"
+          done
 
       - name: Verify complete workflow coverage
         if: env.RUN_WORKERS_E2E == 'true'
         run: >-
           python3 scripts/check_restate_workers_e2e_coverage.py
           --leg 1
-          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-1-attempt-${{ github.run_attempt }}/workflow-inventory.tsv
-          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-1-attempt-${{ github.run_attempt }}/completed-workflows.txt
+          target/restate-postgres-workers-e2e-download/segment-1/workflow-inventory.tsv
+          target/restate-postgres-workers-e2e-download/segment-1/completed-workflows.txt
           --leg 2
-          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}/workflow-inventory.tsv
-          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}/completed-workflows.txt
+          target/restate-postgres-workers-e2e-download/segment-2/workflow-inventory.tsv
+          target/restate-postgres-workers-e2e-download/segment-2/completed-workflows.txt
 
   diff-hygiene:
     runs-on: ubuntu-24.04
