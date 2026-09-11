@@ -361,11 +361,9 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     else {
         panic!("expected if container")
     };
-    assert_unknown_child(&then_graph.as_deref().unwrap().nodes);
+    assert_unknown_child(&then_graph.nodes);
     assert!(
         else_graph
-            .as_deref()
-            .unwrap()
             .nodes
             .iter()
             .all(|node| node.type_facets.is_some())
@@ -395,7 +393,7 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     else {
         panic!("expected while container")
     };
-    assert_unknown_child(&body.as_deref().unwrap().nodes);
+    assert_unknown_child(&body.nodes);
     assert_available_type(&graph.main.nodes[2], "value", &TypeExpr::Int);
 
     let for_source = r#"
@@ -421,7 +419,7 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     else {
         panic!("expected for container")
     };
-    let body = &body.as_deref().unwrap().nodes;
+    let body = &body.nodes;
     assert_unknown_child(body);
     assert_available_type(&body[0], "item", &TypeExpr::Any);
     assert_available_type(&graph.main.nodes[2], "item", &TypeExpr::Str);

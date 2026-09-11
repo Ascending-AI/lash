@@ -2312,7 +2312,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
         .expect("POST while without body");
     assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
     let body: Value = response.json().await.expect("typed missing-child response");
-    assert_eq!(body["error"]["code"], "missing_required_child");
+    assert_eq!(body["error"]["code"], "invalid_graph_document");
     assert_eq!(body["error"]["details"]["child"], "body");
 
     let mut document: WorkflowDocument = client
