@@ -75,7 +75,7 @@ wait_reaped() {
 
 app_descendant() {
   local runner="$1" expected="$2"
-  local attempt parent child cmdline
+  local attempt parent child child_file cmdline
   for attempt in $(seq 1 100); do
     cmdline="$(tr '\0' ' ' <"/proc/$runner/cmdline" 2>/dev/null || true)"
     if [[ "$cmdline" == *"$expected"* ]]; then
@@ -87,16 +87,18 @@ app_descendant() {
     while ((${#frontier[@]})); do
       next=()
       for parent in "${frontier[@]}"; do
-        if [[ -r "/proc/$parent/task/$parent/children" ]]; then
-          for child in $(cat "/proc/$parent/task/$parent/children"); do
+        for child_file in /proc/"$parent"/task/*/children; do
+          if [[ -r "$child_file" ]]; then
+            for child in $(cat "$child_file"); do
             cmdline="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
             if [[ "$cmdline" == *"$expected"* ]]; then
               printf '%s\n' "$child"
               return
             fi
             next+=("$child")
-          done
-        fi
+            done
+          fi
+        done
       done
       frontier=("${next[@]}")
     done
