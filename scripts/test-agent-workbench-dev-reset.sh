@@ -1080,6 +1080,116 @@ fi
   && ! -e "$test_tmp/data-lease-publication-rollback" \
   && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_rollback_port" ]] \
   || fail "partial endpoint-reservation publication did not roll back exact attempt resources"
+
+lease_retry_port=3084
+lease_retry_ingress=$((8080 + (lease_retry_port - 3030) * 10))
+lease_retry_admin=$((19070 + (lease_retry_port - 3030) * 10))
+lease_retry_ingress_hash="$(printf '%s' "loopback:$lease_retry_ingress" | sha256sum | awk '{print $1}')"
+lease_retry_admin_hash="$(printf '%s' "loopback:$lease_retry_admin" | sha256sum | awk '{print $1}')"
+lease_retry_ingress_file="$launcher_runtime_root/restate-ingress-$lease_retry_ingress_hash.lease"
+lease_retry_admin_file="$launcher_runtime_root/restate-admin-$lease_retry_admin_hash.lease"
+rm -f "$mock_state/record-create-failed" "$mock_state/lease-remove-failed"
+if launcher_env "$test_tmp/data-lease-removal-retry" "$lease_retry_port" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$lease_retry_admin_hash.lease" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease && ! -e "$MOCK_STATE/lease-remove-failed" ]]; then : > "$MOCK_STATE/lease-remove-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_retry_port" \
+  > "$test_tmp/lease-removal-retry.log" 2>&1; then
+  fail "startup ignored second endpoint publication failure"
+fi
+[[ -e "$mock_state/lease-remove-failed" \
+  && ! -e "$lease_retry_ingress_file" && ! -e "$lease_retry_admin_file" \
+  && ! -e "$test_tmp/data-lease-removal-retry" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_retry_port" ]] \
+  || fail "lease cleanup progress did not survive engine retirement and a transient unlink failure"
+
+lease_commit_port=3088
+lease_commit_ingress=$((8080 + (lease_commit_port - 3030) * 10))
+lease_commit_ingress_hash="$(printf '%s' "loopback:$lease_commit_ingress" | sha256sum | awk '{print $1}')"
+lease_commit_ingress_file="$launcher_runtime_root/restate-ingress-$lease_commit_ingress_hash.lease"
+rm -f "$mock_state/lease-publish-failed"
+if launcher_env "$test_tmp/data-lease-postcommit" "$lease_commit_port" \
+  'BASH_FUNC_python3%%=() { local target="${@: -1}"; if [[ "$target" = *restate-ingress-*.lease && ! -e "$MOCK_STATE/lease-publish-failed" ]]; then command python3 "$@" || return; : > "$MOCK_STATE/lease-publish-failed"; return 1; fi; command python3 "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_commit_port" \
+  > "$test_tmp/lease-postcommit.log" 2>&1; then
+  fail "startup ignored a lease publisher error after commit"
+fi
+[[ -e "$mock_state/lease-publish-failed" && ! -e "$lease_commit_ingress_file" \
+  && ! -e "$test_tmp/data-lease-postcommit" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_commit_port" ]] \
+  || fail "observable post-commit lease publication was not reconciled and cleaned"
+
+lease_public_retry_port=3089
+lease_public_retry_ingress=$((8080 + (lease_public_retry_port - 3030) * 10))
+lease_public_retry_admin=$((19070 + (lease_public_retry_port - 3030) * 10))
+lease_public_retry_ingress_hash="$(printf '%s' "loopback:$lease_public_retry_ingress" | sha256sum | awk '{print $1}')"
+lease_public_retry_admin_hash="$(printf '%s' "loopback:$lease_public_retry_admin" | sha256sum | awk '{print $1}')"
+lease_public_retry_ingress_file="$launcher_runtime_root/restate-ingress-$lease_public_retry_ingress_hash.lease"
+rm -f "$mock_state/record-create-failed"
+if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$lease_public_retry_admin_hash.lease" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_public_retry_port" \
+  > "$test_tmp/lease-public-retry-first.log" 2>&1; then
+  fail "persistent lease cleanup failure unexpectedly succeeded"
+fi
+lease_public_retry_receipt="$test_tmp/data-lease-public-retry/run/restate-127.0.0.1_${lease_public_retry_port}.service-retired"
+[[ -f "$lease_public_retry_ingress_file" && -f "$lease_public_retry_receipt" \
+  && -d "$test_tmp/data-lease-public-retry" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_public_retry_port" ]] \
+  || fail "persistent lease failure did not retain exact public retry authority"
+grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
+  "$test_tmp/lease-public-retry-first.log" \
+  || fail "persistent lease failure did not report its public recovery command"
+lease_public_retry_record="$(<"$lease_public_retry_ingress_file")"
+read -r _ _ _ lease_public_retry_id <<<"$lease_public_retry_record"
+printf '1 restate 00000000-0000-0000-0000-000000000000 %s\n' \
+  "$lease_public_retry_id" > "$lease_public_retry_ingress_file"
+if run_launcher "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" down \
+  > "$test_tmp/lease-public-retry-mismatch.log" 2>&1; then
+  fail "public startup cleanup accepted a changed service lease"
+fi
+[[ "$(<"$lease_public_retry_ingress_file")" \
+  = "1 restate 00000000-0000-0000-0000-000000000000 $lease_public_retry_id" \
+  && -f "$lease_public_retry_receipt" && -d "$test_tmp/data-lease-public-retry" ]] \
+  || fail "public startup cleanup changed a mismatched lease or its retained authority"
+printf '%s\n' "$lease_public_retry_record" > "$lease_public_retry_ingress_file"
+run_launcher "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" down \
+  > "$test_tmp/lease-public-retry-second.log" 2>&1
+[[ ! -e "$lease_public_retry_ingress_file" && ! -e "$lease_public_retry_receipt" \
+  && ! -e "$test_tmp/data-lease-public-retry" ]] \
+  || fail "fault-free public down did not complete retained startup lease cleanup"
+run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" up \
+  > "$test_tmp/lease-public-retry-fresh-up.log" 2>&1
+run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" down \
+  > "$test_tmp/lease-public-retry-fresh-down.log" 2>&1
+
+postgres_lease_retry_port=3092
+postgres_lease_retry_service=$((55432 + (postgres_lease_retry_port - 3030) * 10))
+postgres_lease_retry_hash="$(printf '%s' "loopback:$postgres_lease_retry_service" | sha256sum | awk '{print $1}')"
+postgres_lease_retry_file="$launcher_runtime_root/postgres-$postgres_lease_retry_hash.lease"
+rm -f "$mock_state/postgres-lease-publish-failed" "$mock_state/postgres-lease-remove-failed"
+if launcher_env "$test_tmp/data-postgres-lease-retry" "$postgres_lease_retry_port" \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  'BASH_FUNC_python3%%=() { local target="${@: -1}"; if [[ "$target" = *postgres-*.lease && ! -e "$MOCK_STATE/postgres-lease-publish-failed" ]]; then command python3 "$@" || return; : > "$MOCK_STATE/postgres-lease-publish-failed"; return 1; fi; command python3 "$@"; }' \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *postgres-*.lease && ! -e "$MOCK_STATE/postgres-lease-remove-failed" ]]; then : > "$MOCK_STATE/postgres-lease-remove-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$postgres_lease_retry_port" \
+  > "$test_tmp/postgres-lease-retry.log" 2>&1; then
+  fail "startup ignored a Postgres lease publisher error after commit"
+fi
+[[ -e "$mock_state/postgres-lease-publish-failed" \
+  && -e "$mock_state/postgres-lease-remove-failed" \
+  && ! -e "$postgres_lease_retry_file" && ! -e "$test_tmp/data-postgres-lease-retry" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$postgres_lease_retry_port" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$postgres_lease_retry_port" ]] \
+  || fail "Postgres lease cleanup progress did not survive retirement and publication/removal errors"
+launcher_env "$test_tmp/data-postgres-lease-fresh" "$postgres_lease_retry_port" \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$postgres_lease_retry_port" \
+  > "$test_tmp/postgres-lease-fresh-up.log" 2>&1
+launcher_env "$test_tmp/data-postgres-lease-fresh" "$postgres_lease_retry_port" \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$postgres_lease_retry_port" \
+  > "$test_tmp/postgres-lease-fresh-down.log" 2>&1
 service_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
 
 partial_ready_port=3085
@@ -1461,7 +1571,10 @@ foreground_spawned_pid="$mock_state/spawned-$port_foreground_pid_failure"
 [[ -f "$foreground_spawned_pid" ]] && ! pid_identity "$foreground_spawned_pid" \
   || fail "foreground PID publication failure left its captured child alive"
 [[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_pid_failure" ]] \
-  || fail "foreground PID publication failure retained its removable engine"
+  || {
+    cat "$test_tmp/foreground-pid-publication-failure.log" >&2
+    fail "foreground PID publication failure retained its removable engine"
+  }
 
 data_marker_failure="$test_tmp/data-marker-publication"
 port_marker_failure=3106
@@ -1736,6 +1849,84 @@ foreground_term_attempts="$(tail -n "+$((foreground_term_attempts_before + 1))" 
   || fail "foreground TERM executed engine retirement more than once"
 ! grep -Fq 'unbound variable' "$test_tmp/foreground-term.log" \
   || fail "foreground TERM cleanup ran after its ownership context expired"
+
+data_foreground_finalize="$test_tmp/data-foreground-finalize"
+port_foreground_finalize=3160
+foreground_finalize_key="127.0.0.1_$port_foreground_finalize"
+foreground_finalize_transaction="$data_foreground_finalize/run/workbench-$foreground_finalize_key.teardown"
+launcher_env "$data_foreground_finalize" "$port_foreground_finalize" \
+  MOCK_FINAL_TRANSACTION="$foreground_finalize_transaction" \
+  MOCK_LAUNCHER_RECORD="$mock_state/launcher-$port_foreground_finalize" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = "$MOCK_FINAL_TRANSACTION" ]]; then return 1; fi; command rm "$@"; }' \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_LAUNCHER_RECORD"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_finalize" \
+  > "$test_tmp/foreground-finalize.log" 2>&1 &
+foreground_finalize_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-finalize.log" "$foreground_finalize_invocation" \
+  || fail "final-transaction foreground fixture did not become ready"
+kill -TERM "$(<"$mock_state/launcher-$port_foreground_finalize")"
+foreground_finalize_status=0
+wait "$foreground_finalize_invocation" || foreground_finalize_status=$?
+[[ "$foreground_finalize_status" = 143 && -f "$foreground_finalize_transaction" \
+  && ! -e "$data_foreground_finalize/run/workbench-$foreground_finalize_key.meta" ]] \
+  || fail "final transaction unlink failure did not retain its completed public authority"
+run_launcher "$data_foreground_finalize" "$port_foreground_finalize" down \
+  > "$test_tmp/foreground-finalize-down.log" 2>&1
+[[ ! -e "$foreground_finalize_transaction" ]] \
+  || fail "public targeted down did not consume the exact completed transaction"
+run_launcher "$data_foreground_finalize" "$port_foreground_finalize" up \
+  > "$test_tmp/foreground-finalize-fresh-up.log" 2>&1
+run_launcher "$data_foreground_finalize" "$port_foreground_finalize" down \
+  > "$test_tmp/foreground-finalize-fresh-down.log" 2>&1
+
+data_foreground_postclear="$test_tmp/data-foreground-postclear"
+port_foreground_postclear=3161
+foreground_postclear_key="127.0.0.1_$port_foreground_postclear"
+foreground_postclear_transaction="$data_foreground_postclear/run/workbench-$foreground_postclear_key.teardown"
+launcher_env "$data_foreground_postclear" "$port_foreground_postclear" \
+  MOCK_FINAL_TRANSACTION="$foreground_postclear_transaction" \
+  MOCK_LAUNCHER_RECORD="$mock_state/launcher-$port_foreground_postclear" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = "$MOCK_FINAL_TRANSACTION" ]]; then command rm "$@"; return 1; fi; command rm "$@"; }' \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_LAUNCHER_RECORD"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_postclear" \
+  > "$test_tmp/foreground-postclear.log" 2>&1 &
+foreground_postclear_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-postclear.log" "$foreground_postclear_invocation" \
+  || fail "post-clear foreground fixture did not become ready"
+kill -TERM "$(<"$mock_state/launcher-$port_foreground_postclear")"
+foreground_postclear_status=0
+wait "$foreground_postclear_invocation" || foreground_postclear_status=$?
+[[ "$foreground_postclear_status" = 143 && ! -e "$foreground_postclear_transaction" ]] \
+  || fail "post-clear transaction error did not preserve signal status and observable removal"
+run_launcher "$data_foreground_postclear" "$port_foreground_postclear" up \
+  > "$test_tmp/foreground-postclear-fresh-up.log" 2>&1
+run_launcher "$data_foreground_postclear" "$port_foreground_postclear" down \
+  > "$test_tmp/foreground-postclear-fresh-down.log" 2>&1
+
+data_foreground_finalize_all="$test_tmp/data-foreground-finalize-all"
+port_foreground_finalize_all=3162
+foreground_finalize_all_key="127.0.0.1_${port_foreground_finalize_all}"
+foreground_finalize_all_transaction="$data_foreground_finalize_all/run/workbench-$foreground_finalize_all_key.teardown"
+launcher_env "$data_foreground_finalize_all" "$port_foreground_finalize_all" \
+  MOCK_FINAL_TRANSACTION="$foreground_finalize_all_transaction" \
+  MOCK_LAUNCHER_RECORD="$mock_state/launcher-$port_foreground_finalize_all" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = "$MOCK_FINAL_TRANSACTION" ]]; then return 1; fi; command rm "$@"; }' \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_LAUNCHER_RECORD"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_finalize_all" \
+  > "$test_tmp/foreground-finalize-all.log" 2>&1 &
+foreground_finalize_all_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-finalize-all.log" "$foreground_finalize_all_invocation" \
+  || fail "all-stack final-transaction fixture did not become ready"
+kill -TERM "$(<"$mock_state/launcher-$port_foreground_finalize_all")"
+foreground_finalize_all_status=0
+wait "$foreground_finalize_all_invocation" || foreground_finalize_all_status=$?
+[[ "$foreground_finalize_all_status" = 143 && -f "$foreground_finalize_all_transaction" ]] \
+  || fail "all-stack final transaction unlink failure did not retain its authority"
+launcher_env "$data_foreground_finalize_all" "$port_foreground_finalize_all" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down \
+  > "$test_tmp/foreground-finalize-all-down.log" 2>&1
+[[ ! -e "$foreground_finalize_all_transaction" ]] \
+  || fail "untargeted down did not consume the exact completed transaction"
 
 data_foreground_registry="$test_tmp/data-foreground-registry"
 port_foreground_registry=3128

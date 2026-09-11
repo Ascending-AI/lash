@@ -29,7 +29,8 @@ reset_destructive_started=0
 reset_finalization_active=0
 reset_finalization_phase=""
 reset_recovery_command=""
-created_restate_service_lease_this_attempt=0
+created_restate_ingress_service_lease_this_attempt=0
+created_restate_admin_service_lease_this_attempt=0
 created_postgres_service_lease_this_attempt=0
 created_run_owner_this_attempt=0
 created_meta_this_attempt=0
@@ -724,6 +725,21 @@ write_service_lease() {
     | publish_private_record create "$file"
 }
 
+publish_attempt_service_lease() {
+  local file="$1" component="$2" id="$3" flag_name="$4"
+  local expected="1 $component $ownership_token $id"
+  if write_service_lease "$file" "$component" "$id"; then
+    printf -v "$flag_name" '%s' 1
+    return 0
+  fi
+  if [[ "$(read_service_lease "$file" 2>/dev/null || true)" = "$expected" ]]; then
+    # Publication can report an error after the atomic destination became visible.
+    # Retain the exact observable claim so cleanup cannot strand it.
+    printf -v "$flag_name" '%s' 1
+  fi
+  return 1
+}
+
 remove_service_lease() {
   local file="$1" expected="$2"
   [[ "$(read_service_lease "$file" 2>/dev/null || true)" = "$expected" ]] \
@@ -739,24 +755,25 @@ restate_service_leases_match() {
   done
 }
 
-attempt_restate_service_leases_match() {
-  local expected="$1" file found=0
-  for file in "$restate_ingress_service_lease_file" "$restate_admin_service_lease_file"; do
-    if [[ -e "$file" || -L "$file" ]]; then
-      found=1
-      [[ "$(read_service_lease "$file" 2>/dev/null || true)" = "$expected" ]] || return 1
-    fi
-  done
-  (( found ))
+remove_attempt_service_lease() {
+  local file="$1" expected="$2" flag_name="$3"
+  local -n outstanding="$flag_name"
+  (( outstanding )) || return 0
+  if [[ ! -e "$file" && ! -L "$file" ]]; then
+    outstanding=0
+    return 0
+  fi
+  remove_service_lease "$file" "$expected" || return 1
+  outstanding=0
 }
 
 remove_attempt_restate_service_leases() {
-  local expected="$1" file
-  for file in "$restate_ingress_service_lease_file" "$restate_admin_service_lease_file"; do
-    if [[ -e "$file" || -L "$file" ]]; then
-      remove_service_lease "$file" "$expected" || return 1
-    fi
-  done
+  local expected="$1" failed=0
+  remove_attempt_service_lease "$restate_ingress_service_lease_file" "$expected" \
+    created_restate_ingress_service_lease_this_attempt || failed=1
+  remove_attempt_service_lease "$restate_admin_service_lease_file" "$expected" \
+    created_restate_admin_service_lease_this_attempt || failed=1
+  (( ! failed ))
 }
 
 require_service_unreserved() {
@@ -1188,6 +1205,49 @@ stop_started_postgres() {
     "$ownership_token" postgres "$postgres_marker_file"
 }
 
+retire_started_service_with_receipt() {
+  local marker_file="$1" receipt_file="$2" component="$3" name="$4" id="$5"
+  local marker_expected="$name $id $ownership_token $component" receipt observation
+  if [[ -e "$marker_file" || -L "$marker_file" ]]; then
+    [[ "$(read_container_marker "$marker_file" 2>/dev/null || true)" = "$marker_expected" ]] \
+      || return 1
+  fi
+  receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  if [[ -z "$receipt" ]]; then
+    container_identity_matches "$name" "$id" "$ownership_token" "$component" || return 1
+    write_service_retirement_receipt \
+      "$receipt_file" prepared "$component" "$ownership_token" "$id" || true
+    receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  fi
+  if [[ "$receipt" = "2 retired $component $ownership_token $id" ]]; then
+    return 0
+  fi
+  [[ "$receipt" = "2 prepared $component $ownership_token $id" ]] || return 1
+  observation="$(container_identity_observation "$id" "$id" "$ownership_token" "$component")"
+  case "$observation" in
+    running)
+      log "stopping $component container $name"
+      docker rm -fv "$id" >/dev/null || return 1
+      ;;
+    retired) ;;
+    *) return 1 ;;
+  esac
+  write_service_retirement_receipt \
+    "$receipt_file" retired "$component" "$ownership_token" "$id" || true
+  [[ "$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)" \
+    = "2 retired $component $ownership_token $id" ]]
+}
+
+finalize_attempt_service_records() {
+  local marker_file="$1" receipt_file="$2" component="$3" name="$4" id="$5"
+  local marker_expected="$name $id $ownership_token $component"
+  local receipt_expected="2 retired $component $ownership_token $id"
+  remove_exact_private_record "$marker_file" "$marker_expected" \
+    read_container_marker "$component ownership marker" || return 1
+  remove_exact_private_record "$receipt_file" "$receipt_expected" \
+    read_service_retirement_receipt "$component retirement receipt"
+}
+
 validate_persisted_service() {
   local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
   local record name id token marker_component expected_lease
@@ -1437,6 +1497,204 @@ finalize_teardown_transaction() {
   fi
 }
 
+owned_service_lease_remains() {
+  local token="$1" restate_id="$2" postgres_id="$3" file record
+  local _schema component lease_token lease_id
+  for file in "$launcher_lock_root"/restate-*.lease \
+    "$launcher_lock_root"/postgres-*.lease; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    record="$(read_service_lease "$file" 2>/dev/null || true)"
+    [[ -n "$record" ]] || continue
+    read -r _schema component lease_token lease_id <<<"$record"
+    if [[ "$lease_token" = "$token" \
+      && ( ( "$component" = restate && "$lease_id" = "$restate_id" ) \
+        || ( "$component" = postgres && "$lease_id" = "$postgres_id" ) ) ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+finalize_orphaned_teardown_transaction() {
+  local transaction_file="$1" required_key="${2:-}" transaction=""
+  local schema phase token pid start_time restate_id postgres_id extra key
+  transaction="$(read_teardown_transaction "$transaction_file" 2>/dev/null || true)"
+  read -r schema phase token pid start_time restate_id postgres_id extra <<<"$transaction"
+  [[ -n "$transaction" && -z "$extra" && "$phase" = retired ]] || {
+    log "refusing teardown: orphan transaction is not an exact completed transaction"
+    return 1
+  }
+  key="${transaction_file##*/workbench-}"
+  key="${key%.teardown}"
+  [[ -n "$key" && ( -z "$required_key" || "$key" = "$required_key" ) \
+    && "$transaction_file" = "$state_dir/workbench-$key.teardown" ]] || {
+    log "refusing teardown: orphan transaction path does not match the requested workbench identity"
+    return 1
+  }
+  [[ "$(process_identity_observation "$pid" "$start_time")" = retired ]] || {
+    log "refusing teardown: completed transaction process identity is not observably retired"
+    return 1
+  }
+  if [[ "$restate_id" != - ]] \
+    && [[ "$(container_identity_observation "$restate_id" "$restate_id" "$token" restate)" != retired ]]; then
+    log "refusing teardown: completed transaction Restate identity is not observably retired"
+    return 1
+  fi
+  if [[ "$postgres_id" != - ]] \
+    && [[ "$(container_identity_observation "$postgres_id" "$postgres_id" "$token" postgres)" != retired ]]; then
+    log "refusing teardown: completed transaction Postgres identity is not observably retired"
+    return 1
+  fi
+  local sibling
+  for sibling in "$state_dir/workbench-$key.meta" "$state_dir/workbench-$key.pid" \
+    "$state_dir/workbench-$key.process-retired" "$state_dir/restate-$key.container" \
+    "$state_dir/postgres-$key.container" "$state_dir/restate-$key.service-retired" \
+    "$state_dir/postgres-$key.service-retired" \
+    "$state_dir/.agent-workbench-dev-run-owner-$key"; do
+    [[ ! -e "$sibling" && ! -L "$sibling" ]] || {
+      log "refusing teardown: completed transaction still has lifecycle context at $sibling"
+      return 1
+    }
+  done
+  if owned_service_lease_remains "$token" "$restate_id" "$postgres_id"; then
+    log "refusing teardown: completed transaction still has an owned service reservation"
+    return 1
+  fi
+  remove_exact_private_record "$transaction_file" "$transaction" \
+    read_teardown_transaction "orphan completed teardown transaction"
+}
+
+remove_matching_service_leases() {
+  local component="$1" token="$2" id="$3" file record failed=0
+  for file in "$launcher_lock_root"/restate-*.lease \
+    "$launcher_lock_root"/postgres-*.lease; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    record="$(read_service_lease "$file" 2>/dev/null || true)"
+    [[ "$record" = "1 $component $token $id" ]] || continue
+    remove_service_lease "$file" "$record" || failed=1
+  done
+  (( ! failed ))
+}
+
+finalize_orphaned_service_receipt() {
+  local component="$1" receipt_file="$2" marker_file="$3"
+  local receipt marker="" name="" schema phase receipt_component token id extra
+  receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  read -r schema phase receipt_component token id extra <<<"$receipt"
+  [[ -n "$receipt" && -z "$extra" && "$phase" = retired \
+    && "$receipt_component" = "$component" ]] || return 1
+  if [[ -e "$marker_file" || -L "$marker_file" ]]; then
+    marker="$(read_container_marker "$marker_file" 2>/dev/null || true)"
+    read -r name _ _ _ <<<"$marker"
+    [[ "$marker" = "$name $id $token $component" ]] || return 1
+  fi
+  [[ "$(container_identity_observation "$id" "$id" "$token" "$component")" = retired ]] \
+    || return 1
+  remove_matching_service_leases "$component" "$token" "$id" || return 1
+  remove_exact_private_record "$marker_file" "$marker" read_container_marker \
+    "$component ownership marker" || return 1
+  printf '%s\n' "$token"
+}
+
+finalize_orphaned_start_attempt() {
+  local key="$1" allow_data_cleanup="${2:-0}"
+  local restate_receipt="$state_dir/restate-$key.service-retired"
+  local postgres_receipt="$state_dir/postgres-$key.service-retired"
+  local restate_marker="$state_dir/restate-$key.container"
+  local postgres_marker="$state_dir/postgres-$key.container"
+  local owner_file="$state_dir/.agent-workbench-dev-run-owner-$key"
+  local owner_record="" schema token="" owner_token owner_key owner_hash extra recovered_token
+  local restate_receipt_record="" postgres_receipt_record="" has_service_receipt=0
+  if [[ -e "$owner_file" || -L "$owner_file" ]]; then
+    owner_record="$(read_run_owner "$owner_file" 2>/dev/null || true)"
+    read -r schema owner_token owner_key owner_hash extra <<<"$owner_record"
+    [[ -n "$owner_record" && -z "$extra" && "$owner_key" = "$key" ]] || return 1
+    token="$owner_token"
+  fi
+  local component receipt marker
+  for component in restate postgres; do
+    if [[ "$component" = restate ]]; then
+      receipt="$restate_receipt"; marker="$restate_marker"
+    else
+      receipt="$postgres_receipt"; marker="$postgres_marker"
+    fi
+    if [[ -e "$receipt" || -L "$receipt" ]]; then
+      local receipt_record receipt_token
+      receipt_record="$(read_service_retirement_receipt "$receipt" 2>/dev/null || true)"
+      read -r _ _ _ receipt_token _ <<<"$receipt_record"
+      [[ -n "$receipt_token" && ( -z "$token" || "$receipt_token" = "$token" ) ]] || return 1
+      token="$receipt_token"
+      has_service_receipt=1
+      if [[ "$component" = restate ]]; then
+        restate_receipt_record="$receipt_record"
+      else
+        postgres_receipt_record="$receipt_record"
+      fi
+    elif [[ -e "$marker" || -L "$marker" ]]; then
+      return 1
+    fi
+  done
+  [[ -n "$token" && "$has_service_receipt" = 1 ]] || return 1
+  if (( allow_data_cleanup )) && [[ -n "$restate_receipt_record" ]]; then
+    local _schema _phase _component receipt_token receipt_id lease_file
+    read -r _schema _phase _component receipt_token receipt_id <<<"$restate_receipt_record"
+    for lease_file in "$restate_ingress_service_lease_file" \
+      "$restate_admin_service_lease_file"; do
+      if [[ -e "$lease_file" || -L "$lease_file" ]]; then
+        [[ "$(read_service_lease "$lease_file" 2>/dev/null || true)" \
+          = "1 restate $receipt_token $receipt_id" ]] || return 1
+      fi
+    done
+  fi
+  if (( allow_data_cleanup )) && [[ -n "$postgres_receipt_record" ]] \
+    && [[ -e "$postgres_service_lease_file" || -L "$postgres_service_lease_file" ]]; then
+    local _pg_schema _pg_phase _pg_component pg_receipt_token pg_receipt_id
+    read -r _pg_schema _pg_phase _pg_component pg_receipt_token pg_receipt_id \
+      <<<"$postgres_receipt_record"
+    [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
+      = "1 postgres $pg_receipt_token $pg_receipt_id" ]] || return 1
+  fi
+  if [[ -e "$restate_receipt" || -L "$restate_receipt" ]]; then
+    recovered_token="$(finalize_orphaned_service_receipt \
+      restate "$restate_receipt" "$restate_marker")" || return 1
+    [[ "$recovered_token" = "$token" ]] || return 1
+  fi
+  if [[ -e "$postgres_receipt" || -L "$postgres_receipt" ]]; then
+    recovered_token="$(finalize_orphaned_service_receipt \
+      postgres "$postgres_receipt" "$postgres_marker")" || return 1
+    [[ "$recovered_token" = "$token" ]] || return 1
+  fi
+  if (( ! allow_data_cleanup )); then
+    log "retained exact startup cleanup authority; retry targeted down with the original data/run settings"
+    return 1
+  fi
+  if (( allow_data_cleanup )) && [[ -e "$data_creation_receipt_file" \
+    || -L "$data_creation_receipt_file" ]]; then
+    local creation_record creation_schema creation_token creation_hash creation_identity creation_extra
+    creation_record="$(read_data_creation_receipt "$data_creation_receipt_file" 2>/dev/null || true)"
+    read -r creation_schema creation_token creation_hash creation_identity creation_extra <<<"$creation_record"
+    [[ -n "$creation_record" && -z "$creation_extra" && "$creation_token" = "$token" \
+      && "$creation_hash" = "$data_path_hash" \
+      && "$creation_identity" = "$(stat -c '%d:%i' "$data_dir" 2>/dev/null || true)" \
+      && "$data_dir" != / && "$data_dir" != "$repo_root" ]] || return 1
+    ! path_has_symlink_component "$configured_data_dir" || return 1
+    rm -rf -- "$data_dir" || return 1
+    [[ ! -e "$data_dir" && ! -L "$data_dir" ]] || return 1
+  fi
+  if [[ -e "$owner_file" || -L "$owner_file" ]]; then
+    remove_exact_private_record "$owner_file" "$owner_record" read_run_owner \
+      "orphan startup run-footprint record" || return 1
+  fi
+  if [[ -n "$postgres_receipt_record" ]]; then
+    remove_exact_private_record "$postgres_receipt" "$postgres_receipt_record" \
+      read_service_retirement_receipt "Postgres retirement receipt" || return 1
+  fi
+  if [[ -n "$restate_receipt_record" ]]; then
+    remove_exact_private_record "$restate_receipt" "$restate_receipt_record" \
+      read_service_retirement_receipt "Restate retirement receipt" || return 1
+  fi
+}
+
 stop_stack_from_meta() (
   local stack_meta_file="$1"
   local retain_transaction="${2:-0}"
@@ -1642,8 +1900,24 @@ stop_stack_from_meta() (
 
 stop_target() {
   if [[ ! -e "$meta_file" && ! -L "$meta_file" ]]; then
+    if [[ -e "$teardown_transaction_file" || -L "$teardown_transaction_file" ]]; then
+      finalize_orphaned_teardown_transaction "$teardown_transaction_file" "$state_key"
+      return
+    fi
     if [[ -e "$pid_file" || -L "$pid_file" ]]; then
       stop_pid_file "$pid_file" || true
+    fi
+    if [[ -e "$restate_service_retirement_receipt_file" \
+      || -L "$restate_service_retirement_receipt_file" \
+      || -e "$postgres_service_retirement_receipt_file" \
+      || -L "$postgres_service_retirement_receipt_file" \
+      || -e "$run_owner_file" || -L "$run_owner_file" ]]; then
+      finalize_orphaned_start_attempt "$state_key" 1 || {
+        log "refusing teardown: retained startup cleanup authority is incomplete or changed"
+        return 1
+      }
+      log "completed cleanup of the exact retired startup attempt"
+      return 0
     fi
     log "refusing service teardown: stack metadata is missing at $meta_file"
     return 1
@@ -1689,6 +1963,87 @@ remove_attempt_reset_ownership() {
   created_reset_ownership_this_attempt=0
 }
 
+cleanup_attempt_restate_service() {
+  local has_lease_progress=0
+  (( created_restate_ingress_service_lease_this_attempt \
+    || created_restate_admin_service_lease_this_attempt )) && has_lease_progress=1
+  if (( started_restate_this_attempt )); then
+    if (( created_restate_ingress_service_lease_this_attempt )) \
+      && [[ "$(read_service_lease "$restate_ingress_service_lease_file" 2>/dev/null || true)" \
+        != "$restate_service_lease_record" ]]; then
+      log "startup cleanup could not verify its exact Restate ingress service lease"
+      return 1
+    fi
+    if (( created_restate_admin_service_lease_this_attempt )) \
+      && [[ "$(read_service_lease "$restate_admin_service_lease_file" 2>/dev/null || true)" \
+        != "$restate_service_lease_record" ]]; then
+      log "startup cleanup could not verify its exact Restate admin service lease"
+      return 1
+    fi
+    if (( has_lease_progress )); then
+      retire_started_service_with_receipt "$restate_marker_file" \
+        "$restate_service_retirement_receipt_file" restate \
+        "$started_restate_name" "$started_restate_id" || return 1
+    else
+      stop_started_restate || return 1
+    fi
+    started_restate_this_attempt=0
+  fi
+  if (( created_restate_ingress_service_lease_this_attempt \
+    || created_restate_admin_service_lease_this_attempt )); then
+    [[ "$(read_service_retirement_receipt "$restate_service_retirement_receipt_file" \
+      2>/dev/null || true)" \
+      = "2 retired restate $ownership_token $started_restate_id" ]] || return 1
+    remove_attempt_restate_service_leases "$restate_service_lease_record" || return 1
+  fi
+  if [[ -e "$restate_service_retirement_receipt_file" \
+    || -L "$restate_service_retirement_receipt_file" ]]; then
+    finalize_attempt_service_records "$restate_marker_file" \
+      "$restate_service_retirement_receipt_file" restate \
+      "$started_restate_name" "$started_restate_id"
+  elif [[ -e "$restate_marker_file" || -L "$restate_marker_file" ]]; then
+    remove_exact_private_record "$restate_marker_file" \
+      "$started_restate_name $started_restate_id $ownership_token restate" \
+      read_container_marker "Restate ownership marker"
+  fi
+}
+
+cleanup_attempt_postgres_service() {
+  if (( started_postgres_this_attempt )); then
+    if (( created_postgres_service_lease_this_attempt )) \
+      && [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
+        != "$postgres_service_lease_record" ]]; then
+      log "startup cleanup could not verify its exact Postgres service lease"
+      return 1
+    fi
+    if (( created_postgres_service_lease_this_attempt )); then
+      retire_started_service_with_receipt "$postgres_marker_file" \
+        "$postgres_service_retirement_receipt_file" postgres \
+        "$started_postgres_name" "$started_postgres_id" || return 1
+    else
+      stop_started_postgres || return 1
+    fi
+    started_postgres_this_attempt=0
+  fi
+  if (( created_postgres_service_lease_this_attempt )); then
+    [[ "$(read_service_retirement_receipt "$postgres_service_retirement_receipt_file" \
+      2>/dev/null || true)" \
+      = "2 retired postgres $ownership_token $started_postgres_id" ]] || return 1
+    remove_attempt_service_lease "$postgres_service_lease_file" \
+      "$postgres_service_lease_record" created_postgres_service_lease_this_attempt || return 1
+  fi
+  if [[ -e "$postgres_service_retirement_receipt_file" \
+    || -L "$postgres_service_retirement_receipt_file" ]]; then
+    finalize_attempt_service_records "$postgres_marker_file" \
+      "$postgres_service_retirement_receipt_file" postgres \
+      "$started_postgres_name" "$started_postgres_id"
+  elif [[ -e "$postgres_marker_file" || -L "$postgres_marker_file" ]]; then
+    remove_exact_private_record "$postgres_marker_file" \
+      "$started_postgres_name $started_postgres_id $ownership_token postgres" \
+      read_container_marker "Postgres ownership marker"
+  fi
+}
+
 cleanup_start_attempt() {
   if (( reset_finalization_active )); then
     log "reset finalization remains retryable; retaining its authoritative ownership receipt"
@@ -1724,7 +2079,8 @@ cleanup_start_attempt() {
     started_workbench_this_attempt=0
     started_restate_this_attempt=0
     started_postgres_this_attempt=0
-    created_restate_service_lease_this_attempt=0
+    created_restate_ingress_service_lease_this_attempt=0
+    created_restate_admin_service_lease_this_attempt=0
     created_postgres_service_lease_this_attempt=0
   fi
   if (( started_workbench_this_attempt )); then
@@ -1744,43 +2100,22 @@ cleanup_start_attempt() {
       return 1
     fi
   fi
-  if (( started_restate_this_attempt )); then
-    if (( created_restate_service_lease_this_attempt )) \
-      && ! attempt_restate_service_leases_match "$restate_service_lease_record"; then
-      log "startup cleanup could not verify its exact Restate service lease; retaining application state and ownership metadata"
+  if (( started_restate_this_attempt \
+    || created_restate_ingress_service_lease_this_attempt \
+    || created_restate_admin_service_lease_this_attempt )) \
+    || [[ -e "$restate_service_retirement_receipt_file" \
+      || -L "$restate_service_retirement_receipt_file" ]]; then
+    if ! cleanup_attempt_restate_service; then
+      log "startup cleanup could not retire its exact Restate service and reservations; retaining application state and ownership metadata"
       return 1
-    fi
-    if ! stop_started_restate; then
-      log "startup cleanup could not remove the exact owned Restate engine; retaining application state and ownership metadata"
-      return 1
-    fi
-    started_restate_this_attempt=0
-    if (( created_restate_service_lease_this_attempt )); then
-      if ! remove_attempt_restate_service_leases "$restate_service_lease_record"; then
-        log "startup cleanup could not clear the exact Restate service lease; retaining application state and ownership metadata"
-        return 1
-      fi
-      created_restate_service_lease_this_attempt=0
     fi
   fi
-  if (( started_postgres_this_attempt )); then
-    if (( created_postgres_service_lease_this_attempt )) \
-      && [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
-        != "$postgres_service_lease_record" ]]; then
-      log "startup cleanup could not verify its exact Postgres service lease; retaining application state and ownership metadata"
+  if (( started_postgres_this_attempt || created_postgres_service_lease_this_attempt )) \
+    || [[ -e "$postgres_service_retirement_receipt_file" \
+      || -L "$postgres_service_retirement_receipt_file" ]]; then
+    if ! cleanup_attempt_postgres_service; then
+      log "startup cleanup could not retire its exact Postgres service and reservation; retaining application state and ownership metadata"
       return 1
-    fi
-    if ! stop_started_postgres; then
-      log "startup cleanup could not remove the exact owned Postgres store; retaining application state and ownership metadata"
-      return 1
-    fi
-    started_postgres_this_attempt=0
-    if (( created_postgres_service_lease_this_attempt )); then
-      if ! remove_service_lease "$postgres_service_lease_file" "$postgres_service_lease_record"; then
-        log "startup cleanup could not clear the exact Postgres service lease; retaining application state and ownership metadata"
-        return 1
-      fi
-      created_postgres_service_lease_this_attempt=0
     fi
   fi
   if (( created_run_owner_this_attempt )); then
@@ -1863,6 +2198,7 @@ cleanup_failed_attempt() {
       fi
     elif (( ! cleanup_complete )); then
       log "startup cleanup is incomplete; retained its application state and ownership metadata"
+      log "retry exact cleanup with the same data/run settings: scripts/agent-workbench-dev.sh down --addr $workbench_addr"
     fi
   fi
   return "$status"
@@ -1966,6 +2302,18 @@ stop_all_known() {
     log "refusing service teardown: process metadata has no matching stack metadata at $expected_meta"
     failed=1
   done
+  for file in "$state_dir"/restate-*.service-retired \
+    "$state_dir"/postgres-*.service-retired; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    key="${file##*/}"
+    key="${key#restate-}"
+    key="${key#postgres-}"
+    key="${key%.service-retired}"
+    expected_meta="$state_dir/workbench-$key.meta"
+    [[ -e "$expected_meta" || -L "$expected_meta" ]] && continue
+    found=1
+    finalize_orphaned_start_attempt "$key" 0 || failed=1
+  done
   for file in "$state_dir"/restate-*.container "$state_dir"/postgres-*.container; do
     [[ -e "$file" || -L "$file" ]] || continue
     key="${file##*/}"
@@ -1978,9 +2326,16 @@ stop_all_known() {
     log "refusing service teardown: ownership marker has no matching stack metadata at $expected_meta"
     failed=1
   done
-  for file in "$state_dir"/workbench-*.process-retired \
-    "$state_dir"/workbench-*.teardown \
-    "$state_dir"/restate-*.service-retired "$state_dir"/postgres-*.service-retired; do
+  for file in "$state_dir"/workbench-*.teardown; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    key="${file##*/workbench-}"
+    key="${key%.teardown}"
+    expected_meta="$state_dir/workbench-$key.meta"
+    [[ -e "$expected_meta" || -L "$expected_meta" ]] && continue
+    found=1
+    finalize_orphaned_teardown_transaction "$file" "$key" || failed=1
+  done
+  for file in "$state_dir"/workbench-*.process-retired; do
     [[ -e "$file" || -L "$file" ]] || continue
     key="${file##*/}"
     key="${key#workbench-}"
@@ -1988,7 +2343,6 @@ stop_all_known() {
     key="${key#postgres-}"
     key="${key%.process-retired}"
     key="${key%.service-retired}"
-    key="${key%.teardown}"
     expected_meta="$state_dir/workbench-$key.meta"
     [[ -e "$expected_meta" || -L "$expected_meta" ]] && continue
     found=1
@@ -2071,10 +2425,11 @@ ensure_restate() {
     die "Restate admin did not become ready at $restate_admin_url"
   fi
   restate_service_lease_record="1 restate $ownership_token $container_id"
-  write_service_lease "$restate_ingress_service_lease_file" restate "$container_id" \
+  publish_attempt_service_lease "$restate_ingress_service_lease_file" restate "$container_id" \
+    created_restate_ingress_service_lease_this_attempt \
     || die "could not reserve the launcher-created Restate ingress service"
-  created_restate_service_lease_this_attempt=1
-  write_service_lease "$restate_admin_service_lease_file" restate "$container_id" \
+  publish_attempt_service_lease "$restate_admin_service_lease_file" restate "$container_id" \
+    created_restate_admin_service_lease_this_attempt \
     || die "could not reserve the launcher-created Restate admin service"
 }
 
@@ -2112,10 +2467,10 @@ ensure_postgres() {
     docker logs "$postgres_container" >&2 || true
     die "Postgres did not become ready at $postgres_host:$postgres_port"
   fi
-  write_service_lease "$postgres_service_lease_file" postgres "$container_id" \
-    || die "could not reserve the launcher-created Postgres service"
   postgres_service_lease_record="1 postgres $ownership_token $container_id"
-  created_postgres_service_lease_this_attempt=1
+  publish_attempt_service_lease "$postgres_service_lease_file" postgres "$container_id" \
+    created_postgres_service_lease_this_attempt \
+    || die "could not reserve the launcher-created Postgres service"
 }
 
 endpoint_url() {
@@ -2783,7 +3138,8 @@ run_reset_dev_state() {
   started_postgres_name=""
   started_postgres_id=""
   created_reset_ownership_this_attempt=0
-  created_restate_service_lease_this_attempt=0
+  created_restate_ingress_service_lease_this_attempt=0
+  created_restate_admin_service_lease_this_attempt=0
   created_postgres_service_lease_this_attempt=0
   created_run_owner_this_attempt=0
   created_meta_this_attempt=0
@@ -2867,44 +3223,30 @@ run_foreground() {
       persisted_stack_retired=1
       started_restate_this_attempt=0
       started_postgres_this_attempt=0
-      created_restate_service_lease_this_attempt=0
+      created_restate_ingress_service_lease_this_attempt=0
+      created_restate_admin_service_lease_this_attempt=0
       created_postgres_service_lease_this_attempt=0
     fi
-    if (( ! persisted_stack_retired && started_restate_this_attempt )); then
-      if (( created_restate_service_lease_this_attempt )) \
-      && ! attempt_restate_service_leases_match "$restate_service_lease_record"; then
-        log "foreground cleanup could not verify its exact Restate service lease; retaining application state"
-        foreground_cleanup_status=1
-        return 1
-      fi
-      if ! stop_started_restate; then
-        log "foreground cleanup could not remove the exact owned Restate engine; retaining application state"
-        foreground_cleanup_status=1
-        return 1
-      fi
-      if (( created_restate_service_lease_this_attempt )) \
-        && ! remove_attempt_restate_service_leases "$restate_service_lease_record"; then
-        log "foreground cleanup could not clear the exact Restate service lease; retaining application state"
+    if (( ! persisted_stack_retired )) && {
+      (( started_restate_this_attempt \
+        || created_restate_ingress_service_lease_this_attempt \
+        || created_restate_admin_service_lease_this_attempt )) \
+        || [[ -e "$restate_service_retirement_receipt_file" \
+          || -L "$restate_service_retirement_receipt_file" ]]
+    }; then
+      if ! cleanup_attempt_restate_service; then
+        log "foreground cleanup could not retire its exact Restate service and reservations; retaining application state"
         foreground_cleanup_status=1
         return 1
       fi
     fi
-    if (( ! persisted_stack_retired && started_postgres_this_attempt )); then
-      if (( created_postgres_service_lease_this_attempt )) \
-        && [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
-          != "$postgres_service_lease_record" ]]; then
-        log "foreground cleanup could not verify its exact Postgres service lease; retaining application state"
-        foreground_cleanup_status=1
-        return 1
-      fi
-      if ! stop_started_postgres; then
-        log "foreground cleanup could not remove the exact owned Postgres store; retaining application state"
-        foreground_cleanup_status=1
-        return 1
-      fi
-      if (( created_postgres_service_lease_this_attempt )) \
-        && ! remove_service_lease "$postgres_service_lease_file" "$postgres_service_lease_record"; then
-        log "foreground cleanup could not clear the exact Postgres service lease; retaining application state"
+    if (( ! persisted_stack_retired )) && {
+      (( started_postgres_this_attempt || created_postgres_service_lease_this_attempt )) \
+        || [[ -e "$postgres_service_retirement_receipt_file" \
+          || -L "$postgres_service_retirement_receipt_file" ]]
+    }; then
+      if ! cleanup_attempt_postgres_service; then
+        log "foreground cleanup could not retire its exact Postgres service and reservation; retaining application state"
         foreground_cleanup_status=1
         return 1
       fi
