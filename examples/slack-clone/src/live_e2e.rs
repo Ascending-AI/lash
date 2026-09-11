@@ -14,14 +14,13 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
-use lash::PromptLayerSink as _;
 use lash::TurnInput;
+use lash::direct::ProviderRouteIdentity;
 use lash::provider::{LlmRequest, LlmResponse, Provider, ProviderFailureKind, ProviderOptions};
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
     ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
 };
-use lash::tracing::{JsonlTraceSink, TraceLevel};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,6 +30,9 @@ use crate::bot::slack_api::{ChatPostMessageRequest, HistoryQuery, SlackApi};
 use crate::log_out;
 
 mod core_builders;
+#[cfg(test)]
+#[path = "live_e2e/host_shutdown_tests.rs"]
+mod host_shutdown_tests;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
 
@@ -640,6 +642,70 @@ async fn finish_live_core<T>(
     }
 }
 
+async fn finish_smoke_stream_with_timeout(
+    stream_session: &lash::LashSession,
+    mut live_stream: lash::TurnStream,
+    turn_timeout: Duration,
+) -> std::result::Result<(lash::TurnReport, usize), FailureReason> {
+    let activity_result = tokio::time::timeout(turn_timeout, async {
+        let mut activity_count = 0;
+        while let Some(activity) = live_stream.next().await {
+            activity.map_err(FailureReason::harness)?;
+            activity_count += 1;
+        }
+        Ok::<_, FailureReason>(activity_count)
+    })
+    .await;
+    match activity_result {
+        Ok(Ok(activity_count)) => {
+            let result = live_stream.finish().await.map_err(FailureReason::harness)?;
+            Ok((result, activity_count))
+        }
+        Ok(Err(primary)) => {
+            stream_session.cancel_running_turns_with_origin(Some(
+                "slack-clone-live-e2e smoke stream failure".to_string(),
+            ));
+            while let Some(activity) = live_stream.next().await {
+                if let Err(drain_error) = activity {
+                    eprintln!(
+                        "slack-clone-live-e2e: smoke-stream drain also failed after activity error {primary:?}: {drain_error}"
+                    );
+                }
+            }
+            if let Err(join_error) = live_stream.finish().await {
+                eprintln!(
+                    "slack-clone-live-e2e: smoke-stream completion failed after activity error {primary:?}: {join_error}"
+                );
+            }
+            Err(primary)
+        }
+        Err(_) => {
+            let primary = FailureReason::TurnTimedOut {
+                agent: "smoke-stream".to_string(),
+            };
+            stream_session.cancel_running_turns_with_origin(Some(
+                "slack-clone-live-e2e smoke stream timeout".to_string(),
+            ));
+            // TurnStream's activity channel is bounded. Keep receiving after
+            // cancellation so a producer blocked in emit can reach its owned
+            // completion JoinHandle before factory shutdown.
+            while let Some(activity) = live_stream.next().await {
+                if let Err(drain_error) = activity {
+                    eprintln!(
+                        "slack-clone-live-e2e: smoke-stream drain failed after timeout: {drain_error}"
+                    );
+                }
+            }
+            if let Err(join_error) = live_stream.finish().await {
+                eprintln!(
+                    "slack-clone-live-e2e: smoke-stream completion failed after timeout: {join_error}"
+                );
+            }
+            Err(primary)
+        }
+    }
+}
+
 async fn run_smoke_probes(
     config: &Config,
     ledger: &SpendLedger,
@@ -654,6 +720,7 @@ async fn run_smoke_probes(
         "Answer with exactly STREAM_OK.",
         None,
         smoke_dir.join("stream.trace.jsonl"),
+        None,
     )
     .map_err(FailureReason::harness)?;
     let stream_result = async {
@@ -662,50 +729,11 @@ async fn run_smoke_probes(
             .open()
             .await
             .map_err(FailureReason::harness)?;
-        let mut live_stream = stream_session
+        let live_stream = stream_session
             .turn(TurnInput::text("Reply now."))
             .stream()
             .map_err(FailureReason::harness)?;
-        let activity_result = tokio::time::timeout(TURN_TIMEOUT, async {
-            let mut activity_count = 0;
-            while let Some(activity) = live_stream.next().await {
-                activity.map_err(FailureReason::harness)?;
-                activity_count += 1;
-            }
-            Ok::<_, FailureReason>(activity_count)
-        })
-        .await;
-        match activity_result {
-            Ok(Ok(activity_count)) => {
-                let result = live_stream.finish().await.map_err(FailureReason::harness)?;
-                Ok((result, activity_count))
-            }
-            Ok(Err(primary)) => {
-                stream_session.cancel_running_turns_with_origin(Some(
-                    "slack-clone-live-e2e smoke stream failure".to_string(),
-                ));
-                if let Err(join_error) = live_stream.finish().await {
-                    eprintln!(
-                        "slack-clone-live-e2e: smoke-stream completion failed after activity error {primary:?}: {join_error}"
-                    );
-                }
-                Err(primary)
-            }
-            Err(_) => {
-                let primary = FailureReason::TurnTimedOut {
-                    agent: "smoke-stream".to_string(),
-                };
-                stream_session.cancel_running_turns_with_origin(Some(
-                    "slack-clone-live-e2e smoke stream timeout".to_string(),
-                ));
-                if let Err(join_error) = live_stream.finish().await {
-                    eprintln!(
-                        "slack-clone-live-e2e: smoke-stream completion failed after timeout: {join_error}"
-                    );
-                }
-                Err(primary)
-            }
-        }
+        finish_smoke_stream_with_timeout(&stream_session, live_stream, TURN_TIMEOUT).await
     }
     .await;
     let (stream, stream_activity_count) =
@@ -722,6 +750,7 @@ async fn run_smoke_probes(
         "Call structural_echo exactly once with value TOOL_OK, then report completion.",
         Some(echo_tools()),
         smoke_dir.join("tool.trace.jsonl"),
+        None,
     )
     .map_err(FailureReason::harness)?;
     let tool_result = async {
@@ -1084,6 +1113,7 @@ async fn run_attempt(
             Arc::clone(&state),
         )),
         attempt_dir.join("standard.trace.jsonl"),
+        None,
     ) {
         Ok(core) => core,
         Err(error) => {

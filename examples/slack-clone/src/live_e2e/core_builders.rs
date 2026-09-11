@@ -8,10 +8,13 @@ use lash::provider::{
     CacheControlDialect, ModelCapability, ProviderHandle, ProviderOptions, ProviderReliability,
     ReasoningCapability, ReasoningEncoding, ReasoningSelection, SamplingCapability,
 };
-use lash::{LashCore, ModelSpec};
+use lash::tools::ToolProvider;
+use lash::tracing::{JsonlTraceSink, TraceLevel};
+use lash::{LashCore, ModelSpec, PromptLayerSink as _};
 use lash_provider_openai::{
     OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider, ProviderRoutingPrefs,
 };
+use uuid::Uuid;
 
 use super::{
     Config, DEFAULT_RLM_MODEL, DEFAULT_STANDARD_MODEL, MAX_MODEL_TURNS_PER_SESSION_TURN,
@@ -96,6 +99,7 @@ pub(super) fn standard_core(
     instructions: &str,
     tools: Option<Arc<dyn ToolProvider>>,
     trace_path: PathBuf,
+    shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
 ) -> Result<LashCore> {
     let mut builder = LashCore::standard_builder(lash::TurnBudget::bounded(turn_budget))
         .without_queued_work()
@@ -104,6 +108,9 @@ pub(super) fn standard_core(
         .generation(generation(output_cap))
         .instructions(instructions)
         .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -119,6 +126,9 @@ pub(super) fn standard_core(
         .map_err(anyhow::Error::msg)?
     {
         builder = builder.plugin(marker);
+    }
+    if let Some(witness) = shutdown_witness {
+        builder = builder.plugin(witness);
     }
     builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -157,6 +167,9 @@ pub(super) fn rlm_core(
     .tools(tools)
     .effect_host(Arc::new(
         lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
+    ))
+    .store_factory(Arc::new(
+        lash::persistence::InMemorySessionStoreFactory::new(),
     ))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
     .process_env_store(Arc::new(

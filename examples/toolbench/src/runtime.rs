@@ -26,6 +26,36 @@ pub(crate) async fn run_task(
     provider_retries: u32,
     dump_dir: Option<&std::path::Path>,
 ) -> (World, RunEvidence) {
+    run_task_with_shutdown_witness(
+        task,
+        dialect,
+        model,
+        api_key,
+        run,
+        channel,
+        effort,
+        turn_wall_limit_secs,
+        provider_retries,
+        dump_dir,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_task_with_shutdown_witness(
+    task: &Task,
+    dialect: lash::rlm::RlmDialect,
+    model: &str,
+    api_key: &str,
+    run: usize,
+    channel: crate::ChannelSelection,
+    effort: crate::ReasoningEffort,
+    turn_wall_limit_secs: u64,
+    provider_retries: u32,
+    dump_dir: Option<&std::path::Path>,
+    shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
+) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
     // Every run owns its world, telemetry, provider and in-memory stores. No
     // process environment is mutated; the HTTP recorder owns a task-local listener.
@@ -71,6 +101,7 @@ pub(crate) async fn run_task(
             &telemetry,
             provider_retries,
             &recorder.base_url,
+            shutdown_witness,
         )?;
         Ok::<_, anyhow::Error>((core, recorder))
     }
@@ -298,6 +329,7 @@ fn build_turn_core(
     telemetry: &Arc<crate::telemetry::Telemetry>,
     provider_retries: u32,
     recorder_base_url: &str,
+    shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
 ) -> Result<LashCore> {
     let provider = ProviderHandle::new(
         telemetry.capture.wrap(
@@ -361,6 +393,9 @@ fn build_turn_core(
             if let Some(marker) = shutdown_marker {
                 stack.push(marker);
             }
+            if let Some(witness) = shutdown_witness {
+                stack.push(witness);
+            }
         }))
         .provider(provider)
         .model(model_spec(model, effort)?)
@@ -370,6 +405,9 @@ fn build_turn_core(
             world.provider()
         })
         .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -481,6 +519,81 @@ fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct ShutdownWitness {
+        called: Arc<AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash::plugins::PluginFactory for ShutdownWitness {
+        fn id(&self) -> &'static str {
+            "toolbench_timeout_shutdown_witness"
+        }
+
+        fn build(
+            &self,
+            _ctx: &lash::plugins::PluginSessionContext,
+        ) -> std::result::Result<Arc<dyn lash::plugins::SessionPlugin>, lash::plugins::PluginError>
+        {
+            Ok(Arc::new(ShutdownWitnessSession))
+        }
+
+        async fn shutdown(&self) -> std::result::Result<(), lash::plugins::PluginError> {
+            self.called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct ShutdownWitnessSession;
+
+    impl lash::plugins::SessionPlugin for ShutdownWitnessSession {
+        fn id(&self) -> &'static str {
+            "toolbench_timeout_shutdown_witness"
+        }
+
+        fn register(
+            &self,
+            _registrar: &mut lash::plugins::PluginRegistrar,
+        ) -> std::result::Result<(), lash::plugins::PluginError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn wall_limit_retains_core_and_awaits_installed_factory_shutdown() {
+        let shutdown_called = Arc::new(AtomicBool::new(false));
+        let witness = Arc::new(ShutdownWitness {
+            called: Arc::clone(&shutdown_called),
+        });
+        let task = crate::tasks::easy_pack()
+            .into_iter()
+            .next()
+            .expect("easy task");
+        let (_world, evidence) = super::run_task_with_shutdown_witness(
+            &task,
+            lash::rlm::RlmDialect::Lashlang,
+            "test/toolbench-timeout",
+            "unused-no-network-key",
+            0,
+            crate::ChannelSelection::Standard,
+            crate::ReasoningEffort::None,
+            0,
+            0,
+            None,
+            Some(witness),
+        )
+        .await;
+
+        assert_eq!(evidence.completion_error.as_deref(), Some("wall_limit"));
+        assert!(!evidence.completed);
+        // The provider endpoint is the task-local recorder. Even if the zero
+        // duration permits one initial poll, no request can leave this process.
+        assert!(evidence.rounds <= 1);
+        assert!(shutdown_called.load(Ordering::SeqCst));
+    }
+
     #[test]
     fn cleanup_failure_preserves_primary_failed_turn_evidence() {
         let mut completed = false;

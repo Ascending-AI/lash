@@ -46,7 +46,7 @@ PY
 wait_http() {
   local url="$1" runner="$2" log="$3"
   local attempt
-  for attempt in $(seq 1 300); do
+  for attempt in $(seq 1 6000); do
     if curl --silent --fail --max-time 1 "$url" >/dev/null 2>&1; then
       return
     fi
@@ -95,6 +95,22 @@ app_child() {
 marker_count() {
   local marker="$1" host="$2"
   grep -c "host=$host plugin_factory=host_shutdown_marker phase=shutdown_completed" "$marker"
+}
+
+wait_listener_ready() {
+  local pid="$1" log="$2" attempt
+  for attempt in $(seq 1 200); do
+    if grep -q ready "$log"; then
+      return
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      cat "$log" >&2
+      return 1
+    fi
+    sleep 0.05
+  done
+  echo "owned conflict listener did not become ready" >&2
+  return 1
 }
 
 assert_count() {
@@ -156,7 +172,7 @@ time.sleep(120)
 PY
   holder=$!
   owned_pids+=("$holder")
-  while ! grep -q ready "$dir/listener.log"; do sleep 0.05; done
+  wait_listener_ready "$holder" "$dir/listener.log"
   env OPENROUTER_API_KEY=deterministic-no-network \
     AGENT_SERVICE_ADDR="127.0.0.1:$port" \
     AGENT_SERVICE_DATA_DIR="$dir/data" \
@@ -256,7 +272,7 @@ time.sleep(120)
 PY
   holder=$!
   owned_pids+=("$holder")
-  while ! grep -q ready "$dir/listener.log"; do sleep 0.05; done
+  wait_listener_ready "$holder" "$dir/listener.log"
   env AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=auth-failure-once \
     AGENT_WORKBENCH_ADDR="127.0.0.1:$port" \
     AGENT_WORKBENCH_RESTATE_ADDR="127.0.0.1:$restate_port" \

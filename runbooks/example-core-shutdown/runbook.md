@@ -56,20 +56,22 @@ cargo check --workspace --all-targets --locked \
   --features agent-service/restate,agent-workbench/provider-wire-fixtures
 ```
 
-Run the focused toolbench cleanup-result tests and require two executed tests
-and two passes:
+Run the focused finite-owner and cleanup-result tests and require four executed
+tests and four passes:
 
 ```sh
 . ./env.sh
 cargo nextest run --workspace --all-targets --locked \
-  -E 'test(cleanup_failure_preserves_primary_failed_turn_evidence) | test(cleanup_failure_marks_successful_turn_failed)'
+  --features slack-clone/live-e2e \
+  -E 'test(smoke_stream_timeout_drains_full_channel_before_factory_shutdown) | test(wall_limit_retains_core_and_awaits_installed_factory_shutdown) | test(cleanup_failure_preserves_primary_failed_turn_evidence) | test(cleanup_failure_marks_successful_turn_failed)'
 ```
 
-Inspect the Slack live-e2e smoke path as a source contract: on stream activity
-error or timeout it calls the existing process-local session cancellation and
-then consumes `TurnStream::finish().await` before `finish_live_core` can shut
-down plugin factories. Do not execute that paid provider harness for this
-deterministic runbook.
+The Slack test fills the real bounded activity channel, triggers the smoke
+timeout, drains after existing process-local cancellation, joins the real
+`TurnStream`, and then lets an installed shutdown factory run. The toolbench
+test takes its real zero-wall-limit owner path and observes an installed
+factory's awaited shutdown. Both providers remain local; do not execute the
+paid live-model harness for this deterministic runbook.
 
 ## Mutation control
 
