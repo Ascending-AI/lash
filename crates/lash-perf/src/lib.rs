@@ -81,6 +81,10 @@ impl DhatStatsAllocator {
 pub static GLOBAL_ALLOCATOR: DhatStatsAllocator = DhatStatsAllocator::new();
 
 #[cfg(feature = "dhat-heap")]
+#[expect(
+    unsafe_code,
+    reason = "the dhat allocator must implement GlobalAlloc and forward its unsafe contract"
+)]
 unsafe impl GlobalAlloc for DhatStatsAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         self.allocations.fetch_add(1, Ordering::SeqCst);
@@ -125,6 +129,10 @@ unsafe impl GlobalAlloc for DhatStatsAllocator {
 }
 
 #[cfg(feature = "dhat-heap")]
+#[expect(
+    unsafe_code,
+    reason = "the shared dhat allocator must forward GlobalAlloc's unsafe contract"
+)]
 unsafe impl GlobalAlloc for &DhatStatsAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Forwarding the caller's GlobalAlloc contract.

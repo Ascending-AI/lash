@@ -280,16 +280,30 @@ mod tests {
 
         assert_eq!(names, vec!["list_process_handles", "cancel_process"]);
         #[cfg(not(feature = "lashlang"))]
-        assert!(
-            definitions
-                .iter()
-                .all(|tool| tool.manifest.bindings.is_empty())
-        );
+        for definition in &definitions {
+            assert_eq!(
+                definition
+                    .manifest
+                    .bindings
+                    .contains_key(lash_tool_support::LASHLANG_TOOL_BINDING_KEY),
+                lash_tool_support::LASHLANG_BINDINGS_ENABLED,
+                "{} had Lashlang binding state inconsistent with lash-tool-support",
+                definition.name()
+            );
+            if !lash_tool_support::LASHLANG_BINDINGS_ENABLED {
+                assert!(
+                    definition.manifest.bindings.is_empty(),
+                    "{} unexpectedly had bindings: {:?}",
+                    definition.name(),
+                    definition.manifest.bindings
+                );
+            }
+        }
         #[cfg(feature = "lashlang")]
         assert!(definitions.iter().all(|tool| {
             tool.manifest
                 .bindings
-                .contains_key(lash_lashlang_runtime::LASHLANG_TOOL_BINDING_KEY)
+                .contains_key(lash_tool_support::LASHLANG_TOOL_BINDING_KEY)
         }));
     }
 
