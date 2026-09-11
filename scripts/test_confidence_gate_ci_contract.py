@@ -24,6 +24,7 @@ RELEASE_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "release-cache.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
+FEATURE_COVERAGE = ROOT / "scripts" / "feature-coverage.toml"
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
@@ -1790,14 +1791,13 @@ derive_mutation_jobs() {{
             self.assertIn(snippet, gate)
 
     def test_provider_conformance_is_explicitly_featured_in_ci(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        feature_checks = workflow_job_block(workflow, "package-feature-checks")
+        feature_coverage = FEATURE_COVERAGE.read_text(encoding="utf-8")
 
         for provider in ("openai", "anthropic", "google"):
             self.assertIn(
-                f"cargo test -p lash-internal-provider-{provider} "
-                "--features testing --locked conformance",
-                feature_checks,
+                f'"cargo", "test", "-p", "lash-internal-provider-{provider}", '
+                '"--features", "testing", "--locked", "conformance"',
+                feature_coverage,
             )
 
     def test_queue_feature_graphs_are_parallel_and_independently_cached(self) -> None:
@@ -1809,16 +1809,20 @@ derive_mutation_jobs() {{
         }
         self.assertEqual(
             {
+                "sansio-schema-validation",
+                "otel-feature-chain",
+                "core-internal-features",
+                "language-testing-features",
+                "llm-transport-features",
+                "store-features",
+                "runtime-features",
                 "protocol-rlm-testing",
-                "agent-workbench",
-                "slack-clone-e2e",
-                "agent-service-restate",
                 "remote-protocol-conversions",
-                "plugin-mcp-lashlang",
-                "llm-transport-conformance",
-                "provider-openai-conformance",
-                "provider-anthropic-conformance",
-                "provider-google-conformance",
+                "tool-lashlang-proxies",
+                "provider-testing-features",
+                "perf-dhat-heap",
+                "regress-stable-features",
+                "host-features",
             },
             package_lanes,
         )
@@ -1973,11 +1977,9 @@ derive_mutation_jobs() {{
                 "python3 scripts/api_surface.py check",
             ),
             "package-feature-checks": (
-                "cargo check -p lash-internal-protocol-rlm --features testing --locked",
-                "cargo check -p agent-workbench --locked",
-                "cargo check -p slack-clone --all-targets --features e2e --locked",
-                "cargo check -p agent-service --features restate --all-targets --locked",
-                "cargo test -p lash-internal-remote-protocol --features core-conversions --locked",
+                "python3 scripts/check_feature_coverage.py run protocol-rlm-testing",
+                "python3 scripts/check_feature_coverage.py run host-features",
+                "python3 scripts/check_feature_coverage.py run remote-protocol-conversions",
             ),
             "runtime-feature-boundary": (
                 "cargo check -p lash-runtime --no-default-features --locked",

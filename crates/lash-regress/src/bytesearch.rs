@@ -2,8 +2,6 @@
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use core::fmt;
 extern crate memchr;
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 
 /// Facilities for searching bytes.
 pub trait ByteSearcher {
