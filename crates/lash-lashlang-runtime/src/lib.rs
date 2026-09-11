@@ -6,6 +6,8 @@ pub use error::{
 };
 mod process_identity;
 pub use process_identity::deterministic_lashlang_process_id;
+mod trigger_commands;
+pub use trigger_commands::execute_trigger_operation;
 mod typescript_runtime;
 pub use typescript_runtime::{is_typescript_runtime_receiver, journaled_typescript_runtime_value};
 
