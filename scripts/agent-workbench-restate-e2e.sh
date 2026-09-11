@@ -13,6 +13,51 @@ agent_workbench_default_port_plan() {
     "$((base + 33))" "$((base + 34))" "$((base + 35))"
 }
 
+agent_workbench_refuse_mismatched_address() {
+  local variable="$1"
+  echo "Refusing $variable: the supported gate accepts only its exact owned loopback address" >&2
+  return 73
+}
+
+agent_workbench_validate_owned_addresses() {
+  local owned_admin_url="http://127.0.0.1:$admin_port"
+  local owned_ingress_url="http://127.0.0.1:$ingress_port"
+  local owned_database_url="postgres://lash:lash@127.0.0.1:$postgres_port/lash"
+
+  [ "$admin_url" = "$owned_admin_url" ] || {
+    agent_workbench_refuse_mismatched_address RESTATE_ADMIN_URL
+    return $?
+  }
+  [ "$ingress_url" = "$owned_ingress_url" ] || {
+    agent_workbench_refuse_mismatched_address RESTATE_INGRESS_URL
+    return $?
+  }
+  [ "$database_url" = "$owned_database_url" ] || {
+    agent_workbench_refuse_mismatched_address AGENT_WORKBENCH_E2E_DATABASE_URL
+    return $?
+  }
+  if ! [[ "$endpoint_bind" =~ ^127\.0\.0\.1:([0-9]+)$ ]]; then
+    agent_workbench_refuse_mismatched_address AGENT_WORKBENCH_E2E_ENDPOINT_BIND
+    return $?
+  fi
+  endpoint_port="${BASH_REMATCH[1]}"
+  if ! [[ "$postgres_endpoint_bind" =~ ^127\.0\.0\.1:([0-9]+)$ ]]; then
+    agent_workbench_refuse_mismatched_address AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND
+    return $?
+  fi
+  postgres_endpoint_port="${BASH_REMATCH[1]}"
+  if [ -n "${AGENT_WORKBENCH_E2E_ENDPOINT_URL+x}" ] \
+    && [ "$AGENT_WORKBENCH_E2E_ENDPOINT_URL" != "http://$endpoint_bind" ]; then
+    agent_workbench_refuse_mismatched_address AGENT_WORKBENCH_E2E_ENDPOINT_URL
+    return $?
+  fi
+  if [ -n "${AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_URL+x}" ] \
+    && [ "$AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_URL" != "http://$postgres_endpoint_bind" ]; then
+    agent_workbench_refuse_mismatched_address AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_URL
+    return $?
+  fi
+}
+
 agent_workbench_refuse_preexisting_resources() {
   local name port
   for name in "$restate_container" "$postgres_container"; do
@@ -178,7 +223,6 @@ fi
 repo="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$repo"
 source "$repo/scripts/worktree-gate-env.sh"
-lash_gate_acquire agent-workbench-restate-e2e
 
 image="${AGENT_WORKBENCH_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
 restate_container="${AGENT_WORKBENCH_RESTATE_CONTAINER:-lash-agent-workbench-restate-${LASH_GATE_WORKTREE_SLUG}}"
@@ -190,11 +234,13 @@ node_port="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-${default_ports[2]}}"
 endpoint_bind="${AGENT_WORKBENCH_E2E_ENDPOINT_BIND:-127.0.0.1:${default_ports[3]}}"
 postgres_port="${AGENT_WORKBENCH_E2E_POSTGRES_PORT:-${default_ports[4]}}"
 postgres_endpoint_bind="${AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND:-127.0.0.1:${default_ports[5]}}"
-endpoint_port="${endpoint_bind##*:}"
-postgres_endpoint_port="${postgres_endpoint_bind##*:}"
 database_url="${AGENT_WORKBENCH_E2E_DATABASE_URL:-postgres://lash:lash@127.0.0.1:$postgres_port/lash}"
 admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:$admin_port}"
 ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
+endpoint_port=""
+postgres_endpoint_port=""
+agent_workbench_validate_owned_addresses
+lash_gate_acquire agent-workbench-restate-e2e
 if [ -n "${AGENT_WORKBENCH_E2E_ARTIFACT_DIR:-}" ]; then
   artifact_dir="$AGENT_WORKBENCH_E2E_ARTIFACT_DIR"
   mkdir -m 700 "$artifact_dir"

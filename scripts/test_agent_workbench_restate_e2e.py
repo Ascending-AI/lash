@@ -11,8 +11,15 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "agent-workbench-restate-e2e.sh"
 
 
-def run_bash(source: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_bash(
+    source: str,
+    *,
+    env: dict[str, str] | None = None,
+    unset: tuple[str, ...] = (),
+) -> subprocess.CompletedProcess[str]:
     merged = os.environ.copy()
+    for name in unset:
+        merged.pop(name, None)
     if env:
         merged.update(env)
     return subprocess.run(
@@ -26,6 +33,16 @@ def run_bash(source: str, *, env: dict[str, str] | None = None) -> subprocess.Co
 
 
 class AgentWorkbenchRestateE2eTest(unittest.TestCase):
+    ADDRESS_OVERRIDES = (
+        "RESTATE_ADMIN_URL",
+        "RESTATE_INGRESS_URL",
+        "AGENT_WORKBENCH_E2E_DATABASE_URL",
+        "AGENT_WORKBENCH_E2E_ENDPOINT_BIND",
+        "AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND",
+        "AGENT_WORKBENCH_E2E_ENDPOINT_URL",
+        "AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_URL",
+    )
+
     def test_default_port_plan_is_distinct(self) -> None:
         result = run_bash(f'source "{SCRIPT}"; agent_workbench_default_port_plan 61000')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -62,6 +79,69 @@ class AgentWorkbenchRestateE2eTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("rm ", calls.read_text(encoding="utf-8"))
+
+    def test_exact_owned_addresses_are_accepted(self) -> None:
+        result = run_bash(
+            f"""
+            source "{SCRIPT}"
+            admin_port=62030; ingress_port=62031; postgres_port=62034
+            admin_url=http://127.0.0.1:62030
+            ingress_url=http://127.0.0.1:62031
+            database_url=postgres://lash:lash@127.0.0.1:62034/lash
+            endpoint_bind=127.0.0.1:62033
+            postgres_endpoint_bind=127.0.0.1:62035
+            unset AGENT_WORKBENCH_E2E_ENDPOINT_URL
+            unset AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_URL
+            agent_workbench_validate_owned_addresses
+            test "$endpoint_port" = 62033
+            test "$postgres_endpoint_port" = 62035
+            """,
+            unset=self.ADDRESS_OVERRIDES,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_mismatched_addresses_exit_before_any_mutation(self) -> None:
+        cases = {
+            "RESTATE_ADMIN_URL": "http://203.0.113.1:1",
+            "RESTATE_INGRESS_URL": "http://203.0.113.2:2",
+            "AGENT_WORKBENCH_E2E_DATABASE_URL": "postgres://secret@203.0.113.3/db",
+            "AGENT_WORKBENCH_E2E_ENDPOINT_BIND": "0.0.0.0:64000",
+            "AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND": "0.0.0.0:64001",
+            "AGENT_WORKBENCH_E2E_ENDPOINT_URL": "http://203.0.113.4:4",
+            "AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_URL": "http://203.0.113.5:5",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            calls = root / "mutation-calls"
+            sentinel = root / "preexisting-data"
+            sentinel.write_text("untouched", encoding="utf-8")
+            for command in ["docker", "cargo"]:
+                executable = root / command
+                executable.write_text(
+                    "#!/usr/bin/env bash\n"
+                    f"printf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >>'{calls}'\n"
+                    "exit 99\n",
+                    encoding="utf-8",
+                )
+                executable.chmod(0o755)
+            for index, (variable, value) in enumerate(cases.items()):
+                with self.subTest(variable=variable):
+                    artifact = root / f"artifacts-{index}"
+                    result = run_bash(
+                        f'bash "{SCRIPT}"',
+                        env={
+                            "PATH": f"{root}:{os.environ['PATH']}",
+                            "AGENT_WORKBENCH_E2E_ARTIFACT_DIR": str(artifact),
+                            variable: value,
+                        },
+                        unset=tuple(name for name in self.ADDRESS_OVERRIDES if name != variable),
+                    )
+                    self.assertEqual(result.returncode, 73, result.stderr)
+                    self.assertIn(variable, result.stderr)
+                    self.assertNotIn(value, result.stderr)
+                    self.assertFalse(artifact.exists())
+                    self.assertFalse(calls.exists())
+                    self.assertEqual(sentinel.read_text(encoding="utf-8"), "untouched")
 
     def test_preflight_refuses_an_existing_listener(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
