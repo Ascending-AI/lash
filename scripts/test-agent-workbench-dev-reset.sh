@@ -139,7 +139,21 @@ case "$command" in
       esac
     done
     file="$MOCK_STATE/container-$name"
-    [[ -f "$file" ]] || exit 1
+    if [[ ! -f "$file" ]]; then
+      for candidate in "$MOCK_STATE"/container-*; do
+        [[ -f "$candidate" && "$candidate" != *container-counter \
+          && "$candidate" != *container-ports-* ]] || continue
+        read -r candidate_id _ _ < "$candidate"
+        if [[ "$candidate_id" = "$name" ]]; then
+          file="$candidate"
+          break
+        fi
+      done
+    fi
+    if [[ ! -f "$file" ]]; then
+      printf 'Error: No such object: %s\n' "$name" >&2
+      exit 1
+    fi
     if [[ -n "$format" ]]; then
       read -r id token component < "$file"
       printf '%s %s %s\n' "$id" "$token" "$component"
@@ -231,6 +245,7 @@ for ((i = 0; i < ${#args[@]}; i++)); do
   fi
 done
 if [[ "$url" = */healthz ]]; then
+  [[ "${MOCK_HEALTH_FAIL:-0}" != 1 ]] || exit 1
   [[ -f "$MOCK_PID_FILE" ]] || exit 1
   read -r pid start < "$MOCK_PID_FILE" || exit 1
   current="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
@@ -279,6 +294,21 @@ elif [[ "$url" = */deployments ]]; then
 else
   exit 2
 fi
+MOCK
+
+cat > "$mock_bin/python3" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+target="${@: -1}"
+if [[ -n "${MOCK_RECORD_PUBLISH_FAIL_MATCH:-}" \
+  && "$target" = *"$MOCK_RECORD_PUBLISH_FAIL_MATCH"* \
+  && -f "$target" \
+  && "$(<"$target")" = '2 prepared '* \
+  && ! -e "$MOCK_STATE/record-publish-failed" ]]; then
+  : > "$MOCK_STATE/record-publish-failed"
+  exit 1
+fi
+exec /usr/bin/python3 "$@"
 MOCK
 
 chmod +x "$mock_bin"/*
@@ -1627,5 +1657,195 @@ grep -Fq $'\tdp_foreign\thttp://127.0.0.1:65531' "$mock_state/deployments" \
   || fail "changed-registry foreground cleanup lost the foreign registration"
 ! grep -Fq 'unbound variable' "$test_tmp/foreground-registry.log" \
   || fail "changed-registry foreground cleanup ran outside its ownership context"
+
+data_original_pid="$test_tmp/data-original-pid-binding"
+port_original_pid=3134
+launcher_env "$data_original_pid" "$port_original_pid" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_original_pid" \
+  > "$test_tmp/original-pid-up.log" 2>&1
+original_pid_file="$data_original_pid/run/workbench-127.0.0.1_${port_original_pid}.pid"
+read -r original_pid original_start < "$original_pid_file"
+sleep 0.01 &
+retired_fixture_pid=$!
+wait "$retired_fixture_pid"
+[[ ! -e "/proc/$retired_fixture_pid" ]] \
+  || fail "retired PID binding fixture unexpectedly remained alive"
+printf '%s %s\n' "$retired_fixture_pid" "$original_start" > "$original_pid_file"
+if launcher_env "$data_original_pid" "$port_original_pid" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_original_pid" \
+  > "$test_tmp/original-pid-refusal.log" 2>&1; then
+  fail "down trusted a substituted already-retired PID over the original launch identity"
+fi
+[[ "$(awk '{print $22}' "/proc/$original_pid/stat" 2>/dev/null || true)" = "$original_start" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_original_pid" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_original_pid" \
+  && -f "$data_original_pid/attempt-app-state" ]] \
+  || fail "substituted retired PID changed the original host or dependent state"
+printf '%s %s\n' "$original_pid" "$original_start" > "$original_pid_file"
+
+data_readiness_unknown="$test_tmp/data-readiness-unknown"
+port_readiness_unknown=3136
+readiness_status=0
+launcher_env "$data_readiness_unknown" "$port_readiness_unknown" \
+  MOCK_HEALTH_FAIL=1 \
+  'BASH_FUNC_awk%%=() { if [[ " ${FUNCNAME[*]} " = *" require_workbench_alive "* ]]; then return 1; fi; command awk "$@"; }' \
+  /usr/bin/timeout 8 bash "$repo_root/scripts/agent-workbench-dev.sh" up \
+    --port "$port_readiness_unknown" \
+  > "$test_tmp/readiness-unknown.log" 2>&1 || readiness_status=$?
+[[ "$readiness_status" != 0 && "$readiness_status" != 124 ]] \
+  || fail "unknown readiness observation did not exit with a bounded truthful status"
+readiness_pid_file="$data_readiness_unknown/run/workbench-127.0.0.1_${port_readiness_unknown}.pid"
+read -r readiness_pid readiness_start < "$readiness_pid_file"
+[[ "$(awk '{print $22}' "/proc/$readiness_pid/stat" 2>/dev/null || true)" = "$readiness_start" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_readiness_unknown" \
+  && -f "$data_readiness_unknown/attempt-app-state" ]] \
+  || fail "unknown readiness observation did not retain the live host and dependencies"
+grep -Fq 'process identity could not be observed' "$test_tmp/readiness-unknown.log" \
+  || fail "unknown readiness observation did not report its state"
+kill -- "-$readiness_pid" >/dev/null 2>&1 || kill "$readiness_pid" >/dev/null 2>&1 \
+  || fail "test could not stop its retained readiness child"
+
+data_receipt_symlink="$test_tmp/data-receipt-symlink"
+port_receipt_symlink=3138
+run_launcher "$data_receipt_symlink" "$port_receipt_symlink" up \
+  > "$test_tmp/receipt-symlink-up.log" 2>&1
+receipt_symlink_key="127.0.0.1_${port_receipt_symlink}"
+receipt_symlink_file="$data_receipt_symlink/run/workbench-$receipt_symlink_key.process-retired"
+receipt_symlink_sentinel="$test_tmp/receipt-symlink-sentinel"
+printf 'unrelated sentinel\n' > "$receipt_symlink_sentinel"
+launcher_env "$data_receipt_symlink" "$port_receipt_symlink" \
+  bash -c 'ln -s "$1" "$2.$$.tmp"; exec bash "$3" down --port "$4"' \
+  _ "$receipt_symlink_sentinel" "$receipt_symlink_file" \
+  "$repo_root/scripts/agent-workbench-dev.sh" "$port_receipt_symlink" \
+  > "$test_tmp/receipt-symlink-down.log" 2>&1
+[[ "$(<"$receipt_symlink_sentinel")" = 'unrelated sentinel' \
+  && ! -L "$receipt_symlink_file" ]] \
+  || fail "retirement publication followed a predictable temporary symlink"
+
+data_clear_retry="$test_tmp/data-clear-retry"
+port_clear_retry=3140
+launcher_env "$data_clear_retry" "$port_clear_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_clear_retry" \
+  > "$test_tmp/clear-retry-up.log" 2>&1
+clear_retry_key="127.0.0.1_${port_clear_retry}"
+clear_retry_transaction="$data_clear_retry/run/workbench-$clear_retry_key.teardown"
+clear_retry_restate_marker="$data_clear_retry/run/restate-$clear_retry_key.container"
+if launcher_env "$data_clear_retry" "$port_clear_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_CLEAR_FAIL_MATCH="restate-$clear_retry_key.container" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = *"$MOCK_CLEAR_FAIL_MATCH"* && ! -e "$MOCK_STATE/record-clear-failed" ]]; then : > "$MOCK_STATE/record-clear-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_clear_retry" \
+  > "$test_tmp/clear-retry-first.log" 2>&1; then
+  fail "down ignored a transient final ownership-record clearing failure"
+fi
+[[ -f "$clear_retry_transaction" && -f "$clear_retry_restate_marker" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_clear_retry" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_clear_retry" ]] \
+  || fail "failed final clearing did not retain authoritative teardown completion evidence"
+launcher_env "$data_clear_retry" "$port_clear_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_clear_retry" \
+  > "$test_tmp/clear-retry-second.log" 2>&1
+[[ ! -e "$clear_retry_transaction" && ! -e "$clear_retry_restate_marker" ]] \
+  || fail "fault-free down did not resume final ownership-record clearing"
+
+data_publish_retry="$test_tmp/data-publication-retry"
+port_publish_retry=3142
+launcher_env "$data_publish_retry" "$port_publish_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_publish_retry" \
+  > "$test_tmp/publication-retry-up.log" 2>&1
+publish_retry_key="127.0.0.1_${port_publish_retry}"
+publish_retry_receipt="$data_publish_retry/run/restate-$publish_retry_key.service-retired"
+if launcher_env "$data_publish_retry" "$port_publish_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_RECORD_PUBLISH_FAIL_MATCH="restate-$publish_retry_key.service-retired" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_publish_retry" \
+  > "$test_tmp/publication-retry-first.log" 2>&1; then
+  fail "down ignored a post-removal retirement-receipt publication failure"
+fi
+[[ "$(<"$publish_retry_receipt")" = '2 prepared restate '* \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_publish_retry" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_publish_retry" ]] \
+  || fail "publication failure did not retain prepared exact-ID evidence and dependency order"
+launcher_env "$data_publish_retry" "$port_publish_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_publish_retry" \
+  > "$test_tmp/publication-retry-second.log" 2>&1
+[[ ! -e "$publish_retry_receipt" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_publish_retry" ]] \
+  || fail "fault-free down did not recover post-removal receipt publication"
+
+data_foreground_retry="$test_tmp/data-foreground-pg-retry"
+port_foreground_retry=3144
+rm -f "$mock_state/docker-rm-failed-postgres"
+launcher_env "$data_foreground_retry" "$port_foreground_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=once \
+  MOCK_LAUNCHER_PID_FILE="$mock_state/launcher-$port_foreground_retry" \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_LAUNCHER_PID_FILE"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_retry" \
+  > "$test_tmp/foreground-pg-retry-first.log" 2>&1 &
+foreground_retry_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-pg-retry-first.log" "$foreground_retry_invocation" \
+  || fail "foreground PostgreSQL retry fixture did not become ready"
+foreground_retry_launcher="$(<"$mock_state/launcher-$port_foreground_retry")"
+kill -TERM "$foreground_retry_launcher"
+foreground_retry_status=0
+wait "$foreground_retry_invocation" || foreground_retry_status=$?
+foreground_retry_key="127.0.0.1_${port_foreground_retry}"
+[[ "$foreground_retry_status" = 143 \
+  && -f "$data_foreground_retry/run/workbench-$foreground_retry_key.teardown" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_retry" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_foreground_retry" ]] \
+  || fail "foreground partial retirement did not retain public retry evidence"
+launcher_env "$data_foreground_retry" "$port_foreground_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_foreground_retry" \
+  > "$test_tmp/foreground-pg-retry-second.log" 2>&1
+[[ ! -e "$data_foreground_retry/run/workbench-$foreground_retry_key.teardown" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_foreground_retry" ]] \
+  || fail "public down did not resume foreground partial retirement"
+
+data_startup_retry="$test_tmp/data-startup-pg-retry"
+port_startup_retry=3146
+if launcher_env "$data_startup_retry" "$port_startup_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_POST_KILL=1 MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=always \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_startup_retry" \
+  > "$test_tmp/startup-pg-retry-first.log" 2>&1; then
+  fail "startup cleanup ignored a persistent PostgreSQL retirement failure"
+fi
+startup_retry_key="127.0.0.1_${port_startup_retry}"
+[[ -f "$data_startup_retry/run/workbench-$startup_retry_key.teardown" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_startup_retry" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_startup_retry" \
+  && -f "$data_startup_retry/attempt-app-state" ]] \
+  || fail "startup partial cleanup did not retain a public teardown transaction"
+launcher_env "$data_startup_retry" "$port_startup_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_startup_retry" \
+  > "$test_tmp/startup-pg-retry-second.log" 2>&1
+[[ ! -e "$data_startup_retry/run/workbench-$startup_retry_key.teardown" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_startup_retry" ]] \
+  || fail "public down did not resume startup partial retirement"
+
+data_reset_retry="$test_tmp/data-reset-pg-retry"
+port_reset_retry=3148
+launcher_env "$data_reset_retry" "$port_reset_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_reset_retry" \
+  > "$test_tmp/reset-pg-retry-up.log" 2>&1
+printf 'old reset state\n' > "$data_reset_retry/old-reset-state"
+if launcher_env "$data_reset_retry" "$port_reset_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=always \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_reset_retry" > "$test_tmp/reset-pg-retry-first.log" 2>&1; then
+  fail "reset ignored a persistent PostgreSQL retirement failure"
+fi
+reset_retry_key="127.0.0.1_${port_reset_retry}"
+[[ -f "$data_reset_retry/run/workbench-$reset_retry_key.teardown" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_reset_retry" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_reset_retry" \
+  && -f "$data_reset_retry/old-reset-state" ]] \
+  || fail "failed reset retirement did not preserve retry evidence and old application state"
+launcher_env "$data_reset_retry" "$port_reset_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_reset_retry" > "$test_tmp/reset-pg-retry-second.log" 2>&1
+[[ ! -e "$data_reset_retry/old-reset-state" \
+  && ! -e "$data_reset_retry/run/workbench-$reset_retry_key.teardown" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_reset_retry" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_reset_retry" ]] \
+  || fail "fault-free reset retry did not complete retirement and start a fresh stack"
 
 printf '%s\n' 'agent-workbench explicit reset lifecycle checks passed'

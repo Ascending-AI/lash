@@ -39,6 +39,7 @@ restate_registry_hash=""
 restate_retirement_authorized=0
 foreground_cleanup_done=0
 foreground_cleanup_status=0
+process_observation_uncertain=0
 
 log() {
   printf '[agent-workbench] %s\n' "$*" >&2
@@ -228,7 +229,6 @@ register_deployment() {
     fi
     sleep 1
   done
-  require_workbench_alive "after Restate deployment registration"
   registered_deployment_id="$(printf '%s' "$last_response" | python3 -c '
 import json
 import re
@@ -243,6 +243,7 @@ if not isinstance(deployment_id, str) or not re.fullmatch(r"dp_[A-Za-z0-9]+", de
     raise SystemExit(1)
 print(deployment_id)
 ')" || return 1
+  require_workbench_alive "after Restate deployment registration"
 }
 
 deployment_registry_records() {
@@ -399,7 +400,8 @@ pid_file_identity() {
 write_pid_file() {
   local file="$1" pid="$2" start_time="$3"
   [[ "$pid" =~ ^[0-9]+$ && "$start_time" =~ ^[0-9]+$ ]] || return 1
-  printf '%s %s\n' "$pid" "$start_time" > "$file"
+  printf '%s %s\n' "$pid" "$start_time" \
+    | publish_private_record create "$file"
 }
 
 new_ownership_token() {
@@ -420,6 +422,79 @@ regular_private_file() {
   mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
   [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
   (( (8#$mode & 0022) == 0 ))
+}
+
+publish_private_record() {
+  local publication="$1" file="$2"
+  [[ "$publication" =~ ^(create|replace)$ ]] || return 1
+  python3 -c '
+import os
+import errno
+import secrets
+import stat
+import sys
+
+publication, path = sys.argv[1:]
+data = sys.stdin.buffer.read()
+directory = os.path.dirname(path) or "."
+name = os.path.basename(path)
+if not name or name in {".", ".."}:
+    raise SystemExit(1)
+directory_fd = os.open(
+    directory,
+    os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+)
+temporary = f".{name}.tmp.{secrets.token_hex(16)}"
+temporary_created = False
+try:
+    fd = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+        dir_fd=directory_fd,
+    )
+    temporary_created = True
+    try:
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            view = view[written:]
+        os.fchmod(fd, 0o600)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    if publication == "create":
+        os.link(
+            temporary,
+            name,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+    else:
+        try:
+            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            current = None
+        if current is not None:
+            if not stat.S_ISREG(current.st_mode) or current.st_uid != os.getuid() \
+                    or current.st_mode & 0o022:
+                raise PermissionError("unsafe destination")
+        os.replace(temporary, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temporary_created = False
+    try:
+        os.fsync(directory_fd)
+    except OSError as error:
+        if error.errno not in {errno.EINVAL, errno.EROFS}:
+            raise
+finally:
+    if temporary_created:
+        try:
+            os.unlink(temporary, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+    os.close(directory_fd)
+' "$publication" "$file"
 }
 
 private_owned_directory() {
@@ -485,6 +560,7 @@ path_contains_reset_footprint_record() {
       \( -name '.agent-workbench-dev-run-owner-*' \
       -o -name '.agent-workbench-dev-attempt-owner' \
       -o -name 'workbench-*.process-retired' \
+      -o -name 'workbench-*.teardown' \
       -o -name '*-*.service-retired' \
       -o -name 'restate-*.lease' -o -name 'postgres-*.lease' \
       -o -name '*-recover.sh' \) \
@@ -592,8 +668,8 @@ read_run_owner() {
 
 write_run_owner() {
   [[ ! -e "$run_owner_file" && ! -L "$run_owner_file" ]] || return 1
-  printf '1 %s %s %s\n' "$ownership_token" "$state_key" "$data_path_hash" > "$run_owner_file"
-  chmod 600 "$run_owner_file"
+  printf '1 %s %s %s\n' "$ownership_token" "$state_key" "$data_path_hash" \
+    | publish_private_record create "$run_owner_file"
 }
 
 claim_run_footprint() {
@@ -605,8 +681,8 @@ claim_run_footprint() {
 write_service_lease() {
   local file="$1" component="$2" id="$3"
   [[ ! -e "$file" && ! -L "$file" ]] || return 1
-  printf '1 %s %s %s\n' "$component" "$ownership_token" "$id" > "$file"
-  chmod 600 "$file"
+  printf '1 %s %s %s\n' "$component" "$ownership_token" "$id" \
+    | publish_private_record create "$file"
 }
 
 remove_service_lease() {
@@ -624,8 +700,9 @@ require_service_unreserved() {
 
 write_container_marker() {
   local file="$1" name="$2" id="$3" component="$4"
-  printf '%s %s %s %s\n' "$name" "$id" "$ownership_token" "$component" > "$file"
-  chmod 600 "$file"
+  [[ ! -e "$file" && ! -L "$file" ]] || return 1
+  printf '%s %s %s %s\n' "$name" "$id" "$ownership_token" "$component" \
+    | publish_private_record create "$file"
 }
 
 read_container_marker() {
@@ -643,6 +720,24 @@ container_identity_matches() {
   local actual=""
   actual="$(docker inspect --format '{{.Id}} {{index .Config.Labels "com.lash.agent-workbench.owner"}} {{index .Config.Labels "com.lash.agent-workbench.component"}}' "$name" 2>/dev/null || true)"
   [[ "$actual" = "$expected_id $expected_token $expected_component" ]]
+}
+
+container_identity_observation() {
+  local reference="$1" expected_id="$2" expected_token="$3" expected_component="$4"
+  local actual="" status=0
+  actual="$(docker inspect --format '{{.Id}} {{index .Config.Labels "com.lash.agent-workbench.owner"}} {{index .Config.Labels "com.lash.agent-workbench.component"}}' "$reference" 2>&1)" \
+    || status=$?
+  if (( status == 0 )); then
+    if [[ "$actual" = "$expected_id $expected_token $expected_component" ]]; then
+      printf 'running\n'
+    else
+      printf 'mismatch\n'
+    fi
+  elif [[ "$actual" =~ [Nn]o[[:space:]]such[[:space:]](object|container) ]]; then
+    printf 'retired\n'
+  else
+    printf 'unknown\n'
+  fi
 }
 
 stop_owned_container_file() {
@@ -731,17 +826,23 @@ tail_log() {
 
 require_workbench_alive() {
   local phase="$1"
-  local record="" pid="" start_time=""
+  local record="" pid="" start_time="" observation="unknown"
   record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
-  if [[ -n "$record" ]]; then
-    read -r pid start_time <<<"$record"
+  if [[ -z "$record" ]]; then
+    tail_log
+    die "workbench process metadata is missing or invalid $phase"
   fi
-  if [[ -n "$pid" ]] && pid_identity_matches "$pid" "$start_time"; then
-    return
+  read -r pid start_time <<<"$record"
+  if [[ -n "$started_workbench_pid" \
+    && "$record" != "$started_workbench_pid $started_workbench_start_time" ]]; then
+    tail_log
+    die "workbench process metadata changed from its captured launch identity $phase"
   fi
+  observation="$(process_identity_observation "$pid" "$start_time")"
+  [[ "$observation" = running ]] && return 0
 
   local exit_status="unknown"
-  if [[ -n "$pid" ]]; then
+  if [[ "$observation" = retired ]]; then
     if wait "$pid" 2>/dev/null; then
       exit_status=0
     else
@@ -749,14 +850,14 @@ require_workbench_alive() {
     fi
   fi
   tail_log
-  if [[ -e "$pid_file" ]]; then
-    log "removing stale or mismatched PID file $pid_file"
-  fi
-  rm -f "$pid_file"
-  if [[ -z "$pid" ]]; then
-    die "workbench process metadata disappeared $phase"
-  fi
-  die "workbench process $pid exited with status $exit_status $phase"
+  case "$observation" in
+    retired) die "workbench process $pid exited with status $exit_status $phase" ;;
+    mismatch) die "workbench process identity changed $phase" ;;
+    *)
+      process_observation_uncertain=1
+      die "workbench process identity could not be observed $phase"
+      ;;
+  esac
 }
 
 workbench_ready() {
@@ -863,39 +964,54 @@ stop_pid_file() {
 read_process_retirement_receipt() {
   local file="$1"
   regular_private_file "$file" || return 1
-  local schema token pid start_time extra
-  read -r schema token pid start_time extra < "$file" || return 1
-  [[ "$schema" = 1 && "$token" =~ ^[0-9a-fA-F-]{36}$ \
+  local schema phase token pid start_time extra
+  read -r schema phase token pid start_time extra < "$file" || return 1
+  [[ "$schema" = 2 && "$phase" =~ ^(prepared|retired)$ \
+    && "$token" =~ ^[0-9a-fA-F-]{36}$ \
     && "$pid" =~ ^[0-9]+$ && "$start_time" =~ ^[0-9]+$ && -z "$extra" ]] \
     || return 1
-  printf '%s %s %s %s\n' "$schema" "$token" "$pid" "$start_time"
+  printf '%s %s %s %s %s\n' "$schema" "$phase" "$token" "$pid" "$start_time"
 }
 
 write_process_retirement_receipt() {
-  local file="$1" token="$2" pid="$3" start_time="$4"
-  local expected="1 $token $pid $start_time" existing="" temporary="$file.$$.tmp"
+  local file="$1" phase="$2" token="$3" pid="$4" start_time="$5"
+  local expected="2 $phase $token $pid $start_time" existing=""
+  [[ "$phase" =~ ^(prepared|retired)$ ]] || return 1
   if [[ -e "$file" || -L "$file" ]]; then
     existing="$(read_process_retirement_receipt "$file" 2>/dev/null || true)"
-    [[ "$existing" = "$expected" ]]
-    return
+    [[ -n "$existing" ]] || return 1
+    if [[ "$existing" = "$expected" ]]; then
+      return 0
+    fi
+    if [[ "$phase" = retired && "$existing" = "2 prepared $token $pid $start_time" ]]; then
+      printf '%s\n' "$expected" | publish_private_record replace "$file" \
+        || [[ "$(read_process_retirement_receipt "$file" 2>/dev/null || true)" = "$expected" ]]
+      return
+    fi
+    return 1
   fi
-  (umask 077; printf '%s\n' "$expected" > "$temporary") || return 1
-  chmod 600 "$temporary" || return 1
-  mv -f -- "$temporary" "$file"
+  [[ "$phase" = prepared ]] || return 1
+  printf '%s\n' "$expected" | publish_private_record create "$file" \
+    || [[ "$(read_process_retirement_receipt "$file" 2>/dev/null || true)" = "$expected" ]]
 }
 
 validate_persisted_process_state() {
-  local pid_file="$1" receipt_file="$2" token="$3"
+  local pid_file="$1" receipt_file="$2" token="$3" expected_pid="$4" expected_start_time="$5"
   local record="" receipt="" pid="" start_time="" observation=""
   record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
   if [[ -z "$record" ]]; then
     log "refusing teardown: workbench process metadata is missing or invalid at $pid_file"
     return 1
   fi
+  if [[ "$record" != "$expected_pid $expected_start_time" ]]; then
+    log "refusing teardown: workbench PID belongs to a different process incarnation or does not match its original launch identity"
+    return 1
+  fi
   read -r pid start_time <<<"$record"
   if [[ -e "$receipt_file" || -L "$receipt_file" ]]; then
     receipt="$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)"
-    if [[ "$receipt" != "1 $token $pid $start_time" ]]; then
+    if [[ "$receipt" != "2 prepared $token $pid $start_time" \
+      && "$receipt" != "2 retired $token $pid $start_time" ]]; then
       log "refusing teardown: process retirement receipt is invalid or changed at $receipt_file"
       return 1
     fi
@@ -916,41 +1032,58 @@ validate_persisted_process_state() {
 }
 
 retire_persisted_process() {
-  local pid_file="$1" receipt_file="$2" token="$3"
+  local pid_file="$1" receipt_file="$2" token="$3" expected_pid="$4" expected_start_time="$5"
   local record="" receipt="" pid="" start_time="" observation=""
   record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
-  [[ -n "$record" ]] || return 1
+  [[ "$record" = "$expected_pid $expected_start_time" ]] || return 1
   read -r pid start_time <<<"$record"
   receipt="$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)"
   if [[ -n "$receipt" ]]; then
-    [[ "$receipt" = "1 $token $pid $start_time" ]] || return 1
-    return 0
+    [[ "$receipt" = "2 prepared $token $pid $start_time" \
+      || "$receipt" = "2 retired $token $pid $start_time" ]] || return 1
+    [[ "$receipt" = "2 retired $token $pid $start_time" ]] && return 0
+  else
+    observation="$(process_identity_observation "$pid" "$start_time")"
+    case "$observation" in
+      running|retired) ;;
+      mismatch)
+        log "workbench process identity changed before retirement began"
+        return 1
+        ;;
+      *)
+        log "workbench process retirement could not be observed"
+        return 1
+        ;;
+    esac
+    write_process_retirement_receipt \
+      "$receipt_file" prepared "$token" "$pid" "$start_time" || true
+    if [[ "$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)" \
+      != "2 prepared $token $pid $start_time" ]]; then
+      log "could not persist the prepared workbench retirement receipt"
+      return 1
+    fi
   fi
   observation="$(process_identity_observation "$pid" "$start_time")"
   case "$observation" in
     running) stop_process_identity "$pid" "$start_time" || return 1 ;;
     retired) ;;
+    mismatch)
+      [[ -n "$receipt" ]] || {
+        log "workbench process identity changed before retirement began"
+        return 1
+      }
+      ;;
     *)
       log "workbench process retirement could not be proven; retaining dependent services"
       return 1
       ;;
   esac
-  write_process_retirement_receipt "$receipt_file" "$token" "$pid" "$start_time" || {
+  write_process_retirement_receipt "$receipt_file" retired "$token" "$pid" "$start_time" || true
+  if [[ "$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)" \
+    != "2 retired $token $pid $start_time" ]]; then
     log "could not persist the verified workbench process retirement receipt"
     return 1
-  }
-}
-
-clear_persisted_process_receipts() {
-  local pid_file="$1" receipt_file="$2" token="$3"
-  local record="" receipt="" pid="" start_time=""
-  record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
-  [[ -n "$record" ]] || return 1
-  read -r pid start_time <<<"$record"
-  receipt="$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)"
-  [[ "$receipt" = "1 $token $pid $start_time" ]] || return 1
-  rm -f -- "$pid_file" || return 1
-  rm -f -- "$receipt_file"
+  fi
 }
 
 stop_attempt_workbench() {
@@ -1004,25 +1137,35 @@ validate_persisted_service() {
 read_service_retirement_receipt() {
   local file="$1"
   regular_private_file "$file" || return 1
-  local schema component token id extra
-  read -r schema component token id extra < "$file" || return 1
-  [[ "$schema" = 1 && "$component" =~ ^(restate|postgres)$ \
+  local schema phase component token id extra
+  read -r schema phase component token id extra < "$file" || return 1
+  [[ "$schema" = 2 && "$phase" =~ ^(prepared|retired)$ \
+    && "$component" =~ ^(restate|postgres)$ \
     && "$token" =~ ^[0-9a-fA-F-]{36}$ \
     && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]] || return 1
-  printf '%s %s %s %s\n' "$schema" "$component" "$token" "$id"
+  printf '%s %s %s %s %s\n' "$schema" "$phase" "$component" "$token" "$id"
 }
 
 write_service_retirement_receipt() {
-  local file="$1" component="$2" token="$3" id="$4"
-  local expected="1 $component $token $id" existing="" temporary="$file.$$.tmp"
+  local file="$1" phase="$2" component="$3" token="$4" id="$5"
+  local expected="2 $phase $component $token $id" existing=""
+  [[ "$phase" =~ ^(prepared|retired)$ ]] || return 1
   if [[ -e "$file" || -L "$file" ]]; then
     existing="$(read_service_retirement_receipt "$file" 2>/dev/null || true)"
-    [[ "$existing" = "$expected" ]]
-    return
+    [[ -n "$existing" ]] || return 1
+    if [[ "$existing" = "$expected" ]]; then
+      return 0
+    fi
+    if [[ "$phase" = retired && "$existing" = "2 prepared $component $token $id" ]]; then
+      printf '%s\n' "$expected" | publish_private_record replace "$file" \
+        || [[ "$(read_service_retirement_receipt "$file" 2>/dev/null || true)" = "$expected" ]]
+      return
+    fi
+    return 1
   fi
-  (umask 077; printf '%s\n' "$expected" > "$temporary") || return 1
-  chmod 600 "$temporary" || return 1
-  mv -f -- "$temporary" "$file"
+  [[ "$phase" = prepared ]] || return 1
+  printf '%s\n' "$expected" | publish_private_record create "$file" \
+    || [[ "$(read_service_retirement_receipt "$file" 2>/dev/null || true)" = "$expected" ]]
 }
 
 validate_persisted_service_state() {
@@ -1033,7 +1176,8 @@ validate_persisted_service_state() {
     return
   fi
   receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
-  read -r _ marker_component token id <<<"$receipt"
+  local phase=""
+  read -r _ phase marker_component token id <<<"$receipt"
   if [[ -z "$receipt" || "$marker_component" != "$component" || "$token" != "$expected_token" ]]; then
     log "refusing teardown: $component retirement receipt is invalid or changed"
     return 1
@@ -1058,48 +1202,139 @@ validate_persisted_service_state() {
 retire_persisted_service() {
   local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
   local receipt_file="$5" receipt="" record="" name="" id="" token="" marker_component=""
+  local phase="" observation=""
   receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
   if [[ -n "$receipt" ]]; then
     validate_persisted_service_state \
-      "$marker_file" "$component" "$lease_file" "$expected_token" "$receipt_file"
-    return
+      "$marker_file" "$component" "$lease_file" "$expected_token" "$receipt_file" \
+      || return 1
+    read -r _ phase marker_component token id <<<"$receipt"
+    [[ "$phase" = retired ]] && return 0
+    name="$(read_container_marker "$marker_file" | awk '{print $1}')" || return 1
+  else
+    record="$(read_container_marker "$marker_file" 2>/dev/null || true)"
+    read -r name id token marker_component <<<"$record"
+    [[ -n "$record" && "$token" = "$expected_token" && "$marker_component" = "$component" \
+      && "$(read_service_lease "$lease_file" 2>/dev/null || true)" \
+        = "1 $component $token $id" ]] || return 1
+    container_identity_matches "$name" "$id" "$token" "$component" || return 1
+    write_service_retirement_receipt \
+      "$receipt_file" prepared "$component" "$token" "$id" || true
+    if [[ "$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)" \
+      != "2 prepared $component $token $id" ]]; then
+      log "could not persist the prepared $component retirement receipt"
+      return 1
+    fi
   fi
-  record="$(read_container_marker "$marker_file" 2>/dev/null || true)"
-  read -r name id token marker_component <<<"$record"
-  [[ -n "$record" && "$token" = "$expected_token" && "$marker_component" = "$component" \
-    && "$(read_service_lease "$lease_file" 2>/dev/null || true)" \
-      = "1 $component $token $id" ]] || return 1
-  container_identity_matches "$name" "$id" "$token" "$component" || return 1
-  log "stopping $component container $name"
-  if ! docker rm -fv "$id" >/dev/null; then
-    log "could not remove the exact owned $component container $name"
+  observation="$(container_identity_observation "$id" "$id" "$token" "$component")"
+  case "$observation" in
+    running)
+      log "stopping $component container $name"
+      if ! docker rm -fv "$id" >/dev/null; then
+        log "could not remove the exact owned $component container $name"
+        return 1
+      fi
+      ;;
+    retired) ;;
+    *)
+      log "could not prove the prepared $component container identity or retirement"
+      return 1
+      ;;
+  esac
+  write_service_retirement_receipt "$receipt_file" retired "$component" "$token" "$id" || true
+  if [[ "$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)" \
+    != "2 retired $component $token $id" ]]; then
+    log "removed the exact owned $component container but could not persist its retirement receipt"
     return 1
   fi
-  write_service_retirement_receipt "$receipt_file" "$component" "$token" "$id" || {
-    log "removed the exact owned $component container but could not persist its retirement receipt"
+}
+
+read_teardown_transaction() {
+  local file="$1"
+  regular_private_file "$file" || return 1
+  local schema phase token pid start_time restate_id postgres_id extra
+  read -r schema phase token pid start_time restate_id postgres_id extra < "$file" || return 1
+  [[ "$schema" = 1 && "$phase" =~ ^(retiring|retired)$ \
+    && "$token" =~ ^[0-9a-fA-F-]{36}$ \
+    && "$pid" =~ ^[0-9]+$ && "$start_time" =~ ^[0-9]+$ \
+    && ( "$restate_id" = - || "$restate_id" =~ ^[0-9a-fA-F]{12,64}$ ) \
+    && ( "$postgres_id" = - || "$postgres_id" =~ ^[0-9a-fA-F]{12,64}$ ) \
+    && -z "$extra" ]] || return 1
+  printf '%s %s %s %s %s %s %s\n' \
+    "$schema" "$phase" "$token" "$pid" "$start_time" "$restate_id" "$postgres_id"
+}
+
+write_teardown_transaction() {
+  local file="$1" phase="$2" token="$3" pid="$4" start_time="$5"
+  local restate_id="$6" postgres_id="$7" expected existing
+  expected="1 $phase $token $pid $start_time $restate_id $postgres_id"
+  existing="$(read_teardown_transaction "$file" 2>/dev/null || true)"
+  if [[ -n "$existing" ]]; then
+    if [[ "$existing" = "$expected" ]]; then
+      return 0
+    fi
+    if [[ "$phase" = retired \
+      && "$existing" = "1 retiring $token $pid $start_time $restate_id $postgres_id" ]]; then
+      printf '%s\n' "$expected" | publish_private_record replace "$file" \
+        || [[ "$(read_teardown_transaction "$file" 2>/dev/null || true)" = "$expected" ]]
+      return
+    fi
+    return 1
+  fi
+  [[ ! -e "$file" && ! -L "$file" && "$phase" = retiring ]] || return 1
+  printf '%s\n' "$expected" | publish_private_record create "$file" \
+    || [[ "$(read_teardown_transaction "$file" 2>/dev/null || true)" = "$expected" ]]
+}
+
+remove_exact_private_record() {
+  local file="$1" expected="$2" reader="$3" label="$4"
+  [[ -e "$file" || -L "$file" ]] || return 0
+  if [[ "$("$reader" "$file" 2>/dev/null || true)" != "$expected" ]]; then
+    log "refusing teardown finalization: $label changed at $file"
+    return 1
+  fi
+  rm -f -- "$file" || {
+    log "could not clear the exact retired $label at $file"
     return 1
   }
 }
 
-clear_persisted_service_receipts() {
-  local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
-  local receipt_file="$5" receipt=""
-  validate_persisted_service_state \
-    "$marker_file" "$component" "$lease_file" "$expected_token" "$receipt_file" || return 1
-  receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
-  [[ -n "$receipt" ]] || return 1
-  rm -f -- "$marker_file" || {
-    log "could not clear the exact retired $component ownership marker"
-    return 1
-  }
-  rm -f -- "$lease_file" || {
-    log "could not clear the exact retired $component service lease"
-    return 1
-  }
-  rm -f -- "$receipt_file" || {
-    log "could not clear the exact retired $component ownership receipts"
-    return 1
-  }
+finalize_teardown_transaction() {
+  local transaction_file="$1" transaction_expected="$2"
+  local process_expected="$3" restate_marker_expected="$4" postgres_marker_expected="$5"
+  local restate_lease_expected="$6" postgres_lease_expected="$7"
+  local restate_receipt_expected="$8" postgres_receipt_expected="$9"
+  local transaction=""
+  transaction="$(read_teardown_transaction "$transaction_file" 2>/dev/null || true)"
+  [[ "$transaction" = "$transaction_expected" ]] || return 1
+
+  if [[ -n "$postgres_marker_expected" ]]; then
+    remove_exact_private_record "$stack_postgres_marker" "$postgres_marker_expected" \
+      read_container_marker "Postgres ownership marker" || return 1
+    remove_exact_private_record "$postgres_lease" "$postgres_lease_expected" \
+      read_service_lease "Postgres service lease" || return 1
+  fi
+  if [[ -n "$restate_marker_expected" ]]; then
+    remove_exact_private_record "$stack_restate_marker" "$restate_marker_expected" \
+      read_container_marker "Restate ownership marker" || return 1
+    remove_exact_private_record "$restate_lease" "$restate_lease_expected" \
+      read_service_lease "Restate service lease" || return 1
+  fi
+  remove_exact_private_record "$stack_pid_file" "$process_expected" \
+    read_pid_file "workbench PID receipt" || return 1
+  if [[ -n "$postgres_receipt_expected" ]]; then
+    remove_exact_private_record "$stack_postgres_receipt" "$postgres_receipt_expected" \
+      read_service_retirement_receipt "Postgres retirement receipt" || return 1
+  fi
+  if [[ -n "$restate_receipt_expected" ]]; then
+    remove_exact_private_record "$stack_restate_receipt" "$restate_receipt_expected" \
+      read_service_retirement_receipt "Restate retirement receipt" || return 1
+  fi
+  remove_exact_private_record "$stack_process_receipt" \
+    "2 retired $ownership_token $workbench_pid $workbench_start_time" \
+    read_process_retirement_receipt "workbench retirement receipt" || return 1
+  remove_exact_private_record "$transaction_file" "$transaction_expected" \
+    read_teardown_transaction "teardown transaction"
 }
 
 stop_stack_from_meta() (
@@ -1108,15 +1343,28 @@ stop_stack_from_meta() (
     log "refusing teardown: missing or unsafe stack metadata at $stack_meta_file"
     return 1
   fi
-  unset meta_schema workbench_addr restate_ingress_url restate_admin_url deployment_url
+  unset meta_schema workbench_addr workbench_pid workbench_start_time
+  unset restate_ingress_url restate_admin_url deployment_url
   unset store_backend ownership_token restate_managed postgres_managed postgres_host postgres_port
+  unset restate_container_name restate_container_id postgres_container_name postgres_container_id
   unset restate_retirement_authorized restate_deployment_id restate_registry_hash
   # shellcheck disable=SC1090
   source "$stack_meta_file"
-  if [[ "${meta_schema:-}" != 2 || ! "${ownership_token:-}" =~ ^[0-9a-fA-F-]{36}$ \
+  if [[ "${meta_schema:-}" != 3 || ! "${ownership_token:-}" =~ ^[0-9a-fA-F-]{36}$ \
+    || ! "${workbench_pid:-}" =~ ^[0-9]+$ || ! "${workbench_start_time:-}" =~ ^[0-9]+$ \
     || ! "${restate_managed:-}" =~ ^[01]$ || ! "${postgres_managed:-}" =~ ^[01]$ \
     || ! "${store_backend:-}" =~ ^(sqlite|postgres)$ ]]; then
     log "refusing teardown: stack metadata is legacy or invalid at $stack_meta_file"
+    return 1
+  fi
+  if [[ "$restate_managed" = 1 ]] \
+    && [[ -z "${restate_container_name:-}" || ! "${restate_container_id:-}" =~ ^[0-9a-fA-F]{12,64}$ ]]; then
+    log "refusing teardown: stack metadata lacks the original Restate identity"
+    return 1
+  fi
+  if [[ "$postgres_managed" = 1 ]] \
+    && [[ -z "${postgres_container_name:-}" || ! "${postgres_container_id:-}" =~ ^[0-9a-fA-F]{12,64}$ ]]; then
+    log "refusing teardown: stack metadata lacks the original Postgres identity"
     return 1
   fi
   local stack_key expected_meta_file
@@ -1132,8 +1380,32 @@ stop_stack_from_meta() (
   local stack_postgres_marker="$state_dir/postgres-$stack_key.container"
   local stack_restate_receipt="$state_dir/restate-$stack_key.service-retired"
   local stack_postgres_receipt="$state_dir/postgres-$stack_key.service-retired"
-  validate_persisted_process_state \
-    "$stack_pid_file" "$stack_process_receipt" "$ownership_token" || return 1
+  local stack_transaction="$state_dir/workbench-$stack_key.teardown"
+  local expected_restate_id="-" expected_postgres_id="-"
+  local expected_restate_marker="" expected_postgres_marker=""
+  local expected_restate_lease="" expected_postgres_lease=""
+  local expected_restate_receipt="" expected_postgres_receipt=""
+  if [[ "$restate_managed" = 1 ]]; then
+    expected_restate_id="$restate_container_id"
+    expected_restate_marker="$restate_container_name $restate_container_id $ownership_token restate"
+    expected_restate_receipt="2 retired restate $ownership_token $restate_container_id"
+  fi
+  if [[ "$postgres_managed" = 1 ]]; then
+    expected_postgres_id="$postgres_container_id"
+    expected_postgres_marker="$postgres_container_name $postgres_container_id $ownership_token postgres"
+    expected_postgres_receipt="2 retired postgres $ownership_token $postgres_container_id"
+  fi
+  local transaction_retiring transaction_retired transaction="" transaction_phase=""
+  transaction_retiring="1 retiring $ownership_token $workbench_pid $workbench_start_time $expected_restate_id $expected_postgres_id"
+  transaction_retired="1 retired $ownership_token $workbench_pid $workbench_start_time $expected_restate_id $expected_postgres_id"
+  if [[ -e "$stack_transaction" || -L "$stack_transaction" ]]; then
+    transaction="$(read_teardown_transaction "$stack_transaction" 2>/dev/null || true)"
+    if [[ "$transaction" != "$transaction_retiring" && "$transaction" != "$transaction_retired" ]]; then
+      log "refusing teardown: transaction receipt is invalid or does not match original ownership"
+      return 1
+    fi
+    read -r _ transaction_phase _ _ _ _ _ <<<"$transaction"
+  fi
 
   local ingress_host ingress_port admin_host admin_port canonical_ingress canonical_admin
   read -r ingress_host ingress_port < <(url_host_port "$restate_ingress_url")
@@ -1154,6 +1426,19 @@ stop_stack_from_meta() (
     postgres_hash="$(printf '%s' "$canonical_postgres:$postgres_port" | sha256sum | awk '{print $1}')"
     postgres_lease="$launcher_lock_root/postgres-$postgres_hash.lease"
   fi
+  expected_restate_lease="1 restate $ownership_token $expected_restate_id"
+  expected_postgres_lease="1 postgres $ownership_token $expected_postgres_id"
+
+  if [[ "$transaction_phase" = retired ]]; then
+    finalize_teardown_transaction "$stack_transaction" "$transaction_retired" \
+      "$workbench_pid $workbench_start_time" "$expected_restate_marker" \
+      "$expected_postgres_marker" "$expected_restate_lease" "$expected_postgres_lease" \
+      "$expected_restate_receipt" "$expected_postgres_receipt"
+    return
+  fi
+
+  validate_persisted_process_state "$stack_pid_file" "$stack_process_receipt" \
+    "$ownership_token" "$workbench_pid" "$workbench_start_time" || return 1
 
   if [[ "$restate_managed" = 1 ]]; then
     if [[ "${restate_retirement_authorized:-}" != 1 \
@@ -1164,7 +1449,21 @@ stop_stack_from_meta() (
     fi
     validate_persisted_service_state "$stack_restate_marker" restate "$restate_lease" \
       "$ownership_token" "$stack_restate_receipt" || return 1
-    if [[ ! -e "$stack_restate_receipt" && ! -L "$stack_restate_receipt" ]]; then
+    [[ "$(read_container_marker "$stack_restate_marker" 2>/dev/null || true)" \
+      = "$expected_restate_marker" \
+      && "$(read_service_lease "$restate_lease" 2>/dev/null || true)" \
+      = "$expected_restate_lease" ]] || {
+      log "refusing teardown: Restate records do not match the original launch identity"
+      return 1
+    }
+    local restate_receipt="" restate_receipt_phase="" restate_observation="running"
+    restate_receipt="$(read_service_retirement_receipt "$stack_restate_receipt" 2>/dev/null || true)"
+    [[ -z "$restate_receipt" ]] || read -r _ restate_receipt_phase _ _ _ <<<"$restate_receipt"
+    if [[ "$restate_receipt_phase" = prepared ]]; then
+      restate_observation="$(container_identity_observation "$restate_container_id" \
+        "$restate_container_id" "$ownership_token" restate)"
+    fi
+    if [[ "$restate_receipt_phase" != retired && "$restate_observation" != retired ]]; then
       local registry_records registry_hash expected_registry_record
       registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
       registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
@@ -1179,10 +1478,26 @@ stop_stack_from_meta() (
   if [[ "$postgres_managed" = 1 ]]; then
     validate_persisted_service_state "$stack_postgres_marker" postgres "$postgres_lease" \
       "$ownership_token" "$stack_postgres_receipt" || return 1
+    [[ "$(read_container_marker "$stack_postgres_marker" 2>/dev/null || true)" \
+      = "$expected_postgres_marker" \
+      && "$(read_service_lease "$postgres_lease" 2>/dev/null || true)" \
+      = "$expected_postgres_lease" ]] || {
+      log "refusing teardown: Postgres records do not match the original launch identity"
+      return 1
+    }
+  fi
+
+  if [[ -z "$transaction" ]]; then
+    write_teardown_transaction "$stack_transaction" retiring "$ownership_token" \
+      "$workbench_pid" "$workbench_start_time" "$expected_restate_id" "$expected_postgres_id" || {
+      log "could not persist the prepared teardown transaction"
+      return 1
+    }
   fi
 
   retire_persisted_process \
-    "$stack_pid_file" "$stack_process_receipt" "$ownership_token" || return 1
+    "$stack_pid_file" "$stack_process_receipt" "$ownership_token" \
+    "$workbench_pid" "$workbench_start_time" || return 1
   if [[ "$restate_managed" = 1 ]]; then
     retire_persisted_service "$stack_restate_marker" restate "$restate_lease" \
       "$ownership_token" "$stack_restate_receipt" || return 1
@@ -1191,20 +1506,30 @@ stop_stack_from_meta() (
     return 1
   else
     log "workbench stopped; external Restate remains registered"
-    clear_persisted_process_receipts \
-      "$stack_pid_file" "$stack_process_receipt" "$ownership_token" || return 1
-    return 0
   fi
   if [[ "$postgres_managed" = 1 ]]; then
     retire_persisted_service "$stack_postgres_marker" postgres "$postgres_lease" \
       "$ownership_token" "$stack_postgres_receipt" || return 1
-    clear_persisted_service_receipts "$stack_postgres_marker" postgres "$postgres_lease" \
-      "$ownership_token" "$stack_postgres_receipt" || return 1
   fi
-  clear_persisted_service_receipts "$stack_restate_marker" restate "$restate_lease" \
-    "$ownership_token" "$stack_restate_receipt" || return 1
-  clear_persisted_process_receipts \
-    "$stack_pid_file" "$stack_process_receipt" "$ownership_token"
+  [[ "$(read_process_retirement_receipt "$stack_process_receipt" 2>/dev/null || true)" \
+    = "2 retired $ownership_token $workbench_pid $workbench_start_time" ]] || return 1
+  if [[ "$restate_managed" = 1 ]]; then
+    [[ "$(read_service_retirement_receipt "$stack_restate_receipt" 2>/dev/null || true)" \
+      = "$expected_restate_receipt" ]] || return 1
+  fi
+  if [[ "$postgres_managed" = 1 ]]; then
+    [[ "$(read_service_retirement_receipt "$stack_postgres_receipt" 2>/dev/null || true)" \
+      = "$expected_postgres_receipt" ]] || return 1
+  fi
+  write_teardown_transaction "$stack_transaction" retired "$ownership_token" \
+    "$workbench_pid" "$workbench_start_time" "$expected_restate_id" "$expected_postgres_id" || {
+    log "could not persist completed teardown transaction"
+    return 1
+  }
+  finalize_teardown_transaction "$stack_transaction" "$transaction_retired" \
+    "$workbench_pid $workbench_start_time" "$expected_restate_marker" \
+    "$expected_postgres_marker" "$expected_restate_lease" "$expected_postgres_lease" \
+    "$expected_restate_receipt" "$expected_postgres_receipt"
 )
 
 stop_target() {
@@ -1255,6 +1580,39 @@ remove_attempt_reset_ownership() {
 }
 
 cleanup_start_attempt() {
+  if (( process_observation_uncertain )); then
+    log "startup cleanup retained the host and dependent resources after unknown process observation"
+    return 1
+  fi
+  if (( created_meta_this_attempt && started_restate_this_attempt \
+    && ! restate_retirement_authorized )) && [[ -n "$registered_deployment_id" ]]; then
+    capture_restate_registry_ownership
+    if (( restate_retirement_authorized )); then
+      write_meta || {
+        log "startup cleanup could not bind its fresh Restate registry ownership"
+        return 1
+      }
+    fi
+  fi
+  if (( created_meta_this_attempt && restate_retirement_authorized )) \
+    && [[ -n "$registered_deployment_id" \
+      && "$(read_pid_file "$pid_file" 2>/dev/null || true)" \
+        = "$started_workbench_pid $started_workbench_start_time" \
+      && "$(read_container_marker "$restate_marker_file" 2>/dev/null || true)" \
+        = "$started_restate_name $started_restate_id $ownership_token restate" \
+      && ( "$started_postgres_this_attempt" = 0 \
+        || "$(read_container_marker "$postgres_marker_file" 2>/dev/null || true)" \
+          = "$started_postgres_name $started_postgres_id $ownership_token postgres" ) ]]; then
+    if ! stop_stack_from_meta "$meta_file"; then
+      log "startup cleanup could not complete its persisted teardown transaction"
+      return 1
+    fi
+    started_workbench_this_attempt=0
+    started_restate_this_attempt=0
+    started_postgres_this_attempt=0
+    created_restate_service_lease_this_attempt=0
+    created_postgres_service_lease_this_attempt=0
+  fi
   if (( started_workbench_this_attempt )); then
     if ! stop_attempt_workbench; then
       log "startup cleanup could not stop the owned workbench; retaining its engine, application state, and ownership metadata"
@@ -1395,12 +1753,13 @@ build_reset_recovery_command() {
 }
 
 write_reset_recovery_file() {
-  {
+  local content
+  content="$({
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n'
     printf 'exec %s\n' "$reset_recovery_command"
-  } > "$reset_recovery_file"
-  chmod 600 "$reset_recovery_file"
+  })"
+  printf '%s\n' "$content" | publish_private_record replace "$reset_recovery_file"
 }
 
 stop_all_known() {
@@ -1436,6 +1795,23 @@ stop_all_known() {
     [[ -e "$expected_meta" || -L "$expected_meta" ]] && continue
     found=1
     log "refusing service teardown: ownership marker has no matching stack metadata at $expected_meta"
+    failed=1
+  done
+  for file in "$state_dir"/workbench-*.process-retired \
+    "$state_dir"/workbench-*.teardown \
+    "$state_dir"/restate-*.service-retired "$state_dir"/postgres-*.service-retired; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    key="${file##*/}"
+    key="${key#workbench-}"
+    key="${key#restate-}"
+    key="${key#postgres-}"
+    key="${key%.process-retired}"
+    key="${key%.service-retired}"
+    key="${key%.teardown}"
+    expected_meta="$state_dir/workbench-$key.meta"
+    [[ -e "$expected_meta" || -L "$expected_meta" ]] && continue
+    found=1
+    log "refusing teardown: retirement receipt has no matching stack metadata at $expected_meta"
     failed=1
   done
   if (( ! found )); then
@@ -1555,9 +1931,12 @@ endpoint_url() {
 }
 
 write_meta() {
-  {
-    printf 'meta_schema=2\n'
+  local content
+  content="$({
+    printf 'meta_schema=3\n'
     printf 'workbench_addr=%q\n' "$workbench_addr"
+    printf 'workbench_pid=%q\n' "$started_workbench_pid"
+    printf 'workbench_start_time=%q\n' "$started_workbench_start_time"
     printf 'workbench_url=%q\n' "$workbench_url"
     printf 'restate_endpoint_addr=%q\n' "$restate_endpoint_addr"
     printf 'restate_ingress_url=%q\n' "$restate_ingress_url"
@@ -1569,14 +1948,18 @@ write_meta() {
     printf 'ownership_token=%q\n' "$ownership_token"
     printf 'restate_managed=%q\n' "$started_restate_this_attempt"
     printf 'postgres_managed=%q\n' "$started_postgres_this_attempt"
+    printf 'restate_container_name=%q\n' "$started_restate_name"
+    printf 'restate_container_id=%q\n' "$started_restate_id"
+    printf 'postgres_container_name=%q\n' "$started_postgres_name"
+    printf 'postgres_container_id=%q\n' "$started_postgres_id"
     printf 'restate_retirement_authorized=%q\n' "$restate_retirement_authorized"
     printf 'restate_deployment_id=%q\n' "$registered_deployment_id"
     printf 'restate_registry_hash=%q\n' "$restate_registry_hash"
     printf 'postgres_host=%q\n' "$postgres_host"
     printf 'postgres_port=%q\n' "$postgres_port"
     printf 'log_file=%q\n' "$log_file"
-  } > "$meta_file"
-  chmod 600 "$meta_file"
+  })"
+  printf '%s\n' "$content" | publish_private_record replace "$meta_file"
 }
 
 capture_restate_registry_ownership() {
@@ -1609,10 +1992,12 @@ attempt_meta_matches() {
   local file="$1" expected_addr="$2" expected_token="$3"
   regular_private_file "$file" || return 1
   (
-    unset meta_schema workbench_addr ownership_token
+    unset meta_schema workbench_addr workbench_pid workbench_start_time ownership_token
     # shellcheck disable=SC1090
     source "$file"
-    [[ "$meta_schema" = 2 && "$workbench_addr" = "$expected_addr" \
+    [[ "$meta_schema" = 3 && "$workbench_addr" = "$expected_addr" \
+      && "$workbench_pid" = "$started_workbench_pid" \
+      && "$workbench_start_time" = "$started_workbench_start_time" \
       && "$ownership_token" = "$expected_token" ]]
   )
 }
@@ -1631,7 +2016,7 @@ remove_attempt_meta() {
 }
 
 write_reset_metadata() {
-  local pid_record restate_record postgres_record=""
+  local pid_record restate_record postgres_record="" reset_content data_owner_content
   pid_record="$(pid_file_identity "$pid_file")" || return 1
   restate_record="$(read_container_marker "$restate_marker_file")" || return 1
   if [[ "$store_backend" = postgres ]]; then
@@ -1645,7 +2030,7 @@ write_reset_metadata() {
   fi
   [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$run_owner_record" ]] \
     || return 1
-  {
+  reset_content="$({
     printf 'reset_schema=5\n'
     printf 'owned_token=%q\n' "$ownership_token"
     printf 'owned_state_key=%q\n' "$state_key"
@@ -1665,16 +2050,16 @@ write_reset_metadata() {
     printf 'owned_restate_service_lease=%q\n' "$restate_service_lease_record"
     printf 'owned_postgres_service_lease=%q\n' "$postgres_service_lease_record"
     printf 'owned_run_owner=%q\n' "$run_owner_record"
-  } > "$reset_file"
-  chmod 600 "$reset_file"
-  {
+  })"
+  data_owner_content="$({
     printf 'data_owner_schema=5\n'
     printf 'data_owner_token=%q\n' "$ownership_token"
     printf 'data_owner_state_key=%q\n' "$state_key"
     printf 'data_owner_path=%q\n' "$data_dir"
     printf 'data_owner_state_dir=%q\n' "$state_dir"
-  } > "$data_owner_file"
-  chmod 600 "$data_owner_file"
+  })"
+  printf '%s\n' "$reset_content" | publish_private_record create "$reset_file" || return 1
+  printf '%s\n' "$data_owner_content" | publish_private_record create "$data_owner_file"
 }
 
 data_owner_matches() {
@@ -1704,10 +2089,16 @@ finalize_reset_ownership() {
     return 0
   fi
   registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
-  {
+  local existing_content additional_content
+  regular_private_file "$reset_file" && attempt_reset_metadata_matches "$reset_file" \
+    || die "could not verify disposable-stack ownership metadata before finalization"
+  existing_content="$(cat -- "$reset_file")"
+  additional_content="$({
     printf 'owned_restate_deployment_id=%q\n' "$registered_deployment_id"
     printf 'owned_restate_registry_hash=%q\n' "$registry_hash"
-  } >> "$reset_file"
+  })"
+  printf '%s\n%s\n' "$existing_content" "$additional_content" \
+    | publish_private_record replace "$reset_file"
 }
 
 prepare_reset_ownership() {
@@ -1743,16 +2134,25 @@ prepare_reset_ownership() {
 validate_run_metadata() {
   regular_private_file "$meta_file" || return 1
   (
-    unset meta_schema workbench_addr workbench_url restate_endpoint_addr restate_ingress_url
+    unset meta_schema workbench_addr workbench_pid workbench_start_time
+    unset workbench_url restate_endpoint_addr restate_ingress_url
     unset restate_admin_url deployment_url store_backend data_dir database_fingerprint ownership_token
     unset restate_managed postgres_managed restate_retirement_authorized
+    unset restate_container_name restate_container_id postgres_container_name postgres_container_id
     unset restate_deployment_id restate_registry_hash
     # shellcheck disable=SC1090
     source "$meta_file"
     expected_postgres_managed=0
     [[ "$owned_store_backend" != postgres ]] || expected_postgres_managed=1
-    [[ "$meta_schema" = 2 \
+    read -r expected_restate_name expected_restate_id _ _ <<<"$owned_restate_record"
+    expected_postgres_name=""
+    expected_postgres_id=""
+    if [[ "$expected_postgres_managed" = 1 ]]; then
+      read -r expected_postgres_name expected_postgres_id _ _ <<<"$owned_postgres_record"
+    fi
+    [[ "$meta_schema" = 3 \
       && "$workbench_addr" = "$owned_workbench_addr" \
+      && "$workbench_pid $workbench_start_time" = "$owned_pid_record" \
       && "$restate_endpoint_addr" = "$owned_restate_endpoint_addr" \
       && "$restate_ingress_url" = "$owned_restate_ingress_url" \
       && "$restate_admin_url" = "$owned_restate_admin_url" \
@@ -1763,6 +2163,10 @@ validate_run_metadata() {
       && "$ownership_token" = "$owned_token" \
       && "$restate_managed" = 1 \
       && "$postgres_managed" = "$expected_postgres_managed" \
+      && "$restate_container_name" = "$expected_restate_name" \
+      && "$restate_container_id" = "$expected_restate_id" \
+      && "$postgres_container_name" = "$expected_postgres_name" \
+      && "$postgres_container_id" = "$expected_postgres_id" \
       && "$restate_retirement_authorized" = 1 \
       && "$restate_deployment_id" = "$owned_restate_deployment_id" \
       && "$restate_registry_hash" = "$owned_restate_registry_hash" ]]
@@ -1805,13 +2209,35 @@ validate_reset_ownership() {
     || die "reset refused: application data path does not resolve to the owned directory"
   data_owner_matches \
     || die "reset refused: application data ownership does not match launcher metadata"
-  [[ "$(pid_file_identity "$pid_file" 2>/dev/null || true)" = "$owned_pid_record" ]] \
-    || die "reset refused: workbench PID identity is missing or changed"
   validate_run_metadata \
     || die "reset refused: run metadata does not match disposable-stack ownership"
   [[ "$owned_run_owner" = "1 $owned_token $state_key $data_path_hash" \
     && "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$owned_run_owner" ]] \
     || die "reset refused: run-footprint ownership does not match launcher metadata"
+  local owned_pid owned_start owned_restate_name owned_restate_id
+  local owned_postgres_name="" owned_postgres_id="-" transaction=""
+  read -r owned_pid owned_start <<<"$owned_pid_record"
+  read -r owned_restate_name owned_restate_id _ _ <<<"$owned_restate_record"
+  [[ "$owned_restate_name" = "$restate_container" ]] \
+    || die "reset refused: configured Restate container does not match disposable-stack ownership"
+  if [[ "$owned_store_backend" = postgres ]]; then
+    (( ! database_url_explicit )) \
+      || die "reset refused: explicit database URL is external or ambiguous"
+    read -r owned_postgres_name owned_postgres_id _ _ <<<"$owned_postgres_record"
+    [[ "$owned_postgres_name" = "$postgres_container" ]] \
+      || die "reset refused: configured Postgres container does not match disposable-stack ownership"
+  elif [[ "$owned_store_backend" != sqlite || -n "$agent_workbench_database_url" ]]; then
+    die "reset refused: application database ownership is external or ambiguous"
+  fi
+  if [[ -e "$teardown_transaction_file" || -L "$teardown_transaction_file" ]]; then
+    transaction="$(read_teardown_transaction "$teardown_transaction_file" 2>/dev/null || true)"
+    [[ "$transaction" = "1 retiring $owned_token $owned_pid $owned_start $owned_restate_id $owned_postgres_id" \
+      || "$transaction" = "1 retired $owned_token $owned_pid $owned_start $owned_restate_id $owned_postgres_id" ]] \
+      || die "reset refused: teardown transaction does not match disposable-stack ownership"
+    return 0
+  fi
+  [[ "$(pid_file_identity "$pid_file" 2>/dev/null || true)" = "$owned_pid_record" ]] \
+    || die "reset refused: workbench PID identity is missing or changed"
   local name id token component
   read -r name id token component <<<"$owned_restate_record"
   [[ "$name" = "$restate_container" \
@@ -1973,15 +2399,8 @@ run_reset_dev_state() {
   start_attempt_active=1
   log "resetting wholly launcher-owned disposable stack at $workbench_addr"
 
-  stop_pid_file "$pid_file"
-  stop_owned_container_file "$restate_marker_file" restate
-  remove_service_lease "$restate_service_lease_file" "$owned_restate_service_lease" \
-    || die "reset stopped before data deletion: Restate service lease changed"
-  if [[ "$owned_store_backend" = postgres ]]; then
-    stop_owned_container_file "$postgres_marker_file" postgres
-    remove_service_lease "$postgres_service_lease_file" "$owned_postgres_service_lease" \
-      || die "reset stopped before data deletion: Postgres service lease changed"
-  fi
+  stop_stack_from_meta "$meta_file" \
+    || die "reset stopped before data deletion: resource retirement is incomplete and retryable"
   [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$owned_run_owner" ]] \
     || die "reset stopped before data deletion: run-footprint ownership changed"
   rm -f "$run_owner_file" \
@@ -2056,23 +2475,28 @@ run_foreground() {
     fi
     foreground_cleanup_done=1
     foreground_cleanup_status=1
-    local published_record=""
+    if (( process_observation_uncertain )); then
+      log "foreground cleanup retained the host and dependent resources after unknown process observation"
+      return 1
+    fi
+    local persisted_stack_retired=0
     if [[ -n "$started_workbench_pid" ]]; then
-      if [[ -z "$started_workbench_start_time" ]] \
-        || ! stop_process_identity "$started_workbench_pid" "$started_workbench_start_time"; then
+      if [[ -z "$started_workbench_start_time" ]]; then
         log "foreground cleanup could not stop the owned workbench; retaining its engine and application state"
         foreground_cleanup_status=1
         return 1
       fi
-      published_record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
-      if [[ "$published_record" = "$started_workbench_pid $started_workbench_start_time" ]]; then
-        write_process_retirement_receipt "$process_retirement_receipt_file" \
-          "$ownership_token" "$started_workbench_pid" "$started_workbench_start_time" || {
-          log "foreground cleanup could not persist its verified process retirement receipt"
+      if [[ "$(read_pid_file "$pid_file" 2>/dev/null || true)" \
+        = "$started_workbench_pid $started_workbench_start_time" ]] \
+        && (( created_meta_this_attempt )); then
+        if ! retire_persisted_process "$pid_file" "$process_retirement_receipt_file" \
+          "$ownership_token" "$started_workbench_pid" "$started_workbench_start_time"; then
+          log "foreground cleanup could not stop the owned workbench; retaining its engine and application state"
           return 1
-        }
-      elif [[ -e "$pid_file" || -L "$pid_file" ]]; then
-        log "stopped the captured foreground process but retained changed PID metadata at $pid_file"
+        fi
+      elif ! stop_process_identity "$started_workbench_pid" "$started_workbench_start_time"; then
+        log "foreground cleanup could not stop its captured unpublished workbench process"
+        return 1
       fi
       wait "$started_workbench_pid" >/dev/null 2>&1 || true
       started_workbench_this_attempt=0
@@ -2088,8 +2512,17 @@ run_foreground() {
         foreground_cleanup_status=1
         return 1
       fi
+      if ! stop_stack_from_meta "$meta_file"; then
+        log "foreground cleanup could not complete its persisted teardown transaction"
+        return 1
+      fi
+      persisted_stack_retired=1
+      started_restate_this_attempt=0
+      started_postgres_this_attempt=0
+      created_restate_service_lease_this_attempt=0
+      created_postgres_service_lease_this_attempt=0
     fi
-    if (( started_restate_this_attempt )); then
+    if (( ! persisted_stack_retired && started_restate_this_attempt )); then
       if (( created_restate_service_lease_this_attempt )) \
         && [[ "$(read_service_lease "$restate_service_lease_file" 2>/dev/null || true)" \
           != "$restate_service_lease_record" ]]; then
@@ -2109,7 +2542,7 @@ run_foreground() {
         return 1
       fi
     fi
-    if (( started_postgres_this_attempt )); then
+    if (( ! persisted_stack_retired && started_postgres_this_attempt )); then
       if (( created_postgres_service_lease_this_attempt )) \
         && [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
           != "$postgres_service_lease_record" ]]; then
@@ -2144,12 +2577,14 @@ run_foreground() {
         return 1
       fi
     fi
-    if [[ -e "$process_retirement_receipt_file" || -L "$process_retirement_receipt_file" ]]; then
-      clear_persisted_process_receipts \
-        "$pid_file" "$process_retirement_receipt_file" "$ownership_token" || {
-        log "foreground cleanup could not clear its exact process retirement receipts"
-        return 1
-      }
+    if (( ! persisted_stack_retired )) \
+      && [[ -e "$process_retirement_receipt_file" || -L "$process_retirement_receipt_file" ]]; then
+      remove_exact_private_record "$pid_file" \
+        "$started_workbench_pid $started_workbench_start_time" read_pid_file \
+        "foreground workbench PID receipt" || return 1
+      remove_exact_private_record "$process_retirement_receipt_file" \
+        "2 retired $ownership_token $started_workbench_pid $started_workbench_start_time" \
+        read_process_retirement_receipt "foreground workbench retirement receipt" || return 1
     fi
     if ! remove_attempt_meta; then
       log "foreground cleanup could not verify its run metadata; retaining it"
@@ -2494,6 +2929,7 @@ ownership_token="$(new_ownership_token)"
 state_key="$(printf '%s' "$workbench_addr" | tr -c 'A-Za-z0-9_.-' '_')"
 pid_file="$state_dir/workbench-$state_key.pid"
 process_retirement_receipt_file="$state_dir/workbench-$state_key.process-retired"
+teardown_transaction_file="$state_dir/workbench-$state_key.teardown"
 meta_file="$state_dir/workbench-$state_key.meta"
 log_file="$state_dir/workbench-$state_key.log"
 restate_marker_file="$state_dir/restate-$state_key.container"
