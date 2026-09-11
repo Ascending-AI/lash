@@ -59,8 +59,8 @@ async fn postgres_persisted_record_decode_classification_head_when_configured() 
         eprintln!("skipping Postgres head decode classification: database URL is not set");
         return;
     };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(isolated_database.url())
         .await
         .expect("connect persisted-record decode storage");
 
@@ -96,8 +96,8 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
         eprintln!("skipping Postgres checkpoint decode classification: database URL is not set");
         return;
     };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(isolated_database.url())
         .await
         .expect("connect persisted-record decode storage");
 
