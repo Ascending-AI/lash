@@ -14,7 +14,7 @@ use crate::{
     ConversationRecord, MediaType, Message, MessageSequence, ModelEffortValidationCategory,
     ModelToolReturn, ModelToolReturnPart, PromptContribution, PromptFingerprint, ProtocolEvent,
     SessionAppendNode, ToolCancellation, ToolCatalog, ToolContract, ToolDefinition, ToolFailure,
-    ToolFailureClass, ToolManifest, ToolRetryPolicy, ToolValue,
+    ToolFailureClass, ToolId, ToolManifest, ToolRetryPolicy, ToolValue,
 };
 
 /// Reserved BLAKE3 domains used by workspace hash owners. Entries are
@@ -43,6 +43,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-process-lease/v2",
     "lash-queued-work-batch/v2",
     "lash-queued-work-claim-lease/v2",
+    "lash-queued-work-claim-lease/v3",
     "lash-record-config-request/v1",
     "lash-rlm-execution-state-leaf/v2",
     "lash-rlm-stall-reply/v2",
@@ -248,10 +249,12 @@ impl SessionAppendNodeCoreSupport for SessionAppendNode {
     }
 }
 
-pub trait ToolCatalogCoreSupport {
+pub trait ToolCatalogCoreSupport: Sized {
     fn from_tool_definitions(tools: Vec<ToolDefinition>) -> Self;
-    fn from_tools(tools: Vec<ToolManifest>, contracts: BTreeMap<String, Arc<ToolContract>>)
-    -> Self;
+    fn from_tools(
+        tools: Vec<ToolManifest>,
+        contracts: BTreeMap<ToolId, Arc<ToolContract>>,
+    ) -> Result<Self, crate::ToolCatalogBuildError>;
     fn tool_names(&self) -> Arc<Vec<String>>;
     fn tool_names_fingerprint(&self) -> PromptFingerprint;
     fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>>;
@@ -268,8 +271,8 @@ impl ToolCatalogCoreSupport for ToolCatalog {
 
     fn from_tools(
         tools: Vec<ToolManifest>,
-        contracts: BTreeMap<String, Arc<ToolContract>>,
-    ) -> Self {
+        contracts: BTreeMap<ToolId, Arc<ToolContract>>,
+    ) -> Result<Self, crate::ToolCatalogBuildError> {
         ToolCatalog::from_tools(tools, contracts)
     }
 
@@ -394,11 +397,14 @@ mod blake3_domain_tests {
     use super::BLAKE3_DOMAINS;
 
     // Permanently reserved, but no longer used: the plugin snapshot revision
-    // after FIG-2113; the v2 usage payload after FIG-2765 moved it to a
-    // disposition-carrying encoding, and the v3 payload after the same ticket's
-    // fix round replaced the hole *count* with per-attempt descriptors.
+    // after FIG-2113; the v2 queued-work claim lease after FIG-2878 replaced
+    // delimiter joining with canonical framing; the v2 usage payload after
+    // FIG-2765 moved it to a disposition-carrying encoding, and the v3 payload
+    // after the same ticket's fix round replaced the hole *count* with
+    // per-attempt descriptors.
     const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
         "lash-plugin-snapshot-revision/v2",
+        "lash-queued-work-claim-lease/v2",
         "lash-runtime-usage-payload/v2",
         "lash-runtime-usage-payload/v3",
     ];

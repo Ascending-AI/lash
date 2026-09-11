@@ -50,15 +50,16 @@ impl SubagentsPluginFactory {
         self
     }
 
-    pub fn with_hidden_tools<I, S>(mut self, tools: I) -> Self
+    pub fn with_hidden_tools<I, S>(
+        mut self,
+        tools: I,
+    ) -> Result<Self, lash_core::SessionToolAccessError>
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.tool_access
-            .hidden_tools
-            .extend(tools.into_iter().map(Into::into));
-        self
+        self.tool_access = self.tool_access.with_hidden_tools(tools)?;
+        Ok(self)
     }
 }
 

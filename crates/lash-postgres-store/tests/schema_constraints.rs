@@ -118,6 +118,21 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
+    for field in ["claim_id", "claim_token"] {
+        assert_check_rejects(
+            &mut connection,
+            &format!(
+                "INSERT INTO lash_pending_turn_inputs (
+                     input_id, session_id, ingress_json, state, input_json,
+                     enqueued_at_ms, {field}
+                 ) VALUES ('pending-{field}', 'session', '{{\"scope\":\"next_turn\"}}',
+                           'deferred_next_turn', '{{}}', 0, 'half')"
+            ),
+            "ck_pending_turn_inputs_claim_id_token_all_or_none",
+        )
+        .await;
+    }
+
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_queued_work_batches (

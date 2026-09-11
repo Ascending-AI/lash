@@ -1164,7 +1164,7 @@ impl ToolProvider for RetryProbeTools {
     }
 }
 
-fn lazy_contract_dispatch_context(
+fn pinned_contract_dispatch_context(
     contracts_resolved: Arc<AtomicUsize>,
     executed: Arc<AtomicUsize>,
 ) -> ToolDispatchContext<'static> {
@@ -1174,10 +1174,7 @@ fn lazy_contract_dispatch_context(
         executed,
     });
     let tools = Arc::clone(&provider);
-    let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
-        provider.tool_manifests(),
-        BTreeMap::new(),
-    ));
+    let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![beta_tool()]));
     ToolDispatchContext {
         plugins: test_plugins(provider),
         tools,
@@ -1220,8 +1217,9 @@ fn authority_hidden_dispatch_context(
     provider: Arc<dyn ToolProvider>,
 ) -> ToolDispatchContext<'static> {
     let (event_tx, _event_rx) = mpsc::channel(8);
-    let mut tool_access = crate::SessionToolAccess::default();
-    tool_access.hidden_tools.insert("hidden".to_string());
+    let tool_access = crate::SessionToolAccess::ambient()
+        .with_hidden_tools(["hidden"])
+        .expect("valid hidden name");
     let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
         "test_tools",
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
@@ -1529,18 +1527,18 @@ async fn dispatch_rejects_invalid_args_before_provider_execution() {
 }
 
 #[tokio::test]
-async fn dispatch_resolves_contract_only_for_called_tool_before_execution() {
+async fn dispatch_uses_catalog_pinned_contract_without_reresolution() {
     let contracts_resolved = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
     let outcome = dispatch_tool_call(
-        &lazy_contract_dispatch_context(Arc::clone(&contracts_resolved), Arc::clone(&executed)),
+        &pinned_contract_dispatch_context(Arc::clone(&contracts_resolved), Arc::clone(&executed)),
         "beta".to_string(),
         json!({ "value": "ok" }),
     )
     .await;
 
     assert!(outcome.record.output.is_success());
-    assert_eq!(contracts_resolved.load(Ordering::SeqCst), 1);
+    assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
     assert_eq!(executed.load(Ordering::SeqCst), 1);
 }
 

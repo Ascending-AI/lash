@@ -58,7 +58,7 @@ fn large_tool_catalog_fixture_matches_gmail_sized_callable_catalog() {
 }
 
 #[test]
-fn rlm_large_tool_catalog_does_not_resolve_nested_schema_contracts_without_tool_calls() {
+fn rlm_large_tool_catalog_pins_each_contract_once() {
     let definitions = BenchmarkLargeToolCatalog::build_tool_definitions();
     let manifests = definitions
         .iter()
@@ -69,20 +69,24 @@ fn rlm_large_tool_catalog_does_not_resolve_nested_schema_contracts_without_tool_
 
     let surface = build_tool_catalog(ToolCatalogBuildInput {
         tools: manifests,
-        resolve_contract: Some(Arc::new(move |name| {
+        resolve_contract: Some(Arc::new(move |manifest| {
             resolver_count.fetch_add(1, Ordering::SeqCst);
             definitions
                 .iter()
-                .find(|definition| definition.name() == name)
+                .find(|definition| definition.manifest.id == manifest.id)
                 .map(|definition| Arc::new(definition.contract()))
         })),
         contributions: Vec::new(),
-    });
+    })
+    .expect("complete resident definitions");
 
-    // Every member is callable under the flat catalog; building the
-    // catalog resolves no contracts (rendering is lazy and protocol-owned).
+    // Provider-side resolution remains lazy until the effective resident set
+    // is known, then every surviving member is pinned exactly once.
     assert_eq!(surface.callable_tools().len(), GMAIL_LIKE_TOOL_NAMES.len());
-    assert_eq!(contract_resolutions.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        contract_resolutions.load(Ordering::SeqCst),
+        GMAIL_LIKE_TOOL_NAMES.len()
+    );
 }
 
 #[test]

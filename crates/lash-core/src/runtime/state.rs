@@ -692,7 +692,6 @@ impl RuntimeCheckpointComponents {
 /// Durable authority inputs required to reconstruct a session on another worker.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionAuthority {
-    #[serde(default)]
     pub tool_access: crate::SessionToolAccess,
     #[serde(default)]
     pub subagent: Option<crate::SubagentSessionContext>,

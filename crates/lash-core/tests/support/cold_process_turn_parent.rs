@@ -266,6 +266,37 @@ pub async fn assert_real_turn_kill_recovery(
     );
 }
 
+/// SIGKILL a real backend process immediately before and after every durable
+/// cancellation-closure phase, then recover the same turn in a fresh process.
+pub async fn assert_real_turn_cancel_kill_recovery(
+    tempdir: &std::path::Path,
+    mut command: impl FnMut(&str, &str, &std::path::Path) -> tokio::process::Command,
+) {
+    for action in lash_conformance::cold_process_turn_cancel_actions() {
+        let nonce = format!("{action}-{}", uuid::Uuid::new_v4());
+        let marker = tempdir.join(format!("{nonce}.log"));
+        kill_at_semantic_point(&mut command, action, &nonce, &marker).await;
+
+        let recovered = helper_command(&mut command, "turn_cancel_recover", &nonce, &marker)
+            .output()
+            .await
+            .unwrap_or_else(|error| panic!("spawn {action} cancellation recovery helper: {error}"));
+        let stdout = String::from_utf8_lossy(&recovered.stdout);
+        let stderr = String::from_utf8_lossy(&recovered.stderr);
+        assert!(
+            recovered.status.success(),
+            "{action} cancellation recovery failed: {stderr}; stdout: {stdout}"
+        );
+        assert!(
+            stdout.lines().any(|line| {
+                line.starts_with("turn_cancel_complete affected_inputs=")
+                    && line.contains(" closure_pins=0 committed=")
+            }),
+            "{action} cancellation recovery did not prove atomic effects and closure consumption: {stdout}"
+        );
+    }
+}
+
 async fn kill_at_semantic_point<F>(
     command: &mut F,
     action: &str,

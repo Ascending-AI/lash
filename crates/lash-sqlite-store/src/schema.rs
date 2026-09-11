@@ -346,6 +346,7 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
+    CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
     UNIQUE (session_id, source_key)
         ON CONFLICT IGNORE
 );
@@ -591,14 +592,16 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 /// Version 55 keeps that phase present under an opaque write token associated
 /// with its manifest session until a restoring backend put succeeds, so failed
 /// re-puts and explicit host recovery can restore it exactly.
-/// Version 56 composes that contract with the monotonic turn-cancel intent
-/// revision used by cancellation publication CAS. Component-55 stores are
+/// Version 56 requires pending-input claim identity and token to be either both
+/// NULL or both populated; version 55 catalogs are recreated.
+/// Version 57 composes that contract with the monotonic turn-cancel intent
+/// revision used by cancellation publication CAS. Component-56 stores are
 /// rejected rather than admitting either half of the composed schema.
-/// Version 57 adds the cancellation-only await-event authority used by Native
+/// Version 58 adds the cancellation-only await-event authority used by Native
 /// sessions without importing the unrelated effect journal.
-/// Version 58 persists the selected authority binding and exact pending closure
+/// Version 59 persists the selected authority binding and exact pending closure
 /// authorization so lease takeover cannot forget or replace promise work.
-pub(crate) const SCHEMA_VERSION: i32 = 58;
+pub(crate) const SCHEMA_VERSION: i32 = 59;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

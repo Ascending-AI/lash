@@ -49,9 +49,9 @@ async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
 
     assert!(matches!(
         &error.stop,
-        crate::store::MaintenanceStop::Failed(AttachmentStoreError::Backend(message))
-            if message.contains("failed to enumerate live attachment refs")
-                && message.contains("live_attachment_refs")
+        crate::store::MaintenanceStop::Failed(
+            AttachmentStoreError::RootSetEnumerationFailed { source }
+        ) if source.to_string().contains("live_attachment_refs")
     ));
     backend
         .get(&reference.id)

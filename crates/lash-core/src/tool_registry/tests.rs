@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 struct MockTool;
 struct MixedEnabledTool;
 struct ExternalMockSource;
+#[derive(Clone)]
 struct ExactResolvingSource {
     manifest_resolutions: Arc<AtomicUsize>,
     contract_resolutions: Arc<AtomicUsize>,
@@ -178,6 +179,13 @@ impl ToolProvider for LazyLeafBatchTool {
 impl ToolSourceExecutor for LazyOrchestratingBatchSource {
     fn id(&self) -> &str {
         "lazy-orchestrating"
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self))
     }
 
     fn source_key(&self) -> ToolSourceKey {
@@ -483,6 +491,13 @@ impl ToolSourceExecutor for ExternalMockSource {
         "external"
     }
 
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self))
+    }
+
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         manifests(vec![ToolDefinition::raw(
             "tool:mcp__demo__search",
@@ -539,6 +554,13 @@ impl ToolSourceExecutor for ExactResolvingSource {
         "exact"
     }
 
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(self.clone()))
+    }
+
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         Vec::new()
     }
@@ -584,6 +606,13 @@ impl ToolSourceExecutor for ExactResolvingSource {
 impl ToolSourceExecutor for NamedExactSource {
     fn id(&self) -> &str {
         self.id
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self { id: self.id }))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -1447,6 +1476,9 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         }),
     ])
     .expect("registry");
+    let registry = registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("resident snapshot keeps hidden providers out of its admitted source");
     let grant = crate::ToolExecutionGrant::from_definition(ToolDefinition::raw(
         "tool:hidden_zeta",
         "shared_hidden_name",
@@ -1465,6 +1497,259 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
     assert!(
         registry.export_state().entries().is_empty(),
         "grant execution must not add hidden providers to registry state"
+    );
+}
+
+#[tokio::test]
+async fn pinned_source_preserves_provider_by_id_overrides() {
+    struct OverrideProvider;
+
+    impl OverrideProvider {
+        fn definition() -> ToolDefinition {
+            test_tool("override_route", "by-id override witness")
+                .with_activation(crate::ToolActivation::Internal)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for OverrideProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            manifests(vec![Self::definition()])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            (name == Self::definition().name()).then(|| Arc::new(Self::definition().contract()))
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("name-route"))
+        }
+
+        async fn execute_by_id(
+            &self,
+            _tool_id: &crate::ToolId,
+            _args: &serde_json::Value,
+            _context: &crate::AttemptContext<'_>,
+        ) -> ToolOutcome {
+            ToolOutcome::ok(json!("id-route"))
+        }
+
+        async fn execute_attempt_by_id(
+            &self,
+            _tool_id: &crate::ToolId,
+            _args: &serde_json::Value,
+            _context: &crate::AttemptContext<'_>,
+        ) -> crate::ToolAttemptOutcome {
+            crate::ToolAttemptOutcome::done(
+                crate::ToolOutcomeDone::ok(json!("id-attempt-route")),
+                crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+                    crate::EmitProcessEventIntent {
+                        session_id: SessionId::from("registry-test"),
+                        process_id: crate::ProcessId::from("override-target"),
+                        event_type: "override.observed".to_string(),
+                        payload: json!({}),
+                    },
+                )]),
+            )
+        }
+
+        async fn execute_internal_by_id(
+            &self,
+            _tool_id: &crate::ToolId,
+            _args: &serde_json::Value,
+            _context: &crate::InternalProcessContext<'_>,
+        ) -> ToolOutcome {
+            ToolOutcome::ok(json!("id-internal-route"))
+        }
+    }
+
+    let registry = ToolRegistry::from_tool_provider(Arc::new(OverrideProvider))
+        .expect("override provider registry")
+        .compose_session_catalog(true, Vec::new())
+        .expect("pinned override provider registry");
+    let id = tool_id("override_route");
+    let args = json!({});
+    let attempt = test_attempt_context();
+
+    let normal = registry.execute_by_id(&id, &args, &attempt).await;
+    assert_eq!(normal.value_for_projection(), json!("id-route"));
+
+    let attempted = registry.execute_attempt_by_id(&id, &args, &attempt).await;
+    let crate::ToolAttemptOutcome::Done { result, intents } = attempted else {
+        panic!("override attempt completes")
+    };
+    assert_eq!(
+        result.into_output().value_for_projection(),
+        json!("id-attempt-route")
+    );
+    assert_eq!(intents.intents.len(), 1, "the by-id intent is preserved");
+
+    let tool_context = test_tool_context();
+    let internal = crate::InternalProcessContext::__for_testing(&tool_context);
+    let internal_result = registry.execute_internal_by_id(&id, &args, &internal).await;
+    assert_eq!(
+        internal_result.value_for_projection(),
+        json!("id-internal-route")
+    );
+}
+
+#[tokio::test]
+async fn pinned_source_retains_exactly_known_nonadvertised_resident_id() {
+    struct KnownResidentProvider;
+
+    impl KnownResidentProvider {
+        fn definition() -> ToolDefinition {
+            test_tool("known_resident", "known but not advertised")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for KnownResidentProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<ToolManifest> {
+            (id == Self::definition().id()).then(|| Self::definition().manifest())
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+            None
+        }
+
+        fn resolve_contract_by_id(&self, id: &crate::ToolId) -> Option<Arc<ToolContract>> {
+            (id == Self::definition().id()).then(|| Arc::new(Self::definition().contract()))
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("known-resident"))
+        }
+    }
+
+    let registry = ToolRegistry::from_tool_provider(Arc::new(KnownResidentProvider))
+        .expect("known resident provider registry");
+    let mut entries = BTreeMap::new();
+    entries.insert(
+        tool_id("known_resident"),
+        ToolStateEntry::new(KnownResidentProvider::definition().manifest()),
+    );
+    registry
+        .restore_state(ToolState::new(registry.generation(), entries))
+        .expect("the exact-id resolver restores the resident binding");
+
+    let pinned = registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("known resident survives request refresh");
+    let entry = pinned
+        .export_state()
+        .get(&tool_id("known_resident"))
+        .expect("known resident remains in state")
+        .clone();
+    assert!(entry.is_member(), "resident curation remains admitted");
+    assert!(!entry.is_orphaned(), "the exact live route remains bound");
+
+    let result = pinned
+        .execute_by_id(
+            &tool_id("known_resident"),
+            &json!({}),
+            &test_attempt_context(),
+        )
+        .await;
+    assert_eq!(result.value_for_projection(), json!("known-resident"));
+}
+
+#[tokio::test]
+async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route() {
+    struct AdvertisedProvider;
+
+    #[async_trait::async_trait]
+    impl ToolProvider for AdvertisedProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            manifests(vec![test_tool("advertised", "advertised route")])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            contract_from(vec![test_tool("advertised", "advertised route")], name)
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("advertised-route"))
+        }
+    }
+
+    struct KnownIdProvider {
+        mismatched: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for KnownIdProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+            (id == &tool_id("known")).then(|| {
+                if self.mismatched.load(Ordering::SeqCst) {
+                    test_tool("advertised", "malformed known-id route").manifest()
+                } else {
+                    test_tool("known", "valid known-id route").manifest()
+                }
+            })
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+            None
+        }
+
+        fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
+            (id == &tool_id("known"))
+                .then(|| Arc::new(test_tool("known", "valid known-id route").contract()))
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("malformed-route"))
+        }
+    }
+
+    let mismatched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let registry = ToolRegistry::from_tool_providers(vec![
+        Arc::new(AdvertisedProvider),
+        Arc::new(KnownIdProvider {
+            mismatched: Arc::clone(&mismatched),
+        }),
+    ])
+    .expect("grouped provider registry");
+    let mut restored = BTreeMap::new();
+    restored.insert(
+        tool_id("known"),
+        ToolStateEntry::new(test_tool("known", "persisted known resident").manifest()),
+    );
+    registry
+        .restore_state(ToolState::new(registry.generation(), restored))
+        .expect("valid exact-id route restores the known resident");
+    let before = serde_json::to_value(registry.export_state()).expect("serialize state");
+
+    mismatched.store(true, Ordering::SeqCst);
+    let pin = registry.compose_session_catalog(true, Vec::new());
+    let error = pin.err().map(|error| error.to_string());
+    let after = serde_json::to_value(registry.export_state()).expect("serialize state");
+    let advertised = registry
+        .execute_by_id(&tool_id("advertised"), &json!({}), &test_attempt_context())
+        .await
+        .value_for_projection();
+
+    assert!(
+        error.is_some() && before == after && advertised == json!("advertised-route"),
+        "mismatched known-id pin must refuse without changing state or the advertised route: \
+         error={error:?}, state_unchanged={}, advertised={advertised}",
+        before == after,
+    );
+    assert_eq!(
+        error.as_deref(),
+        Some(
+            "validation error: source `plugins` resolved tool id `tool:known` with mismatched \
+             manifest id `tool:advertised`"
+        )
     );
 }
 
@@ -2039,14 +2324,13 @@ fn project_tool_catalog_projects_all_members_with_catalog_metadata() {
             serde_json::json!({}),
         )
     }
-    let catalog = project_tool_catalog([
+    let catalog = project_tool_catalog(["read_file", "search_tools"].map(|name| {
+        let definition = member_fixture(name);
         crate::ToolCatalogEntry {
-            manifest: member_fixture("read_file").manifest(),
-        },
-        crate::ToolCatalogEntry {
-            manifest: member_fixture("search_tools").manifest(),
-        },
-    ]);
+            manifest: definition.manifest,
+            contract: Arc::new(definition.contract),
+        }
+    }));
     assert_eq!(catalog.len(), 2);
     assert_eq!(catalog[0]["name"], serde_json::json!("read_file"));
     assert_eq!(
@@ -2072,10 +2356,11 @@ fn project_tool_catalog_preserves_dynamic_output_contracts() {
             serde_json::json!({}),
         )
     }
+    let definition = member_fixture("llm_query")
+        .with_output_from_input_schema("output", Some(serde_json::json!({ "type": "string" })));
     let catalog = project_tool_catalog([crate::ToolCatalogEntry {
-        manifest: member_fixture("llm_query")
-            .with_output_from_input_schema("output", Some(serde_json::json!({ "type": "string" })))
-            .manifest(),
+        manifest: definition.manifest,
+        contract: Arc::new(definition.contract),
     }]);
 
     assert_eq!(

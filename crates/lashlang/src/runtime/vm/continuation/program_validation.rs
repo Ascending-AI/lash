@@ -1,5 +1,5 @@
 use super::*;
-use crate::runtime::HandlerScopeExtent;
+use crate::runtime::{EMPTY_HANDLER_CHAIN_DIGEST, HandlerScopeExtent, extend_handler_chain_digest};
 
 fn function_code_range(
     chunk: &Chunk,
@@ -112,6 +112,7 @@ pub(super) fn validate_program_continuation(
     // entries in one frame have to be a strictly nested chain of those scopes —
     // the same treatment `InvalidReturnSite` gives frames.
     let mut enclosing: Option<(usize, &HandlerScopeExtent)> = None;
+    let mut installed_chains: Vec<(usize, u64)> = Vec::new();
     for (handler_index, handler) in continuation.handler_stack.iter().enumerate() {
         let (range, owner) = function_code_range(chunk, handler.frame_function)?;
         validate_exception_target(
@@ -199,7 +200,49 @@ pub(super) fn validate_program_continuation(
                 });
             }
         }
+        match installed_chains.last_mut() {
+            Some((frame_depth, digest)) if *frame_depth == handler.frame_depth => {
+                *digest = extend_handler_chain_digest(*digest, scope.push_ip);
+            }
+            _ => installed_chains.push((
+                handler.frame_depth,
+                extend_handler_chain_digest(EMPTY_HANDLER_CHAIN_DIGEST, scope.push_ip),
+            )),
+        }
         enclosing = Some((handler_index, scope));
+    }
+
+    // Scope extents are regions; handler validity is flow-sensitive. Nothing
+    // above can tell a chain with a mandatory cleanup *omitted* from the honest
+    // one, nor a scope re-installed while its own cleanup body runs — both sit
+    // inside every extent they name. The chain the lowerer recorded for the
+    // instruction each frame is sitting at settles both: every frame, including
+    // the ones holding no handler at all, must hash to it.
+    for frame_depth in 0..=continuation.frame_stack.len() {
+        let anchor = match continuation.frame_stack.get(frame_depth) {
+            // The call site, which is the instruction the suspended caller is
+            // still executing. `InvalidReturnSite` above has already pinned
+            // this to a real call instruction, and a breakpoint never starts
+            // immediately after one — breakpoints follow a `PushHandler`,
+            // `PopHandler`, `Jump` or `Return` — so the return site would
+            // resolve to the same digest today. Anchoring at the instruction
+            // that is actually running is what keeps that true.
+            Some(frame) => frame.return_instruction_pointer.saturating_sub(1),
+            None => continuation.instruction_pointer,
+        };
+        let found = installed_chains
+            .iter()
+            .find(|(depth, _)| *depth == frame_depth)
+            .map_or(EMPTY_HANDLER_CHAIN_DIGEST, |(_, digest)| *digest);
+        let expected = chunk.handler_chain_digest_at(anchor);
+        if found != expected {
+            return Err(ContinuationError::HandlerChainMismatch {
+                frame_depth,
+                anchor,
+                expected,
+                found,
+            });
+        }
     }
 
     for (finally_index, finally) in continuation.finally_stack.iter().enumerate() {

@@ -33,7 +33,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | "turn_recover_final_commit_boundary"
             | "turn_peer_reclaim"
             | "turn_recover"
-    ) {
+    ) || (action.starts_with("turn_cancel_") && action != "turn_cancel_gate")
+    {
         let marker = args.next().map(PathBuf::from);
         if args.next().is_some() {
             return Err("unexpected helper arguments".into());

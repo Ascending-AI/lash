@@ -58,6 +58,11 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
           @label(title: "Skipped print")
           print 0
         }
+        for item in [1, 2] {
+          @label(title: "For print")
+          print item
+        }
+        measured = [len([item]) for item in [1, 2]]
         count = 0
         while count < 1 {
           @label(title: "Loop print")
@@ -81,6 +86,30 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     .expect("labeled workflow compiles");
     let graph = lashlang::workflow_graph_from_source(source).expect("workflow graph projects");
     let trace_map = trace_lashlang_main_map(&output.artifact);
+
+    let container_kinds = graph
+        .nodes()
+        .filter_map(|node| match &node.kind {
+            lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::If { .. }) => {
+                Some("if")
+            }
+            lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::For { .. }) => {
+                Some("for")
+            }
+            lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::While {
+                ..
+            }) => Some("while"),
+            lashlang::WorkflowNodeKind::Container(
+                lashlang::WorkflowContainer::ListComprehension { .. },
+            ) => Some("list_comprehension"),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        container_kinds,
+        std::collections::BTreeSet::from(["for", "if", "list_comprehension", "while"]),
+        "the equality probe must cover every workflow container kind"
+    );
 
     let expected_nodes = graph
         .nodes()

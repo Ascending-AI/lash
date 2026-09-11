@@ -14,6 +14,15 @@ fn public_session_schema_version_tracks_the_internal_schema_version() {
     assert_eq!(SESSION_SCHEMA_VERSION, crate::schema::SCHEMA_VERSION);
 }
 
+#[tokio::test]
+async fn explicit_tool_access_survives_sqlite_recovery_and_invalid_bytes_refuse() {
+    let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
+    lash_conformance::session_tool_access_durable_recovery(Arc::new(
+        SqliteSessionStoreFactory::new(dir.path()),
+    ))
+    .await;
+}
+
 #[test]
 fn session_execution_lease_identity_check_rejects_a_partial_write() {
     let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
@@ -87,6 +96,34 @@ fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
          )",
         "ck_queued_work_batches_claim_id_token_all_or_none",
     );
+}
+
+#[test]
+fn pending_turn_input_claim_id_and_token_must_be_paired() {
+    let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
+    connection
+        .execute_batch(crate::schema::SCHEMA)
+        .expect("apply SQLite schema to CHECK witness");
+    for fields in ["claim_id", "claim_token"] {
+        let error = connection
+            .execute(
+                &format!(
+                    "INSERT INTO pending_turn_inputs (
+                         input_id, session_id, ingress_json, state, input_json,
+                         enqueued_at_ms, {fields}
+                     ) VALUES ('input-{fields}', 'session', '{{\"scope\":\"next_turn\"}}',
+                               'deferred_next_turn', '{{}}', 0, 'half')"
+                ),
+                [],
+            )
+            .expect_err("a half-populated pending-input claim must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("ck_pending_turn_inputs_claim_id_token_all_or_none"),
+            "SQLite reported the wrong CHECK: {error}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -541,9 +578,9 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
             Err(failure)
                 if matches!(
                     &failure.stop,
-                    lash_core::MaintenanceStop::Failed(lash_core::AttachmentStoreError::Backend(
-                        message
-                    )) if message.contains("failed to enumerate live attachment refs")
+                    lash_core::MaintenanceStop::Failed(
+                        lash_core::AttachmentStoreError::RootSetEnumerationFailed { .. }
+                    )
                 )
         ),
         "a missing catalog must abort GC even when delete-all is authorized: {result:?}"

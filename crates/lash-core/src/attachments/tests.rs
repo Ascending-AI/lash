@@ -384,9 +384,11 @@ impl AttachmentStore for DeleteFailingAttachmentStore {
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        Err(AttachmentStoreError::Backend(format!(
-            "scripted delete failure for {id}"
-        )))
+        Err(AttachmentStoreError::Backend {
+            operation: "delete",
+            class: AttachmentStoreFailureClass::Transient,
+            source: format!("scripted delete failure for {id}").into(),
+        })
     }
 
     async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
@@ -1879,4 +1881,43 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
         unpinned.attachments().is_empty(),
         "the changed table must be a meaningful counterexample"
     );
+}
+
+#[test]
+fn backend_failure_class_drives_retry_and_operator_verdicts() {
+    let cases = [
+        (AttachmentStoreFailureClass::Transient, true, false),
+        (AttachmentStoreFailureClass::Credentials, false, true),
+        (AttachmentStoreFailureClass::Terminal, false, false),
+    ];
+    for (class, retryable, operator_actionable) in cases {
+        let error = AttachmentStoreError::Backend {
+            operation: "test",
+            class,
+            source: "scripted failure".into(),
+        };
+        assert_eq!(error.failure_class(), Some(class));
+        assert_eq!(error.is_retryable(), retryable, "{error}");
+        assert_eq!(
+            error.is_operator_actionable(),
+            operator_actionable,
+            "{error}"
+        );
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the backend cause must be preserved: {error}"
+        );
+    }
+
+    let contract = AttachmentStoreError::Contract("stored key is malformed".into());
+    assert_eq!(contract.failure_class(), None);
+    assert!(!contract.is_retryable());
+    assert!(!contract.is_operator_actionable());
+
+    let reclamation = AttachmentStoreError::ReclamationInFlight {
+        attachment_id: AttachmentId::parse("blake3-deadbeef").expect("valid id"),
+        attempts: 3,
+    };
+    assert!(reclamation.is_retryable());
+    assert!(!reclamation.is_operator_actionable());
 }

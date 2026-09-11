@@ -30,12 +30,13 @@ use super::{
     Chunk, ClosureParameterModel, CompileStats, CompiledAggregateAwaitShape, CompiledAssignPath,
     CompiledAssignPathStep, CompiledFormatTemplate, CompiledFunction,
     CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf,
-    CompiledResourceOperationListBatch, HandlerScopeExtent, Instruction, IntrinsicOp,
-    JavaScriptUriCodec, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
-    LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, Name, Value, as_number,
-    compile_format_template, eval_binary_values, eval_javascript_binary, eval_javascript_unary,
-    execute_integer_div_builtin, execute_len_direct, execute_range_builtin,
-    is_comparison_binary_op, is_numeric_binary_op, is_truthy, read_field_direct, read_index_direct,
+    CompiledResourceOperationListBatch, EMPTY_HANDLER_CHAIN_DIGEST, HandlerScopeExtent,
+    Instruction, IntrinsicOp, JavaScriptUriCodec, LASH_HOST_REQUIREMENTS_REF_KEY,
+    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
+    LASH_TYPE_KEY, Name, Value, as_number, compile_format_template, eval_binary_values,
+    eval_javascript_binary, eval_javascript_unary, execute_integer_div_builtin, execute_len_direct,
+    execute_range_builtin, extend_handler_chain_digest, is_comparison_binary_op,
+    is_numeric_binary_op, is_truthy, read_field_direct, read_index_direct,
     read_javascript_field_direct, read_javascript_index_direct, transient_name, unwrap_type_value,
 };
 
@@ -61,6 +62,9 @@ pub(crate) struct Compiler {
     loop_contexts: Vec<LoopContext>,
     handler_scopes: Vec<HandlerScope>,
     handler_scope_extents: Vec<HandlerScopeExtent>,
+    /// Breakpoints of the handler chain the VM must have installed, recorded as
+    /// the lowerer opens and closes scopes. See [`Chunk::handler_chain_digests`].
+    handler_chain_digests: Vec<(usize, u64)>,
     pending_finally_sites: Vec<Vec<usize>>,
     functions: Vec<CompiledFunction>,
     pending_functions: Vec<Option<PendingFunction>>,
@@ -112,6 +116,9 @@ enum HandlerScope {
     /// A `PushHandler` is live: leaving the region pops it and, when the scope
     /// owns a `finally`, runs that block before the jump continues.
     Protected {
+        /// The scope's `PushHandler` site, which is its identity in the chain
+        /// digests recorded for this function's instructions.
+        push_ip: usize,
         /// Index into [`Compiler::pending_finally_sites`] collecting the
         /// `EnterFinally` sites this scope still has to patch, or `None` when
         /// the scope has no `finally` block.

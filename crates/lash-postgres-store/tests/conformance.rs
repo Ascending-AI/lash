@@ -174,6 +174,19 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset postgres process change clock");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn explicit_tool_access_survives_postgres_recovery_and_invalid_bytes_refuse() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres tool-access recovery: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    lash_conformance::session_tool_access_durable_recovery(Arc::new(
+        storage.session_store_factory(),
+    ))
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_fence_integrity_conformance_when_configured() {
     let Some(database_url) = database_url() else {
@@ -1358,10 +1371,10 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 86, "Postgres component schema pin");
+    assert_eq!(current_version, 87, "Postgres component schema pin");
     assert_eq!(
         current_version - 1,
-        83,
+        86,
         "immediate predecessor adjacency pin"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(
@@ -1939,7 +1952,7 @@ async fn postgres_effect_replay_satisfies_cold_process_crash_conformance_when_co
     };
 
     let crashed = run("effect_crash").await;
-    assert_eq!(crashed.status.code(), Some(86));
+    assert_eq!(crashed.status.code(), Some(87));
     assert_eq!(
         std::fs::read_to_string(&marker)
             .expect("read crashed effect marker")
@@ -1991,6 +2004,34 @@ async fn postgres_real_turn_satisfies_cold_process_crash_matrix_when_configured(
     let url = database_url().expect("configured PostgreSQL database URL");
     let dir = tempfile::tempdir().expect("PostgreSQL cold-process real-turn tempdir");
     cold_process_turn_parent::assert_real_turn_kill_recovery(
+        dir.path(),
+        |action, nonce, marker| {
+            let mut command = tokio::process::Command::new(lash_conformance::helper_executable(
+                "postgres-await-event-helper",
+            ));
+            command
+                .env("LASH_POSTGRES_DATABASE_URL", &url)
+                .arg(action)
+                .arg(nonce)
+                .arg(marker);
+            command
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn postgres_real_turn_cancel_closure_survives_every_cold_process_crash_cut_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping PostgreSQL cancellation cold-process matrix: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    let url = database_url().expect("configured PostgreSQL database URL");
+    let dir = tempfile::tempdir().expect("PostgreSQL cancellation cold-process tempdir");
+    cold_process_turn_parent::assert_real_turn_cancel_kill_recovery(
         dir.path(),
         |action, nonce, marker| {
             let mut command = tokio::process::Command::new(lash_conformance::helper_executable(

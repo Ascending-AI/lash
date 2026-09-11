@@ -432,15 +432,7 @@ pub fn lashlang_resources_from_tool_catalog(
             continue;
         }
         let lashlang_binding = required_tool_lashlang_executable(&entry.manifest)?;
-        let operation_binding = catalog
-            .resolve_contract(&entry.manifest.name)
-            .as_deref()
-            .map(lashlang_tool_contract_types)
-            .unwrap_or(lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Any,
-                output_from_input: None,
-            });
+        let operation_binding = lashlang_tool_contract_types(&entry.contract);
         host_catalog.add_module_operation_binding(
             lashlang_binding.module_path.iter().map(String::as_str),
             lashlang_binding.authority_type.clone(),

@@ -641,10 +641,8 @@ impl InMemorySessionStore {
             first.enqueue_seq,
             fencing_token,
         );
-        let lease_token = format!(
-            "{}:{}:{}:{claim_id}:{now}",
-            session_id, owner.owner_id, owner.incarnation_id
-        );
+        let lease_token =
+            crate::store::queued_work::derive_claim_lease_token(session_id, owner, &claim_id, now);
         let mut batches = Vec::new();
         for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
             let entry = &mut queued[index];
@@ -787,10 +785,8 @@ impl InMemorySessionStore {
             pending[first_index].input.enqueue_seq,
             fencing_token,
         );
-        let lease_token = format!(
-            "{}:{}:{}:{claim_id}:{now}",
-            session_id, owner.owner_id, owner.incarnation_id
-        );
+        let lease_token =
+            crate::store::queued_work::derive_claim_lease_token(session_id, owner, &claim_id, now);
         let mut inputs = Vec::new();
         for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
             let entry = &mut pending[index];

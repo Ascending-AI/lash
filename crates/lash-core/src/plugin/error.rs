@@ -7,6 +7,23 @@ pub enum PluginError {
     /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String },
+    /// An effective resident catalog member could not supply its immutable definition.
+    #[error("resident tool `{name}` ({tool_id}) has no contract")]
+    ResidentToolContractUnavailable {
+        tool_id: crate::ToolId,
+        name: String,
+    },
+    #[error("resident catalog repeats tool id `{tool_id}`")]
+    ResidentToolDuplicateId { tool_id: crate::ToolId },
+    #[error("resident catalog repeats tool name `{name}`")]
+    ResidentToolDuplicateName { name: String },
+    /// An effective resident catalog member has no executable route in the pinned registry.
+    #[error("resident tool `{name}` ({tool_id}) has no pinned execution route: {reason}")]
+    ResidentToolRouteUnavailable {
+        tool_id: crate::ToolId,
+        name: String,
+        reason: String,
+    },
     #[error("plugin registration error: {0}")]
     Registration(String),
     #[error("plugin invoke error: {0}")]

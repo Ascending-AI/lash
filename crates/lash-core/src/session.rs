@@ -304,7 +304,9 @@ impl Session {
         let tools = provider.tool_manifests();
         let contract_provider = Arc::clone(&provider);
         let resolve_contract: lash_sansio::ToolContractResolver =
-            Arc::new(move |name: &str| contract_provider.resolve_contract(name));
+            Arc::new(move |manifest: &crate::ToolManifest| {
+                contract_provider.resolve_contract_by_id(&manifest.id)
+            });
         let tool_catalog = Arc::new(self.plugins().resolve_tool_catalog(
             crate::plugin::ToolCatalogContext {
                 session_id: SessionId::from(session_id.to_string()),
@@ -315,6 +317,7 @@ impl Session {
                 extensions: self.plugins().extensions().clone(),
             },
         )?);
+        tool_registry.validate_resident_catalog_routes(&tool_catalog)?;
         let input = crate::ProtocolBuildInput {
             tool_catalog: Arc::clone(&tool_catalog),
             plugin_extensions: self.plugins().extensions().clone(),
@@ -533,11 +536,103 @@ mod tool_catalog_cache_tests {
     use super::*;
     use crate::plugin::StaticPluginFactory;
     use lash_sansio::sync::MutexExt;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     struct CountingDynamicProvider {
         names: Arc<std::sync::Mutex<Vec<String>>>,
         manifest_reads: Arc<AtomicUsize>,
+    }
+
+    struct ReassignableResidentProvider {
+        label: &'static str,
+        active: Arc<AtomicBool>,
+        prepares: Arc<AtomicUsize>,
+        executions: Arc<AtomicUsize>,
+        defer_queries: Arc<AtomicUsize>,
+        attempts: Arc<AtomicUsize>,
+    }
+
+    struct AdmissionProbeProvider {
+        contract_available: bool,
+        prepare_calls: Arc<AtomicUsize>,
+    }
+
+    impl AdmissionProbeProvider {
+        fn definition() -> crate::ToolDefinition {
+            crate::ToolDefinition::raw(
+                "tool:resident",
+                "resident",
+                "resident admission probe",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": { "pinned": { "type": "string" } },
+                    "required": ["pinned"],
+                    "additionalProperties": false
+                }),
+                serde_json::json!({ "type": "string" }),
+            )
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for AdmissionProbeProvider {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            vec![Self::definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (self.contract_available && name == "resident")
+                .then(|| Arc::new(Self::definition().contract()))
+        }
+
+        async fn prepare_tool_call(
+            &self,
+            call: crate::ToolPrepareCall<'_>,
+        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
+            self.prepare_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::PreparedToolCall::identity(
+                call.tool_id,
+                call.pending,
+            ))
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("resident"))
+        }
+    }
+
+    fn admission_probe_plugins(
+        provider: Arc<dyn ToolProvider>,
+        tool_access: crate::SessionToolAccess,
+    ) -> Arc<crate::PluginSession> {
+        let mut factories = crate::testing::test_standard_protocol_factories();
+        factories.push(Arc::new(StaticPluginFactory::new(
+            "admission_probe",
+            crate::PluginSpec::new().with_tool_provider(provider),
+        )));
+        crate::PluginHost::new(factories)
+            .build_session_with_parent(
+                "admission-probe",
+                None,
+                crate::plugin::SessionCreationConfig {
+                    authority: crate::plugin::SessionAuthorityContext {
+                        tool_access,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .expect("plugin session")
+    }
+
+    async fn admission_probe_session(provider: Arc<dyn ToolProvider>) -> Session {
+        let plugins = admission_probe_plugins(provider, crate::SessionToolAccess::default());
+        Session::new(
+            crate::RuntimeServices::new(plugins),
+            &SessionId::from("admission-probe"),
+        )
+        .await
+        .expect("runtime session")
     }
 
     impl CountingDynamicProvider {
@@ -549,6 +644,66 @@ mod tool_catalog_cache_tests {
                 crate::ToolDefinition::default_input_schema(),
                 serde_json::json!({ "type": "string" }),
             )
+        }
+    }
+
+    impl ReassignableResidentProvider {
+        fn definition(&self) -> crate::ToolDefinition {
+            crate::ToolDefinition::raw(
+                "tool:reassigned",
+                "reassigned",
+                format!("resident route {}", self.label),
+                serde_json::json!({
+                    "type": "object",
+                    "properties": { self.label: { "type": "string" } },
+                    "required": [self.label],
+                    "additionalProperties": false
+                }),
+                serde_json::json!({ "type": "string" }),
+            )
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for ReassignableResidentProvider {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            self.active
+                .load(Ordering::SeqCst)
+                .then(|| self.definition().manifest())
+                .into_iter()
+                .collect()
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "reassigned").then(|| Arc::new(self.definition().contract()))
+        }
+
+        async fn prepare_tool_call(
+            &self,
+            call: crate::ToolPrepareCall<'_>,
+        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
+            self.prepares.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::PreparedToolCall::identity(
+                call.tool_id,
+                call.pending,
+            ))
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            crate::ToolOutcome::ok(serde_json::json!(self.label))
+        }
+
+        fn attempt_may_defer(&self, _tool_id: &crate::ToolId) -> bool {
+            self.defer_queries.fetch_add(1, Ordering::SeqCst);
+            self.label == "route_a"
+        }
+
+        async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
+                serde_json::json!(format!("attempt_{}", self.label)),
+            ))
         }
     }
 
@@ -579,18 +734,18 @@ mod tool_catalog_cache_tests {
     #[test]
     fn authority_fingerprint_covers_hidden_tools_and_explicit_definitions() {
         let base = crate::SessionToolAccess::default();
-        let mut hidden = base.clone();
-        hidden.hidden_tools.insert("hidden".to_string());
-        let explicit = crate::SessionToolAccess {
-            tools: vec![crate::ToolDefinition::raw(
-                "tool:explicit",
-                "explicit",
-                "authority-defined tool",
-                crate::ToolDefinition::default_input_schema(),
-                serde_json::json!({ "type": "string" }),
-            )],
-            ..crate::SessionToolAccess::default()
-        };
+        let hidden = base
+            .clone()
+            .with_hidden_tools(["hidden"])
+            .expect("valid hidden name");
+        let explicit = crate::SessionToolAccess::restricted([crate::ToolDefinition::raw(
+            "tool:explicit",
+            "explicit",
+            "authority-defined tool",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        )])
+        .expect("valid restricted definition");
 
         assert_ne!(
             tool_catalog_authority_fingerprint(&base),
@@ -599,6 +754,46 @@ mod tool_catalog_cache_tests {
         assert_ne!(
             tool_catalog_authority_fingerprint(&base),
             tool_catalog_authority_fingerprint(&explicit)
+        );
+    }
+
+    #[test]
+    fn ambient_and_restricted_empty_select_distinct_resident_catalogs() {
+        let ambient = admission_probe_plugins(
+            Arc::new(AdmissionProbeProvider {
+                contract_available: true,
+                prepare_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            crate::SessionToolAccess::ambient(),
+        );
+        assert!(
+            ambient
+                .resolved_tool_catalog(&SessionId::from("ambient-access"))
+                .expect("ambient resident catalog")
+                .has_callable_tool("resident")
+        );
+
+        let restricted = admission_probe_plugins(
+            Arc::new(AdmissionProbeProvider {
+                contract_available: true,
+                prepare_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            crate::SessionToolAccess::restricted([]).expect("restricted empty is valid"),
+        );
+        assert!(
+            restricted
+                .resolved_tool_catalog(&SessionId::from("restricted-empty-access"))
+                .expect("restricted-empty resident catalog")
+                .tools
+                .is_empty()
+        );
+        assert!(
+            restricted
+                .tool_registry()
+                .export_state()
+                .iter()
+                .any(|(_, entry)| entry.manifest().name == "resident" && entry.is_member()),
+            "restricted access curates the session catalog without changing registry membership"
         );
     }
 
@@ -673,10 +868,9 @@ mod tool_catalog_cache_tests {
             "request admission updates the registry captured at the next durable turn boundary"
         );
 
-        let hidden_access = crate::SessionToolAccess {
-            tools: Vec::new(),
-            hidden_tools: ["alpha".to_string()].into_iter().collect(),
-        };
+        let hidden_access = crate::SessionToolAccess::ambient()
+            .with_hidden_tools(["alpha"])
+            .expect("valid hidden name");
         let hidden = session
             .pin_tool_surface(&SessionId::from("pinned-surface"), &hidden_access, None)
             .expect("authority-hidden request surface");
@@ -714,5 +908,326 @@ mod tool_catalog_cache_tests {
             reads_before_pin + 4,
             "each of four request pins enumerated the live source exactly once"
         );
+    }
+
+    #[tokio::test]
+    async fn model_request_pin_captures_provider_route_across_same_id_reassignment() {
+        let a_active = Arc::new(AtomicBool::new(true));
+        let b_active = Arc::new(AtomicBool::new(false));
+        let a_prepares = Arc::new(AtomicUsize::new(0));
+        let b_prepares = Arc::new(AtomicUsize::new(0));
+        let a_executions = Arc::new(AtomicUsize::new(0));
+        let b_executions = Arc::new(AtomicUsize::new(0));
+        let a_defer_queries = Arc::new(AtomicUsize::new(0));
+        let b_defer_queries = Arc::new(AtomicUsize::new(0));
+        let a_attempts = Arc::new(AtomicUsize::new(0));
+        let b_attempts = Arc::new(AtomicUsize::new(0));
+        let providers = [
+            Arc::new(ReassignableResidentProvider {
+                label: "route_a",
+                active: Arc::clone(&a_active),
+                prepares: Arc::clone(&a_prepares),
+                executions: Arc::clone(&a_executions),
+                defer_queries: Arc::clone(&a_defer_queries),
+                attempts: Arc::clone(&a_attempts),
+            }) as Arc<dyn ToolProvider>,
+            Arc::new(ReassignableResidentProvider {
+                label: "route_b",
+                active: Arc::clone(&b_active),
+                prepares: Arc::clone(&b_prepares),
+                executions: Arc::clone(&b_executions),
+                defer_queries: Arc::clone(&b_defer_queries),
+                attempts: Arc::clone(&b_attempts),
+            }) as Arc<dyn ToolProvider>,
+        ];
+        let mut factories = crate::testing::test_standard_protocol_factories();
+        let spec = providers
+            .into_iter()
+            .fold(crate::PluginSpec::new(), |spec, provider| {
+                spec.with_tool_provider(provider)
+            });
+        factories.push(Arc::new(StaticPluginFactory::new("reassignable", spec)));
+        let plugins = crate::PluginHost::new(factories)
+            .build_session("route-reassignment")
+            .expect("plugin session");
+        let session_id = SessionId::from("route-reassignment");
+        let session = Session::new(crate::RuntimeServices::new(plugins), &session_id)
+            .await
+            .expect("runtime session");
+
+        let old = session
+            .pin_tool_surface(&session_id, &crate::SessionToolAccess::default(), None)
+            .expect("request pinned while provider A owns the id");
+        let old_entries = old
+            .tool_catalog()
+            .tools
+            .iter()
+            .filter(|entry| entry.manifest.id.as_str() == "tool:reassigned")
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(old_entries.len(), 1, "the id is advertised exactly once");
+        assert!(
+            old_entries[0]
+                .contract
+                .input_schema
+                .canonical()
+                .pointer("/properties/route_a")
+                .is_some(),
+            "the old request captures provider A's schema"
+        );
+
+        a_active.store(false, Ordering::SeqCst);
+        b_active.store(true, Ordering::SeqCst);
+        let fresh = session
+            .pin_tool_surface(&session_id, &crate::SessionToolAccess::default(), None)
+            .expect("next request pinned after provider B owns the id");
+        let fresh_entries = fresh
+            .tool_catalog()
+            .tools
+            .iter()
+            .filter(|entry| entry.manifest.id.as_str() == "tool:reassigned")
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(fresh_entries.len(), 1, "the reassigned id stays unique");
+        assert!(
+            fresh_entries[0]
+                .contract
+                .input_schema
+                .canonical()
+                .pointer("/properties/route_b")
+                .is_some(),
+            "the fresh request captures provider B's schema"
+        );
+
+        let prepare_context = crate::ToolPrepareContext::with_execution_binding(
+            session_id,
+            Arc::new(crate::testing::MockSessionManager::default()),
+            crate::TurnContext::default(),
+            Some("reassigned-call".to_string()),
+            serde_json::json!({}),
+        );
+        old.tools()
+            .prepare_tool_call(crate::ToolPrepareCall {
+                tool_id: crate::ToolId::from("tool:reassigned"),
+                pending: crate::sansio::PendingToolCall {
+                    call_id: "reassigned-call".to_string(),
+                    tool_name: "reassigned".to_string(),
+                    args: serde_json::json!({ "route_a": "old" }),
+                    replay: None,
+                },
+                context: &prepare_context,
+            })
+            .await
+            .expect("the old request prepares through provider A");
+        let old_result = old
+            .tools()
+            .execute_by_id(
+                &crate::ToolId::from("tool:reassigned"),
+                &serde_json::json!({ "route_a": "old" }),
+                &crate::testing::mock_attempt_context(),
+            )
+            .await;
+        assert_eq!(
+            old_result.value_for_projection(),
+            serde_json::json!("route_a")
+        );
+        assert_eq!(a_prepares.load(Ordering::SeqCst), 1);
+        assert_eq!(b_prepares.load(Ordering::SeqCst), 0);
+        assert_eq!(a_executions.load(Ordering::SeqCst), 1);
+        assert_eq!(b_executions.load(Ordering::SeqCst), 0);
+        assert!(
+            old.tools()
+                .attempt_may_defer(&crate::ToolId::from("tool:reassigned"))
+        );
+        let old_attempt = old
+            .tools()
+            .execute_attempt_by_id(
+                &crate::ToolId::from("tool:reassigned"),
+                &serde_json::json!({ "route_a": "old" }),
+                &crate::testing::mock_attempt_context(),
+            )
+            .await;
+        let crate::ToolAttemptOutcome::Done { result, .. } = old_attempt else {
+            panic!("provider A returns a completed attempt")
+        };
+        assert_eq!(
+            result.into_output().value_for_projection(),
+            serde_json::json!("attempt_route_a")
+        );
+        assert_eq!(a_defer_queries.load(Ordering::SeqCst), 1);
+        assert_eq!(b_defer_queries.load(Ordering::SeqCst), 0);
+        assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(b_attempts.load(Ordering::SeqCst), 0);
+
+        fresh
+            .tools()
+            .prepare_tool_call(crate::ToolPrepareCall {
+                tool_id: crate::ToolId::from("tool:reassigned"),
+                pending: crate::sansio::PendingToolCall {
+                    call_id: "fresh-reassigned-call".to_string(),
+                    tool_name: "reassigned".to_string(),
+                    args: serde_json::json!({ "route_b": "fresh" }),
+                    replay: None,
+                },
+                context: &prepare_context,
+            })
+            .await
+            .expect("the fresh request prepares through provider B");
+        let fresh_result = fresh
+            .tools()
+            .execute_by_id(
+                &crate::ToolId::from("tool:reassigned"),
+                &serde_json::json!({ "route_b": "fresh" }),
+                &crate::testing::mock_attempt_context(),
+            )
+            .await;
+        assert_eq!(
+            fresh_result.value_for_projection(),
+            serde_json::json!("route_b")
+        );
+        assert_eq!(a_prepares.load(Ordering::SeqCst), 1);
+        assert_eq!(b_prepares.load(Ordering::SeqCst), 1);
+        assert_eq!(a_executions.load(Ordering::SeqCst), 1);
+        assert_eq!(b_executions.load(Ordering::SeqCst), 1);
+        assert!(
+            !fresh
+                .tools()
+                .attempt_may_defer(&crate::ToolId::from("tool:reassigned"))
+        );
+        let fresh_attempt = fresh
+            .tools()
+            .execute_attempt_by_id(
+                &crate::ToolId::from("tool:reassigned"),
+                &serde_json::json!({ "route_b": "fresh" }),
+                &crate::testing::mock_attempt_context(),
+            )
+            .await;
+        let crate::ToolAttemptOutcome::Done { result, .. } = fresh_attempt else {
+            panic!("provider B returns a completed attempt")
+        };
+        assert_eq!(
+            result.into_output().value_for_projection(),
+            serde_json::json!("attempt_route_b")
+        );
+        assert_eq!(a_defer_queries.load(Ordering::SeqCst), 1);
+        assert_eq!(b_defer_queries.load(Ordering::SeqCst), 1);
+        assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(b_attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn effective_member_without_contract_is_refused_before_prepare() {
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let session = admission_probe_session(Arc::new(AdmissionProbeProvider {
+            contract_available: false,
+            prepare_calls: Arc::clone(&prepare_calls),
+        }))
+        .await;
+
+        let error = match session.pin_tool_surface(
+            &SessionId::from("admission-probe"),
+            &crate::SessionToolAccess::default(),
+            None,
+        ) {
+            Ok(_) => panic!("missing resident contract must be refused before advertisement"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            crate::PluginError::ResidentToolContractUnavailable { ref tool_id, ref name }
+                if tool_id.as_str() == "tool:resident" && name == "resident"
+        ));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn restricted_definition_uses_id_route_and_missing_route_is_refused_before_prepare() {
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let session = admission_probe_session(Arc::new(AdmissionProbeProvider {
+            contract_available: true,
+            prepare_calls: Arc::clone(&prepare_calls),
+        }))
+        .await;
+        let renamed = crate::ToolDefinition::raw(
+            "tool:resident",
+            "resident_alias",
+            "authority-owned alias",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "authority": { "type": "string" } },
+                "required": ["authority"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "string" }),
+        );
+        let renamed_surface = session
+            .pin_tool_surface(
+                &SessionId::from("admission-probe"),
+                &crate::SessionToolAccess::restricted([renamed])
+                    .expect("valid restricted definition"),
+                None,
+            )
+            .expect("the same ToolId retains its pinned route under an authority-owned alias");
+        let entry = &renamed_surface.tool_catalog().tools[0];
+        assert_eq!(entry.manifest.name, "resident_alias");
+        assert!(
+            entry
+                .contract
+                .input_schema
+                .canonical()
+                .pointer("/properties/authority")
+                .is_some()
+        );
+
+        let missing = crate::ToolDefinition::raw(
+            "tool:missing-route",
+            "missing_route",
+            "no resident execution route",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        );
+        let error = match session.pin_tool_surface(
+            &SessionId::from("admission-probe"),
+            &crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
+            None,
+        ) {
+            Ok(_) => panic!("missing resident route must be refused before advertisement"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            crate::PluginError::ResidentToolRouteUnavailable { ref tool_id, ref name, .. }
+                if tool_id.as_str() == "tool:missing-route" && name == "missing_route"
+        ));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn plugin_session_refuses_missing_resident_route_before_advertisement() {
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let missing = crate::ToolDefinition::raw(
+            "tool:missing-route",
+            "missing_route",
+            "no resident execution route",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        );
+        let plugins = admission_probe_plugins(
+            Arc::new(AdmissionProbeProvider {
+                contract_available: true,
+                prepare_calls: Arc::clone(&prepare_calls),
+            }),
+            crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
+        );
+
+        let error = plugins
+            .resolved_tool_catalog(&SessionId::from("admission-probe"))
+            .expect_err("direct plugin-session consumers must refuse a missing resident route");
+        assert!(matches!(
+            error,
+            crate::PluginError::ResidentToolRouteUnavailable { ref tool_id, ref name, .. }
+                if tool_id.as_str() == "tool:missing-route" && name == "missing_route"
+        ));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
     }
 }

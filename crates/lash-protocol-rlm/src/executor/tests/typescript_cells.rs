@@ -1,5 +1,141 @@
 use super::*;
 
+fn approval_request_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:approval_request",
+        "approval_request",
+        "Request host approval",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object" }),
+    )
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
+        ["approval"],
+        "request",
+    ))
+}
+
+struct PolicyDeniedToolProvider;
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for PolicyDeniedToolProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![approval_request_definition().manifest()]
+    }
+
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        (id == &lash_core::ToolId::from("tool:approval_request"))
+            .then(|| approval_request_definition().manifest())
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "approval_request" || name == "tool:approval_request")
+            .then(|| Arc::new(approval_request_definition().contract()))
+    }
+
+    async fn prepare_granted_tool_call(
+        &self,
+        _grant: &lash_core::ToolExecutionGrant,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
+        Ok(lash_core::PreparedToolCall::identity(
+            call.tool_id,
+            call.pending,
+        ))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::failure(lash_core::ToolFailure {
+            class: lash_core::ToolFailureClass::PermissionDenied,
+            code: "approval_denied".to_string(),
+            message: "approval was denied".to_string(),
+            source: lash_core::ToolFailureSource::Policy,
+            retry: lash_core::ToolRetryStatus::Never,
+            raw: None,
+        })
+    }
+
+    async fn execute_granted(
+        &self,
+        grant: &lash_core::ToolExecutionGrant,
+        args: &serde_json::Value,
+        context: &lash_core::AttemptContext<'_>,
+    ) -> lash_core::ToolOutcome {
+        self.execute_by_id(&grant.manifest().id, args, context)
+            .await
+    }
+}
+
+#[test]
+fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
+    block_on(async {
+        let definition = approval_request_definition();
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            Arc::new(PolicyDeniedToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![definition]),
+        );
+        let mut state = RlmExecutionState::for_engine("typescript");
+        let response = execute_code_with_dialect_and_bounds(
+            &mut state,
+            context,
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: r#"
+                    const settled = await Promise.allSettled([
+                        approval.request({ reason: "settled deploy" })
+                    ]);
+                    const settledReason = settled[0].reason;
+                    try {
+                        await approval.request({ reason: "deploy" });
+                        finish({ caught: false });
+                    } catch (error) {
+                        finish({
+                            caught: error instanceof Error,
+                            name: error.name,
+                            code: error.cause.code,
+                            message: error.message,
+                            class: error.cause.class,
+                            source: error.cause.source,
+                            retry: error.cause.retry.type,
+                            settledCode: settledReason.cause.code,
+                            settledMessage: settledReason.message,
+                            settledSource: settledReason.cause.source,
+                            settledRetry: settledReason.cause.retry.type
+                        });
+                    }
+                "#
+                .to_string(),
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            RlmSourceContext::cell(SourceDialect::Typescript),
+        )
+        .await;
+
+        assert_eq!(response.error, None);
+        assert_eq!(
+            response.terminal_finish,
+            Some(serde_json::json!({
+                "caught": true,
+                "name": "EffectError",
+                "code": "approval_denied",
+                "message": "approval was denied",
+                "class": "permission_denied",
+                "source": "policy",
+                "retry": "never",
+                "settledCode": "approval_denied",
+                "settledMessage": "approval was denied",
+                "settledSource": "policy",
+                "settledRetry": "never"
+            }))
+        );
+    });
+}
+
 #[test]
 fn parser_accepts_bounded_while_with_nested_for() {
     let source = r#"pool_i = 0

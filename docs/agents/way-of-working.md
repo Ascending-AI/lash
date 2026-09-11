@@ -25,7 +25,7 @@ Planning, tracking, and everything in-flight live in **Linear** (team `figments`
 `docs/` is not a published website and not a scratch directory. Since FIG-2364 it holds
 ADRs (`docs/adr/`), the agent runbook you are reading (`docs/agents/`), architecture
 notes, a small number of standing operational guides (`provider-recording.md`,
-`complexity-audit.md`), and the generated `api-surface.snapshot`. There are no `.html`
+`complexity-audit.md`). There are no `.html`
 pages left and nothing lints it. Anything else you want to write belongs on the Linear
 ticket per the table above.
 

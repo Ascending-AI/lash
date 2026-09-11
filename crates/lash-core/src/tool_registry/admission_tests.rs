@@ -76,10 +76,62 @@ impl MutableAdmissionSource {
     }
 }
 
+struct AdmissionSourceSnapshot {
+    id: String,
+    manifests: Vec<ToolManifest>,
+    result: Option<&'static str>,
+}
+
+#[async_trait::async_trait]
+impl ToolSourceExecutor for AdmissionSourceSnapshot {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self {
+            id: self.id.clone(),
+            manifests: self.manifests.clone(),
+            result: self.result,
+        }))
+    }
+
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        self.manifests.clone()
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+        None
+    }
+
+    async fn execute(
+        &self,
+        tool: &str,
+        _args: &serde_json::Value,
+        _context: &crate::AttemptContext<'_>,
+    ) -> ToolOutcome {
+        ToolOutcome::ok(json!(self.result.unwrap_or(tool)))
+    }
+}
+
 #[async_trait::async_trait]
 impl ToolSourceExecutor for MutableAdmissionSource {
     fn id(&self) -> &str {
         self.id
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(AdmissionSourceSnapshot {
+            id: self.id.to_string(),
+            manifests: self.advertised_tools(),
+            result: None,
+        }))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -162,6 +214,17 @@ impl RoutedAdmissionSource {
 impl ToolSourceExecutor for RoutedAdmissionSource {
     fn id(&self) -> &str {
         self.id
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(AdmissionSourceSnapshot {
+            id: self.id.to_string(),
+            manifests: self.advertised_tools(),
+            result: Some(self.result),
+        }))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {

@@ -40,7 +40,28 @@ pub(crate) struct Chunk {
     /// these scopes, and consecutive handlers in one frame must be a strictly
     /// nested chain of them.
     pub(crate) handler_scopes: Vec<HandlerScopeExtent>,
+    /// The expected durable handler chain, recorded as the breakpoints at which
+    /// it changes: entry `(ip, digest)` means every instruction from `ip` until
+    /// the next breakpoint expects `digest`. Handler validity is flow-sensitive
+    /// — the same `try` region is protected on the normal path and unprotected
+    /// while its own `finally` body runs — which is exactly what the extents
+    /// above cannot express, so the chain a restored handler stack must hash to
+    /// is recorded where it is known: at lowering.
+    pub(crate) handler_chain_digests: Vec<(usize, u64)>,
     pub(crate) root_code_len: usize,
+}
+
+/// The digest of an empty handler chain, and the seed every chain folds from.
+pub(crate) const EMPTY_HANDLER_CHAIN_DIGEST: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// Folds one more handler onto a chain digest, innermost last. A scope's
+/// `PushHandler` site is its identity: no two scopes share one.
+pub(crate) fn extend_handler_chain_digest(digest: u64, push_ip: usize) -> u64 {
+    let mut digest = digest;
+    for byte in (push_ip as u64).to_le_bytes() {
+        digest = (digest ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    digest
 }
 
 /// The bytecode extent of one `try` scope.
@@ -75,6 +96,19 @@ impl Chunk {
             .ok()?;
         let scope = &self.handler_scopes[index];
         (scope.finally_ip == finally_ip && scope.catches == catches).then_some(scope)
+    }
+
+    /// The handler chain a frame sitting at `ip` must have installed, as the
+    /// digest of the scopes open just before the instruction at `ip` runs.
+    pub(crate) fn handler_chain_digest_at(&self, ip: usize) -> u64 {
+        match self
+            .handler_chain_digests
+            .binary_search_by_key(&ip, |(start, _)| *start)
+        {
+            Ok(index) => self.handler_chain_digests[index].1,
+            Err(0) => EMPTY_HANDLER_CHAIN_DIGEST,
+            Err(index) => self.handler_chain_digests[index - 1].1,
+        }
     }
 }
 

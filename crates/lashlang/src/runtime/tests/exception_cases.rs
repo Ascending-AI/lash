@@ -104,6 +104,82 @@ async fn effect_failure_is_a_throw_with_structured_operation_metadata() {
     );
 }
 
+struct StructuredToolFailureHost;
+
+impl ExecutionHost for StructuredToolFailureHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        if matches!(op, AbilityOp::ResourceOperation(_)) {
+            return Err(ExecutionHostError::from_tool_failure(
+                &lash_sansio::ToolFailure {
+                    class: lash_sansio::ToolFailureClass::PermissionDenied,
+                    code: "approval_denied".to_string(),
+                    message: "approval was denied".to_string(),
+                    source: lash_sansio::ToolFailureSource::Policy,
+                    retry: lash_sansio::ToolRetryStatus::Safe {
+                        after_ms: Some(1_250),
+                    },
+                    raw: None,
+                },
+            ));
+        }
+        Host.perform(op).await
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn lashlang_catch_reads_structured_tool_failure_fields_directly() {
+    fn error_field(field: &str) -> Expr {
+        Expr::Field {
+            target: Box::new(Expr::Variable("error".into())),
+            field: field.into(),
+        }
+    }
+
+    let failure = Expr::ResultUnwrap(Box::new(Expr::ReceiverCall {
+        receiver: Box::new(Expr::ResourceRef(crate::ResourceRefExpr::resolved(
+            vec!["approval".into()],
+            "Approval",
+            "approval",
+        ))),
+        operation: "request".into(),
+        args: Vec::new(),
+    }));
+    let retry_type = Expr::Field {
+        target: Box::new(error_field("retry")),
+        field: "type".into(),
+    };
+    let retry_after_ms = Expr::Field {
+        target: Box::new(error_field("retry")),
+        field: "after_ms".into(),
+    };
+    let caught = Expr::Record(vec![
+        ("code".into(), error_field("code")),
+        ("message".into(), error_field("message")),
+        ("class".into(), error_field("class")),
+        ("source".into(), error_field("source")),
+        ("retry".into(), retry_type),
+        ("after_ms".into(), retry_after_ms),
+    ]);
+    let program = exception_finish(exception_try(failure, Some(("error", caught)), None));
+
+    let ExecutionOutcome::Finished(Value::Record(value)) =
+        run_exception_program(program, &StructuredToolFailureHost)
+            .await
+            .expect("the catch handles the tool failure")
+    else {
+        panic!("catch should finish with a record")
+    };
+    assert_eq!(value["code"], Value::String("approval_denied".into()));
+    assert_eq!(
+        value["message"],
+        Value::String("approval was denied".into())
+    );
+    assert_eq!(value["class"], Value::String("permission_denied".into()));
+    assert_eq!(value["source"], Value::String("policy".into()));
+    assert_eq!(value["retry"], Value::String("safe".into()));
+    assert_eq!(value["after_ms"], Value::Number(1_250.0));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn finally_runs_on_normal_and_exceptional_paths_and_a_new_throw_replaces_the_old_one() {
     let replacement = exception_try(

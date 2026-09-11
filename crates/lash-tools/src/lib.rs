@@ -28,14 +28,25 @@ mod tests {
 
     #[cfg(not(feature = "lashlang"))]
     #[test]
-    fn default_manifests_do_not_include_lashlang_bindings() {
+    fn local_feature_off_preserves_resolved_dependency_binding_behavior() {
         for manifest in all_manifests() {
-            assert!(
-                manifest.bindings.is_empty(),
-                "{} unexpectedly had bindings: {:?}",
+            assert_eq!(
+                manifest
+                    .bindings
+                    .contains_key(lash_tool_support::LASHLANG_TOOL_BINDING_KEY),
+                lash_tool_support::LASHLANG_BINDINGS_ENABLED,
+                "{} had Lashlang binding state inconsistent with lash-tool-support: {:?}",
                 manifest.name,
                 manifest.bindings
             );
+            if !lash_tool_support::LASHLANG_BINDINGS_ENABLED {
+                assert!(
+                    manifest.bindings.is_empty(),
+                    "{} unexpectedly had bindings: {:?}",
+                    manifest.name,
+                    manifest.bindings
+                );
+            }
         }
     }
 
@@ -46,7 +57,7 @@ mod tests {
             assert!(
                 manifest
                     .bindings
-                    .contains_key(lash_lashlang_runtime::LASHLANG_TOOL_BINDING_KEY),
+                    .contains_key(lash_tool_support::LASHLANG_TOOL_BINDING_KEY),
                 "{} did not include a lashlang binding",
                 manifest.name
             );

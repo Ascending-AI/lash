@@ -947,6 +947,7 @@ pub(crate) async fn delete_process_sessions_tx(
     if session_ids.is_empty() {
         return Ok(lash_core::SessionBlobReclaimReport::default());
     }
+    crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
 
     let session_id_texts: Vec<_> = session_ids.iter().map(SessionId::as_str).collect();
     let mut report = lash_core::SessionBlobReclaimReport::default();

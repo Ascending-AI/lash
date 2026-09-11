@@ -141,4 +141,34 @@ impl TurnCancellationAuthority {
     pub fn resolver(&self) -> Arc<dyn AwaitEventResolver> {
         Arc::clone(&self.resolver)
     }
+
+    /// Finish one exact closure operation previously authorized by the store.
+    ///
+    /// This grants no store mutation authority: the promise pair may be
+    /// settled after owner takeover, while applying input effects and consuming
+    /// the authorization still requires the successor's current store fence.
+    pub async fn settle_authorized_closure(
+        &self,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<Option<crate::TurnCancellationEvidence>, RuntimeError> {
+        authorization.validate()?;
+        if authorization.binding_id() != self.binding_id {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                format!(
+                    "turn cancellation closure binding `{}` does not match authority `{}`",
+                    authorization.binding_id(),
+                    self.binding_id
+                ),
+            ));
+        }
+        let control = crate::runtime::turn_control::ActiveTurnControl::new(
+            self.resolver.as_ref(),
+            authorization.address(),
+        )
+        .await?;
+        control
+            .settle_authorized(self.resolver.as_ref(), authorization)
+            .await
+    }
 }

@@ -224,10 +224,13 @@ acquires the key itself and would queue behind the caller's own exclusive hold:
 already holds the key and owns its own transaction.
 
 The expectation artifact is regenerated from a live database rather than
-hand-written, and CI runs the Postgres lane on PostgreSQL 14, 16, and 18,
-asserting all three produce the byte-identical artifact. Any attribute that
-renders differently across the matrix leaves the scope; it is never special-cased
-per version.
+hand-written. CI uses a stable PostgreSQL 14/16/18 matrix: 14 and 18 run narrow
+live catalog compatibility checks, while 16 is the sole primary behavior lane.
+Whenever the PostgreSQL job runs, PostgreSQL 14 and 18 assert the byte-identical
+artifact. The PG16 full store suite asserts it on trunk and full-profile runs;
+PG16 also runs the focused runtime identity oracle on pull requests and merge
+groups. Any attribute that renders differently across the matrix leaves the
+scope; it is never special-cased per version.
 
 No fingerprint is persisted in `lash_schema_versions`. A published hash is
 exactly as copy-pasteable as an integer, so it would defend against typos rather
@@ -274,8 +277,20 @@ verify against; shape-checking there would be lash verifying itself.
   Lash's *own* `CHECK` constraints are pinned elsewhere rather than left
   unpinned: ADR 0081 puts them in a declared expected-constraints registry that
   the lash-sim schema-congruence gate asserts against the published DDL. That
-  registry reads the committed artifacts, not a live catalog, so it neither
-  widens this fingerprint's object classes nor changes what a host may add.
+  registry remains the single expected-definition source and the generated
+  structural fingerprint remains unchanged.
+
+  Amended 2026-09-11 (FIG-2837): hosts can explicitly call
+  `PostgresStorage::inspect_required_constraints_for` (or the caller-owned-
+  connection `inspect_required_constraints_on`) to compare those registered
+  names and predicates against a live catalog snapshot. The pool form uses the
+  same shared advisory-lock and post-lock `REPEATABLE READ` ordering as
+  `verify_schema_for`. It reports missing, altered, `NOT VALID`, and, on
+  PostgreSQL 18+, `NOT ENFORCED` registered checks while tolerating unrelated
+  additions. Unsupported predicate syntax makes inspection inconclusive rather
+  than clean. This is a separate read-only diagnostic: it performs no repair and
+  normal startup does not call it, so the structural fingerprint's scope and
+  `SchemaCheck` policy remain unchanged.
 
 - A pre-version-9 database's leftover `lash_process_change_seq` sequence is never
   cleaned up now that the artifact is creation-only. Such a database is rejected at

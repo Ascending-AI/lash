@@ -70,7 +70,7 @@ finish choice
     assert!(*then_is_block);
     assert!(!else_is_block);
     assert!(matches!(
-        else_graph.as_deref().unwrap().nodes.as_slice(),
+        else_graph.nodes.as_slice(),
         [WorkflowNode {
             kind: WorkflowNodeKind::Container(WorkflowContainer::If {
                 then_is_block: true,
@@ -114,21 +114,75 @@ fn invalid_graphs_are_refused() {
         workflow_graph_to_source(&graph),
         Err(GraphRenderError::UnknownNodeReference { .. })
     ));
+}
 
-    let mut graph = workflow_graph_from_source("if true { value = 1 }\n").unwrap();
-    let WorkflowNodeKind::Container(WorkflowContainer::If { then_graph, .. }) =
-        &mut graph.main.nodes[0].kind
-    else {
-        panic!("expected if container")
-    };
-    *then_graph = None;
-    assert!(matches!(
-        workflow_graph_to_source(&graph),
-        Err(GraphRenderError::MissingRequiredChild {
-            child: "then_graph",
-            ..
-        })
-    ));
+#[test]
+fn omitted_container_children_fail_at_decode() {
+    let empty = || Box::new(WorkflowSubgraph::default());
+    let cases = [
+        (
+            WorkflowContainer::If {
+                binding: None,
+                condition: "true".to_string(),
+                then_is_block: true,
+                else_is_block: true,
+                then_graph: empty(),
+                else_graph: empty(),
+            },
+            "then_graph",
+        ),
+        (
+            WorkflowContainer::If {
+                binding: None,
+                condition: "true".to_string(),
+                then_is_block: true,
+                else_is_block: true,
+                then_graph: empty(),
+                else_graph: empty(),
+            },
+            "else_graph",
+        ),
+        (
+            WorkflowContainer::For {
+                binding: "item".to_string(),
+                iterable: "[]".to_string(),
+                body: empty(),
+            },
+            "body",
+        ),
+        (
+            WorkflowContainer::While {
+                condition: "false".to_string(),
+                body: empty(),
+            },
+            "body",
+        ),
+        (
+            WorkflowContainer::ListComprehension {
+                binding: None,
+                clauses: vec![WorkflowListComprehensionClause::For {
+                    binding: "item".to_string(),
+                    iterable: "[]".to_string(),
+                }],
+                element: empty(),
+            },
+            "element",
+        ),
+    ];
+
+    for (container, missing_field) in cases {
+        let mut encoded = serde_json::to_value(container).expect("container serializes");
+        encoded
+            .as_object_mut()
+            .expect("container serializes as an object")
+            .remove(missing_field);
+        let error = serde_json::from_value::<WorkflowContainer>(encoded)
+            .expect_err("omitting a required child must fail at decode");
+        assert!(
+            error.to_string().contains(missing_field),
+            "decode error for `{missing_field}` should name the missing field: {error}"
+        );
+    }
 }
 
 #[test]
@@ -145,7 +199,7 @@ fn while_and_path_assignment_are_structured_and_typed() {
         panic!("expected while container")
     };
     assert!(matches!(
-        body.as_deref().unwrap().nodes[0].kind,
+        body.nodes[0].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
     assert_eq!(
@@ -474,7 +528,7 @@ fn iteration_carried_reassignment_is_structured_state_update() {
         panic!("expected for container")
     };
     assert!(matches!(
-        body.as_deref().unwrap().nodes[0].kind,
+        body.nodes[0].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
     assert_eq!(graph.main.nodes[1].outputs[0].version, 2);
@@ -524,11 +578,11 @@ finish [state, introduced]
         panic!("expected for container")
     };
     assert!(matches!(
-        body.as_deref().unwrap().nodes[0].kind,
+        body.nodes[0].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
     assert!(matches!(
-        body.as_deref().unwrap().nodes[2].kind,
+        body.nodes[2].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
     assert_lens_laws(source);
@@ -551,8 +605,8 @@ finish item
     else {
         panic!("expected for container")
     };
-    let body_node = &body.as_deref().unwrap().nodes[0];
-    assert!(!body.as_deref().unwrap().edges.iter().any(|edge| {
+    let body_node = &body.nodes[0];
+    assert!(!body.edges.iter().any(|edge| {
         edge.from == outer_item.id
             && edge.to == body_node.id
             && matches!(
@@ -608,7 +662,7 @@ fn nodes_expose_stable_identifiers_available_before_their_execution() {
         panic!("expected for container")
     };
     assert_eq!(
-        body.as_deref().unwrap().nodes[0].available_variables,
+        body.nodes[0].available_variables,
         ["first", "item", "record", "state"]
     );
     assert_eq!(
@@ -785,10 +839,7 @@ while await tools.ready({})? {
             .collect::<Vec<_>>(),
         vec!["Loop guard", "ready"]
     );
-    assert_eq!(
-        body.as_deref().unwrap().nodes[0].execution_sites[0].label,
-        "tick"
-    );
+    assert_eq!(body.nodes[0].execution_sites[0].label, "tick");
     assert_lens_laws(source);
 }
 

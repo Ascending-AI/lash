@@ -247,6 +247,7 @@ impl Compiler {
                     .handler_scope_depth;
                 self.emit_exception_scope_exit(scope_depth);
                 let jump = self.emit_jump();
+                self.record_handler_chain_breakpoint();
                 self.loop_contexts
                     .last_mut()
                     .expect("validate_ast rejects `break` outside loops")
@@ -264,6 +265,7 @@ impl Compiler {
                 };
                 self.emit_exception_scope_exit(scope_depth);
                 self.code.push(Instruction::Jump(continue_target));
+                self.record_handler_chain_breakpoint();
                 self.clear_const_slots();
             }
             Expr::Null => {
@@ -436,6 +438,7 @@ impl Compiler {
                 self.compile_expr(value);
                 self.emit_return_scope_exit();
                 self.code.push(Instruction::Return);
+                self.record_handler_chain_breakpoint();
                 self.clear_const_slots();
             }
             Expr::Field { target, field } => {
@@ -627,6 +630,54 @@ impl Compiler {
         }
     }
 
+    /// The digest of the handler chain the first `depth` lowering scopes
+    /// install. A `finally` body contributes nothing: its own scope's handler
+    /// is off the VM's stack for as long as the body runs.
+    fn handler_chain_digest_through(&self, depth: usize) -> u64 {
+        self.handler_scopes[..depth]
+            .iter()
+            .fold(EMPTY_HANDLER_CHAIN_DIGEST, |digest, scope| match scope {
+                HandlerScope::Protected { push_ip, .. } => {
+                    extend_handler_chain_digest(digest, *push_ip)
+                }
+                HandlerScope::FinallyBody => digest,
+            })
+    }
+
+    /// Records the chain every instruction from here on expects, which is the
+    /// chain the instruction just emitted leaves installed. Call it after
+    /// emitting any instruction that pushes or pops a handler, and after the
+    /// jump that ends a scope-exit edge, where the lexical chain resumes.
+    fn record_handler_chain_breakpoint(&mut self) {
+        self.record_handler_chain_digest(
+            self.handler_chain_digest_through(self.handler_scopes.len()),
+        );
+    }
+
+    fn record_handler_chain_digest(&mut self, digest: u64) {
+        let ip = self.code.len();
+        let previous = self
+            .handler_chain_digests
+            .last()
+            .map_or(EMPTY_HANDLER_CHAIN_DIGEST, |(_, digest)| *digest);
+        if previous == digest {
+            return;
+        }
+        match self.handler_chain_digests.last_mut() {
+            // One ip, one live chain: the table is keyed by ip alone, so a
+            // second chain recorded at the same ip would silently win and
+            // false-reject honest state at that boundary.
+            Some((start, last)) if *start == ip => {
+                debug_assert_eq!(
+                    *last, digest,
+                    "instruction {ip} was recorded with two different handler chains"
+                );
+                *last = digest;
+            }
+            _ => self.handler_chain_digests.push((ip, digest)),
+        }
+    }
+
     fn compile_try_expr(&mut self, scope: &crate::ast::TryExpr) {
         if scope.catch.is_none() && scope.finally.is_none() {
             self.compile_expr(&scope.body);
@@ -643,13 +694,20 @@ impl Compiler {
             self.pending_finally_sites.push(Vec::new());
             self.pending_finally_sites.len() - 1
         });
-        self.handler_scopes
-            .push(HandlerScope::Protected { finally_sites });
+        self.handler_scopes.push(HandlerScope::Protected {
+            push_ip: handler_push,
+            finally_sites,
+        });
+        self.record_handler_chain_breakpoint();
         self.compile_expr(&scope.body);
+        // The scope is still installed while `PopHandler` is the next
+        // instruction to run, so the breakpoint that drops it is recorded
+        // after that instruction is emitted, not before.
+        self.code.push(Instruction::PopHandler);
         self.handler_scopes
             .pop()
             .expect("the try body's scope is popped once");
-        self.code.push(Instruction::PopHandler);
+        self.record_handler_chain_breakpoint();
 
         let normal_exit = self.code.len();
         if scope.finally.is_some() {
@@ -674,15 +732,19 @@ impl Compiler {
                     finally: None,
                     catches: false,
                 });
-                self.handler_scopes
-                    .push(HandlerScope::Protected { finally_sites });
+                self.handler_scopes.push(HandlerScope::Protected {
+                    push_ip: catch_cleanup.expect("the cleanup scope was just emitted"),
+                    finally_sites,
+                });
+                self.record_handler_chain_breakpoint();
             }
             self.compile_expr(&catch.body);
             if scope.finally.is_some() {
+                self.code.push(Instruction::PopHandler);
                 self.handler_scopes
                     .pop()
                     .expect("the catch body's cleanup scope is popped once");
-                self.code.push(Instruction::PopHandler);
+                self.record_handler_chain_breakpoint();
                 catch_exit = Some(self.code.len());
                 self.code.push(Instruction::EnterFinally {
                     finally: usize::MAX,
@@ -777,8 +839,12 @@ impl Compiler {
     fn emit_exception_scope_exit(&mut self, target_depth: usize) {
         for index in (target_depth..self.handler_scopes.len()).rev() {
             match self.handler_scopes[index] {
-                HandlerScope::Protected { finally_sites } => {
+                HandlerScope::Protected { finally_sites, .. } => {
                     self.code.push(Instruction::PopHandler);
+                    // This edge unwinds scopes the lowering stack still holds,
+                    // so the chain each following instruction expects is the
+                    // prefix left below the one just popped.
+                    self.record_handler_chain_digest(self.handler_chain_digest_through(index));
                     if let Some(bucket) = finally_sites {
                         let site = self.code.len();
                         // The finally target is patched by `compile_try_expr`
@@ -805,8 +871,9 @@ impl Compiler {
     fn emit_return_scope_exit(&mut self) {
         for index in (0..self.handler_scopes.len()).rev() {
             match self.handler_scopes[index] {
-                HandlerScope::Protected { finally_sites } => {
+                HandlerScope::Protected { finally_sites, .. } => {
                     self.code.push(Instruction::PopHandler);
+                    self.record_handler_chain_digest(self.handler_chain_digest_through(index));
                     if let Some(bucket) = finally_sites {
                         let site = self.code.len();
                         self.code.push(Instruction::EnterFinally {

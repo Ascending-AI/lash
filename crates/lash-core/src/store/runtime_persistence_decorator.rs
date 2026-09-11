@@ -14,6 +14,10 @@ use crate::SessionId;
 pub trait RuntimePersistenceDecorator: Send + Sync {
     fn inner(&self) -> &(dyn RuntimePersistence + '_);
 
+    fn turn_cancellation_authority(&self) -> Option<crate::TurnCancellationAuthority> {
+        self.inner().turn_cancellation_authority()
+    }
+
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         self.inner().read_session_state_version().await
     }
@@ -687,6 +691,10 @@ impl<T> TurnInputStore for T
 where
     T: RuntimePersistenceDecorator + ?Sized,
 {
+    fn turn_cancellation_authority(&self) -> Option<crate::TurnCancellationAuthority> {
+        RuntimePersistenceDecorator::turn_cancellation_authority(self)
+    }
+
     async fn turn_is_committed(&self, address: &crate::TurnAddress) -> Result<bool, StoreError> {
         RuntimePersistenceDecorator::turn_is_committed(self, address).await
     }

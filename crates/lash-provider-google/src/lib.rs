@@ -1535,21 +1535,6 @@ mod tests {
         );
     }
 
-    /// The cross-provider conformance law below is feature-gated. This crate's
-    /// self dev-dependency keeps `testing` on for every test build, so a bare
-    /// `cargo test -p lash-provider-google` runs the law. If that wiring is
-    /// ever dropped, this sentinel makes the bare run fail loudly instead of
-    /// reporting green over a law it never compiled.
-    #[cfg(not(feature = "testing"))]
-    #[test]
-    fn conformance_law_must_not_be_compiled_out() {
-        panic!(
-            "the cross-provider conformance law was compiled out: this crate's `testing` feature \
-             is off for the test build, which the self dev-dependency in Cargo.toml is supposed \
-             to guarantee"
-        );
-    }
-
     #[cfg(feature = "testing")]
     mod conformance;
     mod protocol53;

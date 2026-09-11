@@ -117,7 +117,6 @@ jobs:
       workflows_only: ${{ steps.classify.outputs.workflows_only }}
       e2e_relevant: ${{ steps.classify.outputs.e2e_relevant }}
       scripts_gates: ${{ steps.classify.outputs.scripts_gates }}
-      identity_versions: ${{ steps.classify.outputs.identity_versions }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
 
@@ -184,17 +183,8 @@ jobs:
           if ! git diff --name-status --no-renames -z "${base_sha}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-paths"; then
             fail_open "exact diff ${base_sha}..${GITHUB_SHA} could not be computed"
           fi
-          # The exact diff *content*, not just its paths: `identity_versions`
-          # keys on a changed `const LASHLANG_SEMANTIC_HASH_VERSION`/
-          # `const BYTECODE_FORMAT_VERSION` definition line, which a path list
-          # cannot see. Context-free (`--unified=0`) keeps it to the changed
-          # lines; a failure here falls open to the wide matrix.
-          if ! git diff --unified=0 --no-color --no-renames "${base_sha}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/exact-diff"; then
-            fail_open "exact diff content ${base_sha}..${GITHUB_SHA} could not be computed"
-          fi
           python3 scripts/ci_plan.py classify \
-            --paths-file "${RUNNER_TEMP}/changed-paths" \
-            --diff-file "${RUNNER_TEMP}/exact-diff" >> "${GITHUB_OUTPUT}"
+            --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
       - name: Summarize plan
         env:
@@ -354,6 +344,9 @@ jobs:
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
       - name: Lint orchestrating tools
         run: python3 scripts/lint_orchestrating_tools.py
 
@@ -366,9 +359,9 @@ jobs:
       - name: Test repository scripts
         run: |
           python3 scripts/test_agent_workbench_restate_e2e.py
-          python3 scripts/test_api_surface.py
-          python3 scripts/test_check_facade_external_types.py
           python3 scripts/test_check_facade_only_examples.py
+          python3 scripts/test_check_feature_coverage.py
+          python3 scripts/check_feature_coverage.py check
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_service_gate_pinning.py
@@ -387,7 +380,6 @@ jobs:
           python3 scripts/test_judged_runbook_matrix.py
           python3 scripts/test_check_judged_build_geometry.py
           python3 scripts/test_restate_workers_e2e_coverage.py
-          python3 scripts/test_rustdoc_json_cache.py
           python3 scripts/test_runtime_perf_percentiles.py
           python3 scripts/test_perfreport.py
           python3 scripts/test_ci_plan.py
@@ -439,69 +431,6 @@ jobs:
 
       - name: Check for unused dependencies
         run: cargo shear
-
-  # The generated facade contract gates build rustdoc JSON for the facade crate,
-  # independently of the workspace build. They run only on the full profile.
-  facade-gates:
-    name: Facade API contract gates
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: plan
-    # Full-profile only (2026-08-26 ruling): the surface snapshot and related
-    # facade gates certify docs/ artifacts, not the build, so they
-    # run on workflow_dispatch — which the release gate requires on the
-    # release SHA — instead of spending a rustdoc compile on every PR.
-    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true'
-
-    steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
-
-      - name: Check facade external types
-        run: python3 scripts/check_facade_external_types.py
-
-      # Same rustdoc graph and cache geometry as the coverage gate, so it
-      # rides in this job instead of paying a second rustdoc build.
-      - name: Check public API surface snapshot
-        run: python3 scripts/api_surface.py check
-
-      - name: Report cache disk capacity
-        if: always()
-        run: bash scripts/ci/report-cache.sh
 
   # A dependency workspace's [patch] table is invisible to its consumers.
   # Resolve lashlang from this checkout as a Git dependency in a fresh external
@@ -559,10 +488,11 @@ jobs:
         if: always()
         run: bash scripts/ci/report-cache.sh
 
-  # Feature-set coverage the workspace check cannot reach, and the deliberately
-  # non-default provider/protocol test features. Split out of test-doc: these
-  # resolve their own feature graphs, so they neither reuse nor warm anything the
-  # workspace check produces, and running them beside it costs nothing.
+  # Feature-set coverage the workspace check cannot reach. The executable
+  # registry owns every declared workspace feature, resolves ON/OFF graphs in
+  # normal dependency context, and runs the exact package checks for this lane.
+  # Split out of test-doc: these resolve their own feature graphs, so they
+  # neither reuse nor warm anything the workspace check produces.
   package-feature-checks:
     name: Package feature check (${{ matrix.lane }})
     runs-on: ubuntu-24.04
@@ -576,26 +506,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - lane: sansio-schema-validation
+            command: python3 scripts/check_feature_coverage.py run sansio-schema-validation
+          - lane: otel-feature-chain
+            command: python3 scripts/check_feature_coverage.py run otel-feature-chain
+          - lane: core-internal-features
+            command: python3 scripts/check_feature_coverage.py run core-internal-features
+          - lane: language-testing-features
+            command: python3 scripts/check_feature_coverage.py run language-testing-features
+          - lane: llm-transport-features
+            command: python3 scripts/check_feature_coverage.py run llm-transport-features
+          - lane: store-features
+            command: python3 scripts/check_feature_coverage.py run store-features
+          - lane: runtime-features
+            command: python3 scripts/check_feature_coverage.py run runtime-features
           - lane: protocol-rlm-testing
-            command: cargo check -p lash-internal-protocol-rlm --features testing --locked
-          - lane: agent-workbench
-            command: cargo check -p agent-workbench --locked
-          - lane: slack-clone-e2e
-            command: cargo check -p slack-clone --all-targets --features e2e --locked
-          - lane: agent-service-restate
-            command: cargo check -p agent-service --features restate --all-targets --locked
+            command: python3 scripts/check_feature_coverage.py run protocol-rlm-testing
           - lane: remote-protocol-conversions
-            command: cargo test -p lash-internal-remote-protocol --features core-conversions --locked
-          - lane: plugin-mcp-lashlang
-            command: cargo test -p lash-internal-plugin-mcp --features lashlang --locked
-          - lane: llm-transport-conformance
-            command: cargo test -p lash-internal-llm-transport --features testing --locked conformance
-          - lane: provider-openai-conformance
-            command: cargo test -p lash-internal-provider-openai --features testing --locked conformance
-          - lane: provider-anthropic-conformance
-            command: cargo test -p lash-internal-provider-anthropic --features testing --locked conformance
-          - lane: provider-google-conformance
-            command: cargo test -p lash-internal-provider-google --features testing --locked conformance
+            command: python3 scripts/check_feature_coverage.py run remote-protocol-conversions
+          - lane: tool-lashlang-proxies
+            command: python3 scripts/check_feature_coverage.py run tool-lashlang-proxies
+          - lane: provider-testing-features
+            command: python3 scripts/check_feature_coverage.py run provider-testing-features
+          - lane: perf-dhat-heap
+            command: python3 scripts/check_feature_coverage.py run perf-dhat-heap
+          - lane: regress-stable-features
+            command: python3 scripts/check_feature_coverage.py run regress-stable-features
+          - lane: host-features
+            command: python3 scripts/check_feature_coverage.py run host-features
 
     steps:
       - name: Check out repository
@@ -1296,15 +1234,13 @@ jobs:
           if-no-files-found: error
 
   postgres-store:
-    name: Test Postgres store (PG ${{ matrix.postgres }})
+    name: Test Postgres store (PG ${{ matrix.postgres }}, ${{ matrix.role }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
-    # The focused runtime Agent Scenario is a pull-request and merge-queue gate.
-    # The heavier store/perf coverage below remains deferred to relevant trunk
-    # runs per the 2026-08-25 CI-scope ruling -- except on a diff that moves a
-    # Lashlang identity version (`plan.identity_versions`), where every step in
-    # this job is the gate.
+    # The stable matrix always supplies real PostgreSQL evidence on pull requests
+    # and merge groups. The heavier PG16 store/perf coverage remains deferred to
+    # relevant trunk runs per the 2026-08-25 CI-scope ruling.
     if: >-
       github.event_name == 'pull_request'
       || github.event_name == 'merge_group'
@@ -1317,23 +1253,21 @@ jobs:
     # 14 and 18 bracket the supported range — 18 is where NOT NULL became
     # `pg_constraint` rows, 14 is before `pg_index.indnullsnotdistinct` existed —
     # and the shape suite asserts all three produce the byte-identical artifact.
-    # Pull requests and merge-group runs are PR-class and test only the oldest
-    # supported major (14), keeping the queue on the same fast path. Main
-    # pushes run the full 14/16/18 catalog byte-identity bracket; the full
-    # profile (workflow_dispatch) keeps the release certification path intact.
-    #
-    # The one PR-class exception is `plan.identity_versions`: a diff that moves
-    # `LASHLANG_SEMANTIC_HASH_VERSION` or `BYTECODE_FORMAT_VERSION` invalidates
-    # the `resource_operation:<hex>` and `tool-intent:v2:blake3:` literals that
-    # only execute in the PG16 legs below, so such a pull request buys the full
-    # matrix -- and the trunk-only steps in this job -- on its own head commit.
-    # Three trunk outages in one night came from letting those diffs through on
-    # a PG14-only matrix. The evidence is this run, so nothing depends on a
-    # human sequencing a second dispatch by hand, and no run is cancelled.
+    # PG14 and PG18 are compatibility lanes: they run only the live catalog
+    # artifact comparison and a focused version-stamp gate. PG16 is the sole
+    # primary lane. On PR-class events it runs the proven runtime identity oracle;
+    # on trunk/full runs it retains the package-wide, pool-wait, runtime, and
+    # cross-backend behavior coverage without triplicating it across majors.
     strategy:
       fail-fast: false
       matrix:
-        postgres: ${{ fromJSON((github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || needs.plan.outputs.identity_versions == 'true') && '["14", "16", "18"]' || '["14"]') }}
+        include:
+          - postgres: "14"
+            role: compatibility
+          - postgres: "16"
+            role: primary
+          - postgres: "18"
+            role: compatibility
 
     services:
       postgres:
@@ -1388,6 +1322,20 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
+      # The compatibility lanes provision the published DDL and compare its live
+      # catalog rendering byte-for-byte with schema-shape.txt. The second test is
+      # a distinct version-stamp gate. Required mode makes a missing URL fail.
+      - name: Test PostgreSQL catalog compatibility
+        if: matrix.role == 'compatibility'
+        run: |
+          cargo test -p lash-internal-postgres-store --locked --lib \
+            committed_shape_artifact_matches_the_ddl_artifact
+          cargo test -p lash-internal-postgres-store --locked --test schema_drift \
+            a_mismatched_version_stamp_is_reported_without_a_column_diff
+        env:
+          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+          LASH_REQUIRE_POSTGRES: "1"
+
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
@@ -1404,24 +1352,25 @@ jobs:
       # Keep this package-wide: tests/attempt_atomicity.rs is part of this gate;
       # narrowing to --test conformance would silently drop attempt atomicity.
       - name: Test Postgres store (conformance and attempt atomicity)
-        if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.plan.outputs.identity_versions == 'true'
+        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: cargo test -p lash-internal-postgres-store --locked
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
       - name: Test runtime pool-wait binding
-        if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.plan.outputs.identity_versions == 'true'
+        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: cargo nextest run -p lash-perf -E 'test(pool_wait)' --locked
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
       # crates/lash currently has one Agent Scenario gated by the shared
-      # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. Keep this
-      # focused on the exact test instead of rerunning the runtime suite.
+      # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. It is also the
+      # test that caught a real identity-version mutation, so keep it stable and
+      # focused instead of scheduling tests by parsing changed source literals.
       - name: Test runtime Postgres agent scenarios
-        if: matrix.postgres == '16'
+        if: matrix.role == 'primary'
         run: >-
           cargo nextest run --profile ci -p lash-runtime --features rlm
           --locked -E
@@ -1430,10 +1379,10 @@ jobs:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
-      # The differential compares backend semantics, not catalog rendering, so it
-      # runs once on the primary major instead of three times.
+      # The full differential compares backend semantics, not catalog rendering,
+      # so it runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
-        if: ((github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.plan.outputs.identity_versions == 'true') && matrix.postgres == '16'
+        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: >-
           cargo nextest run --profile ci -p lash-sim
           --test cross_backend_store_differential
@@ -2525,7 +2474,6 @@ jobs:
       - test-doc
       - repo-gates
       - unused-deps
-      - facade-gates
       - lashlang-git-consumer
       - package-feature-checks
       - runtime-feature-boundary

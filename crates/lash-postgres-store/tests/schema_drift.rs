@@ -8,10 +8,15 @@
 //! order, host-chosen constraint names, identity instead of `BIGSERIAL` — opens
 //! clean.
 
-use lash_postgres_store::{
-    ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig, SchemaCheck,
-    SchemaFinding, SchemaProvisioning,
+use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary, TurnWorkPayload};
+use lash_core::{
+    DeliveryPolicy, LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError,
 };
+use lash_postgres_store::{
+    ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig,
+    RequiredConstraintFinding, SchemaCheck, SchemaFinding, SchemaProvisioning,
+};
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Connection, Executor, PgConnection};
@@ -29,7 +34,7 @@ use harness::{
     ScratchSchema, assert_mutation_is_rejected, pool_with_search_path, postgres_server_version_num,
 };
 
-const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 83;
+const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 84;
 
 /// Append-request replay depends on one durable receipt per session and turn.
 /// Dropping the receipt table's primary key would silently admit conflicting
@@ -980,7 +985,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 86")
+                && rendered.contains("expected 87")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
@@ -1078,7 +1083,7 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
             let rendered = error.to_string();
             assert!(
                 rendered.contains("has version 65")
-                    && rendered.contains("expected 86")
+                    && rendered.contains("expected 87")
                     && rendered.contains("no applicable migration")
                     && rendered.contains("does not relax it"),
                 "the destructive version boundary was lost for {provisioning:?} + {check:?}: \
@@ -1359,7 +1364,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 86 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 87 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1490,7 +1495,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(86)", "finding_total=0"],
+        &["found_version=Some(87)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1662,7 +1667,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=86"]
+    for field in ["component=lash-postgres-store", "expected_version=87"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)
@@ -1788,5 +1793,316 @@ async fn verification_waiting_for_the_key_sees_the_holders_committed_work() {
         "a verification that waited for the key must see the schema as the holder left \
          it, not as it was before the wait: {report}"
     );
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn fig2837_required_constraint_inspection_reports_live_drift_without_rejecting_additions() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping required-constraint inspection: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    let clean = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect published constraints");
+    assert!(clean.is_conformant(), "{clean:?}");
+
+    scratch
+        .apply(
+            "ALTER TABLE lash_pending_turn_inputs
+                 ADD CONSTRAINT ck_host_extra CHECK (pg_catalog.length(state) > 0)",
+        )
+        .await;
+    let with_addition = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("unrelated added checks are outside the registry");
+    assert!(with_addition.is_conformant(), "{with_addition:?}");
+
+    scratch
+        .apply(
+            "ALTER TABLE lash_pending_turn_inputs
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none",
+        )
+        .await;
+    let missing = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect missing required check");
+    assert!(missing.findings().iter().any(|finding| matches!(
+        finding,
+        RequiredConstraintFinding::Missing { table, name, .. }
+            if table == "lash_pending_turn_inputs"
+                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+    )));
+
+    scratch
+        .apply(
+            "ALTER TABLE lash_pending_turn_inputs
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                 CHECK (claim_id IS NULL OR claim_token IS NOT NULL)",
+        )
+        .await;
+    let altered = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect altered required check");
+    assert!(altered.findings().iter().any(|finding| matches!(
+        finding,
+        RequiredConstraintFinding::Altered { table, name, .. }
+            if table == "lash_pending_turn_inputs"
+                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+    )));
+
+    scratch
+        .apply(
+            "ALTER TABLE lash_pending_turn_inputs
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+             ALTER TABLE lash_pending_turn_inputs
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                 CHECK ((claim_id IS NULL AND claim_token IS NULL)
+                     OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)) NOT VALID",
+        )
+        .await;
+    let unvalidated = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect unvalidated required check");
+    assert!(unvalidated.findings().iter().any(|finding| matches!(
+        finding,
+        RequiredConstraintFinding::Unvalidated { table, name }
+            if table == "lash_pending_turn_inputs"
+                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+    )));
+
+    if postgres_server_version_num().await >= 180_000 {
+        scratch
+            .apply(
+                "ALTER TABLE lash_pending_turn_inputs
+                     DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+                 ALTER TABLE lash_pending_turn_inputs
+                     ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                     CHECK ((claim_id IS NULL AND claim_token IS NULL)
+                         OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)) NOT ENFORCED",
+            )
+            .await;
+        let unenforced = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+            .await
+            .expect("inspect unenforced required check");
+        assert!(unenforced.findings().iter().any(|finding| matches!(
+            finding,
+            RequiredConstraintFinding::Unenforced { table, name }
+                if table == "lash_pending_turn_inputs"
+                    && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+        )));
+    }
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_identity() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping quoted-identifier inspection: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "ALTER TABLE lash_pending_turn_inputs
+                 ADD COLUMN \"STATE\" TEXT,
+                 ADD COLUMN \"CLAIM_ID\" TEXT;
+             ALTER TABLE lash_pending_turn_inputs
+                 DROP CONSTRAINT ck_pending_turn_inputs_state,
+                 DROP CONSTRAINT ck_pending_turn_inputs_state_ingress,
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+             ALTER TABLE lash_pending_turn_inputs
+                 ADD CONSTRAINT ck_pending_turn_inputs_state
+                     CHECK (\"STATE\" IN (
+                         'pending_active', 'deferred_next_turn', 'accepted',
+                         'cancelled', 'completed')),
+                 ADD CONSTRAINT ck_pending_turn_inputs_state_ingress
+                     CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn'
+                             AND \"STATE\" IN (
+                                 'pending_active', 'accepted', 'cancelled', 'completed'))
+                         OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
+                             AND \"STATE\" IN (
+                                 'deferred_next_turn', 'cancelled', 'completed'))),
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                     CHECK ((\"CLAIM_ID\" IS NULL AND claim_token IS NULL)
+                         OR (\"CLAIM_ID\" IS NOT NULL AND claim_token IS NOT NULL));
+             INSERT INTO lash_pending_turn_inputs (
+                 input_id, session_id, ingress_json, state, input_json,
+                 enqueued_at_ms, claim_id, \"STATE\"
+             ) VALUES (
+                 'quoted-identity-witness', 'session',
+                 '{\"scope\":\"active_turn\"}', 'invalid', '{}',
+                 0, 'orphan-real-claim-id', 'accepted'
+             )",
+        )
+        .await;
+
+    let altered = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect checks redirected to distinct quoted columns");
+    for expected_name in [
+        "ck_pending_turn_inputs_state",
+        "ck_pending_turn_inputs_state_ingress",
+        "ck_pending_turn_inputs_claim_id_token_all_or_none",
+    ] {
+        assert!(
+            altered.findings().iter().any(|finding| matches!(
+                finding,
+                RequiredConstraintFinding::Altered { table, name, .. }
+                    if table == "lash_pending_turn_inputs" && name == expected_name
+            )),
+            "quoted uppercase identifier must remain distinct for {expected_name}: {altered:?}"
+        );
+    }
+
+    scratch
+        .apply(
+            "DELETE FROM lash_pending_turn_inputs
+                 WHERE input_id = 'quoted-identity-witness';
+             ALTER TABLE lash_pending_turn_inputs
+                 DROP CONSTRAINT ck_pending_turn_inputs_state,
+                 DROP CONSTRAINT ck_pending_turn_inputs_state_ingress,
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+             ALTER TABLE lash_pending_turn_inputs
+                 ADD CONSTRAINT ck_pending_turn_inputs_state
+                     CHECK (\"state\" IN (
+                         'pending_active', 'deferred_next_turn', 'accepted',
+                         'cancelled', 'completed')),
+                 ADD CONSTRAINT ck_pending_turn_inputs_state_ingress
+                     CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn'
+                             AND \"state\" IN (
+                                 'pending_active', 'accepted', 'cancelled', 'completed'))
+                         OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
+                             AND \"state\" IN (
+                                 'deferred_next_turn', 'cancelled', 'completed'))),
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                     CHECK ((\"claim_id\" IS NULL AND claim_token IS NULL)
+                         OR (\"claim_id\" IS NOT NULL AND claim_token IS NOT NULL))",
+        )
+        .await;
+    let quoted_lowercase = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect equivalent quoted lowercase identifiers");
+    assert!(quoted_lowercase.is_conformant(), "{quoted_lowercase:?}");
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping corrupt predecessor rollback: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "ALTER TABLE lash_queued_work_batches
+                 DROP CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none",
+        )
+        .await;
+    let storage = scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("open controlled corruption fixture");
+
+    for (case, prior_id, prior_token, should_succeed) in [
+        ("id-only", Some("prior-id"), None, false),
+        ("token-only", None, Some("prior-token"), false),
+        ("paired", Some("prior-id"), Some("prior-token"), true),
+    ] {
+        let session_id = SessionId::from(format!("corrupt-predecessor-{case}"));
+        let store = storage.session_store(session_id.clone());
+        let queued = store
+            .enqueue_queued_work(
+                QueuedWorkBatchDraft::new(
+                    &session_id,
+                    DeliveryPolicy::EarliestSafeBoundary,
+                    TurnWorkPayload::agent_frame_task(
+                        lash_core::session_graph::frame_node_id(
+                            &session_id,
+                            &format!("frame:{case}"),
+                        ),
+                        case,
+                        None,
+                    ),
+                )
+                .with_source_key(format!("corrupt:{case}")),
+            )
+            .await
+            .expect("enqueue corruption fixture");
+        sqlx::query(
+            "UPDATE lash_queued_work_batches
+             SET claim_id = $2, claim_token = $3,
+                 claim_fencing_token = 7, claim_session_lease_generation = 0
+             WHERE batch_id = $1",
+        )
+        .bind(&queued.batch_id)
+        .bind(prior_id)
+        .bind(prior_token)
+        .execute(&scratch.pool)
+        .await
+        .expect("inject predecessor claim state");
+
+        let owner = LeaseOwnerIdentity::opaque(
+            format!("corrupt-owner-{case}"),
+            format!("corrupt-owner-{case}:incarnation"),
+        );
+        let executor_id = format!("corrupt-executor-{case}");
+        let lease = store
+            .try_claim_session_execution_lease(&session_id, &owner, &executor_id, 60_000)
+            .await
+            .expect("claim session lease")
+            .acquired()
+            .expect("session lease available");
+        let outcome = store
+            .claim_ready_queued_work(
+                &session_id,
+                &lease.fence(),
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                lash_core::testing::queued_work_claim_policy(1),
+            )
+            .await;
+
+        if should_succeed {
+            let claim = outcome
+                .expect("a complete predecessor pair is valid")
+                .claim()
+                .expect("paired predecessor is reclaimable");
+            assert_eq!(claim.data.abandon_restore_claim_id.as_deref(), prior_id);
+            assert_eq!(
+                claim.data.abandon_restore_claim_token.as_deref(),
+                prior_token
+            );
+            continue;
+        }
+
+        assert!(matches!(
+            outcome,
+            Err(StoreError::QueuedWorkPredecessorClaimCorrupt { .. })
+        ));
+        let persisted = sqlx::query_as::<_, (Option<String>, Option<String>, i64, i64)>(
+            "SELECT claim_id, claim_token, claim_fencing_token,
+                    claim_session_lease_generation
+             FROM lash_queued_work_batches WHERE batch_id = $1",
+        )
+        .bind(&queued.batch_id)
+        .fetch_one(&scratch.pool)
+        .await
+        .expect("read row after refusal");
+        assert_eq!(
+            persisted,
+            (
+                prior_id.map(str::to_string),
+                prior_token.map(str::to_string),
+                7,
+                0,
+            ),
+            "claim transaction changed the corrupt predecessor row"
+        );
+    }
+
+    drop(storage);
     scratch.cleanup().await;
 }
