@@ -224,10 +224,83 @@ impl LiveRestateEndpoint {
 
 impl Drop for LiveRestateEndpoint {
     fn drop(&mut self) {
-        // Failure cleanup must finish before outer TempDir owners unwind and
-        // remove storage that Restate can still replay against.
+        if std::thread::panicking() {
+            // The Restate service is owned by the surrounding isolated gate,
+            // outside this libtest process. Aborting prevents libtest from
+            // advancing to another fixture and prevents outer TempDirs from
+            // deleting storage while that service can still replay work. The
+            // gate trap then retires the service before cleaning retained data.
+            eprintln!(
+                "owned Restate fixture failed; aborting its test process before replay storage is dropped"
+            );
+            std::process::abort();
+        }
         self.request_shutdown_and_join();
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn restate_fixture_failure_aborts_process_before_storage_drop() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    const CHILD_ENV: &str = "AGENT_WORKBENCH_RESTATE_FAILURE_SCOPE_CHILD";
+    const ROOT_ENV: &str = "AGENT_WORKBENCH_RESTATE_FAILURE_SCOPE_ROOT";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let root = PathBuf::from(std::env::var(ROOT_ENV).expect("failure-scope probe root"));
+        let storage = tempfile::Builder::new()
+            .prefix("retained-")
+            .tempdir_in(&root)
+            .expect("create failure-scope probe storage");
+        std::fs::write(
+            root.join("storage-path"),
+            storage.path().as_os_str().as_encoded_bytes(),
+        )
+        .expect("record failure-scope probe storage path");
+        let _endpoint = LiveRestateEndpoint {
+            addr: "127.0.0.1:0".parse().expect("failure probe address"),
+            endpoint_url: "http://127.0.0.1:0".to_string(),
+            deployment_id: "failure-probe".to_string(),
+            shutdown: None,
+            thread: None,
+        };
+        panic!("intentional Restate fixture failure-scope probe");
+    }
+
+    let root = tempfile::tempdir().expect("create failure-scope parent directory");
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("resolve Restate failure-scope test executable"),
+    )
+    .arg("tests::restate_endpoint::restate_fixture_failure_aborts_process_before_storage_drop")
+    .arg("--exact")
+    .arg("--nocapture")
+    .env(CHILD_ENV, "1")
+    .env(ROOT_ENV, root.path())
+    .output()
+    .expect("run Restate failure-scope child");
+    assert_eq!(
+        output.status.signal(),
+        Some(6),
+        "fixture failure must abort its libtest process: {output:#?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("intentional Restate fixture failure-scope probe")
+            && stderr.contains("aborting its test process before replay storage is dropped"),
+        "failure-scope child did not reach the named panic/abort boundary: {stderr}"
+    );
+    let retained_path = PathBuf::from(
+        String::from_utf8(
+            std::fs::read(root.path().join("storage-path"))
+                .expect("read retained failure-scope storage path"),
+        )
+        .expect("failure-scope storage path UTF-8"),
+    );
+    assert!(
+        retained_path.exists(),
+        "aborted fixture process must retain replay storage for gate teardown"
+    );
+    std::fs::remove_dir_all(&retained_path).expect("remove failure-scope probe storage");
 }
 
 #[derive(Deserialize)]
