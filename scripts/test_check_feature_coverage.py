@@ -630,6 +630,59 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unsupported feature-bearing cfg_attr action 'path'", result.stdout)
 
+    def test_cfg_attr_requires_one_top_level_action(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        cases = {
+            "conditional-cfg-after-allow": (
+                '#[cfg_attr(feature = "testing", allow(dead_code), cfg(feature = "other"))]\n'
+                'mod nested {\n'
+                '    #[cfg(feature = "testing")]\n'
+                '    compile_error!("UNCOVERED_MULTI_ACTION_CFG_ATTR");\n'
+                '}\n'
+            ),
+            "conditional-cfg-attr-after-allow": (
+                '#[cfg_attr(feature = "testing", allow(dead_code), '
+                'cfg_attr(feature = "other", allow(dead_code)))]\n'
+                'pub fn support() {}\n'
+            ),
+            "path-after-allow": (
+                '#[cfg_attr(feature = "testing", allow(dead_code), '
+                'path = "alternate.rs")]\n'
+                'pub mod support;\n'
+            ),
+        }
+        for name, contents in cases.items():
+            with self.subTest(name=name):
+                source.write_text(contents, encoding="utf-8")
+                result = self.check()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "cfg_attr must contain exactly one action",
+                    result.stdout,
+                )
+
+    def test_cfg_attr_accepts_one_action_trailing_comma_and_nested_arguments(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        cases = {
+            "one-action": (
+                '#[cfg_attr(feature = "testing", allow(dead_code))]\n'
+                'pub fn support() {}\n'
+            ),
+            "trailing-comma": (
+                '#[cfg_attr(feature = "testing", allow(dead_code),)]\n'
+                'pub fn support() {}\n'
+            ),
+            "nested-arguments": (
+                '#[cfg_attr(feature = "testing", derive(Clone, Debug))]\n'
+                'struct Support;\n'
+            ),
+        }
+        for name, contents in cases.items():
+            with self.subTest(name=name):
+                source.write_text(contents, encoding="utf-8")
+                result = self.check()
+                self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_dev_self_dependency_cannot_serve_as_off_witness(self) -> None:
         manifest = self.root / "member" / "Cargo.toml"
         manifest.write_text(

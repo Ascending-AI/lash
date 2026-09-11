@@ -444,28 +444,46 @@ def true_feature_states(
     return states
 
 
+def top_level_commas(source: str) -> tuple[int, ...]:
+    masked = masked_rust(source)
+    closing = {")": "(", "]": "[", "}": "{"}
+    delimiters: list[str] = []
+    commas: list[int] = []
+    for index, character in enumerate(masked):
+        if character in "([{":
+            delimiters.append(character)
+        elif character in closing:
+            if delimiters and delimiters[-1] == closing[character]:
+                delimiters.pop()
+        elif character == "," and not delimiters:
+            commas.append(index)
+    return tuple(commas)
+
+
 def split_cfg_attr(body: str) -> tuple[str, str]:
-    depth = 0
-    in_string = False
-    escaped = False
-    for index, character in enumerate(body):
-        if in_string:
-            if escaped:
-                escaped = False
-            elif character == "\\":
-                escaped = True
-            elif character == '"':
-                in_string = False
-            continue
-        if character == '"':
-            in_string = True
-        elif character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-        elif character == "," and depth == 0:
-            return body[:index], body[index + 1 :]
-    raise ValueError("cfg_attr requires a predicate and an attribute")
+    commas = top_level_commas(body)
+    if not commas:
+        raise ValueError("cfg_attr requires a predicate and an attribute")
+    index = commas[0]
+    return body[:index], body[index + 1 :]
+
+
+def single_cfg_attr_action(applied: str) -> str:
+    commas = top_level_commas(applied)
+    parts = []
+    start = 0
+    for index in commas:
+        parts.append(applied[start:index])
+        start = index + 1
+    parts.append(applied[start:])
+    if len(parts) > 1 and not masked_rust(parts[-1]).strip():
+        parts.pop()
+    if len(parts) != 1 or not masked_rust(parts[0]).strip():
+        raise ValueError(
+            "cfg_attr must contain exactly one action "
+            "(an optional trailing comma is allowed)"
+        )
+    return parts[0]
 
 
 def rust_attributes(source: Path, text: str, masked: str) -> tuple[RustAttribute, ...]:
@@ -575,7 +593,14 @@ def parsed_cfg_attribute(
 ) -> tuple[CfgExpr, str]:
     predicate = attribute.body
     if attribute.kind == "cfg_attr":
-        predicate, applied = split_cfg_attr(attribute.body)
+        try:
+            predicate, applied = split_cfg_attr(attribute.body)
+            applied = single_cfg_attr_action(applied)
+        except ValueError as error:
+            line = text.count("\n", 0, attribute.start) + 1
+            raise ValueError(
+                f"{source.relative_to(package.path)}:{line}: {error}"
+            ) from error
         if re.match(r"\s*cfg(?:_attr)?\s*\(", applied):
             line = text.count("\n", 0, attribute.start) + 1
             if "feature" in attribute.body:
@@ -587,7 +612,9 @@ def parsed_cfg_attribute(
                 f"{source.relative_to(package.path)}:{line}: "
                 "conditional cfg_attr in a feature-gated composition is unsupported"
             )
-        applied_match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)", applied)
+        applied_match = re.match(
+            r"\s*([A-Za-z_][A-Za-z0-9_]*)", masked_rust(applied)
+        )
         applied_name = applied_match.group(1) if applied_match is not None else ""
         if applied_name not in SUPPORTED_CFG_ATTRS:
             line = text.count("\n", 0, attribute.start) + 1
