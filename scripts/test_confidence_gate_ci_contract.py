@@ -507,7 +507,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
             "docs_only": "false",
             "fail_open": "false",
-            "identity_versions": "false",
         }
         for job in trunk_only:
             needs[job] = {"result": "skipped", "outputs": {}}
@@ -562,17 +561,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             summary,
         )
 
-        # PR-class runs test the oldest supported major; main pushes, the full
-        # profile, and any diff that moves a Lashlang identity version run the
-        # complete catalog byte-identity bracket.
+        # Every event uses the same primary/compatibility bracket. The focused
+        # contract tests in test_ci_plan.py evaluate per-role step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
-        self.assertIn(
-            "postgres: ${{ fromJSON((github.event_name == 'push'"
-            " && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'"
-            " || needs.plan.outputs.identity_versions == 'true')"
-            " && '[\"14\", \"16\", \"18\"]' || '[\"14\"]') }}",
-            postgres,
-        )
+        for version in ("14", "16", "18"):
+            self.assertIn(f'postgres: "{version}"', postgres)
+        self.assertEqual(2, postgres.count("role: compatibility"))
+        self.assertEqual(1, postgres.count("role: primary"))
 
         # postgres-store is unconditional on PR-class events, so a skipped
         # matrix job must fail the single required conclusion even if plan's
@@ -584,7 +579,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         pr_needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "false") | {
             "docs_only": "true",
             "fail_open": "false",
-            "identity_versions": "false",
         }
         for job in trunk_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
@@ -1643,6 +1637,7 @@ derive_mutation_jobs() {{
         # returns the differential to comparing nothing. A workflow-wide
         # `assertIn` cannot see that: the sibling step still carries the flag.
         for step_name in (
+            "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
             "Test runtime pool-wait binding",
             "Test runtime Postgres agent scenarios",
@@ -1656,7 +1651,7 @@ derive_mutation_jobs() {{
         runtime_scenarios = workflow_step_block(
             postgres_store_job, "Test runtime Postgres agent scenarios"
         )
-        self.assertIn("if: matrix.postgres == '16'", runtime_scenarios)
+        self.assertIn("if: matrix.role == 'primary'", runtime_scenarios)
         self.assertIn(
             "cargo nextest run --profile ci -p lash-runtime --features rlm",
             runtime_scenarios,
