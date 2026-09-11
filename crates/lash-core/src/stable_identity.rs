@@ -27,6 +27,7 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     "lash.process-registration-definition",
     "lash.process-transfer-set",
     "lash.process-wake",
+    "lash.queued-work-claim-lease",
     "lash.runtime-usage-payload",
     "lash.tool-invocation-batch",
     "lash.tool-intent",

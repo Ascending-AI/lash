@@ -1,0 +1,314 @@
+schema = 1
+non_normal_forwards = [
+  "lash-runtime/rlm->lash-sqlite-store/lashlang",
+  "lash-runtime/rlm->lash-postgres-store/lashlang",
+]
+
+# Explicit `default` declarations are exercised by the ordinary workspace
+# all-targets graph. Packages with no `[features].default` entry do not acquire
+# a synthetic row here.
+[baseline]
+command = ["cargo", "check", "--workspace", "--all-targets", "--locked"]
+features = [
+  "agent-workbench/default",
+  "lash-internal-core/default",
+  "lash-internal-llm-tools/default",
+  "lash-internal-plugin-mcp/default",
+  "lash-internal-plugin-process-controls/default",
+  "lash-internal-postgres-store/default",
+  "lash-internal-protocol-rlm/default",
+  "lash-internal-protocol-standard/default",
+  "lash-internal-provider-anthropic/default",
+  "lash-internal-provider-google/default",
+  "lash-internal-provider-openai/default",
+  "lash-internal-remote-protocol/default",
+  "lash-internal-sansio/default",
+  "lash-internal-sqlite-store/default",
+  "lash-internal-standard-plugins/default",
+  "lash-internal-tool-support/default",
+  "lash-internal-tools/default",
+  "lash-internal-trace/default",
+  "lash-perf/default",
+  "lash-regress/default",
+  "lash-runtime/default",
+]
+
+[[lane]]
+name = "sansio-schema-validation"
+features = [
+  "lash-internal-sansio/schema-validation:on",
+  "lash-internal-sansio/schema-validation:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-sansio", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sansio", "--lib", "--no-default-features", "--features", "schema-validation", "--locked"],
+]
+
+[[lane]]
+name = "otel-feature-chain"
+features = [
+  "lash-internal-trace/otel:on",
+  "lash-internal-trace/otel:off",
+  "lash-internal-core/otel-trace:on",
+  "lash-internal-core/otel-trace:off",
+  "lash-runtime/otel-trace:on",
+  "lash-runtime/otel-trace:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--features", "otel", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+]
+
+[[lane]]
+name = "core-internal-features"
+features = [
+  "lash-internal-core/perf-witness:on",
+  "lash-internal-core/perf-witness:off",
+  "lash-internal-core/testing:on",
+  "lash-internal-core/testing:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+]
+
+[[lane]]
+name = "language-testing-features"
+features = [
+  "lash-internal-lashlang/testing:on",
+  "lash-internal-lashlang/testing:off",
+  "lash-internal-lashlang-runtime/testing:on",
+  "lash-internal-lashlang-runtime/testing:off",
+  "lash-internal-typescript/testing:on",
+  "lash-internal-typescript/testing:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-lashlang-runtime", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-lashlang-runtime", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-typescript", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-typescript", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+]
+
+[[lane]]
+name = "llm-transport-features"
+features = [
+  "lash-internal-llm-transport/testing:on",
+  "lash-internal-llm-transport/testing:off",
+  "lash-internal-llm-transport/proptest-support:on",
+  "lash-internal-llm-transport/proptest-support:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-llm-transport", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-llm-transport", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-llm-transport", "--lib", "--no-default-features", "--features", "proptest-support", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-llm-transport", "--features", "testing", "--locked", "conformance"],
+]
+
+[[lane]]
+name = "store-features"
+features = [
+  "lash-internal-sqlite-store/lashlang:on",
+  "lash-internal-sqlite-store/lashlang:off",
+  "lash-internal-sqlite-store/perf-witness:on",
+  "lash-internal-sqlite-store/perf-witness:off",
+  "lash-internal-sqlite-store/testing:on",
+  "lash-internal-sqlite-store/testing:off",
+  "lash-internal-postgres-store/lashlang:on",
+  "lash-internal-postgres-store/lashlang:off",
+  "lash-internal-postgres-store/perf-witness:on",
+  "lash-internal-postgres-store/perf-witness:off",
+  "lash-internal-postgres-store/testing:on",
+  "lash-internal-postgres-store/testing:off",
+  "lash-internal-s3-store/testing:on",
+  "lash-internal-s3-store/testing:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--tests", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+]
+
+[[lane]]
+name = "runtime-features"
+features = [
+  "lash-runtime/rlm:on",
+  "lash-runtime/rlm:off",
+  "lash-runtime/testing:on",
+  "lash-runtime/testing:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "rlm", "--locked"],
+]
+
+[[lane]]
+name = "protocol-rlm-testing"
+features = [
+  "lash-internal-protocol-rlm/testing:on",
+  "lash-internal-protocol-rlm/testing:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-protocol-rlm", "--features", "testing", "--locked"],
+]
+
+[[lane]]
+name = "remote-protocol-conversions"
+features = [
+  "lash-internal-remote-protocol/core-conversions:on",
+  "lash-internal-remote-protocol/core-conversions:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-remote-protocol", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-remote-protocol", "--lib", "--no-default-features", "--features", "core-conversions", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-remote-protocol", "--features", "core-conversions", "--locked"],
+]
+
+[[lane]]
+name = "tool-lashlang-proxies"
+features = [
+  "lash-internal-protocol-standard/lashlang:on",
+  "lash-internal-plugin-mcp/lashlang:on",
+  "lash-internal-plugin-mcp/lashlang:off",
+  "lash-internal-plugin-process-controls/lashlang:on",
+  "lash-internal-plugin-process-controls/lashlang:off",
+  "lash-internal-llm-tools/lashlang:on",
+  "lash-internal-tool-support/lashlang:on",
+  "lash-internal-tool-support/lashlang:off",
+  "lash-internal-tools/lashlang:on",
+  "lash-internal-tools/lashlang:off",
+  "lash-internal-standard-plugins/lashlang:on",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-protocol-standard", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--features", "lash-tool-support/lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-llm-tools", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-tool-support", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-tool-support", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-tools", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-tools", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-tools", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-tools", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-tools", "--no-default-features", "--features", "lash-tool-support/lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-standard-plugins", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+]
+
+[[lane]]
+name = "provider-testing-features"
+features = [
+  "lash-internal-provider-anthropic/testing:on",
+  "lash-internal-provider-anthropic/testing:off",
+  "lash-internal-provider-google/testing:on",
+  "lash-internal-provider-google/testing:off",
+  "lash-internal-provider-openai/testing:on",
+  "lash-internal-provider-openai/testing:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-internal-provider-anthropic", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-provider-anthropic", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-provider-anthropic", "--features", "testing", "--locked", "conformance"],
+  ["cargo", "check", "-p", "lash-internal-provider-google", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-provider-google", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-provider-google", "--features", "testing", "--locked", "conformance"],
+  ["cargo", "check", "-p", "lash-internal-provider-openai", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-provider-openai", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-provider-openai", "--features", "testing", "--locked", "conformance"],
+]
+
+[[proxy_witness]]
+feature = "lash-internal-plugin-process-controls/lashlang"
+dependency = "lash-tool-support/lashlang"
+command = ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--features", "lash-tool-support/lashlang", "--locked"]
+
+[[proxy_witness]]
+feature = "lash-internal-tools/lashlang"
+dependency = "lash-tool-support/lashlang"
+command = ["cargo", "test", "-p", "lash-internal-tools", "--no-default-features", "--features", "lash-tool-support/lashlang", "--locked"]
+
+[[lane]]
+name = "perf-dhat-heap"
+features = [
+  "lash-perf/dhat-heap:on",
+  "lash-perf/dhat-heap:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--features", "dhat-heap", "--locked"],
+]
+
+[[lane]]
+name = "regress-stable-features"
+features = [
+  "lash-regress/std:on",
+  "lash-regress/std:off",
+  "lash-regress/backend-pikevm:on",
+  "lash-regress/backend-pikevm:off",
+  "lash-regress/index-positions:on",
+  "lash-regress/index-positions:off",
+  "lash-regress/prohibit-unsafe:on",
+  "lash-regress/prohibit-unsafe:off",
+  "lash-regress/utf16:on",
+  "lash-regress/utf16:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-regress", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-regress", "--lib", "--no-default-features", "--features", "std", "--locked"],
+  ["cargo", "check", "-p", "lash-regress", "--lib", "--no-default-features", "--features", "backend-pikevm", "--locked"],
+  ["cargo", "check", "-p", "lash-regress", "--lib", "--no-default-features", "--features", "index-positions", "--locked"],
+  ["cargo", "check", "-p", "lash-regress", "--lib", "--no-default-features", "--features", "prohibit-unsafe", "--locked"],
+  ["cargo", "check", "-p", "lash-regress", "--lib", "--no-default-features", "--features", "utf16", "--locked"],
+  ["cargo", "test", "-p", "lash-regress", "--no-default-features", "--features", "backend-pikevm,std,index-positions,utf16", "--locked"],
+  ["cargo", "test", "-p", "lash-regress", "--no-default-features", "--features", "backend-pikevm,std,prohibit-unsafe,utf16", "--locked"],
+]
+
+[[lane]]
+name = "host-features"
+features = [
+  "agent-service/restate:on",
+  "agent-service/restate:off",
+  "agent-workbench/provider-wire-fixtures:on",
+  "agent-workbench/provider-wire-fixtures:off",
+  "slack-clone/e2e:on",
+  "slack-clone/e2e:off",
+  "slack-clone/live-e2e:on",
+  "slack-clone/live-e2e:off",
+]
+commands = [
+  ["cargo", "check", "-p", "agent-service", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "agent-service", "--all-targets", "--no-default-features", "--features", "restate", "--locked"],
+  ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "provider-wire-fixtures", "--locked"],
+  ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--features", "e2e", "--locked"],
+  ["cargo", "check", "-p", "slack-clone", "--all-targets", "--no-default-features", "--features", "live-e2e", "--locked"],
+]

@@ -940,6 +940,28 @@ async fn shell_start_and_write_are_literal_leaf_intents() {
     let context =
         context_with_processes(Arc::new(TestProcessService::default()), "shell-intent-call");
     let attempt = lash_core::AttemptContext::__for_testing(&context, "shell-intent-scope");
+    let refused = shell
+        .execute_attempt(ToolCall {
+            name: "start_command",
+            args: &json!({
+                "cmd": "sleep 30",
+                "detach": true,
+                "detached_process_id": "caller-chosen",
+            }),
+            context: &attempt,
+        })
+        .await;
+    let lash_core::ToolAttemptOutcome::Done { result, intents } = refused else {
+        panic!("invalid shell.start must complete with a refusal")
+    };
+    assert!(intents.intents.is_empty());
+    let output = result.into_output();
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("caller-supplied detached_process_id must fail")
+    };
+    assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+    assert_eq!(failure.code, "invalid_tool_args");
+
     let start = shell
         .execute_attempt(ToolCall {
             name: "start_command",
@@ -1922,6 +1944,268 @@ fn shell_definitions_are_compact_and_non_empty() {
     assert!(defs.iter().all(|def| !def.description().is_empty()));
 }
 
+fn assert_parser_schema_cases(
+    lane: &str,
+    definition: &ToolDefinition,
+    cases: &[(serde_json::Value, bool)],
+    parse: impl Fn(&serde_json::Value) -> bool,
+) {
+    for (args, expected) in cases {
+        let parser_accepts = parse(args);
+        let schema_accepts = lash_sansio::validate_tool_input(&definition.contract, args).is_ok();
+        assert_eq!(
+            parser_accepts, *expected,
+            "{lane} parser disagreed with expected result for {args}"
+        );
+        assert_eq!(
+            schema_accepts, *expected,
+            "{lane} schema disagreed with expected result for {args}"
+        );
+    }
+}
+
+#[test]
+fn canonical_shell_argument_parsers_and_schemas_agree_by_lane() {
+    let shell = StandardShell::new().with_cwd("/");
+    let definitions = shell.tool_definitions();
+    let definition = |name| {
+        definitions
+            .iter()
+            .find(|definition| definition.name() == name)
+            .expect("shell definition")
+    };
+
+    assert_parser_schema_cases(
+        "exec_command",
+        definition("exec_command"),
+        &[
+            (json!({"cmd": "echo ok"}), true),
+            (
+                json!({
+                    "cmd": "echo ok",
+                    "workdir": "",
+                    "shell": "",
+                    "login": false,
+                    "max_output_tokens": 1,
+                    "timeout_ms": DEFAULT_EXEC_COMMAND_TIMEOUT_MS,
+                }),
+                true,
+            ),
+            (json!({}), false),
+            (json!({"cmd": 1}), false),
+            (json!({"cmd": "echo", "login": "false"}), false),
+            (json!({"cmd": "echo", "max_output_tokens": 0}), false),
+            (json!({"cmd": "echo", "timeout_ms": null}), false),
+            (json!({"cmd": "echo", "timeout_ms": 0}), false),
+        ],
+        |args| shell.parse_exec_command_params(args).is_ok(),
+    );
+
+    assert_parser_schema_cases(
+        "start_command",
+        definition("start_command"),
+        &[
+            (json!({"cmd": "cat"}), true),
+            (
+                json!({
+                    "cmd": "cat",
+                    "workdir": "",
+                    "shell": "",
+                    "login": false,
+                    "max_output_tokens": 1,
+                    "detach": true,
+                }),
+                true,
+            ),
+            (json!({}), false),
+            (json!({"cmd": "cat", "login": "false"}), false),
+            (
+                json!({"cmd": "cat", "detached_process_id": "caller-chosen"}),
+                false,
+            ),
+        ],
+        |args| shell.parse_public_start_command_params(args).is_ok(),
+    );
+
+    assert_parser_schema_cases(
+        "run_start_command",
+        definition("run_start_command"),
+        &[
+            (json!({"cmd": "cat"}), true),
+            (
+                json!({
+                    "cmd": "cat",
+                    "detach": true,
+                    "detached_process_id": "intent-derived:detached",
+                }),
+                true,
+            ),
+            (json!({}), false),
+            (json!({"cmd": "cat", "login": "false"}), false),
+        ],
+        |args| shell.parse_internal_start_command_params(args).is_ok(),
+    );
+}
+
+#[test]
+fn typed_shell_schemas_preserve_public_validation_and_defaults() {
+    let shell = StandardShell::default();
+    let definitions = shell.tool_definitions();
+    let properties = |name| {
+        definitions
+            .iter()
+            .find(|definition| definition.name() == name)
+            .expect("shell definition")
+            .contract
+            .input_schema
+            .canonical["properties"]
+            .as_object()
+            .expect("typed shell schema properties")
+    };
+
+    let exec = properties("exec_command");
+    assert_eq!(
+        exec.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![
+            "cmd",
+            "login",
+            "max_output_tokens",
+            "shell",
+            "timeout_ms",
+            "workdir"
+        ]
+    );
+    assert_eq!(exec["login"]["default"], false);
+    assert_eq!(exec["max_output_tokens"]["minimum"], 1);
+    assert_eq!(
+        exec["timeout_ms"]["default"],
+        DEFAULT_EXEC_COMMAND_TIMEOUT_MS
+    );
+    assert_eq!(exec["timeout_ms"]["minimum"], 1);
+
+    let public_start = properties("start_command");
+    assert_eq!(
+        public_start.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![
+            "cmd",
+            "detach",
+            "login",
+            "max_output_tokens",
+            "shell",
+            "workdir"
+        ]
+    );
+    assert_eq!(public_start["detach"]["default"], false);
+    assert!(!public_start.contains_key("detached_process_id"));
+
+    let internal_start = properties("run_start_command");
+    assert_eq!(
+        internal_start
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec![
+            "cmd",
+            "detach",
+            "detached_process_id",
+            "login",
+            "max_output_tokens",
+            "shell",
+            "workdir"
+        ]
+    );
+    assert_eq!(internal_start["detached_process_id"]["type"], "string");
+
+    for definition in &definitions {
+        if matches!(
+            definition.name(),
+            "exec_command" | "start_command" | "run_start_command"
+        ) {
+            assert_eq!(
+                definition.contract.input_schema.canonical["required"],
+                json!(["cmd"])
+            );
+            assert_eq!(
+                definition.contract.input_schema.canonical["additionalProperties"],
+                false
+            );
+        }
+    }
+}
+
+#[test]
+fn typed_shell_parsers_preserve_omitted_defaults_and_empty_path_fallbacks() {
+    let shell = StandardShell::new().with_cwd("/");
+    let exec = shell
+        .parse_exec_command_params(&json!({
+            "cmd": "echo ok",
+            "workdir": "",
+            "shell": "",
+        }))
+        .expect("typed exec args");
+    assert_eq!(exec.workdir, std::path::PathBuf::from("/"));
+    assert_eq!(exec.shell_path, shell.runtime.shell_path);
+    assert!(!exec.login);
+    assert_eq!(exec.timeout_ms, DEFAULT_EXEC_COMMAND_TIMEOUT_MS);
+    assert_eq!(exec.max_output_tokens, None);
+
+    let public_start = shell
+        .parse_public_start_command_params(&json!({"cmd": "cat"}))
+        .expect("typed public start args");
+    assert!(!public_start.detach);
+    assert_eq!(public_start.detached_process_id, None);
+    assert_eq!(public_start.max_output_tokens, None);
+
+    let internal_start = shell
+        .parse_internal_start_command_params(&json!({"cmd": "cat"}))
+        .expect("typed internal start args");
+    assert!(!internal_start.detach);
+    assert_eq!(internal_start.detached_process_id, None);
+}
+
+#[test]
+fn typed_internal_start_arguments_preserve_forwarded_serialization() {
+    let shell = StandardShell::new().with_cwd("/workspace");
+    let params = shell
+        .parse_public_start_command_params(&json!({
+            "cmd": "cat",
+            "workdir": "child",
+            "shell": "/bin/sh",
+            "login": true,
+            "max_output_tokens": 17,
+            "detach": true,
+        }))
+        .expect("typed public start args");
+    let derived_id = ProcessId::from("tool-intent:v2:derived:detached");
+
+    assert_eq!(
+        start_command_process_args(&params, Some(&derived_id)),
+        json!({
+            "cmd": "cat",
+            "workdir": "/workspace/child",
+            "shell": "/bin/sh",
+            "login": true,
+            "max_output_tokens": 17,
+            "detach": true,
+            "detached_process_id": "tool-intent:v2:derived:detached",
+        })
+    );
+
+    let defaults = shell
+        .parse_public_start_command_params(&json!({"cmd": "cat"}))
+        .expect("typed default public start args");
+    assert_eq!(
+        start_command_process_args(&defaults, None),
+        json!({
+            "cmd": "cat",
+            "workdir": "/workspace",
+            "shell": shell.runtime.shell_path,
+            "login": false,
+            "detach": false,
+        })
+    );
+}
+
 #[test]
 fn shell_definitions_document_distinct_result_shapes() {
     let shell = StandardShell::default();
@@ -2047,10 +2331,14 @@ fn exec_command_timeout_schema_documents_default() {
         DEFAULT_EXEC_COMMAND_TIMEOUT_MS
     );
     assert!(
-        definition
-            .description()
-            .contains("Commands time out after 600000 ms by default")
+        properties["timeout_ms"]["description"]
+            .as_str()
+            .expect("timeout description")
+            .contains(&format!("Defaults to {DEFAULT_EXEC_COMMAND_TIMEOUT_MS} ms"))
     );
+    assert!(definition.description().contains(&format!(
+        "Commands time out after {DEFAULT_EXEC_COMMAND_TIMEOUT_MS} ms by default"
+    )));
 }
 
 #[test]

@@ -27,21 +27,6 @@ mod request_work_tests;
 mod responses_text_slot_tests;
 mod usage_reconciliation_tests;
 
-/// The cross-provider conformance law is feature-gated. This crate's self
-/// dev-dependency keeps `testing` on for every test build, so a bare
-/// `cargo test -p lash-provider-openai` runs the law. If that wiring is ever
-/// dropped, this sentinel makes the bare run fail loudly instead of reporting
-/// green over a law it never compiled.
-#[cfg(not(feature = "testing"))]
-#[test]
-fn conformance_law_must_not_be_compiled_out() {
-    panic!(
-        "the cross-provider conformance law was compiled out: this crate's `testing` feature is \
-         off for the test build, which the self dev-dependency in Cargo.toml is supposed to \
-         guarantee"
-    );
-}
-
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
 
 #[derive(Debug)]

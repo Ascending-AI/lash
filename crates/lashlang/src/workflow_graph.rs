@@ -36,7 +36,7 @@ pub use execution_sites::runtime_execution_site_for_workflow_site;
 pub use facets::*;
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 6;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 7;
 
 /// A deterministic node identifier minted from canonical source and AST position.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -235,29 +235,66 @@ pub enum WorkflowContainer {
         then_is_block: bool,
         /// Whether the source's else branch is a block rather than a direct value or `else if`.
         else_is_block: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        then_graph: Option<Box<WorkflowSubgraph>>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        else_graph: Option<Box<WorkflowSubgraph>>,
+        then_graph: Box<WorkflowSubgraph>,
+        else_graph: Box<WorkflowSubgraph>,
     },
     For {
         binding: String,
         iterable: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        body: Option<Box<WorkflowSubgraph>>,
+        body: Box<WorkflowSubgraph>,
     },
     While {
         condition: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        body: Option<Box<WorkflowSubgraph>>,
+        body: Box<WorkflowSubgraph>,
     },
     ListComprehension {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         binding: Option<String>,
         clauses: Vec<WorkflowListComprehensionClause>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        element: Option<Box<WorkflowSubgraph>>,
+        element: Box<WorkflowSubgraph>,
     },
+}
+
+impl WorkflowContainer {
+    /// Iterates over this container's named child subgraphs in source order.
+    pub fn child_subgraphs(&self) -> impl Iterator<Item = (&'static str, &WorkflowSubgraph)> {
+        let children = match self {
+            Self::If {
+                then_graph,
+                else_graph,
+                ..
+            } => [
+                Some(("then", then_graph.as_ref())),
+                Some(("else", else_graph.as_ref())),
+            ],
+            Self::For { body, .. } | Self::While { body, .. } => {
+                [Some(("body", body.as_ref())), None]
+            }
+            Self::ListComprehension { element, .. } => [Some(("element", element.as_ref())), None],
+        };
+        children.into_iter().flatten()
+    }
+
+    /// Iterates mutably over this container's named child subgraphs in source order.
+    pub fn child_subgraphs_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&'static str, &mut WorkflowSubgraph)> {
+        let children = match self {
+            Self::If {
+                then_graph,
+                else_graph,
+                ..
+            } => [
+                Some(("then", then_graph.as_mut())),
+                Some(("else", else_graph.as_mut())),
+            ],
+            Self::For { body, .. } | Self::While { body, .. } => {
+                [Some(("body", body.as_mut())), None]
+            }
+            Self::ListComprehension { element, .. } => [Some(("element", element.as_mut())), None],
+        };
+        children.into_iter().flatten()
+    }
 }
 
 /// One editable list-comprehension clause.
@@ -310,11 +347,6 @@ pub enum GraphRenderError {
         edge_id: String,
         endpoint: &'static str,
         node_id: String,
-    },
-    #[error("node `{node_id}` is missing required child `{child}`")]
-    MissingRequiredChild {
-        node_id: String,
-        child: &'static str,
     },
     #[error("node `{node_id}` has a payload incompatible with its kind: {message}")]
     InvalidNodePayload { node_id: String, message: String },
@@ -603,8 +635,8 @@ impl<'a> GraphProjector<'a> {
                         condition: self.expression_text(condition),
                         then_is_block: matches!(then_block.as_ref(), Expr::Block(_)),
                         else_is_block: matches!(else_block.as_ref(), Expr::Block(_)),
-                        then_graph: Some(Box::new(then_graph)),
-                        else_graph: Some(Box::new(else_graph)),
+                        then_graph: Box::new(then_graph),
+                        else_graph: Box::new(else_graph),
                     }),
                     "if".to_string(),
                     outputs,
@@ -628,7 +660,7 @@ impl<'a> GraphProjector<'a> {
                     WorkflowNodeKind::Container(WorkflowContainer::For {
                         binding: loop_binding.to_string(),
                         iterable: self.expression_text(iterable),
-                        body: Some(Box::new(body_graph)),
+                        body: Box::new(body_graph),
                     }),
                     format!("for {loop_binding}"),
                     outputs,
@@ -646,7 +678,7 @@ impl<'a> GraphProjector<'a> {
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::While {
                         condition: self.expression_text(condition),
-                        body: Some(Box::new(body_graph)),
+                        body: Box::new(body_graph),
                     }),
                     "while".to_string(),
                     outputs,
@@ -673,7 +705,7 @@ impl<'a> GraphProjector<'a> {
                             .iter()
                             .map(|clause| self.workflow_clause(clause))
                             .collect(),
-                        element: Some(Box::new(element_graph)),
+                        element: Box::new(element_graph),
                     }),
                     "list comprehension".to_string(),
                     outputs,
@@ -906,30 +938,22 @@ fn validate_node(
     node: &WorkflowNode,
     all_ids: &mut BTreeSet<WorkflowNodeId>,
 ) -> Result<(), GraphRenderError> {
+    if let WorkflowNodeKind::Container(container) = &node.kind {
+        for (_, child) in container.child_subgraphs() {
+            validate_subgraph(child, all_ids)?;
+        }
+    }
     match &node.kind {
-        WorkflowNodeKind::Container(WorkflowContainer::If {
-            then_is_block,
-            else_is_block,
-            then_graph,
-            else_graph,
-            ..
-        }) => {
-            let then_graph =
-                then_graph
-                    .as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "then_graph",
-                    })?;
-            let else_graph =
-                else_graph
-                    .as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "else_graph",
-                    })?;
-            validate_subgraph(then_graph, all_ids)?;
-            validate_subgraph(else_graph, all_ids)?;
+        WorkflowNodeKind::Container(
+            container @ WorkflowContainer::If {
+                then_is_block,
+                else_is_block,
+                ..
+            },
+        ) => {
+            let mut children = container.child_subgraphs().map(|(_, child)| child);
+            let then_graph = children.next().expect("if has a then child");
+            let else_graph = children.next().expect("if has an else child");
             if !then_is_block && *else_is_block {
                 return invalid_payload(
                     node,
@@ -961,43 +985,20 @@ fn validate_node(
                 }
             }
         }
-        WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) => {
-            let body = body
-                .as_deref()
-                .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                    node_id: node.id.to_string(),
-                    child: "body",
-                })?;
-            validate_subgraph(body, all_ids)?;
-        }
-        WorkflowNodeKind::Container(WorkflowContainer::While { body, .. }) => {
-            let body = body
-                .as_deref()
-                .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                    node_id: node.id.to_string(),
-                    child: "body",
-                })?;
-            validate_subgraph(body, all_ids)?;
-        }
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-            clauses,
-            element,
-            ..
-        }) => {
+        WorkflowNodeKind::Container(
+            container @ WorkflowContainer::ListComprehension { clauses, .. },
+        ) => {
             if clauses.is_empty() {
                 return invalid_payload(
                     node,
                     "list-comprehension container requires at least one clause",
                 );
             }
-            let element =
-                element
-                    .as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "element",
-                    })?;
-            validate_subgraph(element, all_ids)?;
+            let element = container
+                .child_subgraphs()
+                .next()
+                .expect("list comprehension has an element child")
+                .1;
             if element.nodes.len() != 1 {
                 return invalid_payload(
                     node,
@@ -1139,109 +1140,93 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
             }
             expression
         }
-        WorkflowNodeKind::Container(WorkflowContainer::If {
-            binding,
-            condition,
-            then_is_block,
-            else_is_block,
-            then_graph,
-            else_graph,
-        }) => {
-            let then_graph =
-                then_graph
-                    .as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "then_graph",
-                    })?;
-            let else_graph =
-                else_graph
-                    .as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "else_graph",
-                    })?;
-            with_assignment(
-                node,
+        WorkflowNodeKind::Container(container) => match container {
+            WorkflowContainer::If {
                 binding,
-                Expr::If {
-                    condition: Box::new(parse_expression_field(node, "condition", condition)?),
-                    then_block: Box::new(subgraph_to_branch(
-                        node,
-                        then_graph,
-                        context,
-                        *then_is_block,
-                        "then_graph",
-                    )?),
-                    else_block: Box::new(subgraph_to_branch(
-                        node,
-                        else_graph,
-                        context,
-                        *else_is_block,
-                        "else_graph",
-                    )?),
-                },
-                true,
-            )?
-        }
-        WorkflowNodeKind::Container(WorkflowContainer::For {
-            binding,
-            iterable,
-            body,
-        }) => Expr::For {
-            binding: parse_simple_binding_field(node, "binding", binding)?.root,
-            iterable: Box::new(parse_expression_field(node, "iterable", iterable)?),
-            body: Box::new(subgraph_to_block(
-                body.as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "body",
-                    })?,
-                context,
-            )?),
-        },
-        WorkflowNodeKind::Container(WorkflowContainer::While { condition, body }) => Expr::While {
-            condition: Box::new(parse_expression_field(node, "condition", condition)?),
-            body: Box::new(subgraph_to_block(
-                body.as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "body",
-                    })?,
-                context,
-            )?),
-        },
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-            binding,
-            clauses,
-            element,
-        }) => {
-            let element =
-                element
-                    .as_deref()
-                    .ok_or_else(|| GraphRenderError::MissingRequiredChild {
-                        node_id: node.id.to_string(),
-                        child: "element",
-                    })?;
-            let Expr::Block(mut expressions) = subgraph_to_block(element, context)? else {
-                unreachable!("subgraph rendering always returns a block")
-            };
-            if expressions.len() != 1 {
-                return invalid_payload(
+                condition,
+                then_is_block,
+                else_is_block,
+                ..
+            } => {
+                let mut children = container.child_subgraphs().map(|(_, child)| child);
+                let then_graph = children.next().expect("if has a then child");
+                let else_graph = children.next().expect("if has an else child");
+                with_assignment(
                     node,
-                    "list-comprehension element must contain exactly one node",
-                );
+                    binding,
+                    Expr::If {
+                        condition: Box::new(parse_expression_field(node, "condition", condition)?),
+                        then_block: Box::new(subgraph_to_branch(
+                            node,
+                            then_graph,
+                            context,
+                            *then_is_block,
+                            "then_graph",
+                        )?),
+                        else_block: Box::new(subgraph_to_branch(
+                            node,
+                            else_graph,
+                            context,
+                            *else_is_block,
+                            "else_graph",
+                        )?),
+                    },
+                    true,
+                )?
             }
-            with_assignment(
-                node,
-                binding,
-                Expr::ListComprehension {
-                    element: Box::new(expressions.remove(0)),
-                    clauses: parse_comprehension_clauses(node, clauses)?,
-                },
-                true,
-            )?
-        }
+            WorkflowContainer::For {
+                binding, iterable, ..
+            } => Expr::For {
+                binding: parse_simple_binding_field(node, "binding", binding)?.root,
+                iterable: Box::new(parse_expression_field(node, "iterable", iterable)?),
+                body: Box::new(subgraph_to_block(
+                    container
+                        .child_subgraphs()
+                        .next()
+                        .expect("for has a body child")
+                        .1,
+                    context,
+                )?),
+            },
+            WorkflowContainer::While { condition, .. } => Expr::While {
+                condition: Box::new(parse_expression_field(node, "condition", condition)?),
+                body: Box::new(subgraph_to_block(
+                    container
+                        .child_subgraphs()
+                        .next()
+                        .expect("while has a body child")
+                        .1,
+                    context,
+                )?),
+            },
+            WorkflowContainer::ListComprehension {
+                binding, clauses, ..
+            } => {
+                let element = container
+                    .child_subgraphs()
+                    .next()
+                    .expect("list comprehension has an element child")
+                    .1;
+                let Expr::Block(mut expressions) = subgraph_to_block(element, context)? else {
+                    unreachable!("subgraph rendering always returns a block")
+                };
+                if expressions.len() != 1 {
+                    return invalid_payload(
+                        node,
+                        "list-comprehension element must contain exactly one node",
+                    );
+                }
+                with_assignment(
+                    node,
+                    binding,
+                    Expr::ListComprehension {
+                        element: Box::new(expressions.remove(0)),
+                        clauses: parse_comprehension_clauses(node, clauses)?,
+                    },
+                    true,
+                )?
+            }
+        },
         WorkflowNodeKind::Opaque { source } => parse_opaque_statement(node, source, context)?,
     };
     Ok(if node.name_source == WorkflowNodeNameSource::Label {
@@ -1317,30 +1302,10 @@ fn parse_opaque_statement(
 fn collect_subgraph_nodes<'a>(graph: &'a WorkflowSubgraph, nodes: &mut Vec<&'a WorkflowNode>) {
     for node in &graph.nodes {
         nodes.push(node);
-        match &node.kind {
-            WorkflowNodeKind::Container(WorkflowContainer::If {
-                then_graph,
-                else_graph,
-                ..
-            }) => {
-                if let Some(graph) = then_graph {
-                    collect_subgraph_nodes(graph, nodes);
-                }
-                if let Some(graph) = else_graph {
-                    collect_subgraph_nodes(graph, nodes);
-                }
+        if let WorkflowNodeKind::Container(container) = &node.kind {
+            for (_, child) in container.child_subgraphs() {
+                collect_subgraph_nodes(child, nodes);
             }
-            WorkflowNodeKind::Container(WorkflowContainer::For {
-                body: Some(graph), ..
-            }) => collect_subgraph_nodes(graph, nodes),
-            WorkflowNodeKind::Container(WorkflowContainer::While {
-                body: Some(graph), ..
-            }) => collect_subgraph_nodes(graph, nodes),
-            WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-                element: Some(graph),
-                ..
-            }) => collect_subgraph_nodes(graph, nodes),
-            _ => {}
         }
     }
 }

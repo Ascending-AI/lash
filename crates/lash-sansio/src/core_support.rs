@@ -43,6 +43,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-process-lease/v2",
     "lash-queued-work-batch/v2",
     "lash-queued-work-claim-lease/v2",
+    "lash-queued-work-claim-lease/v3",
     "lash-record-config-request/v1",
     "lash-rolling-history-compaction/v1",
     "lash-rolling-history-compaction/v2",
@@ -399,12 +400,16 @@ mod blake3_domain_tests {
     use super::BLAKE3_DOMAINS;
 
     // Permanently reserved, but no longer used: the plugin snapshot revision
-    // after FIG-2113; the v2 usage payload after FIG-2765 moved it to a
-    // disposition-carrying encoding; the v3 usage payload after the same
-    // ticket's fix round replaced the hole *count* with per-attempt descriptors;
-    // and effect envelope v2 predates admitted effect addresses.
+    // after FIG-2113; the v2 queued-work claim lease after FIG-2878 replaced
+    // delimiter joining with canonical framing; effect envelope v2 predates
+    // admitted effect addresses; rolling-history compaction v1 predates binding
+    // the identity to request content; the v2 usage payload after FIG-2765 moved
+    // it to a disposition-carrying encoding; and the v3 payload after the same
+    // ticket's fix round replaced the hole *count* with per-attempt descriptors.
     const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
         "lash-plugin-snapshot-revision/v2",
+        "lash-queued-work-claim-lease/v2",
+        "lash-rolling-history-compaction/v1",
         "lash-runtime-effect-envelope/v2",
         "lash-runtime-usage-payload/v2",
         "lash-runtime-usage-payload/v3",

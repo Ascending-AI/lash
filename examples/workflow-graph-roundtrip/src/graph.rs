@@ -376,9 +376,10 @@ fn flatten_subgraph(
             parent_id: parent_id.clone(),
             data: node_data(node, child_groups.clone()),
         });
-        for child in child_groups {
-            if let Some(subgraph) = child_subgraph(node, &child.slot) {
-                flatten_subgraph(subgraph, &child.scope, Some(id.clone()), nodes, edges);
+        if let WorkflowNodeKind::Container(container) = &node.kind {
+            for (slot, subgraph) in container.child_subgraphs() {
+                let scope = format!("container:{}:{slot}", node.id);
+                flatten_subgraph(subgraph, &scope, Some(id.clone()), nodes, edges);
             }
         }
     }
@@ -558,54 +559,11 @@ fn child_groups(node: &WorkflowNode) -> Vec<ChildGroup> {
         node_ids: node_ids(graph),
     };
     match &node.kind {
-        WorkflowNodeKind::Container(WorkflowContainer::If {
-            then_graph,
-            else_graph,
-            ..
-        }) => [
-            then_graph.as_deref().map(|graph| group("then", graph)),
-            else_graph.as_deref().map(|graph| group("else", graph)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect(),
-        WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) => body
-            .as_deref()
-            .map(|graph| vec![group("body", graph)])
-            .unwrap_or_default(),
-        WorkflowNodeKind::Container(WorkflowContainer::While { body, .. }) => body
-            .as_deref()
-            .map(|graph| vec![group("body", graph)])
-            .unwrap_or_default(),
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { element, .. }) => {
-            element
-                .as_deref()
-                .map(|graph| vec![group("element", graph)])
-                .unwrap_or_default()
-        }
+        WorkflowNodeKind::Container(container) => container
+            .child_subgraphs()
+            .map(|(slot, graph)| group(slot, graph))
+            .collect(),
         _ => Vec::new(),
-    }
-}
-
-fn child_subgraph<'a>(node: &'a WorkflowNode, slot: &str) -> Option<&'a WorkflowSubgraph> {
-    match (&node.kind, slot) {
-        (WorkflowNodeKind::Container(WorkflowContainer::If { then_graph, .. }), "then") => {
-            then_graph.as_deref()
-        }
-        (WorkflowNodeKind::Container(WorkflowContainer::If { else_graph, .. }), "else") => {
-            else_graph.as_deref()
-        }
-        (WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }), "body") => {
-            body.as_deref()
-        }
-        (WorkflowNodeKind::Container(WorkflowContainer::While { body, .. }), "body") => {
-            body.as_deref()
-        }
-        (
-            WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { element, .. }),
-            "element",
-        ) => element.as_deref(),
-        _ => None,
     }
 }
 
@@ -700,54 +658,41 @@ fn rebuild_children(
     flow_edges: &BTreeMap<&str, Vec<&FlowEdge>>,
     allow_empty_default: bool,
 ) -> Result<(), RenderErrorResponse> {
-    let build = |slot: &str| -> Result<Option<Box<WorkflowSubgraph>>, RenderErrorResponse> {
-        children
-            .iter()
-            .find(|child| child.slot == slot)
-            .map(|child| {
-                build_subgraph(
-                    &child.scope,
-                    &child.node_ids,
-                    flow_nodes,
-                    baseline_nodes,
-                    flow_edges,
-                )
-                .map(Box::new)
-            })
-            .transpose()
-            .map(|graph| {
-                graph.or_else(|| allow_empty_default.then(|| Box::new(WorkflowSubgraph::default())))
-            })
-    };
-    match &mut node.kind {
-        WorkflowNodeKind::Container(WorkflowContainer::If {
-            then_graph,
-            else_graph,
-            ..
-        }) => {
-            *then_graph = build("then")?;
-            *else_graph = build("else")?;
-        }
-        WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) => {
-            *body = build("body")?;
-        }
-        WorkflowNodeKind::Container(WorkflowContainer::While { body, .. }) => {
-            *body = build("body")?;
-        }
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { element, .. }) => {
-            *element = build("element")?;
-            if allow_empty_default
-                && element
-                    .as_deref()
-                    .is_some_and(|element| element.nodes.is_empty())
-            {
-                return Err(RenderErrorResponse::invalid_node_payload(
-                    &node.id.to_string(),
-                    "container body cannot be empty; a list comprehension needs one element node",
-                ));
+    let node_id = node.id.to_string();
+    let build = |slot: &str| -> Result<WorkflowSubgraph, RenderErrorResponse> {
+        let Some(child) = children.iter().find(|child| child.slot == slot) else {
+            if allow_empty_default {
+                return Ok(WorkflowSubgraph::default());
             }
+            return Err(RenderErrorResponse::document(
+                format!("node `{node_id}` is missing required child `{slot}`"),
+                json!({ "nodeId": node_id, "child": slot }),
+            ));
+        };
+        build_subgraph(
+            &child.scope,
+            &child.node_ids,
+            flow_nodes,
+            baseline_nodes,
+            flow_edges,
+        )
+    };
+    if let WorkflowNodeKind::Container(container) = &mut node.kind {
+        for (slot, graph) in container.child_subgraphs_mut() {
+            *graph = build(slot)?;
         }
-        _ => {}
+        if matches!(container, WorkflowContainer::ListComprehension { .. })
+            && allow_empty_default
+            && container
+                .child_subgraphs()
+                .next()
+                .is_some_and(|(_, element)| element.nodes.is_empty())
+        {
+            return Err(RenderErrorResponse::invalid_node_payload(
+                &node_id,
+                "container body cannot be empty; a list comprehension needs one element node",
+            ));
+        }
     }
     Ok(())
 }
@@ -821,22 +766,22 @@ fn node_from_flow_data(id: &str, data: &NodeData) -> Result<WorkflowNode, Render
                 condition: required_text(id, data.condition.as_ref(), "condition")?,
                 then_is_block: true,
                 else_is_block: true,
-                then_graph: Some(Box::new(WorkflowSubgraph::default())),
-                else_graph: Some(Box::new(WorkflowSubgraph::default())),
+                then_graph: Box::new(WorkflowSubgraph::default()),
+                else_graph: Box::new(WorkflowSubgraph::default()),
             },
             Some("while") => WorkflowContainer::While {
                 condition: required_text(id, data.condition.as_ref(), "condition")?,
-                body: Some(Box::new(WorkflowSubgraph::default())),
+                body: Box::new(WorkflowSubgraph::default()),
             },
             Some("for") => WorkflowContainer::For {
                 binding: required_text(id, data.binding.as_ref(), "binding")?,
                 iterable: required_text(id, data.iterable.as_ref(), "iterable")?,
-                body: Some(Box::new(WorkflowSubgraph::default())),
+                body: Box::new(WorkflowSubgraph::default()),
             },
             Some("comprehension") => WorkflowContainer::ListComprehension {
                 binding: data.binding.clone(),
                 clauses: data.clauses.iter().map(workflow_clause).collect(),
-                element: Some(Box::new(WorkflowSubgraph::default())),
+                element: Box::new(WorkflowSubgraph::default()),
             },
             subkind => {
                 return Err(RenderErrorResponse::unknown_node_kind(

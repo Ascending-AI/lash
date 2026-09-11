@@ -24,6 +24,7 @@ RELEASE_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "release-cache.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
+FEATURE_COVERAGE = ROOT / "scripts" / "feature-coverage.toml"
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
@@ -507,7 +508,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
             "docs_only": "false",
             "fail_open": "false",
-            "identity_versions": "false",
         }
         for job in trunk_only:
             needs[job] = {"result": "skipped", "outputs": {}}
@@ -562,17 +562,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             summary,
         )
 
-        # PR-class runs test the oldest supported major; main pushes, the full
-        # profile, and any diff that moves a Lashlang identity version run the
-        # complete catalog byte-identity bracket.
+        # Every event uses the same primary/compatibility bracket. The focused
+        # contract tests in test_ci_plan.py evaluate per-role step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
-        self.assertIn(
-            "postgres: ${{ fromJSON((github.event_name == 'push'"
-            " && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'"
-            " || needs.plan.outputs.identity_versions == 'true')"
-            " && '[\"14\", \"16\", \"18\"]' || '[\"14\"]') }}",
-            postgres,
-        )
+        for version in ("14", "16", "18"):
+            self.assertIn(f'postgres: "{version}"', postgres)
+        self.assertEqual(2, postgres.count("role: compatibility"))
+        self.assertEqual(1, postgres.count("role: primary"))
 
         # postgres-store is unconditional on PR-class events, so a skipped
         # matrix job must fail the single required conclusion even if plan's
@@ -584,7 +580,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         pr_needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "false") | {
             "docs_only": "true",
             "fail_open": "false",
-            "identity_versions": "false",
         }
         for job in trunk_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
@@ -1643,6 +1638,7 @@ derive_mutation_jobs() {{
         # returns the differential to comparing nothing. A workflow-wide
         # `assertIn` cannot see that: the sibling step still carries the flag.
         for step_name in (
+            "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
             "Test runtime pool-wait binding",
             "Test runtime Postgres agent scenarios",
@@ -1656,7 +1652,7 @@ derive_mutation_jobs() {{
         runtime_scenarios = workflow_step_block(
             postgres_store_job, "Test runtime Postgres agent scenarios"
         )
-        self.assertIn("if: matrix.postgres == '16'", runtime_scenarios)
+        self.assertIn("if: matrix.role == 'primary'", runtime_scenarios)
         self.assertIn(
             "cargo nextest run --profile ci -p lash-runtime --features rlm",
             runtime_scenarios,
@@ -1768,14 +1764,13 @@ derive_mutation_jobs() {{
             self.assertIn(snippet, gate)
 
     def test_provider_conformance_is_explicitly_featured_in_ci(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        feature_checks = workflow_job_block(workflow, "package-feature-checks")
+        feature_coverage = FEATURE_COVERAGE.read_text(encoding="utf-8")
 
         for provider in ("openai", "anthropic", "google"):
             self.assertIn(
-                f"cargo test -p lash-internal-provider-{provider} "
-                "--features testing --locked conformance",
-                feature_checks,
+                f'"cargo", "test", "-p", "lash-internal-provider-{provider}", '
+                '"--features", "testing", "--locked", "conformance"',
+                feature_coverage,
             )
 
     def test_queue_feature_graphs_are_parallel_and_independently_cached(self) -> None:
@@ -1787,16 +1782,20 @@ derive_mutation_jobs() {{
         }
         self.assertEqual(
             {
+                "sansio-schema-validation",
+                "otel-feature-chain",
+                "core-internal-features",
+                "language-testing-features",
+                "llm-transport-features",
+                "store-features",
+                "runtime-features",
                 "protocol-rlm-testing",
-                "agent-workbench",
-                "slack-clone-e2e",
-                "agent-service-restate",
                 "remote-protocol-conversions",
-                "plugin-mcp-lashlang",
-                "llm-transport-conformance",
-                "provider-openai-conformance",
-                "provider-anthropic-conformance",
-                "provider-google-conformance",
+                "tool-lashlang-proxies",
+                "provider-testing-features",
+                "perf-dhat-heap",
+                "regress-stable-features",
+                "host-features",
             },
             package_lanes,
         )
@@ -1947,11 +1946,9 @@ derive_mutation_jobs() {{
                 "bash scripts/test-dev-script-process-identity.sh",
             ),
             "package-feature-checks": (
-                "cargo check -p lash-internal-protocol-rlm --features testing --locked",
-                "cargo check -p agent-workbench --locked",
-                "cargo check -p slack-clone --all-targets --features e2e --locked",
-                "cargo check -p agent-service --features restate --all-targets --locked",
-                "cargo test -p lash-internal-remote-protocol --features core-conversions --locked",
+                "python3 scripts/check_feature_coverage.py run protocol-rlm-testing",
+                "python3 scripts/check_feature_coverage.py run host-features",
+                "python3 scripts/check_feature_coverage.py run remote-protocol-conversions",
             ),
             "runtime-feature-boundary": (
                 "cargo check -p lash-runtime --no-default-features --locked",

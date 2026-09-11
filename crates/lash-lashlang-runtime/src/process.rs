@@ -1380,52 +1380,10 @@ fn append_trace_workflow_subgraph(
                 label_metadata: label_metadata.clone(),
             });
         }
-        match &node.kind {
-            lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::If {
-                then_graph,
-                else_graph,
-                ..
-            }) => {
-                if let Some(graph) = then_graph {
-                    append_trace_workflow_subgraph(
-                        artifact,
-                        graph,
-                        nodes,
-                        edges,
-                        primary_runtime_ids,
-                    );
-                }
-                if let Some(graph) = else_graph {
-                    append_trace_workflow_subgraph(
-                        artifact,
-                        graph,
-                        nodes,
-                        edges,
-                        primary_runtime_ids,
-                    );
-                }
+        if let lashlang::WorkflowNodeKind::Container(container) = &node.kind {
+            for (_, child) in container.child_subgraphs() {
+                append_trace_workflow_subgraph(artifact, child, nodes, edges, primary_runtime_ids);
             }
-            lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::For {
-                body: Some(graph),
-                ..
-            }) => {
-                append_trace_workflow_subgraph(artifact, graph, nodes, edges, primary_runtime_ids);
-            }
-            lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::While {
-                body: Some(graph),
-                ..
-            }) => {
-                append_trace_workflow_subgraph(artifact, graph, nodes, edges, primary_runtime_ids);
-            }
-            lashlang::WorkflowNodeKind::Container(
-                lashlang::WorkflowContainer::ListComprehension {
-                    element: Some(graph),
-                    ..
-                },
-            ) => {
-                append_trace_workflow_subgraph(artifact, graph, nodes, edges, primary_runtime_ids);
-            }
-            _ => {}
         }
     }
     for edge in &graph.edges {

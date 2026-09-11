@@ -599,14 +599,14 @@ fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &st
                 return false;
             };
             let lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::For {
-                body,
+                iterable,
                 ..
             }) = &mut node.kind
             else {
                 return false;
             };
-            *body = None;
-            expected = "missing_child";
+            *iterable = "{".to_string();
+            expected = "invalid_expression";
         }
         "while" => {
             let Some(node) = invalid.main.nodes.iter_mut().find(|node| {
@@ -620,14 +620,14 @@ fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &st
                 return false;
             };
             let lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::While {
-                body,
+                condition,
                 ..
             }) = &mut node.kind
             else {
                 return false;
             };
-            *body = None;
-            expected = "missing_child";
+            *condition = "{".to_string();
+            expected = "invalid_expression";
         }
         "comprehension" => {
             let Some(node) = invalid.main.nodes.iter_mut().find(|node| {
@@ -641,13 +641,13 @@ fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &st
                 return false;
             };
             let lashlang::WorkflowNodeKind::Container(
-                lashlang::WorkflowContainer::ListComprehension { element, .. },
+                lashlang::WorkflowContainer::ListComprehension { clauses, .. },
             ) = &mut node.kind
             else {
                 return false;
             };
-            *element = None;
-            expected = "missing_child";
+            clauses.clear();
+            expected = "invalid_payload";
         }
         "state_update_path" | "state_update_simple" => {
             let Some(node) =
@@ -730,9 +730,6 @@ fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &st
         (
             "invalid_payload",
             Err(lashlang::GraphRenderError::InvalidNodePayload { .. })
-        ) | (
-            "missing_child",
-            Err(lashlang::GraphRenderError::MissingRequiredChild { .. })
         ) | (
             "invalid_expression",
             Err(lashlang::GraphRenderError::InvalidExpression { .. })

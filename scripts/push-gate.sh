@@ -74,6 +74,8 @@ configure_bindgen_headers() {
 run_release_script_tests() {
   step "Repository script tests"
   python3 scripts/test_check_facade_only_examples.py
+  python3 scripts/test_check_feature_coverage.py
+  python3 scripts/check_feature_coverage.py check
   python3 scripts/test_check_judged_build_geometry.py
   python3 scripts/test_check_postgres_json_carrier_coverage.py
   python3 scripts/test_check_postgres_payload_shape_version.py
