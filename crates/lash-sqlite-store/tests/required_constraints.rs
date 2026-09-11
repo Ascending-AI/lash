@@ -1,3 +1,4 @@
+use lash_core::StoreError;
 use lash_sqlite_store::{
     RequiredConstraintFinding, SqliteDatabase, Store, inspect_required_constraints_at,
 };
@@ -214,6 +215,39 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
         .await
         .expect("inspect genuine quoted check");
     assert!(report.is_conformant(), "{report:?}");
+}
+
+#[tokio::test]
+async fn fig2837_sqlite_virtual_table_arguments_cannot_forge_a_named_check() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("virtual.db");
+    let connection = rusqlite::Connection::open(&path).expect("open virtual-table fixture");
+    connection
+        .execute_batch(
+            "CREATE VIRTUAL TABLE runtime_effect_replay USING rtree(
+                id, min, max,
+                +status CONSTRAINT ck_runtime_effect_replay_status
+                    CHECK(status IN ('in_progress', 'completed', 'failed'))
+            );
+            INSERT INTO runtime_effect_replay VALUES (1, 0, 1, 'invalid');",
+        )
+        .expect("rtree module arguments do not declare a table CHECK");
+    drop(connection);
+
+    let error = inspect_required_constraints_at(&path, SqliteDatabase::EffectReplay)
+        .await
+        .expect_err("a virtual table cannot produce a conformant constraint report");
+    assert!(matches!(
+        error,
+        StoreError::RequiredConstraintInspectionInconclusive {
+            backend: "sqlite",
+            table,
+            constraint,
+            detail,
+        } if table == "runtime_effect_replay"
+            && constraint == "ck_runtime_effect_replay_status"
+            && detail.contains("virtual tables")
+    ));
 }
 
 #[tokio::test]

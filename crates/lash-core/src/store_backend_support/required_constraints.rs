@@ -374,12 +374,7 @@ pub fn compare_required_constraints(
 pub fn extract_named_check_expressions(source: &str) -> Result<BTreeMap<String, String>, String> {
     let tokens = lex_sqlite_ddl(source)?;
     let mut checks = BTreeMap::new();
-    let Some(opening) = tokens
-        .iter()
-        .position(|token| token.kind == TokenKind::LParen)
-    else {
-        return Ok(checks);
-    };
+    let opening = sqlite_create_table_body_opening(&tokens)?;
     let mut item_start = opening + 1;
     let mut depth = 1_usize;
     for index in opening + 1..tokens.len() {
@@ -408,6 +403,53 @@ pub fn extract_named_check_expressions(source: &str) -> Result<BTreeMap<String, 
         }
     }
     Err("CREATE TABLE statement has no closing `)`".to_string())
+}
+
+fn sqlite_create_table_body_opening(tokens: &[Token]) -> Result<usize, String> {
+    let mut index = 0;
+    if !tokens
+        .get(index)
+        .is_some_and(|token| token.is_ident("create"))
+    {
+        return Err("schema SQL is not an ordinary `CREATE TABLE` statement".to_string());
+    }
+    index += 1;
+    if tokens
+        .get(index)
+        .is_some_and(|token| token.is_ident("virtual"))
+    {
+        return Err("virtual tables do not have an ordinary `CREATE TABLE` body".to_string());
+    }
+    if !tokens
+        .get(index)
+        .is_some_and(|token| token.is_ident("table"))
+    {
+        return Err("schema SQL is not an ordinary `CREATE TABLE` statement".to_string());
+    }
+    index += 1;
+    if tokens.get(index).is_some_and(|token| token.is_ident("if")) {
+        if !tokens
+            .get(index + 1)
+            .is_some_and(|token| token.is_ident("not"))
+            || !tokens
+                .get(index + 2)
+                .is_some_and(|token| token.is_ident("exists"))
+        {
+            return Err("malformed `CREATE TABLE IF NOT EXISTS` header".to_string());
+        }
+        index += 3;
+    }
+    if tokens.get(index).and_then(Token::identifier).is_none() {
+        return Err("ordinary `CREATE TABLE` header has no table name".to_string());
+    }
+    index += 1;
+    if !tokens
+        .get(index)
+        .is_some_and(|token| token.kind == TokenKind::LParen)
+    {
+        return Err("ordinary `CREATE TABLE` header has no column-definition body".to_string());
+    }
+    Ok(index)
 }
 
 fn extract_checks_from_sqlite_table_item(
@@ -1053,6 +1095,18 @@ mod tests {
         let found = extract_named_check_expressions(genuine).unwrap();
         assert_eq!(found["ck_column"], "value = 'column'");
         assert_eq!(found["ck_table"], "value = 'table'");
+    }
+
+    #[test]
+    fn sqlite_extraction_rejects_virtual_table_module_arguments() {
+        let virtual_table = "CREATE VIRTUAL TABLE runtime_effect_replay USING rtree(\
+            id, min, max, +status CONSTRAINT ck_runtime_effect_replay_status \
+            CHECK(status IN ('in_progress', 'completed', 'failed')))";
+        assert!(
+            extract_named_check_expressions(virtual_table)
+                .unwrap_err()
+                .contains("virtual tables")
+        );
     }
 
     #[test]
