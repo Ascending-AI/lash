@@ -60,6 +60,9 @@ to 6, and its type-facet schema from 1 to 2. The ModuleRef envelope remains v2.
 Bytecode, continuation, snapshot, and VM ABI versions do not change because no
 instruction or runtime-value representation changed. Stored artifacts using
 the anonymous process shape must be recompiled and republished.
+Execution-site IDs rooted in module or process identity, and downstream
+tool-intent and frame IDs derived from their call IDs, deliberately rekey under
+v7.
 
 ## Consequences
 

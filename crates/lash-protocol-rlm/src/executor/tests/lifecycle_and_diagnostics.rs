@@ -809,16 +809,19 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         let without_trace = execute_continue_as_with_trace_sink(None).await;
         let with_trace = execute_continue_as_with_trace_sink(Some(Arc::new(NoopTraceSink))).await;
 
+        // Semantic hash v7 deliberately rekeys the module-rooted execution
+        // site and the frame key derived from its call ID. Keep both literal
+        // while proving trace configuration is absent from their inputs.
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:dbf23c228c63b0166ba85ee5:1"
+                "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:0f28bf90f826784366c2cc87:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:dbf23c228c63b0166ba85ee5:1"
+                "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:0f28bf90f826784366c2cc87:1"
             )
         );
 
@@ -832,11 +835,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/73dff9c10f58d036f52bd5434603ef396228c50d0f4ce93be8a9a98b5fd28eb2"
+            "frame-key/v2/811e851bb06aad817c7738c62978f90c762e2ba0cb9f09f770bfd3a56efb17c6"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/73dff9c10f58d036f52bd5434603ef396228c50d0f4ce93be8a9a98b5fd28eb2"
+            "frame-key/v2/811e851bb06aad817c7738c62978f90c762e2ba0cb9f09f770bfd3a56efb17c6"
         );
     });
 }
