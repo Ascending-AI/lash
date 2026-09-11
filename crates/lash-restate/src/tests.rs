@@ -85,7 +85,7 @@ use endpoint_protocol::{
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_endpoint, restate_call_frames, restate_command_frame_types,
-    restate_completed_promise, restate_error_message, restate_message_types,
+    restate_completed_promise, restate_error_code, restate_error_message, restate_message_types,
     restate_output_failure_message, restate_output_json,
 };
 
