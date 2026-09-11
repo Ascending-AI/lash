@@ -4,6 +4,12 @@
 > the deterministic `just process-operations-e2e` companion. Do not replace the companion's
 > PostgreSQL assertions with manual SQL, and do not treat a green script as the judgment itself.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove that an operator can inspect and act on the process-operations surface on
 real Restate, PostgreSQL, and MinIO geometry: typed wake failures, redrive, retargeting,
 visibility policy, wake-turn policy, crash recovery, process-id reuse, and retention all remain
@@ -97,11 +103,12 @@ standard-protocol `tools.batch` call.
 
 Use a fresh session for each row and save the rendered transcript, `/api/state`, Restate
 invocation/journal inspection, and `trace.jsonl` extract under a row-named artifact directory.
-Submit the row's named tool call or RLM program, wait until its turn is active and its first
-durable child command is visible, then replace **only** the target worker (via
-`just agent-workbench-restart <port>`
-or the target host restart recipe) while preserving the same run/data directories and Restate
-container. Never use Restate Admin kill as a substitute. After recovery, reconcile DOM,
+Submit the row's named tool call or RLM program and wait until its turn is active and its first
+durable child command is visible. The next step requires a separately verified target-host
+restart that preserves the same run/data directories and Restate container. The historical
+`just agent-workbench-restart <port>` path is currently blocked and must not be executed or
+replaced with destructive reset. Never use Restate Admin kill as a substitute. After recovery,
+reconcile DOM,
 API/durable messages, trace executions, and the literal outcome below.
 
 | Row | Call/program and literal oracle | Required Restate journal shape after worker replacement |

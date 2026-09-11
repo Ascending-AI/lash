@@ -4,6 +4,12 @@
 > screenshot, polling, real-token, Abort/RCA, and teardown rules. This runbook adds only
 > the attachment scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove that the Agent Workbench can upload a PNG, visibly attach it to a user
 turn, deliver that exact content-addressed attachment to the model, and retrieve identical
 bytes after replacing the web process.
@@ -49,8 +55,10 @@ cross-surface identity, not the quality of the model's image description.
    inline-source fields and are intentionally absent after this normalization.
 3. **Compare bytes, not availability.** Save the source and both retrievals; SHA-256 and
    byte length must match exactly before and after restart.
-4. **Replace the web process.** Use `just agent-workbench-restart <port>` and require the
-   PID to change while the data directory and session id remain unchanged.
+4. **Replace the web process (blocked by FIG-1164).** The historical command was
+   `just agent-workbench-restart <port>`. Do not execute it until a verified immutable
+   same-configuration host restart exists; then require the PID to change while the data
+   directory and session id remain unchanged.
 5. **The attachment facet is the same in both session modes.** The workbench always wires
    `FileAttachmentStore`; SQLite/Postgres changes the session ledger, not attachment blob
    storage. The deterministic companion gate reopens that file store and separately runs
@@ -138,8 +146,10 @@ its content facts. A plausible visual answer without this trace chain is not a p
 
 ## Phase 3 — Replace the process and retrieve again
 
-Run `just agent-workbench-restart <port>` and poll `/healthz`. Require a changed PID and
-unchanged rendered/API/disk session id. Reload the page, GET the original `retrieve_url`,
+**Blocked by FIG-1164.** Retain the historical `just agent-workbench-restart <port>` step as
+the required process-replacement geometry, but do not execute it until a verified immutable
+same-configuration host restart exists. Then poll `/healthz`, require a changed PID and
+unchanged rendered/API/disk session id, reload the page, GET the original `retrieve_url`,
 and save the body as `03-after-restart.png`. Require its id header, byte length, and
 SHA-256 to match both the source and `01-before-restart.png`; the content-addressed image
 route must return 200 and must not inherit the 409 semantics of session-scoped admission.

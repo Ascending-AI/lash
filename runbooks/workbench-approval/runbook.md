@@ -4,6 +4,12 @@
 > objective gates, three-layer reconciliation, Abort/RCA, screenshots, boot,
 > and teardown. This runbook adds only the approval scenarios.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove with the real configured model that a host-gated tool parks
 on Lash's real Restate completion-key machinery, the workbench exposes the wait
 to an operator, approve resumes successfully, deny reaches Lashlang as a typed
@@ -133,8 +139,10 @@ Reset to a fresh session and submit:
    message ids, and trace execution identity. Save
    `05-restart-before.png`, `05-restart-before-state.json`, and
    `05-restart-before-approvals.json`.
-2. Send SIGTERM through `just agent-workbench-restart <port>` with the same
-   exported data/run directories. Gate on the listening line and browser
+2. **Blocked by FIG-1164.** The historical step sent SIGTERM through
+   `just agent-workbench-restart <port>` with the same exported data/run directories. Do not
+   execute it until a verified immutable same-configuration host restart exists. Then gate on
+   the listening line and browser
    reconnection. Require the same session, approval key, arguments, active turn,
    and pre-restart DOM/message identities. A redrive may append another
    `turn_started` / `tool_call_started` observation for the same typed call id

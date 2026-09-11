@@ -10,6 +10,14 @@ import traceback
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
+raise SystemExit(
+    "FIG-1164: approval restart scenario is blocked because the bundled "
+    "agent-workbench restart safely refuses process replacement; the destructive "
+    "reset command cannot prove approval persistence"
+)
+
+# Kept below the fail-fast boundary so the unsupported scenario reports its
+# lifecycle blocker before loading browser dependencies or reading run state.
 from playwright.sync_api import expect, sync_playwright
 
 

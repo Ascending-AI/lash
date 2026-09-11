@@ -4,6 +4,12 @@
 > apps)": browser tooling, objective gate order, screenshots, real-token designation,
 > and teardown ownership. This runbook only adds the scenario-specific parts.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove the Agent Workbench Stop control uses Lash's exact-turn,
 keyed-promise cancellation primitive end to end. Stop one live turn normally, then start
 another, restart only the workbench web process while Restate owns the turn, and Stop it
@@ -42,9 +48,10 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 3. **UI and receipt agree.** The UI renders `turn stopped · request <id>` using the same
    request id returned in `terminal.cancellation`; the transcript/API converges on the
    interrupted terminal. Any disagreement is a contract violation → Abort/RCA.
-4. **Restart only the web process.** Use `just agent-workbench-restart <port>`, which
-   preserves the data directory and Restate container. Tearing down Restate invalidates
-   the durability proof.
+4. **Restart only the web process (blocked by FIG-1164).** The historical command was
+   `just agent-workbench-restart <port>`. Do not execute it until a verified immutable
+   same-configuration host restart exists. The data directory and Restate container must remain
+   unchanged; tearing down Restate invalidates the durability proof.
 5. **Break-glass is not success.** Never use Restate Admin cancel/kill to pass a gate. If
    cleanup requires it after an Abort, record that separately; it must not be reported as
    a Lash `Cancelled` terminal.
@@ -72,8 +79,9 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 - To judge the same flow on Postgres, add `AGENT_WORKBENCH_POSTGRES=1` to the boot
   command. The dev helper starts a Postgres 16 container on a port derived from
   `<port>`, passes its URL as `AGENT_WORKBENCH_DATABASE_URL`, records a managed-container
-  marker beside the Restate marker, and preserves both containers across
-  `agent-workbench-restart`. `agent-workbench-down` removes both. Record the Postgres
+  marker beside the Restate marker. The persistence contract requires both containers to remain
+  unchanged across the currently blocked `agent-workbench-restart` phase;
+  `agent-workbench-down` removes both. Record the Postgres
   container name and require the startup trace payload's `store_backend` to be
   `"postgres"` before Phase 1.
 - Browser affordances: chat composer, **stop turn** button, running/idle pill, transcript.
@@ -115,8 +123,10 @@ Screenshot `01-cancelled.png`; save the cancel response as `01-cancel-receipt.js
 ## Phase 2 — Restart the web process mid-turn, then Stop
 
 Submit another long-running turn. Gate on Stop plus one `/api/state.active_turns` entry
-and record its session/turn ids. Run `just agent-workbench-restart <port>` without
-touching Restate. Poll `/healthz` until the replacement process is ready, reload the page,
+and record its session/turn ids. **Stop here for FIG-1164:** the historical
+`just agent-workbench-restart <port>` step is blocked and must not be executed or replaced by
+destructive reset. Once a verified immutable same-configuration host restart exists, run it
+without touching Restate, poll `/healthz` until the replacement process is ready, reload the page,
 and gate all of the following before pressing Stop:
 
 - the rendered session id is unchanged;
