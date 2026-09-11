@@ -74,8 +74,12 @@ impl Provider for AnthropicProvider {
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
-        let body = self.build_request_body(&req)?;
-        let generation_disposition = Some(Self::generation_disposition(&req, &body));
+        let (body, cache_control_emitted) = self.build_request_body_with_cache_evidence(&req)?;
+        let generation_disposition = Some(Self::generation_disposition(
+            &req,
+            &body,
+            cache_control_emitted,
+        ));
         let request_body_bytes = serde_json::to_vec(&body).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Anthropic body: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
@@ -157,6 +161,7 @@ impl Provider for AnthropicProvider {
             ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                response_started: true,
                 request_body: request_body.clone(),
                 http_summary: Some(format!(
                     "HTTP POST {}/v1/messages (stream)",
@@ -277,10 +282,16 @@ impl AnthropicProvider {
     /// Temperature is read off the assembled body, so that record cannot drift
     /// from what was sent: the one reason a requested temperature is missing is
     /// that this request pins sampling — extended thinking, or a model whose
-    /// host-declared capability says so. The other two are read off the dialect
-    /// instead, because for them the body cannot be wrong: Messages always
-    /// carries a `max_tokens`, and it has no seed field at all.
-    pub(crate) fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationReceipt {
+    /// host-declared capability says so. Cache emission is reported by the
+    /// placement code itself so host tool schemas cannot impersonate it. The
+    /// other two are read off the dialect instead, because for them the body
+    /// cannot be wrong: Messages always carries a `max_tokens`, and it has no
+    /// seed field at all.
+    pub(crate) fn generation_disposition(
+        req: &LlmRequest,
+        body: &Value,
+        cache_control_emitted: bool,
+    ) -> GenerationReceipt {
         GenerationReceipt {
             output_token_cap: GenerationOptionOutcome::applied(
                 req.generation.output_token_cap.is_some(),
@@ -294,7 +305,7 @@ impl AnthropicProvider {
             stop_sequences: GenerationOptionOutcome::applied(
                 !req.generation.stop_sequences.is_empty(),
             ),
-            cache: lash_llm_transport::cache_intent_disposition(req, Some(body)),
+            cache: lash_llm_transport::cache_intent_disposition(req, cache_control_emitted),
         }
     }
 

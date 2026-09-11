@@ -607,8 +607,9 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
 
 #[derive(Clone)]
 pub(super) struct TypeScriptSignalProcessService {
-    registry: Arc<lash_core::TestLocalProcessRegistry>,
-    controller: Arc<dyn lash_core::RuntimeEffectController>,
+    pub(super) registry: Arc<lash_core::TestLocalProcessRegistry>,
+    pub(super) controller: Arc<dyn lash_core::RuntimeEffectController>,
+    pub(super) originator_override: Option<lash_core::ProcessOriginator>,
 }
 
 pub(super) struct EmptyTypeScriptSignalToolProvider;
@@ -754,11 +755,29 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
 
     async fn start(
         &self,
-        _session_id: &SessionId,
-        registration: lash_core::ProcessRegistration,
+        session_id: &SessionId,
+        mut registration: lash_core::ProcessRegistration,
         options: lash_core::ProcessStartOptions,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
+        let (originator, wake_session_id) = self
+            .originator_override
+            .clone()
+            .map(|originator| (originator, None))
+            .or_else(|| {
+                options
+                    .spawn_provenance
+                    .map(|spawn| (spawn.originator, spawn.wake_session_id))
+            })
+            .unwrap_or_else(|| {
+                (
+                    lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id)),
+                    Some(session_id.clone()),
+                )
+            });
+        registration = registration
+            .with_process_provenance(lash_core::ProcessProvenance::new(originator))
+            .with_wake_session_id(wake_session_id);
         lash_core::ProcessRegistrar::register_process_with_observers(
             self.registry.as_ref(),
             registration,
@@ -962,6 +981,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         controller: controller.clone(),
+        originator_override: None,
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         Arc::new(EmptyTypeScriptSignalToolProvider),
@@ -1102,6 +1122,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         controller: controller.clone(),
+        originator_override: None,
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         Arc::new(EmptyTypeScriptSignalToolProvider),
@@ -1242,6 +1263,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
         controller: controller.clone(),
+        originator_override: None,
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         tool_provider,

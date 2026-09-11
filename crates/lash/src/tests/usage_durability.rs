@@ -66,7 +66,8 @@ fn aborting_provider(
                     stream.send(LlmStreamEvent::Evidence(
                         lash_core::llm::types::LlmStreamEvidence {
                             // Execution evidence is only admissible once the
-                            // response is established, which the summary marks.
+                            // provider marks the response as established.
+                            response_started: true,
                             http_summary: Some("200 OK".to_string()),
                             execution_evidence: Some(lash_core::ExecutionEvidence {
                                 provider_response_id: Some(generation_id.to_string()),
@@ -270,6 +271,7 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
                         if let Some(generation_id) = generation_id {
                             stream.send(LlmStreamEvent::Evidence(
                                 lash_core::llm::types::LlmStreamEvidence {
+                                    response_started: true,
                                     http_summary: Some("200 OK".to_string()),
                                     execution_evidence: Some(lash_core::ExecutionEvidence {
                                         provider_response_id: Some(generation_id.to_string()),

@@ -110,11 +110,19 @@ fn typescript_type(ty: &lashlang::TypeExpr) -> String {
             format!("{{ {fields} }}")
         }
         lashlang::TypeExpr::Ref(name) => typescript_type_name(name),
-        lashlang::TypeExpr::Process { input, output, .. } => format!(
-            "Process<{}, {}>",
-            typescript_type(input),
-            typescript_type(output)
-        ),
+        lashlang::TypeExpr::Process(process) => match process.as_signature() {
+            Some(signature) => format!(
+                "Process<[{}], {}>",
+                signature
+                    .params()
+                    .iter()
+                    .map(|param| format!("{}: {}", param.name, typescript_type(&param.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                typescript_type(signature.output())
+            ),
+            None => "Process".to_string(),
+        },
         lashlang::TypeExpr::TriggerHandle(event) => {
             format!("TriggerHandle<{}>", typescript_type(event))
         }
@@ -265,7 +273,7 @@ impl TypescriptDialect {
 pub(crate) fn typescript_process_prompt(abilities: &lashlang::LashlangAbilities) -> String {
     let mut lines = Vec::new();
     if abilities.processes {
-        lines.push(r#"interface Process<Input = unknown, Output = unknown> { readonly name: string }
+        lines.push(r#"interface Process<Params extends readonly unknown[] = readonly unknown[], Output = unknown> { readonly name: string }
 defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
 start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
 wake(value: unknown): void;
@@ -629,10 +637,10 @@ mod tests {
         );
         assert!(section.contains("triggers.list"), "{section}");
         assert!(
-            section.contains("interface Process<Input = unknown, Output = unknown>"),
+            section.contains("interface Process<Params extends readonly unknown[] = readonly unknown[], Output = unknown>"),
             "{section}"
         );
-        assert!(section.contains("Process<"), "{section}");
+        assert!(section.contains("target: Process"), "{section}");
         assert!(!section.contains("ProcessDefinition"), "{section}");
         // And none of it may arrive in Lashlang's type syntax (ADR 0063).
         for leak in ["list[", "-> str", ": str`", "float`", "trigger.register"] {

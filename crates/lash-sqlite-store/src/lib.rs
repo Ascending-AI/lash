@@ -1319,18 +1319,6 @@ async fn delete_session_from_catalog(
                 .optional()
                 .map_err(sqlite_error)?
                 .unwrap_or((None, None));
-            let trigger_blob_ref = tx
-                .query_row(
-                    "SELECT blob_ref FROM artifact_refs
-                     WHERE namespace = ?1 AND artifact_ref = ?2",
-                    params![
-                        attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
-                        lash_core::TriggerOwnerScope::session(&session_id).namespace()
-                    ],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(sqlite_error)?;
             let mut candidates = std::collections::BTreeSet::new();
             if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
                 candidates.insert(checkpoint_ref.to_string());
@@ -1345,7 +1333,6 @@ async fn delete_session_from_catalog(
                     .map_err(sqlite_error)?;
                 candidates.extend(rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?);
             }
-            candidates.extend(trigger_blob_ref);
             for blob_ref in &candidates {
                 let exists = tx
                     .query_row(
@@ -1443,19 +1430,6 @@ async fn delete_session_from_catalog(
             }
             tx.execute(attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS, [])
                 .map_err(sqlite_error)?;
-            // Trigger manifests are the one artifact-ref namespace with an exact
-            // session owner. Module, raw-artifact, and process-environment refs are
-            // content-addressed factory services with no safe session attribution;
-            // their lifecycle remains owned by the host-facing artifact APIs.
-            tx.execute(
-                "DELETE FROM artifact_refs
-             WHERE namespace = ?1 AND artifact_ref = ?2",
-                params![
-                    attachments::CURRENT_TRIGGER_MANIFEST_NAMESPACE,
-                    lash_core::TriggerOwnerScope::session(&session_id).namespace()
-                ],
-            )
-            .map_err(sqlite_error)?;
             if let Some(checkpoint_ref) = checkpoint_ref.as_ref() {
                 // Sever this root's outgoing projection before any blob delete
                 // when the owner transaction removed its final head/anchor.

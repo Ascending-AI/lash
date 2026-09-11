@@ -84,6 +84,45 @@ const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
 /// An effect group opened under the scope, keyed by group key; cleared once
 /// the group's index reports no unsettled child.
 const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
+
+#[cfg(test)]
+type WaitRegistrationWitness = tokio::sync::oneshot::Sender<RestateDurableWaitRegistration>;
+
+#[cfg(test)]
+static WAIT_REGISTRATION_WITNESSES: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, WaitRegistrationWitness>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Arm a test-only observation of the exact workflow-to-index registration.
+///
+/// The receiver fires from the index handler, so an unfinished ingress task is
+/// never mistaken for durable registration. The workflow key keeps concurrent
+/// live tests independent.
+#[cfg(test)]
+pub(crate) fn arm_wait_registration_witness(
+    key: &AwaitEventKey,
+) -> tokio::sync::oneshot::Receiver<RestateDurableWaitRegistration> {
+    let address = RestateDurableWaitAddress::for_key(key);
+    let (send, receive) = tokio::sync::oneshot::channel();
+    WAIT_REGISTRATION_WITNESSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(address.workflow_key, send);
+    receive
+}
+
+#[cfg(test)]
+fn observe_wait_registration(key: &AwaitEventKey, registration: &RestateDurableWaitRegistration) {
+    let address = RestateDurableWaitAddress::for_key(key);
+    if let Some(witness) = WAIT_REGISTRATION_WITNESSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(&address.workflow_key)
+    {
+        let _ = witness.send(registration.clone());
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RestateDurableWaitAddress {
     pub workflow_key: String,
@@ -874,17 +913,23 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
     ) -> HandlerResult<Json<RestateDurableWaitRegistration>> {
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
         let metadata = load_durable_wait_index_metadata(&ctx).await?;
-        if metadata.revoked {
-            return Ok(Json(RestateDurableWaitRegistration::Revoked));
-        }
-        if let Some(Json(resolution)) = ctx
+        let registration = if metadata.revoked {
+            RestateDurableWaitRegistration::Revoked
+        } else if let Some(Json(resolution)) = ctx
             .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&address))
             .await?
         {
-            return Ok(Json(RestateDurableWaitRegistration::Resolved(resolution)));
-        }
-        ctx.set(&durable_wait_index_state_key(&address), Json(request.key));
-        Ok(Json(RestateDurableWaitRegistration::Registered))
+            RestateDurableWaitRegistration::Resolved(resolution)
+        } else {
+            ctx.set(
+                &durable_wait_index_state_key(&address),
+                Json(request.key.clone()),
+            );
+            RestateDurableWaitRegistration::Registered
+        };
+        #[cfg(test)]
+        observe_wait_registration(&request.key, &registration);
+        Ok(Json(registration))
     }
 
     async fn settle(

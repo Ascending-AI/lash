@@ -10,6 +10,7 @@ pub(crate) struct CacheBreakpointDiagnostics {
     pub(crate) requested: usize,
     pub(crate) emitted: usize,
     pub(crate) dropped: usize,
+    pub(crate) cache_control_emitted: bool,
 }
 
 impl OpenAiCompatibleProvider {
@@ -312,6 +313,7 @@ impl OpenAiCompatibleProvider {
                 requested,
                 emitted: 0,
                 dropped: requested,
+                cache_control_emitted: false,
             };
         };
         let extended_ttl = matches!(dialect, CacheControlDialect::Anthropic);
@@ -322,6 +324,7 @@ impl OpenAiCompatibleProvider {
                 requested,
                 emitted: 0,
                 dropped: requested,
+                cache_control_emitted: false,
             };
         };
 
@@ -329,33 +332,33 @@ impl OpenAiCompatibleProvider {
             let applied_explicit_breakpoint = messages.iter_mut().rev().any(|message| {
                 Self::add_cache_control_to_marked_text_content(message, &cache_control)
             });
-            if !applied_explicit_breakpoint {
-                for message in messages.iter_mut().rev() {
-                    if matches!(
+            let fallback_emitted = !applied_explicit_breakpoint
+                && messages.iter_mut().rev().any(|message| {
+                    matches!(
                         message.get("role").and_then(Value::as_str),
                         Some("user" | "assistant" | "system" | "developer")
                     ) && Self::add_cache_control_to_text_content(message, &cache_control)
-                    {
-                        break;
-                    }
-                }
-            }
+                });
             Self::strip_internal_cache_markers(messages);
             let emitted = usize::from(applied_explicit_breakpoint);
             return CacheBreakpointDiagnostics {
                 requested,
                 emitted,
                 dropped: requested.saturating_sub(emitted),
+                cache_control_emitted: applied_explicit_breakpoint || fallback_emitted,
             };
         }
 
+        let mut cache_control_emitted = false;
         if req.instructions.is_some()
             && let Some(message) = messages.first_mut()
         {
-            Self::add_cache_control_to_text_content(message, &cache_control);
+            cache_control_emitted |=
+                Self::add_cache_control_to_text_content(message, &cache_control);
         }
         if let Some(last_tool) = tools.last_mut() {
             last_tool["cache_control"] = cache_control.clone();
+            cache_control_emitted = true;
         }
         let mut applied_explicit_breakpoint = false;
         for message in messages.iter_mut().rev() {
@@ -365,6 +368,7 @@ impl OpenAiCompatibleProvider {
             ) && Self::add_cache_control_to_marked_text_content(message, &cache_control)
             {
                 applied_explicit_breakpoint = true;
+                cache_control_emitted = true;
                 break;
             }
         }
@@ -375,6 +379,7 @@ impl OpenAiCompatibleProvider {
                     Some("user" | "assistant" | "system" | "developer")
                 ) && Self::add_cache_control_to_text_content(message, &cache_control)
                 {
+                    cache_control_emitted = true;
                     break;
                 }
             }
@@ -385,9 +390,11 @@ impl OpenAiCompatibleProvider {
             requested,
             emitted,
             dropped: requested.saturating_sub(emitted),
+            cache_control_emitted,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn build_chat_request_body(
         &self,
         req: &LlmRequest,
@@ -675,6 +682,7 @@ impl OpenAiCompatibleProvider {
                 merge_usage(&mut state.usage, &usage_from_usage_value(usage));
             }
             if let Some(finish_reason) = choice.finish_reason {
+                state.normal_stop_seen |= finish_reason == "stop";
                 state.terminal_reason =
                     terminal_reason_from_chat_finish_reason(finish_reason, state.terminal_reason);
             }
@@ -801,6 +809,10 @@ pub(crate) struct ChatStreamState {
     emitted_tool_call_indices: std::collections::HashSet<usize>,
     pub(crate) final_response_raw: Option<String>,
     pub(crate) terminal_reason: LlmTerminalReason,
+    /// True only when the Chat wire carries the normal successful terminal
+    /// status. Native provider evidence is retained separately and cannot
+    /// stand in for a missing `finish_reason`.
+    pub(crate) normal_stop_seen: bool,
     pub(crate) execution_evidence: Option<ExecutionEvidence>,
 }
 
@@ -809,6 +821,13 @@ impl ChatStreamState {
         &mut self,
         value: &Value,
     ) -> Result<(), LlmTransportError> {
+        self.normal_stop_seen |= value
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("finish_reason"))
+            .and_then(Value::as_str)
+            == Some("stop");
         let provider_finish_reason = value
             .get("choices")
             .and_then(Value::as_array)

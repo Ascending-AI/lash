@@ -161,7 +161,7 @@ async fn store_maintenance_fixture(
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     StoreMaintenanceFixture {
         state,
         session_id,

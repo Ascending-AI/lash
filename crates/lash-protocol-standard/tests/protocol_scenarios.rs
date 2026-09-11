@@ -11,7 +11,7 @@ use lash_core::testing::sansio_transcript::record_effects;
 use lash_core::{
     CheckpointKind, Effect, LlmCallError, LlmOutputPart, LlmRequest, LlmResponse,
     LlmTerminalReason, Message, MessageRole, Part, ToolCallOutput, ToolFailure, ToolFailureClass,
-    TurnMachine, TurnMachineConfig, facade_support::SessionStreamEvent,
+    TurnMachine, TurnMachineConfig, facade_support::SessionStreamEvent, facade_support::TurnFinish,
     facade_support::TurnOutcome, facade_support::TurnStop,
 };
 use lash_protocol_standard::StandardDriver;
@@ -46,9 +46,9 @@ const PROJECTION: StandardProtocolScenarioCoverage = standard_protocol_coverage!
     "Standard protocol projects user/system input into the first model request."
 );
 const EMPTY_MODEL_RESPONSE: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
-    standard_protocol_scenario_empty_model_response_stops_provider_error,
+    standard_protocol_scenario_empty_model_response_finishes_after_checkpoint,
     "empty response",
-    "Empty provider response terminates through the protocol error boundary."
+    "Successful empty provider response finishes through the normal completion checkpoint."
 );
 const PROVIDER_ERROR: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
     standard_protocol_scenario_provider_error_stops_without_checkpoint,
@@ -173,6 +173,12 @@ impl StandardProtocolScenario {
         self
     }
 
+    fn checkpoint_with_user_message(mut self, message: &'static str) -> Self {
+        self.steps
+            .push(StandardProtocolStep::CheckpointWithUserMessage(message));
+        self
+    }
+
     fn expect(mut self, expectations: StandardProtocolExpectations) -> Self {
         self.expectations = expectations;
         self
@@ -274,6 +280,20 @@ impl StandardProtocolScenario {
                         delivery: sansio::CheckpointDelivery::default(),
                     });
                 }
+                StandardProtocolStep::CheckpointWithUserMessage(message) => {
+                    let (checkpoint_id, _) = find_checkpoint(&effects)
+                        .unwrap_or_else(|| panic!("{} expected checkpoint", self.name));
+                    machine.handle_response(Response::Checkpoint {
+                        id: checkpoint_id,
+                        delivery: sansio::CheckpointDelivery {
+                            messages: vec![lash_core::PluginMessage::text(
+                                MessageRole::User,
+                                *message,
+                            )],
+                            ..sansio::CheckpointDelivery::default()
+                        },
+                    });
+                }
             }
 
             effects = drain_effects(&mut machine);
@@ -299,6 +319,7 @@ enum StandardProtocolStep {
     LlmError(&'static str),
     ToolResults(Vec<StandardToolResult>),
     Checkpoint,
+    CheckpointWithUserMessage(&'static str),
 }
 
 #[derive(Clone, Debug)]
@@ -642,16 +663,71 @@ fn standard_protocol_scenario_projects_initial_request() {
 }
 
 #[test]
-fn standard_protocol_scenario_empty_model_response_stops_provider_error() {
+fn standard_protocol_scenario_empty_model_response_finishes_after_checkpoint() {
     StandardProtocolScenario::new(EMPTY_MODEL_RESPONSE.display_name)
         .user_message("answer with something")
         .llm_response(false, vec![])
+        .checkpoint()
         .expect(StandardProtocolExpectations {
             initial_request_contains: vec!["answer with something"],
+            checkpoints: vec![CheckpointKind::BeforeCompletion],
             llm_call_count: Some(1),
             done: Some(true),
-            error_contains: vec!["Model returned no assistant text or tool calls."],
-            turn_outcome: Some(TurnOutcome::Stopped(TurnStop::ProviderError)),
+            turn_outcome: Some(TurnOutcome::Finished(TurnFinish::AssistantMessage {
+                text: String::new(),
+            })),
+            ..StandardProtocolExpectations::default()
+        })
+        .run();
+}
+
+#[test]
+fn post_tool_empty_model_response_finishes_without_repeating_the_tool() {
+    StandardProtocolScenario::new("post-tool empty response")
+        .user_message("read file and do nothing else")
+        .llm_response(
+            false,
+            vec![tool_call_part("tc1", "read_file", r#"{"path":"foo.txt"}"#)],
+        )
+        .tool_results(vec![StandardToolResult::ok(
+            "tc1",
+            "read_file",
+            serde_json::json!("file contents"),
+            "file contents",
+        )])
+        .checkpoint()
+        .llm_response(false, vec![])
+        .checkpoint()
+        .expect(StandardProtocolExpectations {
+            initial_request_contains: vec!["read file and do nothing else"],
+            tool_calls: vec![ExpectedToolCall {
+                call_id: "tc1".to_string(),
+                tool_name: "read_file".to_string(),
+                args: serde_json::json!({"path":"foo.txt"}),
+            }],
+            checkpoints: vec![CheckpointKind::AfterWork, CheckpointKind::BeforeCompletion],
+            llm_call_count: Some(2),
+            done: Some(true),
+            turn_outcome: Some(TurnOutcome::Finished(TurnFinish::AssistantMessage {
+                text: String::new(),
+            })),
+            ..StandardProtocolExpectations::default()
+        })
+        .run();
+}
+
+#[test]
+fn empty_model_response_checkpoint_delivers_pending_input_before_completion() {
+    StandardProtocolScenario::new("empty response with pending input")
+        .user_message("answer only after the pending input")
+        .llm_response(false, vec![])
+        .checkpoint_with_user_message("pending follow-up")
+        .expect(StandardProtocolExpectations {
+            initial_request_contains: vec!["answer only after the pending input"],
+            checkpoints: vec![CheckpointKind::BeforeCompletion],
+            llm_call_count: Some(2),
+            done: Some(false),
+            model_requests_contain: vec!["pending follow-up"],
             ..StandardProtocolExpectations::default()
         })
         .run();

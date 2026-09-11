@@ -77,7 +77,9 @@ fn standard_protocol_execution_boundary(
         .unwrap_or("standard.protocol.contract");
     let proof_id = contract.replace(['.', '_'], "-");
     match contract {
-        "standard.initial_request_projection" | "standard.streamed_text_finalizes_once" => {
+        "standard.initial_request_projection"
+        | "standard.empty_response_finishes"
+        | "standard.streamed_text_finalizes_once" => {
             let provider = first_successful_provider(events).ok_or_else(|| {
                 FixedScriptRunnerError::Assertion(format!(
                     "could not anchor {contract} execution to a successful generated provider boundary"
@@ -101,12 +103,8 @@ fn standard_protocol_execution_boundary(
                 execution,
             ))
         }
-        "standard.empty_provider_response_error" | "standard.provider_error_without_checkpoint" => {
-            let mutation = match contract {
-                "standard.empty_provider_response_error" => "dropped_terminal_event",
-                "standard.provider_error_without_checkpoint" => "rate_limit_error_envelope",
-                _ => unreachable!(),
-            };
+        "standard.provider_error_without_checkpoint" => {
+            let mutation = "rate_limit_error_envelope";
             let provider = first_successful_provider(events).ok_or_else(|| {
                 FixedScriptRunnerError::Assertion(format!(
                     "could not anchor {contract} execution to a successful generated provider boundary"

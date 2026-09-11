@@ -226,6 +226,15 @@ impl McpDeferredToolProvider {
     }
 }
 
+fn attempt_outcome(result: ToolOutcome) -> lash_core::ToolAttemptOutcome {
+    match result {
+        ToolOutcome::Done(output) => lash_core::ToolAttemptOutcome::done_without_intents(
+            lash_core::ToolOutcomeDone::from_output(*output),
+        ),
+        ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(pending),
+    }
+}
+
 #[async_trait]
 impl ToolProvider for McpToolProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
@@ -248,6 +257,24 @@ impl ToolProvider for McpToolProvider {
         self.pool
             .call_tool(call.name, call.args, call.context)
             .await
+    }
+
+    async fn execute_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &AttemptContext<'_>,
+    ) -> ToolOutcome {
+        self.pool.call_tool_by_id(tool_id, args, context).await
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &AttemptContext<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
+        attempt_outcome(self.pool.call_tool_by_id(tool_id, args, context).await)
     }
 }
 
@@ -292,12 +319,16 @@ impl ToolProvider for McpDeferredToolProvider {
         {
             return result;
         }
-        let Some(definition) = self.definition_by_id(tool_id) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown MCP tool id: {tool_id}"));
-        };
-        self.pool
-            .call_tool(&definition.manifest.name, args, context)
-            .await
+        self.pool.call_tool_by_id(tool_id, args, context).await
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &AttemptContext<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
+        attempt_outcome(self.execute_by_id(tool_id, args, context).await)
     }
 }
 
@@ -445,7 +476,8 @@ mod tests {
 
         let defs = factory.pool().advertised_tools();
         assert_eq!(defs.len(), 1, "expected one imported tool, got {defs:?}");
-        assert_eq!(defs[0].name(), "mcp__docs__search_docs");
+        let expected_name = crate::mcp_tool_name("docs", "search-docs");
+        assert_eq!(defs[0].name(), expected_name);
         assert_eq!(defs[0].manifest.id.as_str(), "mcp:4:docs/11:search-docs");
         #[cfg(feature = "lashlang")]
         {
@@ -454,8 +486,13 @@ mod tests {
                     .expect("valid lashlang binding")
                     .expect("mcp tool has lashlang binding");
             assert_eq!(binding.module_path, vec!["docs".to_string()]);
-            assert_eq!(binding.operation.as_deref(), Some("search_docs"));
-            assert_eq!(binding.aliases, vec!["search-docs".to_string()]);
+            assert_eq!(
+                binding.operation.as_deref(),
+                expected_name
+                    .rsplit_once("__")
+                    .map(|(_, operation)| operation)
+            );
+            assert!(binding.aliases.is_empty());
         }
         // Whether the binding lands in the manifest is governed by
         // `lash-tool-support/lashlang`, not by this crate's own feature: our
@@ -474,14 +511,13 @@ mod tests {
             );
             assert_eq!(
                 recorded.get("operation"),
-                Some(&serde_json::json!("search_docs")),
+                expected_name
+                    .rsplit_once("__")
+                    .map(|(_, operation)| serde_json::json!(operation))
+                    .as_ref(),
                 "{recorded:?}"
             );
-            assert_eq!(
-                recorded.get("aliases"),
-                Some(&serde_json::json!(["search-docs"])),
-                "{recorded:?}"
-            );
+            assert!(recorded.get("aliases").is_none(), "{recorded:?}");
         }
         assert_eq!(
             defs[0]

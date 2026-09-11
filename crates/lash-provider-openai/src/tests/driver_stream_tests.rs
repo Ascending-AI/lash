@@ -10,6 +10,36 @@
 use super::*;
 use lash_llm_transport::{LlmByteStream, LlmHttpResponse, run_with_timeout};
 
+#[tokio::test]
+async fn unsuccessful_http_response_emits_no_response_establishment_marker() {
+    let transport = Arc::new(ScriptedHttpTransport {
+        responses: std::sync::Mutex::new(VecDeque::from([(
+            503,
+            vec![("content-type".to_string(), "application/json".to_string())],
+            r#"{"error":{"message":"unavailable"}}"#,
+        )])),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let mut provider =
+        OpenAiCompatibleProvider::new("key", "https://proxy.example/v1").with_transport(transport);
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let event_sink = Arc::clone(&events);
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.stream_events = Some(LlmEventSender::new(move |event| {
+        event_sink.lock_recover().push(event);
+    }));
+
+    provider
+        .complete(req)
+        .await
+        .expect_err("unsuccessful response is returned as an error");
+
+    assert!(
+        events.lock_recover().is_empty(),
+        "request serialization and an unsuccessful HTTP response cannot establish a response"
+    );
+}
+
 /// One scripted step of a response body: either bytes, or the transport-level
 /// failure that models a server hanging up mid-stream.
 #[derive(Debug)]
@@ -477,6 +507,19 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
             .iter()
             .any(|event| matches!(event, LlmStreamEvent::AttemptReset)),
         "a resumed generation keeps the existing stream accumulator"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    LlmStreamEvent::Evidence(evidence) if evidence.response_started
+                )
+            })
+            .count(),
+        1,
+        "reattachment preserves the original response establishment marker"
     );
     assert_eq!(
         *evidence_errors.lock_recover(),

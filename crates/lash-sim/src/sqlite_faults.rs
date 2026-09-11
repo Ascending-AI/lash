@@ -1,5 +1,6 @@
 use lash_sansio::SessionId;
 use std::collections::BTreeSet;
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,8 +9,10 @@ use lash_core::{
     OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionPolicy,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
-use lash_sqlite_store::testing::{SqliteFaultInjector, SqliteFaultObservation, SqliteFaultPoint};
-use serde::Serialize;
+use lash_sqlite_store::testing::{
+    SqliteFaultArm, SqliteFaultInjector, SqliteFaultObservation, SqliteFaultPoint,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const DEFAULT_SQLITE_FAULT_SEED_BASE: u64 = 0x0000_0000_0859_0000;
@@ -65,6 +68,7 @@ pub struct SqliteFaultProfileReport {
     pub status: &'static str,
     pub configured_seeds: Vec<u64>,
     pub scenarios: Vec<SqliteFaultScenarioReport>,
+    pub composition_witness: SqliteFaultCompositionWitness,
     pub coverage: SqliteFaultCoverage,
     #[serde(skip)]
     pub report_path: PathBuf,
@@ -76,6 +80,66 @@ pub struct SqliteFaultCoverage {
     pub exercised_scenarios: Vec<SqliteFaultScenarioKind>,
     pub dropped_scenarios: Vec<SqliteFaultScenarioKind>,
     pub bounded_prefix_commits_per_seed: &'static str,
+    pub bounded_composition_policy: &'static str,
+}
+
+/// Explicit multi-arm plan selected from one generated workload.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SqliteFaultCompositionPlan {
+    pub schema: String,
+    pub workload_seed: u64,
+    pub workload_profile: String,
+    pub workload_max_boundaries: usize,
+    pub workload_id: String,
+    pub selection_policy: String,
+    pub max_attempts: usize,
+    pub arms: Vec<GeneratedSqliteFaultArm>,
+}
+
+/// One injector arm and the generated boundary that selected it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct GeneratedSqliteFaultArm {
+    pub source_boundary_id: String,
+    pub arm: SqliteFaultArm,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SqliteFaultCompositionAttempt {
+    pub attempt: usize,
+    pub outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store_error_variant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub committed_head_revision: Option<u64>,
+    pub fired_observations: Vec<SqliteFaultObservation>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SqliteFaultCompositionRun {
+    pub label: String,
+    pub selected_arm_indices: Vec<usize>,
+    pub attempts: Vec<SqliteFaultCompositionAttempt>,
+    pub operation_failed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_class: Option<String>,
+    pub durable_prefix_revision: u64,
+    pub final_reopened_head_revision: u64,
+    pub injection_observations: Vec<SqliteFaultObservation>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SqliteFaultCompositionWitness {
+    pub schema: &'static str,
+    pub plan: SqliteFaultCompositionPlan,
+    pub zero_arm_control: SqliteFaultCompositionRun,
+    pub single_arm_controls: Vec<SqliteFaultCompositionRun>,
+    pub paired: SqliteFaultCompositionRun,
+    pub repeated_paired: SqliteFaultCompositionRun,
+    pub repeat_matches: bool,
+    pub oracle: SqliteFaultOracle,
+    pub replay_command: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,7 +154,7 @@ pub struct SqliteFaultScenarioReport {
     pub replay_command: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct SqliteFaultOracle {
     pub oracle_id: &'static str,
     pub status: &'static str,
@@ -177,22 +241,351 @@ pub async fn run_sqlite_fault_profile(
     if !dropped.is_empty() {
         eprintln!("SQLite substrate fault coverage dropped by configured seed bound: {dropped:?}");
     }
+    let composition_witness = run_composition_witness(artifact_root, seeds[0]).await?;
     let report_path = artifact_root.join("sqlite-faults.json");
     let report = SqliteFaultProfileReport {
-        schema: "lash.sim.sqlite-substrate-faults.v1",
+        schema: "lash.sim.sqlite-substrate-faults.v2",
         status: "passed",
         configured_seeds: seeds.to_vec(),
         scenarios,
+        composition_witness,
         coverage: SqliteFaultCoverage {
             complete_scenario_set: SqliteFaultScenarioKind::ALL.to_vec(),
             exercised_scenarios: exercised.into_iter().collect(),
             dropped_scenarios: dropped,
             bounded_prefix_commits_per_seed: "1..=8 selected deterministically by seed",
+            bounded_composition_policy: "zero arms, each single arm, both arms, and repeated both arms; at most two commit attempts per run",
         },
         report_path: report_path.clone(),
     };
     write_json(&report_path, &report)?;
     Ok(report)
+}
+
+fn generated_multi_arm_plan(seed: u64) -> Result<SqliteFaultCompositionPlan, String> {
+    const PROFILE: &str = "fast-random";
+    const MAX_BOUNDARIES: usize = 24;
+
+    let workload = crate::generator::generate_workload(seed, PROFILE, MAX_BOUNDARIES)
+        .map_err(|error| error.to_string())?;
+    let retryable = workload
+        .boundaries
+        .iter()
+        .find(|boundary| {
+            boundary.kind == crate::scheduler::BoundaryKind::BackendFailure
+                && boundary.payload.get("retryable").and_then(Value::as_bool) == Some(true)
+        })
+        .ok_or_else(|| {
+            "generated workload has no retryable backend-failure boundary".to_string()
+        })?;
+    let terminal = workload
+        .boundaries
+        .iter()
+        .find(|boundary| {
+            boundary.kind == crate::scheduler::BoundaryKind::BackendFailure
+                && boundary.payload.get("retryable").and_then(Value::as_bool) == Some(false)
+        })
+        .ok_or_else(|| "generated workload has no terminal backend-failure boundary".to_string())?;
+    let points = match workload.seed % 3 {
+        0 => [SqliteFaultPoint::AfterBegin, SqliteFaultPoint::BeforeCommit],
+        1 => [SqliteFaultPoint::AfterBegin, SqliteFaultPoint::CommitIo],
+        _ => [SqliteFaultPoint::BeforeCommit, SqliteFaultPoint::CommitIo],
+    };
+    let occurrence = NonZeroU64::new(1).expect("one is non-zero");
+    let arms = vec![
+        GeneratedSqliteFaultArm {
+            source_boundary_id: retryable.boundary_id.clone(),
+            arm: SqliteFaultArm::new(
+                seed ^ retryable.at.rotate_left(17) ^ 0x4649_4731_3135_3501,
+                points[0],
+                occurrence,
+            ),
+        },
+        GeneratedSqliteFaultArm {
+            source_boundary_id: terminal.boundary_id.clone(),
+            arm: SqliteFaultArm::new(
+                seed ^ terminal.at.rotate_left(17) ^ 0x4649_4731_3135_3502,
+                points[1],
+                occurrence,
+            ),
+        },
+    ];
+    Ok(SqliteFaultCompositionPlan {
+        schema: "lash.sim.sqlite-fault-plan.v1".to_string(),
+        workload_seed: seed,
+        workload_profile: PROFILE.to_string(),
+        workload_max_boundaries: MAX_BOUNDARIES,
+        workload_id: workload.workload_id,
+        selection_policy: "the generated workload seed selects one of the three ordered pairs of distinct transaction points; its first retryable and first terminal backend boundaries supply arm identities; both target their first reached occurrence".to_string(),
+        max_attempts: 2,
+        arms,
+    })
+}
+
+async fn run_composition_witness(
+    artifact_root: &Path,
+    seed: u64,
+) -> Result<SqliteFaultCompositionWitness, String> {
+    let plan = generated_multi_arm_plan(seed)?;
+    let zero_arm_control =
+        run_composition_case(artifact_root, &plan, "zero-arms", Vec::new()).await?;
+    let mut single_arm_controls = Vec::with_capacity(plan.arms.len());
+    for arm_index in 0..plan.arms.len() {
+        single_arm_controls.push(
+            run_composition_case(
+                artifact_root,
+                &plan,
+                &format!("single-arm-{arm_index}"),
+                vec![arm_index],
+            )
+            .await?,
+        );
+    }
+    let paired = run_composition_case(artifact_root, &plan, "paired", vec![0, 1]).await?;
+    let repeated_paired =
+        run_composition_case(artifact_root, &plan, "paired-repeat", vec![0, 1]).await?;
+    let repeat_matches = paired.selected_arm_indices == repeated_paired.selected_arm_indices
+        && paired.attempts == repeated_paired.attempts
+        && paired.operation_failed == repeated_paired.operation_failed
+        && paired.failure_class == repeated_paired.failure_class
+        && paired.durable_prefix_revision == repeated_paired.durable_prefix_revision
+        && paired.final_reopened_head_revision == repeated_paired.final_reopened_head_revision
+        && paired.injection_observations == repeated_paired.injection_observations;
+    let replay_command = format!(
+        "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
+        artifact_root.join("replay").display()
+    );
+    let mut witness = SqliteFaultCompositionWitness {
+        schema: "lash.sim.sqlite-fault-composition.v1",
+        plan,
+        zero_arm_control,
+        single_arm_controls,
+        paired,
+        repeated_paired,
+        repeat_matches,
+        oracle: SqliteFaultOracle {
+            oracle_id: "sim.oracle.sqlite-multi-arm-composition.v1",
+            status: "passed",
+            assertion: "the generated two-arm plan exhausts a two-attempt operation while zero-arm and either single-arm controls commit, and repeating the seed reproduces fired identities, order, and storage outcome",
+            evidence: Value::Null,
+        },
+        replay_command,
+    };
+    validate_composition_witness(&witness)?;
+    witness.oracle.evidence = json!({
+        "workload_seed": witness.plan.workload_seed,
+        "workload_id": witness.plan.workload_id,
+        "max_attempts": witness.plan.max_attempts,
+        "paired_failure_class": witness.paired.failure_class,
+        "paired_fired": witness.paired.injection_observations,
+        "paired_final_head_revision": witness.paired.final_reopened_head_revision,
+        "single_arm_final_head_revisions": witness
+            .single_arm_controls
+            .iter()
+            .map(|control| control.final_reopened_head_revision)
+            .collect::<Vec<_>>(),
+        "zero_arm_final_head_revision": witness.zero_arm_control.final_reopened_head_revision,
+        "repeat_matches": witness.repeat_matches,
+    });
+    Ok(witness)
+}
+
+async fn run_composition_case(
+    artifact_root: &Path,
+    plan: &SqliteFaultCompositionPlan,
+    label: &str,
+    selected_arm_indices: Vec<usize>,
+) -> Result<SqliteFaultCompositionRun, String> {
+    let case_root = artifact_root.join("composition").join(label);
+    if case_root.exists() {
+        std::fs::remove_dir_all(&case_root).map_err(|error| error.to_string())?;
+    }
+    std::fs::create_dir_all(&case_root).map_err(|error| error.to_string())?;
+    let injector = SqliteFaultInjector::default();
+    let factory: Arc<dyn SessionStoreFactory> = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(case_root.join("sqlite-store"))
+            .with_fault_injector(injector.clone()),
+    );
+    let session_id = SessionId::from(format!(
+        "lash-sim-composition-{:016x}-{label}",
+        plan.workload_seed
+    ));
+
+    // Creation and the durable prefix happen before arming so setup writes
+    // cannot consume an operation arm.
+    let store = create_store(Arc::clone(&factory), &session_id)
+        .await
+        .map_err(|failure| failure.reason)?;
+    let mut state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+    };
+    let prefix = stamped_commit(&state, "composition-prefix").map_err(|failure| failure.reason)?;
+    let prefix_result = store
+        .commit_runtime_state(prefix)
+        .await
+        .map_err(|error| error.to_string())?;
+    state.apply_persisted_commit_result(prefix_result);
+    let durable_prefix_revision = state.head_revision;
+    state.turn_index += 1;
+    let target = stamped_commit(&state, "composition-target").map_err(|failure| failure.reason)?;
+
+    let selected_arms = selected_arm_indices
+        .iter()
+        .map(|&index| {
+            plan.arms
+                .get(index)
+                .map(|planned| planned.arm)
+                .ok_or_else(|| format!("composition selected missing arm index {index}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    injector.arm_many(selected_arms);
+
+    let mut attempts = Vec::with_capacity(plan.max_attempts);
+    let mut operation_failed = true;
+    for attempt in 1..=plan.max_attempts {
+        let observations_before = injector.observations().len();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            store.commit_runtime_state(target.clone()),
+        )
+        .await
+        .map_err(|_| {
+            format!("composition case `{label}` attempt {attempt} hung for five seconds")
+        })?;
+        let observations = injector.observations();
+        let fired_observations = observations[observations_before..].to_vec();
+        match result {
+            Ok(result) => {
+                attempts.push(SqliteFaultCompositionAttempt {
+                    attempt,
+                    outcome: "committed".to_string(),
+                    store_error_variant: None,
+                    message: None,
+                    committed_head_revision: Some(result.head_revision),
+                    fired_observations,
+                });
+                operation_failed = false;
+                break;
+            }
+            Err(error @ StoreError::StorageFailure { .. }) => {
+                attempts.push(SqliteFaultCompositionAttempt {
+                    attempt,
+                    outcome: "storage_failure".to_string(),
+                    store_error_variant: Some(error.variant_name().to_string()),
+                    message: Some(error.to_string()),
+                    committed_head_revision: None,
+                    fired_observations,
+                });
+            }
+            Err(other) => {
+                return Err(format!(
+                    "composition case `{label}` attempt {attempt} returned non-storage error {other:?}"
+                ));
+            }
+        }
+    }
+    if !injector.remaining_arms().is_empty() {
+        return Err(format!(
+            "composition case `{label}` did not consume every selected arm: {:?}",
+            injector.remaining_arms()
+        ));
+    }
+
+    drop(store);
+    let reopened = open_store(factory, &session_id)
+        .await
+        .map_err(|failure| failure.reason)?;
+    let final_state = reopened
+        .load_session()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("composition case `{label}` lost the durable prefix"))?;
+    Ok(SqliteFaultCompositionRun {
+        label: label.to_string(),
+        selected_arm_indices,
+        attempts,
+        operation_failed,
+        failure_class: operation_failed.then(|| "retry_budget_exhausted".to_string()),
+        durable_prefix_revision,
+        final_reopened_head_revision: final_state.head_revision,
+        injection_observations: injector.observations(),
+    })
+}
+
+fn validate_composition_witness(witness: &SqliteFaultCompositionWitness) -> Result<(), String> {
+    if witness.plan.arms.len() != 2 || witness.plan.max_attempts != 2 {
+        return Err("composition witness requires exactly two arms and two attempts".to_string());
+    }
+    if witness.zero_arm_control.operation_failed
+        || witness.zero_arm_control.attempts.len() != 1
+        || witness.zero_arm_control.attempts[0].outcome != "committed"
+        || !witness.zero_arm_control.injection_observations.is_empty()
+        || witness.zero_arm_control.final_reopened_head_revision
+            != witness.zero_arm_control.durable_prefix_revision + 1
+    {
+        return Err("zero-arm control must commit on its first attempt".to_string());
+    }
+    if witness.single_arm_controls.len() != witness.plan.arms.len()
+        || witness
+            .single_arm_controls
+            .iter()
+            .enumerate()
+            .any(|(arm_index, control)| {
+                control.operation_failed
+                    || control.selected_arm_indices != [arm_index]
+                    || control.attempts.len() != 2
+                    || control.attempts[0].outcome != "storage_failure"
+                    || control.attempts[1].outcome != "committed"
+                    || control.injection_observations.len() != 1
+                    || !observation_matches_arm(
+                        &control.injection_observations[0],
+                        &witness.plan.arms[arm_index].arm,
+                    )
+                    || control.final_reopened_head_revision != control.durable_prefix_revision + 1
+            })
+    {
+        return Err("each single arm must fail once and commit on retry".to_string());
+    }
+    if !witness.paired.operation_failed
+        || witness.paired.failure_class.as_deref() != Some("retry_budget_exhausted")
+        || witness.paired.attempts.len() != witness.plan.max_attempts
+        || witness
+            .paired
+            .attempts
+            .iter()
+            .any(|attempt| attempt.outcome != "storage_failure")
+        || witness.paired.injection_observations.len() != witness.plan.arms.len()
+        || witness
+            .paired
+            .injection_observations
+            .iter()
+            .zip(&witness.plan.arms)
+            .enumerate()
+            .any(|(arm_index, (observation, planned))| {
+                observation.arm_index != arm_index
+                    || !observation_matches_arm(observation, &planned.arm)
+            })
+        || witness.paired.final_reopened_head_revision != witness.paired.durable_prefix_revision
+    {
+        return Err(
+            "paired arms must exhaust both attempts in plan order without publishing the operation"
+                .to_string(),
+        );
+    }
+    if !witness.repeat_matches {
+        return Err(
+            "repeating the same generated seed must reproduce arm order and storage outcome"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn observation_matches_arm(observation: &SqliteFaultObservation, arm: &SqliteFaultArm) -> bool {
+    observation.seed == arm.seed
+        && observation.point == arm.point
+        && observation.point_occurrence == arm.occurrence.get()
 }
 
 async fn run_seed(
@@ -506,6 +899,81 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_multi_arm_plan_round_trips_with_stable_identity_and_order() {
+        let plan = generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE)
+            .expect("generated multi-arm plan");
+        let repeated = generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE)
+            .expect("repeated generated multi-arm plan");
+        let encoded = serde_json::to_value(&plan).expect("encode plan");
+        let decoded: SqliteFaultCompositionPlan =
+            serde_json::from_value(encoded).expect("decode plan");
+
+        assert_eq!(decoded, plan);
+        assert_eq!(repeated, plan);
+        assert_eq!(plan.max_attempts, 2);
+        assert_eq!(plan.arms.len(), 2);
+        assert_eq!(plan.arms[0].arm.point, SqliteFaultPoint::AfterBegin);
+        assert_eq!(plan.arms[1].arm.point, SqliteFaultPoint::CommitIo);
+        assert_ne!(
+            plan.arms[0].source_boundary_id,
+            plan.arms[1].source_boundary_id
+        );
+
+        let schedules = (0..3)
+            .map(|offset| {
+                generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE + offset)
+                    .expect("generated multi-arm schedule")
+                    .arms
+                    .into_iter()
+                    .map(|planned| planned.arm.point)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            schedules,
+            vec![
+                vec![SqliteFaultPoint::AfterBegin, SqliteFaultPoint::CommitIo],
+                vec![SqliteFaultPoint::BeforeCommit, SqliteFaultPoint::CommitIo],
+                vec![SqliteFaultPoint::AfterBegin, SqliteFaultPoint::BeforeCommit,],
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn generated_two_arm_witness_requires_both_arms_to_exhaust_retry_budget() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let witness = run_composition_witness(tmp.path(), DEFAULT_SQLITE_FAULT_SEED_BASE)
+            .await
+            .expect("two-arm witness");
+
+        validate_composition_witness(&witness).expect("valid witness");
+        assert!(witness.paired.operation_failed);
+        assert_eq!(witness.paired.attempts.len(), witness.plan.max_attempts);
+        assert_eq!(witness.single_arm_controls.len(), witness.plan.arms.len());
+        assert!(
+            witness
+                .single_arm_controls
+                .iter()
+                .all(|control| !control.operation_failed)
+        );
+        assert!(!witness.zero_arm_control.operation_failed);
+        assert!(witness.repeat_matches);
+
+        let mut omitted_arm_witness = witness.clone();
+        omitted_arm_witness.paired = run_composition_case(
+            tmp.path(),
+            &witness.plan,
+            "paired-omitted-second-arm",
+            vec![0],
+        )
+        .await
+        .expect("real SQLite run with omitted second injector arm");
+        let error = validate_composition_witness(&omitted_arm_witness)
+            .expect_err("the oracle must reject a real run missing its second injector arm");
+        assert!(error.contains("paired arms must exhaust"), "{error}");
+    }
 
     #[tokio::test]
     async fn bounded_seed_set_covers_every_sqlite_fault_and_oracle() {

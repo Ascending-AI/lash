@@ -242,6 +242,12 @@ impl EmbedError {
     /// [`StoreCommitFailed`](lash_core::RuntimeErrorCode::StoreCommitFailed)
     /// stays `false`: the code does not distinguish transient store I/O from
     /// conflicts, so there is no typed signal that a retry is safe.
+    /// Direct and session-wrapped [`StoreError::Contended`](lash_core::StoreError::Contended)
+    /// are retryable for the same reason as the corresponding runtime code.
+    /// A selected queued-work drain refused by
+    /// [`SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy`] is likewise
+    /// safe to retry unchanged; the other refusal causes require the host to
+    /// reconsider the selection or input and remain unclassified.
     ///
     /// Provider failures never surface as `EmbedError` — a failed LLM call
     /// finishes the turn with `TurnOutcome::Stopped(ProviderError)` — so
@@ -251,7 +257,54 @@ impl EmbedError {
         match self {
             Self::Runtime(err) => err.is_retryable(),
             Self::Plugin(err) => err.is_retryable(),
-            _ => false,
+            Self::Store(lash_core::StoreError::Contended)
+            | Self::Session(SessionError::Store {
+                source: lash_core::StoreError::Contended,
+                ..
+            })
+            | Self::SelectedQueuedWorkDrainRefused {
+                cause: SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy,
+            } => true,
+            Self::SelectedQueuedWorkDrainRefused {
+                cause:
+                    SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether { .. }
+                    | SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
+                        ..
+                    }
+                    | SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow { .. },
+            }
+            | Self::MissingProtocolPlugin
+            | Self::MissingModelSpec
+            | Self::MissingTurnBudget
+            | Self::MissingEffectHost
+            | Self::MissingAttachmentStore
+            | Self::MissingProcessEnvStore
+            | Self::MissingCommitBudget
+            | Self::MissingQueuedWorkBatching
+            | Self::RuntimeHostConfigConflict { .. }
+            | Self::MissingQueuedWorkSource
+            | Self::NativeQueuedWorkRequiresStoreFactory
+            | Self::StoreFactory { .. }
+            | Self::SessionDeleteStorage { .. }
+            | Self::Store(_)
+            | Self::MissingSessionStore
+            | Self::StoreSessionMismatch { .. }
+            | Self::MissingProcessWorkerStoreFactory
+            | Self::ProcessRegistryRequiresStoreFactory
+            | Self::MissingProcessRegistry
+            | Self::ProcessExecutionConcurrency(_)
+            | Self::QueuedWorkExecutionConcurrency(_)
+            | Self::NativeSubstrateConfig(_)
+            | Self::SessionCatalogUnavailable { .. }
+            | Self::SessionDeleteProcess { .. }
+            | Self::SessionStillInUse
+            | Self::TraceFlush(_)
+            | Self::StaticTurnStreamRequiresStaticEffectHost
+            | Self::Session(_)
+            | Self::RemoteProtocol(_)
+            | Self::ProtocolTurnOptions(_)
+            | Self::DecodeProtocolTurnOptions(_)
+            | Self::Control(_) => false,
         }
     }
 
@@ -263,9 +316,9 @@ impl EmbedError {
     /// The terminal set includes:
     ///
     /// - builder/wiring variants of this enum (missing protocol plugin,
-    ///   model spec, effect host, stores, registries, handler context, and
-    ///   store/session mismatches) — the same call fails identically until
-    ///   the host changes its wiring;
+    ///   model spec, turn budget, effect host, stores, registries, handler
+    ///   context, and store/session mismatches) — the same call fails
+    ///   identically until the host changes its wiring;
     /// - typed runtime wiring, caller-invariant, unsupported-operation,
     ///   deterministic codec, and corrupt durable-state codes;
     /// - session provider-configuration errors (`ProviderMismatch`,
@@ -278,12 +331,14 @@ impl EmbedError {
     /// - direct or session-wrapped commit byte or node budget rejections, which
     ///   require the host to raise the configured limit or submit a smaller
     ///   commit;
-    /// - session-wrapped checkpoint codec mismatches and record-encoding
-    ///   failures, which are deterministic for the same store and build.
+    /// - direct or session-wrapped checkpoint codec mismatches and
+    ///   record-encoding failures, which are deterministic for the same store
+    ///   and build.
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
             | Self::MissingModelSpec
+            | Self::MissingTurnBudget
             | Self::MissingEffectHost
             | Self::MissingAttachmentStore
             | Self::MissingProcessEnvStore
@@ -301,31 +356,47 @@ impl EmbedError {
             | Self::MissingSessionStore
             | Self::SessionCatalogUnavailable { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
-            Self::Store(
-                lash_core::StoreError::SessionDeleted { .. }
-                | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
-                | lash_core::StoreError::CommitByteBudgetExceeded { .. },
-            ) => true,
+            Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),
             Self::Plugin(err) => err.is_terminal(),
-            Self::Session(err) => matches!(
-                err,
-                SessionError::ProviderMismatch { .. }
-                    | SessionError::ProviderUnconfigured { .. }
-                    | SessionError::ProviderUnavailable { .. }
-                    | SessionError::CodeExecutionUnavailable
-                    | SessionError::Store {
-                        source: lash_core::StoreError::SessionDeleted { .. }
-                            | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
-                            | lash_core::StoreError::CommitByteBudgetExceeded { .. }
-                            | lash_core::StoreError::CheckpointComponentEncodingVersionMismatch { .. }
-                            | lash_core::StoreError::RecordEncodingFailed { .. },
+            Self::Session(SessionError::ProviderMismatch { .. })
+            | Self::Session(SessionError::ProviderUnconfigured { .. })
+            | Self::Session(SessionError::ProviderUnavailable { .. })
+            | Self::Session(SessionError::CodeExecutionUnavailable) => true,
+            Self::Session(SessionError::Store { source, .. }) => store_error_is_terminal(source),
+            Self::StoreFactory { .. }
+            | Self::SessionDeleteStorage { .. }
+            | Self::SessionDeleteProcess { .. }
+            | Self::SessionStillInUse
+            | Self::TraceFlush(_)
+            | Self::SelectedQueuedWorkDrainRefused {
+                cause:
+                    SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether { .. }
+                    | SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
                         ..
                     }
-            ),
-            _ => false,
+                    | SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
+                    | SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow { .. },
+            }
+            | Self::RemoteProtocol(_)
+            | Self::ProtocolTurnOptions(_)
+            | Self::DecodeProtocolTurnOptions(_)
+            | Self::Control(_)
+            | Self::NativeSubstrateConfig(_)
+            | Self::Session(_) => false,
         }
     }
+}
+
+fn store_error_is_terminal(error: &lash_core::StoreError) -> bool {
+    matches!(
+        error,
+        lash_core::StoreError::SessionDeleted { .. }
+            | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
+            | lash_core::StoreError::CommitByteBudgetExceeded { .. }
+            | lash_core::StoreError::CheckpointComponentEncodingVersionMismatch { .. }
+            | lash_core::StoreError::RecordEncodingFailed { .. }
+    )
 }
 
 /// Result type returned by Lash facade operations.
@@ -333,7 +404,7 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 
 #[cfg(test)]
 mod tests {
-    use super::EmbedError;
+    use super::{EmbedError, SelectedQueuedWorkDrainRefusalCause};
     use crate::runtime::{QueuedWorkRunError, QueuedWorkRunErrorClass};
     use lash_core::{
         PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
@@ -394,9 +465,22 @@ mod tests {
 
     #[test]
     fn store_commit_contended_is_retryable_and_not_terminal() {
-        let err = runtime_error(RuntimeErrorCode::StoreCommitContended);
-        assert!(err.is_retryable(), "{err}");
-        assert!(!err.is_terminal(), "{err}");
+        let errors = [
+            runtime_error(RuntimeErrorCode::StoreCommitContended),
+            EmbedError::Store(StoreError::Contended),
+            EmbedError::Session(SessionError::Store {
+                context: "failed to park a contended session".to_string(),
+                source: StoreError::Contended,
+            }),
+            EmbedError::Plugin(PluginError::RuntimeEffectController(
+                RuntimeEffectControllerError::from(StoreError::Contended),
+            )),
+        ];
+
+        for error in errors {
+            assert!(error.is_retryable(), "{error}");
+            assert!(!error.is_terminal(), "{error}");
+        }
     }
 
     #[test]
@@ -433,6 +517,7 @@ mod tests {
     fn wiring_errors_are_terminal_and_not_retryable() {
         for err in [
             EmbedError::MissingProtocolPlugin,
+            EmbedError::MissingTurnBudget,
             EmbedError::MissingEffectHost,
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),
         ] {
@@ -499,10 +584,113 @@ mod tests {
                 source,
             })
         });
+        let direct_errors = [
+            StoreError::CheckpointComponentEncodingVersionMismatch {
+                key: "execution_state".to_string(),
+                actual: 2,
+                expected: 1,
+            },
+            StoreError::RecordEncodingFailed {
+                record_kind: "checkpoint root".to_string(),
+                message: "deterministic fixture failure".to_string(),
+            },
+        ]
+        .map(EmbedError::Store);
+        let plugin_errors = [
+            StoreError::CheckpointComponentEncodingVersionMismatch {
+                key: "execution_state".to_string(),
+                actual: 2,
+                expected: 1,
+            },
+            StoreError::RecordEncodingFailed {
+                record_kind: "checkpoint root".to_string(),
+                message: "deterministic fixture failure".to_string(),
+            },
+        ]
+        .map(|source| {
+            EmbedError::Plugin(PluginError::RuntimeEffectController(
+                RuntimeEffectControllerError::from(source),
+            ))
+        });
 
-        for error in runtime_errors.into_iter().chain(session_errors) {
+        for error in runtime_errors
+            .into_iter()
+            .chain(direct_errors)
+            .chain(session_errors)
+            .chain(plugin_errors)
+        {
             assert!(error.is_terminal(), "{error}");
             assert!(!error.is_retryable(), "{error}");
+        }
+    }
+
+    #[test]
+    fn selected_queued_work_drain_refusals_are_classified_per_cause() {
+        let cases = [
+            (
+                SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
+                    unclaimed_batch_ids: vec!["unclaimable".to_string()],
+                },
+                false,
+                false,
+            ),
+            (
+                SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
+                    required_batch_ids: vec!["interrupted".to_string()],
+                },
+                false,
+                false,
+            ),
+            (
+                SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy,
+                true,
+                false,
+            ),
+            (
+                SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
+                    batch_id: "oversized".to_string(),
+                    batch_enqueue_seq: 7,
+                    required_context_tokens: 9,
+                    max_context_tokens: 8,
+                },
+                false,
+                false,
+            ),
+        ];
+
+        for (cause, retryable, terminal) in cases {
+            let error = EmbedError::SelectedQueuedWorkDrainRefused { cause };
+            assert_eq!(error.is_retryable(), retryable, "{error}");
+            assert_eq!(error.is_terminal(), terminal, "{error}");
+        }
+    }
+
+    #[test]
+    fn superseded_commits_require_reload_across_every_host_shape() {
+        let errors = [
+            runtime_error(RuntimeErrorCode::StoreCommitSuperseded),
+            EmbedError::Store(StoreError::HeadRevisionConflict {
+                expected: 7,
+                actual: 8,
+            }),
+            EmbedError::Session(SessionError::Store {
+                context: "failed to park a superseded session".to_string(),
+                source: StoreError::HeadRevisionConflict {
+                    expected: 7,
+                    actual: 8,
+                },
+            }),
+            EmbedError::Plugin(PluginError::RuntimeEffectController(
+                RuntimeEffectControllerError::from(StoreError::HeadRevisionConflict {
+                    expected: 7,
+                    actual: 8,
+                }),
+            )),
+        ];
+
+        for error in errors {
+            assert!(!error.is_retryable(), "{error}");
+            assert!(!error.is_terminal(), "{error}");
         }
     }
 

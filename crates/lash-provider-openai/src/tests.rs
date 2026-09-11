@@ -17,6 +17,7 @@ mod attachment_tests;
 #[cfg(feature = "testing")]
 pub(crate) mod conformance;
 mod driver_stream_tests;
+mod empty_completion_tests;
 mod error_classification_tests;
 mod generation_tests;
 mod openrouter_execution_evidence_tests;
@@ -474,15 +475,15 @@ async fn response_metadata_captures_only_allowlisted_headers() {
         json!("0.000008")
     );
     assert!(!response.response_metadata.contains_key("header:set-cookie"));
-    assert!(events.lock_recover().iter().any(|event| {
-        matches!(
-            event,
-            lash_core::llm::types::LlmStreamEvent::Evidence(evidence)
-                if evidence.response_metadata.get("header:x-opper-cost")
+    let events = events.lock_recover();
+    assert!(matches!(
+        events.first(),
+        Some(lash_core::llm::types::LlmStreamEvent::Evidence(evidence))
+            if evidence.response_started
+                && evidence.response_metadata.get("header:x-opper-cost")
                     == Some(&json!("0.000008"))
-                    && !evidence.response_metadata.contains_key("header:set-cookie")
-        )
-    }));
+                && !evidence.response_metadata.contains_key("header:set-cookie")
+    ));
 }
 
 #[tokio::test]
@@ -1015,27 +1016,6 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
     assert!(body["tools"][0].get("cache_control").is_none());
     assert_eq!(count_object_key(&body, "ttl"), 0);
     assert_eq!(count_object_key(&body, "__lash_cache_breakpoint"), 0);
-}
-
-#[test]
-fn gemini_cache_dialect_falls_back_to_last_message_text() {
-    let mut req = request_with_instructions(
-        "stable system prompt",
-        vec![LlmMessage::text(LlmRole::User, "last stable text")],
-    );
-    req.model = "custom/model-v1".to_string();
-    enable_cache_control(&mut req, CacheControlDialect::Gemini);
-
-    let body = openrouter_provider()
-        .build_chat_request_body(&req, true)
-        .unwrap();
-
-    assert_eq!(count_object_key(&body, "cache_control"), 1);
-    assert_eq!(
-        body["messages"][1]["content"][0]["cache_control"],
-        json!({ "type": "ephemeral" })
-    );
-    assert!(body["messages"][0]["content"].is_array());
 }
 
 #[test]
@@ -2472,16 +2452,20 @@ fn generation_disposition_reports_what_each_dialect_carried() {
     req.generation.seed = Some(7);
 
     // Chat Completions carries both sampling controls.
-    let chat = provider.build_chat_request_body(&req, false).unwrap();
-    let chat = generation_disposition(&req, &chat);
+    let (chat, chat_diagnostics) = provider
+        .build_chat_request_body_with_diagnostics(&req, false)
+        .unwrap();
+    let chat = generation_disposition(&req, &chat, chat_diagnostics.cache_control_emitted);
     assert_eq!((chat.temperature, chat.seed), (Applied, Applied));
     assert_eq!(chat.cache, Applied);
     assert!(chat.nothing_omitted());
 
     // Responses has no seed field, so a repeatability request is dropped —
     // silently on the wire, but not in the report.
-    let responses = provider.build_responses_request_body(&req, false).unwrap();
-    let responses = generation_disposition(&req, &responses);
+    let (responses, responses_cache_emitted) = provider
+        .build_responses_request_body_with_cache_evidence(&req, false)
+        .unwrap();
+    let responses = generation_disposition(&req, &responses, responses_cache_emitted);
     assert_eq!(
         (responses.temperature, responses.seed),
         (Applied, OmittedUnsupported)
@@ -2489,12 +2473,17 @@ fn generation_disposition_reports_what_each_dialect_carried() {
     assert!(!responses.nothing_omitted());
 
     let direct = OpenAiProvider::new("key");
-    let direct_body = direct.build_responses_request_body(&req, false).unwrap();
+    let (direct_body, direct_cache_emitted) = direct
+        .build_responses_request_body_with_cache_evidence(&req, false)
+        .unwrap();
     assert_eq!(
-        generation_disposition(&req, &direct_body).cache,
+        generation_disposition(&req, &direct_body, direct_cache_emitted).cache,
         Applied,
         "OpenAI Responses carries prompt-cache intent via prompt_cache_key"
     );
 }
+
+#[path = "tests/cache_emission_tests.rs"]
+mod cache_emission_tests;
 
 mod epilogue;

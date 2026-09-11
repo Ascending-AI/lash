@@ -221,7 +221,7 @@ pub(crate) async fn assert_queued_turn_sync_cancelled(scenario: &LiveRestateCron
 }
 
 fn rotate_cron_session_out_of_current(state: &AppState) -> SessionId {
-    let cron_session_id = SessionId::from(state.current_session_id());
+    let cron_session_id = state.current_session_id();
     let (rotated_session_id, new_current_session_id) = state.sessions.rotate();
     assert_eq!(rotated_session_id, cron_session_id);
     assert_ne!(new_current_session_id, cron_session_id);

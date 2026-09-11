@@ -21,13 +21,11 @@ pub(crate) async fn enqueue_turn_input(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
         })?;
     let ingress = match request.ingress {
         TurnInputIngressRequest::ActiveTurn => {
-            let active = state
-                .active_turns
-                .for_session(&SessionId::from(session_id.clone()));
+            let active = state.active_turns.for_session(&session_id);
             let [address] = active.as_slice() else {
                 return Err(AppError::conflict(
                     "inject now requires exactly one running turn",
@@ -42,7 +40,7 @@ pub(crate) async fn enqueue_turn_input(
     };
     let receipt = admit_turn_input(
         &state,
-        &SessionId::from(session_id.clone()),
+        &session_id,
         text.clone(),
         lash::TurnInput::text(text),
         ingress,
@@ -61,7 +59,7 @@ pub(crate) async fn admit_queued_send(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
         })?;
     let mut input = lash::TurnInput::text(text.clone());
     if let Some(attachment_bytes) = attachment_bytes {

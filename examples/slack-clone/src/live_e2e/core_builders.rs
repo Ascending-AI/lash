@@ -8,10 +8,13 @@ use lash::provider::{
     CacheControlDialect, ModelCapability, ProviderHandle, ProviderOptions, ProviderReliability,
     ReasoningCapability, ReasoningEncoding, ReasoningSelection, SamplingCapability,
 };
-use lash::{LashCore, ModelSpec};
+use lash::tools::ToolProvider;
+use lash::tracing::{JsonlTraceSink, TraceLevel};
+use lash::{LashCore, ModelSpec, PromptLayerSink as _};
 use lash_provider_openai::{
     OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider, ProviderRoutingPrefs,
 };
+use uuid::Uuid;
 
 use super::{
     Config, DEFAULT_RLM_MODEL, DEFAULT_STANDARD_MODEL, MAX_MODEL_TURNS_PER_SESSION_TURN,
@@ -96,6 +99,7 @@ pub(super) fn standard_core(
     instructions: &str,
     tools: Option<Arc<dyn ToolProvider>>,
     trace_path: PathBuf,
+    shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
 ) -> Result<LashCore> {
     let mut builder = LashCore::standard_builder(lash::TurnBudget::bounded(turn_budget))
         .without_queued_work()
@@ -104,6 +108,9 @@ pub(super) fn standard_core(
         .generation(generation(output_cap))
         .instructions(instructions)
         .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -114,6 +121,14 @@ pub(super) fn standard_core(
         .trace_level(TraceLevel::Extended);
     if let Some(tools) = tools {
         builder = builder.tools(tools);
+    }
+    if let Some(marker) = super::shutdown_marker::factory_from_env("slack-clone-live-e2e")
+        .map_err(anyhow::Error::msg)?
+    {
+        builder = builder.plugin(marker);
+    }
+    if let Some(witness) = shutdown_witness {
+        builder = builder.plugin(witness);
     }
     builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -140,7 +155,7 @@ pub(super) fn rlm_core(
             .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    LashCore::rlm_builder(
+    let mut builder = LashCore::rlm_builder(
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
         factory,
     )
@@ -153,6 +168,9 @@ pub(super) fn rlm_core(
     .effect_host(Arc::new(
         lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
     ))
+    .store_factory(Arc::new(
+        lash::persistence::InMemorySessionStoreFactory::new(),
+    ))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
     .process_env_store(Arc::new(
         lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -160,10 +178,16 @@ pub(super) fn rlm_core(
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(Arc::new(JsonlTraceSink::new(trace_path)))
-    .trace_level(TraceLevel::Extended)
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "slack-clone-live-rlm",
-        Uuid::new_v4().to_string(),
-    ))
-    .context("build RLM live-E2E core")
+    .trace_level(TraceLevel::Extended);
+    if let Some(marker) = super::shutdown_marker::factory_from_env("slack-clone-live-e2e")
+        .map_err(anyhow::Error::msg)?
+    {
+        builder = builder.plugin(marker);
+    }
+    builder
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "slack-clone-live-rlm",
+            Uuid::new_v4().to_string(),
+        ))
+        .context("build RLM live-E2E core")
 }

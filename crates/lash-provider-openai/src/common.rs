@@ -56,6 +56,28 @@ pub(crate) fn has_response_content(parts: &[lash_core::llm::types::LlmOutputPart
     })
 }
 
+/// Whether a contentless response is still missing the evidence needed to
+/// classify it. A normal stop is valid only when the wire carried an explicit
+/// successful terminal status; compatibility EOF tolerance must not manufacture success
+/// from an empty, unterminated stream. The other terminal outcomes already
+/// carry their own distinct semantics even when they contain no output.
+pub(crate) fn invalid_empty_response(
+    parts: &[lash_core::llm::types::LlmOutputPart],
+    terminal_reason: lash_core::llm::types::LlmTerminalReason,
+    normal_completion_seen: bool,
+) -> bool {
+    if has_response_content(parts) {
+        return false;
+    }
+    match terminal_reason {
+        lash_core::llm::types::LlmTerminalReason::Stop => !normal_completion_seen,
+        lash_core::llm::types::LlmTerminalReason::OutputLimit
+        | lash_core::llm::types::LlmTerminalReason::ContentFilter
+        | lash_core::llm::types::LlmTerminalReason::Cancelled => false,
+        _ => true,
+    }
+}
+
 pub(crate) fn empty_response_error(raw: String) -> lash_core::llm::transport::LlmTransportError {
     empty_response_diagnostic(crate::request_work::body_excerpt(&raw))
 }
@@ -72,15 +94,16 @@ pub(crate) fn empty_response_diagnostic(
 /// Which of the caller's generation options an assembled OpenAI-compatible
 /// body carries.
 ///
-/// The body is the evidence, so the record cannot drift from what was sent:
-/// a compat profile that omits the token-cap field, a dialect without a seed or
-/// stop field (Responses, Codex), and Codex declining sampling controls all
-/// look the same on the wire — the key is simply absent. None of these
-/// endpoints drops a control because sampling is pinned; that is an
+/// Ordinary generation controls are read from the body, so their record cannot
+/// drift from what was sent. Prompt-cache evidence is supplied separately by
+/// the builder branch that emitted the adapter's dialect; body-wide scans would
+/// mistake host tool-schema properties for provider request controls. None of
+/// these endpoints drops a control because sampling is pinned; that is an
 /// Anthropic-only fact.
 pub(crate) fn generation_disposition(
     request: &LlmRequest,
     body: &Value,
+    cache_control_emitted: bool,
 ) -> lash_core::llm::types::GenerationReceipt {
     use lash_core::llm::types::{GenerationOptionOutcome, GenerationReceipt};
 
@@ -109,7 +132,7 @@ pub(crate) fn generation_disposition(
             !request.generation.stop_sequences.is_empty(),
             body.get("stop").is_some() || body.get("stop_sequences").is_some(),
         ),
-        cache: lash_llm_transport::cache_intent_disposition(request, Some(body)),
+        cache: lash_llm_transport::cache_intent_disposition(request, cache_control_emitted),
     }
 }
 

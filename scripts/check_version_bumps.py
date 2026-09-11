@@ -114,6 +114,10 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-2360: the reviewed version fence replaces derived decoding while
+    # preserving version-2 serialization and current-format input semantics.
+    # Both HARD review scopes confirmed exact JSON/MessagePack output parity.
+    'crates/lash-core/src/runtime/process/model.rs:PROCESS_LEASE_SCHEMA_VERSION': 'sha256:b8ae30a35110ff90e730de2de77f97489b8ff82f3482a5e4ddc3fab1568e674e',
 
     # FIG-1102: the workbench include! splice became real modules, so every
     # item in state.rs gained pub(crate) and one line was rewrapped. Serde

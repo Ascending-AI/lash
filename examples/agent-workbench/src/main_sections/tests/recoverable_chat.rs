@@ -408,7 +408,7 @@ fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
     run_async_test_on_stack_budget("retired-session-reset-cron-cancel-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
         let error = crate::restate::cancel_cron_jobs_for_session(&state, &session_id, "reset")
@@ -448,7 +448,7 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
             None,
         )
         .await;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         trigger_store.retire_on_next_list(&session_id);
 
         let error =
@@ -491,7 +491,7 @@ fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
             Some(queued_work_driver),
         )
         .await;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retiring_run_handle.retire_on_next_run(&session_id);
 
         let error = enqueue_tool_catalog_refresh(&state, "close_retirement_race")
@@ -509,7 +509,7 @@ fn retired_session_admission_precedes_attachment_reads_and_submission() {
         let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         state.restate_ingress_url = restate_ingress_url;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
         let error = send_turn(
@@ -545,7 +545,7 @@ fn observing_a_retired_session_returns_the_typed_conflict() {
     run_async_test_on_stack_budget("retired-session-observations-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
         let error = session_observations(
@@ -567,7 +567,7 @@ fn enqueuing_turn_input_to_a_retired_session_returns_the_typed_conflict() {
     run_async_test_on_stack_budget("retired-session-turn-input-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
         let error = enqueue_turn_input(
@@ -592,7 +592,7 @@ fn retired_session_cancel_and_tool_refresh_return_the_typed_conflict() {
     run_async_test_on_stack_budget("retired-session-secondary-surfaces-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
         let cancel_error = state
@@ -615,7 +615,7 @@ fn retired_session_http_refusals_record_structured_admission_evidence() {
         let trace_path = data_dir.path().join("refusals.jsonl");
         let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
         state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
         let state_error = app_state(
@@ -737,7 +737,7 @@ fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal() {
     run_async_test_on_stack_budget("retired-session-settlement-callers-test", || async {
         let data_dir = tempfile::tempdir().expect("tempdir");
         let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-        let session_id = SessionId::from(state.current_session_id());
+        let session_id = state.current_session_id();
         retire_workbench_session(&state, &session_id).await;
 
         type TerminalizeResult = Result<Result<(), AppError>, Box<dyn std::any::Any + Send>>;
@@ -1290,7 +1290,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
 async fn product_event_route_lag_emits_durable_ordered_resync() {
     let data_dir = tempfile::tempdir().expect("workbench lag tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 1).await;
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let response = session_events(
         State(state.clone()),
         Query(ProductEventsQuery {
@@ -1353,7 +1353,7 @@ async fn product_event_route_lag_emits_durable_ordered_resync() {
 async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_log() {
     let data_dir = tempfile::tempdir().expect("workbench state merge tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let session = state
         .core
         .session(session_id.clone())
@@ -1414,7 +1414,7 @@ async fn workbench_state_snapshot_merges_canonical_history_with_partial_product_
 async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_reconciled() {
     let data_dir = tempfile::tempdir().expect("single user row tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig972";
 
     // What `send_turn` publishes: the workbench's own optimistic row for a turn
@@ -1608,7 +1608,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
     let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     state.event_tx = SessionEventRegistry::persistent(product_events_path.clone(), 16)
         .expect("open persistent product event registry");
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
 
     let first_turn_id = "workbench-turn-before-continue-as";
     let first_prompt = "first submitted row";
@@ -1819,7 +1819,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
 async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill() {
     let data_dir = tempfile::tempdir().expect("attachment backfill tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig994";
     let attachment = lash::attachments::AttachmentRef {
         id: lash::attachments::AttachmentId::parse("sha256:fig994-backfill")
@@ -1932,7 +1932,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     let active_turns_path = data_dir.path().join("active-turns.json");
     state.active_turns =
         ActiveTurns::persistent(active_turns_path.clone()).expect("persistent active turns");
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let turn_id = "workbench-turn-fig994-replay";
     let attachment = lash::attachments::AttachmentRef {
         id: lash::attachments::AttachmentId::parse("sha256:fig994-replay")
@@ -2005,7 +2005,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
 async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     let data_dir = tempfile::tempdir().expect("committed attachment snapshot tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let attachment = lash::attachments::AttachmentRef {
         id: lash::attachments::AttachmentId::parse("sha256:fig994-committed")
             .expect("valid attachment id"),
@@ -2148,7 +2148,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
     let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let turn_text = "exercise the user-facing send path";
 
     let _ = send_turn(
@@ -2226,7 +2226,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(state.current_session_id()),
+            session_id: state.current_session_id(),
             relation: lash::persistence::SessionRelation::Root,
             policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
         })
@@ -2343,7 +2343,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
 async fn workbench_settled_turn_cancels_preserve_execution_done() {
     let data_dir = tempfile::tempdir().expect("workbench cancel identity tempdir");
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let session = state
         .core
         .session(session_id.clone())
@@ -2394,7 +2394,7 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
     let mut state = recoverable_chat_test_state(data_dir.path(), 4).await;
     state.event_tx =
         SessionEventRegistry::persistent(path.clone(), 4).expect("persistent product events");
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let session = state
         .core
         .session(session_id.clone())

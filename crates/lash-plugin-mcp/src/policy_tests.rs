@@ -16,6 +16,10 @@ use super::*;
 #[path = "policy_script.rs"]
 mod scripted;
 
+fn mcp_name(server: &str, native_tool: &str) -> String {
+    crate::naming::build_prefixed_name(server, native_tool).0
+}
+
 pub(super) struct ActorPauseHook {
     pub(super) reached: tokio::sync::Notify,
     pub(super) release: tokio::sync::Notify,
@@ -248,8 +252,9 @@ async fn connect_mock(root: &Path, options: MockOptions) -> Arc<McpConnectionPoo
 }
 
 async fn call(pool: &McpConnectionPool) -> ToolOutcome {
+    let name = mcp_name("mock", "work");
     pool.call_tool(
-        "mcp__mock__work",
+        &name,
         &json!({}),
         &lash_core::testing::mock_attempt_context(),
     )
@@ -766,7 +771,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>(),
-        ["mcp__mock__generation_2"]
+        [mcp_name("mock", "generation-2")]
     );
     pool.shutdown_all().await;
 }
@@ -2018,7 +2023,7 @@ async fn discovery_publishes_received_catalog_before_observing_same_burst_quit()
             .into_iter()
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>(),
-        ["mcp__mock__work"]
+        [mcp_name("mock", "work")]
     );
     pool.shutdown_all().await;
 }
@@ -2070,6 +2075,253 @@ async fn service_quit_records_cause_before_close_ignoring_child_cleanup() {
         None,
         "shutdown_all must fully reap stdio child PID {pid}"
     );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn probe_loop_observes_waiting_reason_and_reaps() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
+    let root = tempfile::tempdir().unwrap();
+    let (pool, mut mock) = scripted::Mock::connect(
+        root.path(),
+        MockOptions {
+            behavior: "silent_ping_ignore_eof",
+            probe_interval_ms: 10,
+            probe_timeout_ms: 5_000,
+            reconnect_initial_ms: 5_000,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
+    let reconnect_scheduled = Arc::new(tokio::sync::Notify::new());
+    let observed_ceilings = Arc::new(Mutex::new(Vec::new()));
+    *current_entry.reconnect_jitter.write_recover() = {
+        let reconnect_scheduled = Arc::clone(&reconnect_scheduled);
+        let observed_ceilings = Arc::clone(&observed_ceilings);
+        Arc::new(move |ceiling| {
+            observed_ceilings.lock_recover().push(ceiling);
+            reconnect_scheduled.notify_one();
+            ceiling
+        })
+    };
+    let pid = current_entry.active_pid.load(Ordering::SeqCst);
+    tokio::time::advance(Duration::from_millis(11)).await;
+    mock.event("ping").await;
+
+    mock.command("close").await;
+    let (reaping, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert!(
+        current_entry.service_snapshot().is_none(),
+        "service quit while the probe is pending must unpublish its generation"
+    );
+    assert_eq!(
+        current_entry.last_error.read_recover().as_deref(),
+        Some("MCP server `mock` service quit: Ok(Closed)"),
+        "the probe loop must retain the same quit cause as the outer connected loop"
+    );
+    assert!(
+        alive(pid),
+        "the actor must retain the close-ignoring child during bounded cleanup"
+    );
+
+    clock.expire(deadline).await;
+    lifecycle.kill_issued(pid).await;
+    lifecycle.reaped(pid).await;
+    reconnect_scheduled.notified().await;
+    assert_eq!(
+        *observed_ceilings.lock_recover(),
+        [Duration::from_millis(5_000)],
+        "a probe-loop service quit returns Disconnected and schedules the ordinary reconnect"
+    );
+    assert_eq!(process_state(pid), None);
+    pool.shutdown_all().await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn probe_loop_observes_healthy_dwell_and_resets_reconnect_backoff() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
+    let root = tempfile::tempdir().unwrap();
+    let (pool, mut mock) = scripted::Mock::connect(
+        root.path(),
+        MockOptions {
+            behavior: "silent_ping_ignore_eof",
+            probe_interval_ms: 10,
+            probe_timeout_ms: 5_000,
+            reconnect_initial_ms: 10,
+            reconnect_max_ms: Some(80),
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let current_entry = entry(&pool);
+    lifecycle.observe(&current_entry);
+    let reconnect_scheduled = Arc::new(tokio::sync::Notify::new());
+    let observed_ceilings = Arc::new(Mutex::new(Vec::new()));
+    *current_entry.reconnect_jitter.write_recover() = {
+        let reconnect_scheduled = Arc::clone(&reconnect_scheduled);
+        let observed_ceilings = Arc::clone(&observed_ceilings);
+        Arc::new(move |ceiling| {
+            observed_ceilings.lock_recover().push(ceiling);
+            reconnect_scheduled.notify_one();
+            Duration::ZERO
+        })
+    };
+
+    assert!(current_entry.mark_disconnected("prime reconnect backoff".to_string(), 1));
+    let (first_pid, first_deadline) = lifecycle.grace_armed().await;
+    clock.expire(first_deadline).await;
+    lifecycle.kill_issued(first_pid).await;
+    lifecycle.reaped(first_pid).await;
+    reconnect_scheduled.notified().await;
+    tokio::time::advance(scripted::TIMER_TICK).await;
+    mock.reconnected().await;
+    published_generation(&current_entry, 2).await;
+    assert_eq!(
+        *observed_ceilings.lock_recover(),
+        [Duration::from_millis(10)],
+        "the first reconnect must advance the actor's internal backoff to 20ms"
+    );
+
+    current_entry
+        .establish()
+        .await
+        .expect("actor command barrier after generation 2 publication");
+    tokio::time::advance(Duration::from_millis(11)).await;
+    mock.event("ping").await;
+
+    // Make the healthy deadline and several commands ready together. The
+    // one-shot healthy transition must win before command traffic can end the
+    // generation, while stale timeout replies retain their established shape.
+    let probe_hook = Arc::new(ActorPauseHook::default());
+    *current_entry.probe_select_hook.write_recover() = Some(Arc::clone(&probe_hook));
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::CallSucceeded { generation: 2 })
+        .expect("wake the pending probe for its test rendezvous");
+    probe_hook.reached.notified().await;
+    tokio::time::advance(Duration::from_millis(81)).await;
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::CallSucceeded { generation: 2 })
+        .expect("queue matching success observation");
+    let (stale_reply, stale_result) = tokio::sync::oneshot::channel();
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::CallTimedOut {
+            generation: 1,
+            reply: stale_reply,
+        })
+        .expect("queue stale timeout observation");
+    assert!(current_entry.mark_disconnected(
+        "observe reconnect ceiling after healthy dwell".to_string(),
+        2,
+    ));
+    probe_hook.release.notify_one();
+    assert_eq!(stale_result.await.expect("stale timeout reply"), None);
+    let (second_pid, second_deadline) = lifecycle.grace_armed().await;
+    clock.expire(second_deadline).await;
+    lifecycle.kill_issued(second_pid).await;
+    lifecycle.reaped(second_pid).await;
+    reconnect_scheduled.notified().await;
+    assert_eq!(
+        *observed_ceilings.lock_recover(),
+        [Duration::from_millis(10), Duration::from_millis(10)],
+        "healthy dwell inside the pending probe must reset reconnect backoff to its initial value"
+    );
+    pool.shutdown_all().await;
+
+    // A normally answered interval probe completes and retains its published
+    // generation before a later disconnect.
+    let answered_root = tempfile::tempdir().unwrap();
+    let answered_pool = connect_mock(
+        answered_root.path(),
+        MockOptions {
+            behavior: "silent_ping",
+            probe_interval_ms: 10,
+            probe_timeout_ms: 5_000,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let answered_entry = entry(&answered_pool);
+    tokio::time::advance(Duration::from_millis(11)).await;
+    answered_entry.probe_completed.notified().await;
+    let received = received(answered_root.path());
+    assert!(
+        received.contains("\"method\":\"ping\""),
+        "the interval probe must reach the server: {received}"
+    );
+    assert_eq!(
+        answered_entry
+            .service_snapshot()
+            .expect("answered probe retains publication")
+            .generation,
+        1
+    );
+    assert!(answered_entry.mark_disconnected("disconnect after answered probe".to_string(), 1));
+    answered_pool.shutdown_all().await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn matching_timeout_after_entry_drop_still_cancels_and_reaps_connection() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
+    let root = tempfile::tempdir().unwrap();
+    let current_entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "ignore_eof",
+                policy: TimeoutDisconnectPolicy::ConsecutiveTimeouts,
+                threshold: 1,
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    );
+    lifecycle.observe(&current_entry);
+    current_entry.establish().await.expect("connected entry");
+    let pid = current_entry.active_pid.load(Ordering::SeqCst);
+    let active_pid = Arc::clone(&current_entry.active_pid);
+    let actor_tx = current_entry.actor_tx.clone();
+    let actor = current_entry
+        .actor_handle
+        .lock_recover()
+        .take()
+        .expect("lifecycle actor handle");
+    drop(current_entry);
+
+    let (reply, result) = tokio::sync::oneshot::channel();
+    actor_tx
+        .send(LifecycleCommand::CallTimedOut {
+            generation: 1,
+            reply,
+        })
+        .expect("send matching timeout after dropping the entry");
+    assert_eq!(result.await.expect("timeout observation reply"), None);
+    let (reaping, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert!(
+        alive(pid),
+        "the detached actor still owns its child while bounded cleanup runs"
+    );
+
+    clock.expire(deadline).await;
+    lifecycle.kill_issued(pid).await;
+    lifecycle.reaped(pid).await;
+    actor
+        .await
+        .expect("lifecycle actor exits after consuming cleanup");
+    assert_eq!(active_pid.load(Ordering::SeqCst), 0);
+    assert_eq!(process_state(pid), None);
 }
 
 #[tokio::test]

@@ -3,6 +3,43 @@ use super::*;
 use crate::request::BreakpointAddress;
 
 #[test]
+fn tool_schema_cache_control_does_not_count_as_adapter_cache_emission() {
+    let provider = AnthropicProvider::new("key").with_options(ProviderOptions {
+        cache_retention: CacheRetention::None,
+        ..ProviderOptions::default()
+    });
+    let mut req = request(vec![LlmMessage::new(
+        LlmRole::User,
+        vec![LlmContentBlock::Text {
+            text: "stable history".into(),
+            response_meta: None,
+            cache_breakpoint: true,
+        }],
+    )]);
+    req.tools = Arc::new(vec![LlmToolSpec {
+        name: "cache-shaped-input".to_string(),
+        description: "Host tool with a provider-looking property".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": { "cache_control": { "type": "string" } }
+        })
+        .into(),
+        output_schema: json!({}).into(),
+    }]);
+
+    let (body, cache_control_emitted) = provider
+        .build_request_body_with_cache_evidence(&req)
+        .expect("body");
+
+    assert!(body["tools"][0]["input_schema"]["properties"]["cache_control"].is_object());
+    assert!(!cache_control_emitted);
+    assert_eq!(
+        AnthropicProvider::generation_disposition(&req, &body, cache_control_emitted).cache,
+        lash_core::GenerationOptionOutcome::OmittedUnsupported
+    );
+}
+
+#[test]
 fn marked_whitespace_only_block_falls_back_without_wire_marker() {
     let provider = AnthropicProvider::new("key");
     let req = request(vec![LlmMessage::new(

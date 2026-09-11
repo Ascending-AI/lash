@@ -23,7 +23,7 @@ use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
 };
-use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
+use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
@@ -32,9 +32,8 @@ use lash_core::{
     QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeTurnCommitStamp,
     SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
-    ToolState, TriggerOwnerScope, TurnInput, TurnInputApplication, TurnInputClaim,
-    TurnInputIngress, TurnInputState, facade_support::InMemorySessionStore,
-    facade_support::InMemorySessionStoreFactory,
+    ToolState, TurnInput, TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputState,
+    facade_support::InMemorySessionStore, facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -869,7 +868,6 @@ enum RawDurableReader {
     InMemory {
         store: Arc<InMemorySessionStore>,
         factory: Arc<InMemorySessionStoreFactory>,
-        session_id: SessionId,
     },
     Sqlite {
         path: PathBuf,
@@ -1293,13 +1291,6 @@ async fn read_sqlite_durable_state(
     };
     let queued_work =
         queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
-    let session_owned_artifact_refs = session_owned_artifact_ref_observations(
-        store
-            .raw_session_owned_artifact_refs_for_testing(session_id)
-            .await
-            .expect("read SQLite session-owned artifact refs"),
-    );
-
     RawDurableState {
         head_revision,
         leaf_node_id,
@@ -1313,7 +1304,6 @@ async fn read_sqlite_durable_state(
         session_execution_leases,
         pending_turn_inputs,
         queued_work,
-        session_owned_artifact_refs,
     }
 }
 
@@ -1928,23 +1918,6 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::DeleteSessionThroughFactory => {
-                let store = self.store();
-                let has_session_artifact_refs = store
-                    .seed_session_trigger_manifest_ref_for_testing(&self.session_id)
-                    .await?;
-                if has_session_artifact_refs {
-                    assert_eq!(
-                        store
-                            .raw_session_owned_artifact_refs_for_testing(&self.session_id)
-                            .await?,
-                        vec![(
-                            "lashlang_trigger_manifest".to_string(),
-                            TriggerOwnerScope::session(&self.session_id).namespace(),
-                        )],
-                        "{} did not seed the exact session-owned trigger-manifest ref",
-                        self.name
-                    );
-                }
                 self.factory()
                     .delete_session(&self.session_id)
                     .await
@@ -2268,7 +2241,6 @@ async fn runners_for_case_with_clock(
             raw_reader: RawDurableReader::InMemory {
                 store: memory,
                 factory: memory_factory,
-                session_id: session_id.clone(),
             },
             reopen: BackendReopen::InMemory,
             clock: Arc::clone(&clock),

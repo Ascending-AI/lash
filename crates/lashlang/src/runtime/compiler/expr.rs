@@ -326,11 +326,7 @@ impl Compiler {
             }
             Expr::StartProcess(process) => {
                 let instruction = self.compile_start_process_expr(process);
-                if let Some(site) = self.lashlang_execution_site(
-                    expr,
-                    "child_process",
-                    format!("start {}", process.process),
-                ) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -353,7 +349,7 @@ impl Compiler {
                 self.compile_expr(duration);
                 let instruction = self.code.len();
                 self.code.push(Instruction::SleepFor);
-                if let Some(site) = self.lashlang_execution_site(expr, "sleep", "sleep for") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -361,7 +357,7 @@ impl Compiler {
                 self.compile_expr(deadline);
                 let instruction = self.code.len();
                 self.code.push(Instruction::SleepUntil);
-                if let Some(site) = self.lashlang_execution_site(expr, "sleep", "sleep until") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -369,7 +365,7 @@ impl Compiler {
                 let name = self.push_name(name);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessWaitSignal { name });
-                if let Some(site) = self.lashlang_execution_site(expr, "wait", "wait_signal") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -379,7 +375,7 @@ impl Compiler {
                 let name = self.push_name(name);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessSignalRun { name });
-                if let Some(site) = self.lashlang_execution_site(expr, "signal", "signal_run") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -421,7 +417,7 @@ impl Compiler {
                 }
                 let instruction = self.code.len();
                 self.code.push(Instruction::Call { argc: args.len() });
-                if let Some(site) = self.lashlang_execution_site(expr, "call", "function call") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -468,7 +464,7 @@ impl Compiler {
                 else_block,
             } => {
                 let jump_to_else = self.compile_condition_jump_if_false(condition);
-                if let Some(site) = self.branch_execution_site(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(jump_to_else, site);
                 }
                 let const_slots_before_branches = self.const_slots.clone();
@@ -492,7 +488,7 @@ impl Compiler {
                 self.compile_expr(value);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessYield);
-                if let Some(site) = self.lashlang_execution_site(expr, "process_event", "yield") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -500,7 +496,7 @@ impl Compiler {
                 self.compile_expr(value);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessWake);
-                if let Some(site) = self.lashlang_execution_site(expr, "process_event", "wake") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -508,7 +504,7 @@ impl Compiler {
                 self.compile_expr(value);
                 let instruction = self.code.len();
                 self.code.push(Instruction::Finish);
-                if let Some(site) = self.lashlang_execution_site(expr, "terminal", "result") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -516,7 +512,7 @@ impl Compiler {
                 self.compile_expr(value);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessFail);
-                if let Some(site) = self.lashlang_execution_site(expr, "terminal", "failure") {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }

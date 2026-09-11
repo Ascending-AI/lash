@@ -38,15 +38,24 @@ pub(super) fn function_signature(function: &crate::ast::FunctionDecl) -> Functio
 pub(super) struct Linker<'module> {
     pub(super) program: &'module Program,
     pub(super) surface: &'module LashlangHostEnvironment,
-    pub(super) process_names: BTreeSet<String>,
     pub(super) process_types: BTreeMap<String, TypeExpr>,
     /// Declared function signatures, keyed by name. Collected before any body
     /// is lowered so a function may call one declared later, and itself.
     pub(super) function_signatures: BTreeMap<String, FunctionSignature>,
-    pub(super) type_names: BTreeSet<String>,
     pub(super) type_defs: BTreeMap<String, TypeExpr>,
     pub(super) expression_spans: BTreeMap<usize, Span>,
     pub(super) expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
+    /// Completion facts produced by the canonical expression walk.
+    pub(super) completion_facts: RefCell<BTreeMap<usize, Completion>>,
+    pub(super) collect_completion: Cell<bool>,
+    /// Optional best-effort editor projection populated by the same walk.
+    pub(super) workflow_analysis: Option<RefCell<WorkflowLinkAnalysis>>,
+    pub(super) recover_workflow_errors: Cell<bool>,
+    /// The source expression whose facts the workflow projector will read for
+    /// a recovered error in the current top-level workflow node.
+    pub(super) workflow_diagnostic_owner: Cell<Option<usize>>,
+    pub(super) collect_trigger_keys: Cell<bool>,
+    pub(super) derived_trigger_registrations: RefCell<BTreeSet<(String, String, String)>>,
     /// The surface dialect the linked source was written in.
     ///
     /// Linking is dialect-independent — TypeScript is lowered to the same AST —
@@ -64,13 +73,18 @@ impl<'module> Linker<'module> {
             program,
             surface,
             dialect: crate::CompilationDialect::Lashlang,
-            process_names: BTreeSet::new(),
             process_types: BTreeMap::new(),
             function_signatures: BTreeMap::new(),
-            type_names: BTreeSet::new(),
             type_defs: BTreeMap::new(),
             expression_spans: expression_spans_by_pointer(program),
             expected_type_facts: None,
+            completion_facts: RefCell::new(BTreeMap::new()),
+            collect_completion: Cell::new(false),
+            workflow_analysis: None,
+            recover_workflow_errors: Cell::new(false),
+            workflow_diagnostic_owner: Cell::new(None),
+            collect_trigger_keys: Cell::new(false),
+            derived_trigger_registrations: RefCell::new(BTreeSet::new()),
         }
     }
 
@@ -92,12 +106,18 @@ impl<'module> Linker<'module> {
         self
     }
 
+    pub(super) fn with_workflow_analysis(mut self) -> Self {
+        self.workflow_analysis = Some(RefCell::new(WorkflowLinkAnalysis::default()));
+        self
+    }
+
     pub(super) fn link_program(&mut self) -> Result<Program, LinkError> {
         // Single walk: collect declaration metadata, then lower (and validate)
         // declarations in source order, then lower main. Declaration errors
         // therefore still surface before main errors, matching the prior
         // two-pass (validate-then-lower) ordering.
         self.collect_declarations()?;
+        self.collect_trigger_keys.set(true);
         let declarations = self
             .program
             .declarations
@@ -136,7 +156,6 @@ impl<'module> Linker<'module> {
                             span,
                         });
                     }
-                    self.type_names.insert(decl.name.to_string());
                     self.type_defs
                         .insert(decl.name.to_string(), decl.ty.clone());
                     continue;
@@ -166,9 +185,7 @@ impl<'module> Linker<'module> {
                 });
             }
             match declaration {
-                Declaration::Process(decl) => {
-                    self.process_names.insert(decl.name.to_string());
-                }
+                Declaration::Process(_) => {}
                 Declaration::Function(decl) => {
                     self.function_signatures
                         .insert(decl.name.to_string(), function_signature(decl));
@@ -349,14 +366,25 @@ impl<'module> Linker<'module> {
                     .map(|item| self.close_schema_type_expr(item, resolving))
                     .collect::<Option<Vec<_>>>()?,
             ),
-            TypeExpr::Process {
-                input,
-                output,
-                input_count,
-            } => TypeExpr::Process {
-                input: Box::new(self.close_schema_type_expr(input, resolving)?),
-                output: Box::new(self.close_schema_type_expr(output, resolving)?),
-                input_count: *input_count,
+            TypeExpr::Process(process) => match process.as_signature() {
+                None => ty.clone(),
+                Some(signature) => {
+                    let params = signature
+                        .params()
+                        .iter()
+                        .map(|param| {
+                            Some(ProcessParam {
+                                name: param.name.clone(),
+                                ty: self.close_schema_type_expr(&param.ty, resolving)?,
+                            })
+                        })
+                        .collect::<Option<Vec<_>>>()?;
+                    let output = self.close_schema_type_expr(signature.output(), resolving)?;
+                    TypeExpr::Process(crate::ProcessType::known(
+                        crate::ProcessSignature::try_new(params, output)
+                            .expect("resolved checked process signature remains valid"),
+                    ))
+                }
             },
             TypeExpr::TriggerHandle(event) => {
                 TypeExpr::TriggerHandle(Box::new(self.close_schema_type_expr(event, resolving)?))
@@ -433,14 +461,22 @@ impl<'module> Linker<'module> {
                     .map(|item| self.resolve_type_aliases_inner(item, seen))
                     .collect(),
             ),
-            TypeExpr::Process {
-                input,
-                output,
-                input_count,
-            } => TypeExpr::Process {
-                input: Box::new(self.resolve_type_aliases_inner(input, seen)),
-                output: Box::new(self.resolve_type_aliases_inner(output, seen)),
-                input_count: *input_count,
+            TypeExpr::Process(process) => match process.as_signature() {
+                None => ty.clone(),
+                Some(signature) => TypeExpr::Process(crate::ProcessType::known(
+                    crate::ProcessSignature::try_new(
+                        signature
+                            .params()
+                            .iter()
+                            .map(|param| ProcessParam {
+                                name: param.name.clone(),
+                                ty: self.resolve_type_aliases_inner(&param.ty, seen),
+                            })
+                            .collect(),
+                        self.resolve_type_aliases_inner(signature.output(), seen),
+                    )
+                    .expect("resolved checked process signature remains valid"),
+                )),
             },
             TypeExpr::TriggerHandle(event) => {
                 TypeExpr::TriggerHandle(Box::new(self.resolve_type_aliases_inner(event, seen)))
@@ -667,9 +703,10 @@ impl<'module> Linker<'module> {
             // Awaited process handles are runtime result envelopes. Preserve
             // the inferred payload as the known branch while keeping the
             // envelope gradual; `?` does not narrow gradual information.
-            Some(TypeExpr::Process { output, .. }) => {
-                union_type(vec![*output.clone(), TypeExpr::Any])
-            }
+            Some(TypeExpr::Process(process)) => process
+                .as_signature()
+                .map(|signature| union_type(vec![signature.output().clone(), TypeExpr::Any]))
+                .unwrap_or(TypeExpr::Any),
             _ => TypeExpr::Any,
         }
     }
@@ -710,9 +747,14 @@ impl<'module> Linker<'module> {
                 }
                 Ok(())
             }
-            TypeExpr::Process { input, output, .. } => {
-                self.validate_type_refs(input, span)?;
-                self.validate_type_refs(output, span)
+            TypeExpr::Process(process) => {
+                let Some(signature) = process.as_signature() else {
+                    return Ok(());
+                };
+                for param in signature.params() {
+                    self.validate_type_refs(&param.ty, span)?;
+                }
+                self.validate_type_refs(signature.output(), span)
             }
             TypeExpr::TriggerHandle(event) => self.validate_type_refs(event, span),
             TypeExpr::Any
@@ -822,6 +864,20 @@ impl<'module> Linker<'module> {
                         });
                     }
                     scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
+                    if let TypeExpr::Ref(source_type) = &param.ty {
+                        scope.set_static_trigger_binding(
+                            param.name.as_str(),
+                            Some(StaticTriggerBinding::Source {
+                                source_type: source_type.to_string(),
+                                source_key: semantic_trigger_source_key(
+                                    source_type.as_str(),
+                                    &serde_json::json!({
+                                        "process_param": param.name.as_str(),
+                                    }),
+                                ),
+                            }),
+                        );
+                    }
                 }
                 let mut seen_signals = BTreeSet::new();
                 for signal in &process.signals {
@@ -840,11 +896,24 @@ impl<'module> Linker<'module> {
                 scope.bind("input", Binding::Value(process_input_type(process)));
                 scope.bind("inputs", Binding::Value(process_input_record_type(process)));
                 let body = self.lower_expr(&process.body, &mut scope)?.0;
+                let return_ty = self
+                    .process_types
+                    .get(process.name.as_str())
+                    .and_then(|ty| match ty {
+                        TypeExpr::Process(process) => process
+                            .as_signature()
+                            .map(|signature| signature.output().clone()),
+                        _ => None,
+                    })
+                    .or_else(|| process.return_ty.clone())
+                    .unwrap_or(TypeExpr::Any);
                 Declaration::Process(ProcessDecl {
                     name: process.name.clone(),
                     params: process.params.clone(),
                     signals: process.signals.clone(),
-                    return_ty: process.return_ty.clone(),
+                    // Linked artifacts carry the inferred result explicitly so an
+                    // immutable process identity resolves to one complete signature.
+                    return_ty: Some(return_ty),
                     label: process.label.clone(),
                     body,
                 })
@@ -898,7 +967,7 @@ impl<'module> Linker<'module> {
         // while the parsed walk above still owns the precise span for effects
         // a reader wrote themselves.
         self.reject_effects_in_function(function, &body, span)?;
-        let output = binding_type(binding.as_ref());
+        let output = binding_type(&binding);
         if !self.is_type_assignable(&output, &function.return_ty) {
             return Err(LinkError::IncompatibleFunctionReturn {
                 function: function.name.to_string(),

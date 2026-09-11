@@ -15,7 +15,9 @@ use crate::ast::{
     ProcessDecl, ProcessParam, ProcessSignalDecl, Program, TypeDecl, TypeExpr,
 };
 use crate::linker::WorkflowLinkAnalysis;
-use crate::runtime::is_pure_expr;
+use crate::runtime::{
+    RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
+};
 use crate::source::{CanonicalSourceError, canonical_program_source};
 use crate::tracking::WorkflowExecutionSite;
 use crate::{LashlangExecutionSite, ParseError, Span, parse};
@@ -34,7 +36,7 @@ pub use execution_sites::runtime_execution_site_for_workflow_site;
 pub use facets::*;
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 5;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 6;
 
 /// A deterministic node identifier minted from canonical source and AST position.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -1507,19 +1509,21 @@ fn peel_label(expression: &Expr) -> (Option<&LabelMetadata>, &Expr) {
 
 fn first_receiver_operation(expression: &Expr) -> Option<&str> {
     match expression {
-        Expr::ReceiverCall { operation, .. } => Some(operation.as_str()),
+        Expr::ReceiverCall { operation, .. } => execution_site_descriptor(expression)
+            .filter(|(kind, _)| *kind == RESOURCE_OPERATION_EXECUTION_SITE_KIND)
+            .map(|_| operation.as_str()),
         Expr::Await(expr) => match expr.as_ref() {
-            Expr::ReceiverCall { operation, .. } => Some(operation.as_str()),
+            Expr::ReceiverCall { .. } => first_receiver_operation(expr),
             Expr::ResultUnwrap(inner) => match inner.as_ref() {
-                Expr::ReceiverCall { operation, .. } => Some(operation.as_str()),
+                Expr::ReceiverCall { .. } => first_receiver_operation(inner),
                 _ => None,
             },
             _ => None,
         },
         Expr::ResultUnwrap(expr) => match expr.as_ref() {
-            Expr::ReceiverCall { operation, .. } => Some(operation.as_str()),
+            Expr::ReceiverCall { .. } => first_receiver_operation(expr),
             Expr::Await(inner) => match inner.as_ref() {
-                Expr::ReceiverCall { operation, .. } => Some(operation.as_str()),
+                Expr::ReceiverCall { .. } => first_receiver_operation(inner),
                 _ => None,
             },
             _ => None,
@@ -1553,26 +1557,29 @@ fn direct_effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
 }
 
 fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
-    match expression {
-        Expr::StartProcess(start) => format!("start {}", start.process),
-        Expr::WaitSignal { name } => format!("wait_signal {name}"),
-        Expr::SleepFor(_) => "sleep for".to_string(),
-        Expr::SleepUntil(_) => "sleep until".to_string(),
-        _ => match effect {
-            WorkflowEffectKind::StartProcess => "start process",
-            WorkflowEffectKind::AwaitJoin => "await",
-            WorkflowEffectKind::SignalRun => "signal_run",
-            WorkflowEffectKind::WaitSignal => "wait_signal",
-            WorkflowEffectKind::Sleep => "sleep",
-            WorkflowEffectKind::Cancel => "cancel",
-            WorkflowEffectKind::Print => "print",
-            WorkflowEffectKind::Yield => "yield",
-            WorkflowEffectKind::Wake => "wake",
-            WorkflowEffectKind::Break => "break",
-            WorkflowEffectKind::Continue => "continue",
-        }
-        .to_string(),
+    let descriptor_expression = match expression {
+        Expr::ResultUnwrap(inner) => inner.as_ref(),
+        _ => expression,
+    };
+    if let Some((_, label)) = execution_site_descriptor(descriptor_expression) {
+        return label.into_owned();
     }
+    match effect {
+        WorkflowEffectKind::AwaitJoin => "await",
+        WorkflowEffectKind::Cancel => "cancel",
+        WorkflowEffectKind::Print => "print",
+        WorkflowEffectKind::Break => "break",
+        WorkflowEffectKind::Continue => "continue",
+        WorkflowEffectKind::StartProcess
+        | WorkflowEffectKind::SignalRun
+        | WorkflowEffectKind::WaitSignal
+        | WorkflowEffectKind::Sleep
+        | WorkflowEffectKind::Yield
+        | WorkflowEffectKind::Wake => {
+            unreachable!("execution-site effects must have a compiler descriptor")
+        }
+    }
+    .to_string()
 }
 
 fn data_name(expression: &Expr) -> String {

@@ -110,12 +110,19 @@ fn build_request_body(
     endpoint: CompletionEndpoint,
     stream: bool,
     origin_route: &ProviderRouteIdentity,
-) -> Result<Value, LlmTransportError> {
-    let mut body = match endpoint {
-        CompletionEndpoint::Responses => {
-            provider.build_responses_request_body_for_route(req, stream, origin_route)?
+) -> Result<(Value, bool), LlmTransportError> {
+    let (mut body, cache_control_emitted) = match endpoint {
+        CompletionEndpoint::Responses => provider
+            .build_responses_request_body_for_route_with_cache_evidence(
+                req,
+                stream,
+                origin_route,
+            )?,
+        CompletionEndpoint::ChatCompletions => {
+            let (body, diagnostics) =
+                provider.build_chat_request_body_with_diagnostics(req, stream)?;
+            (body, diagnostics.cache_control_emitted)
         }
-        CompletionEndpoint::ChatCompletions => provider.build_chat_request_body(req, stream)?,
     };
     if provider.resolved_compat(endpoint).cache_session_affinity {
         body["session_id"] = Value::String(
@@ -126,7 +133,7 @@ fn build_request_body(
                 .collect(),
         );
     }
-    Ok(body)
+    Ok((body, cache_control_emitted))
 }
 
 fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
@@ -143,7 +150,7 @@ pub(crate) fn responses_request_fingerprint(
         &provider.base_url,
         req.model.clone(),
     );
-    let body = build_request_body(
+    let (body, _) = build_request_body(
         provider,
         req,
         endpoint,
@@ -274,8 +281,9 @@ pub(crate) async fn complete(
             // Sanitize the owned request before the builders borrow it, avoiding
             // replay_safe_for cloning the resolved-stored byte cache.
             req.drop_foreign_replay(&build_route);
-            let body = build_request_body(&builder, &req, endpoint, stream, &build_route)?;
-            let disposition = Some(generation_disposition(&req, &body));
+            let (body, cache_control_emitted) =
+                build_request_body(&builder, &req, endpoint, stream, &build_route)?;
+            let disposition = Some(generation_disposition(&req, &body, cache_control_emitted));
             let bytes = serialize_body(&body).map_err(|e| {
                 LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error()))
             })?;
@@ -458,6 +466,7 @@ pub(crate) async fn complete(
         && let Some(tx) = &stream_events
     {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+            response_started: true,
             request_body: Some(request_body_text(request_body.clone(), blocking).await?),
             http_summary: Some(http_summary.clone()),
             execution_evidence: provider_request_id.clone().map(|provider_request_id| {
@@ -654,6 +663,8 @@ fn complete_buffered_responses(
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
         state.parts = OpenAiCompatibleProvider::response_parts_from_value(&value);
+        state.completed_status_seen =
+            value.get("status").and_then(Value::as_str) == Some("completed");
         state.final_response = Some(value);
     }
     let terminal_event_seen = state.terminal_event_seen
@@ -683,14 +694,7 @@ fn complete_buffered_responses(
         .as_ref()
         .map(|value| terminal_reason_from_responses_value(value, &parts))
         .unwrap_or_else(|| terminal_reason_from_parts(&parts));
-    if !has_response_content(&parts)
-        && !matches!(
-            terminal_reason,
-            LlmTerminalReason::OutputLimit
-                | LlmTerminalReason::ContentFilter
-                | LlmTerminalReason::Cancelled
-        )
-    {
+    if invalid_empty_response(&parts, terminal_reason, state.completed_status_seen) {
         return Err(empty_response_error(text));
     }
     if let Some(tx) = &stream_events {
@@ -776,14 +780,7 @@ fn complete_buffered_chat(
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(chat_response_from_state(state, &url)));
     }
-    if !has_response_content(&parts)
-        && !matches!(
-            state.terminal_reason,
-            LlmTerminalReason::OutputLimit
-                | LlmTerminalReason::ContentFilter
-                | LlmTerminalReason::Cancelled
-        )
-    {
+    if invalid_empty_response(&parts, state.terminal_reason, state.normal_stop_seen) {
         return Err(empty_response_error(text));
     }
     if let Some(tx) = &stream_events {
@@ -1001,14 +998,7 @@ async fn drive_streaming_responses(
         .as_ref()
         .map(|value| terminal_reason_from_responses_value(value, &parts))
         .unwrap_or_else(|| terminal_reason_from_parts(&parts));
-    if !has_response_content(&parts)
-        && !matches!(
-            terminal_reason,
-            LlmTerminalReason::OutputLimit
-                | LlmTerminalReason::ContentFilter
-                | LlmTerminalReason::Cancelled
-        )
-    {
+    if invalid_empty_response(&parts, terminal_reason, state.completed_status_seen) {
         return Err(empty_response_diagnostic(
             state
                 .final_response
@@ -1112,14 +1102,7 @@ async fn drive_streaming_chat(
             .with_partial_response(chat_response_from_state(state, &url)));
     }
     let parts = state.parts();
-    if !has_response_content(&parts)
-        && !matches!(
-            state.terminal_reason,
-            LlmTerminalReason::OutputLimit
-                | LlmTerminalReason::ContentFilter
-                | LlmTerminalReason::Cancelled
-        )
-    {
+    if invalid_empty_response(&parts, state.terminal_reason, state.normal_stop_seen) {
         return Err(empty_response_error(
             state.final_response_raw.take().unwrap_or_default(),
         ));

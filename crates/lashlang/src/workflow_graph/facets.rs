@@ -2,7 +2,7 @@ use super::*;
 use crate::linker::{LashlangHostEnvironment, analyze_workflow_program};
 
 /// Version of the optional, derived workflow type-facet contract.
-pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 1;
+pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowNodeTypeFacets {
@@ -92,9 +92,9 @@ pub(super) fn projected_node_type_facets(
             .iter()
             .map(|diagnostic| WorkflowTypeDiagnostic {
                 node_id: id.clone(),
-                kind: diagnostic.kind().to_string(),
-                message: diagnostic.to_string(),
-                span: diagnostic.span(),
+                kind: diagnostic.error.kind().to_string(),
+                message: diagnostic.error.to_string(),
+                span: diagnostic.span,
             })
             .collect(),
     })

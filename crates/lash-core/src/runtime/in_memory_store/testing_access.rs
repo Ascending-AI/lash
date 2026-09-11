@@ -339,20 +339,6 @@ impl crate::store::StoreTestSupport for InMemorySessionStore {
         self.stamp_session_state_version_and_corrupt_payload_in_memory(version);
         Ok(())
     }
-
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<bool, crate::store::StoreError> {
-        Ok(false)
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<(String, String)>, crate::store::StoreError> {
-        Ok(Vec::new())
-    }
 }
 
 #[async_trait::async_trait]

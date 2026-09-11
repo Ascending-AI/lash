@@ -330,10 +330,11 @@ impl AnthropicProvider {
         messages: &mut [Value],
         tools: &mut [Value],
         breakpoint: Option<BreakpointAddress>,
-    ) {
+    ) -> bool {
         let Some(ctrl) = Self::cache_control_value(cache_retention) else {
-            return;
+            return false;
         };
+        let mut cache_control_emitted = false;
 
         if let Some(sys) = system
             && let Some(arr) = sys.as_array_mut()
@@ -341,6 +342,7 @@ impl AnthropicProvider {
             && last.is_object()
         {
             last["cache_control"] = ctrl.clone();
+            cache_control_emitted = true;
         }
 
         if let Some(address) = breakpoint {
@@ -351,6 +353,7 @@ impl AnthropicProvider {
                 .and_then(|content| content.get_mut(address.block_index))
                 .expect("breakpoint address points to a surviving content block");
             block["cache_control"] = ctrl.clone();
+            cache_control_emitted = true;
         }
 
         if breakpoint.is_none()
@@ -364,13 +367,16 @@ impl AnthropicProvider {
             && last_block.is_object()
         {
             last_block["cache_control"] = ctrl.clone();
+            cache_control_emitted = true;
         }
 
         if let Some(last_tool) = tools.last_mut()
             && last_tool.is_object()
         {
             last_tool["cache_control"] = ctrl;
+            cache_control_emitted = true;
         }
+        cache_control_emitted
     }
 
     /// Derive the Anthropic thinking config from the resolved selection and
@@ -410,7 +416,16 @@ impl AnthropicProvider {
         }
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn build_request_body(&self, req: &LlmRequest) -> Result<Value, LlmTransportError> {
+        self.build_request_body_with_cache_evidence(req)
+            .map(|(body, _)| body)
+    }
+
+    pub(crate) fn build_request_body_with_cache_evidence(
+        &self,
+        req: &LlmRequest,
+    ) -> Result<(Value, bool), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
         let req = safe_request.as_ref();
@@ -488,7 +503,7 @@ impl AnthropicProvider {
         // Cache control: mark system, last user message, and last tool as
         // ephemeral to benefit from prompt caching. Applied before the body
         // is assembled so we only serialize the final state once.
-        self.apply_cache_control(
+        let cache_control_emitted = self.apply_cache_control(
             policy.cache_retention,
             &mut system_value,
             &mut messages,
@@ -599,7 +614,7 @@ impl AnthropicProvider {
         }
 
         body["stream"] = json!(true);
-        Ok(body)
+        Ok((body, cache_control_emitted))
     }
 }
 

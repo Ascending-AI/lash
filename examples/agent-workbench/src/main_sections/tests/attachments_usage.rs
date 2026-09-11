@@ -1,5 +1,4 @@
 use super::*;
-use lash::SessionId;
 use lash::TurnId;
 
 const ATTACHMENT_USAGE_GATE_PNG_BASE64: &str =
@@ -223,7 +222,7 @@ async fn run_attachment_usage_gate(
     let turn_id = TurnId::from(format!("attachment-usage-gate-{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
-        session_id: SessionId::from(session_id.clone()),
+        session_id: session_id.clone(),
         text: "Describe the attached PNG briefly.".to_string(),
         model: ModelSelection {
             model: "test-model".to_string(),

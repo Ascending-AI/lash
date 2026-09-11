@@ -1,6 +1,9 @@
 mod awaiter;
 mod engine;
 mod events;
+mod lease_serde;
+#[cfg(test)]
+mod lease_serde_tests;
 mod materialization;
 pub(crate) mod model;
 #[cfg(test)]
@@ -46,11 +49,12 @@ pub use model::{
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOutcome,
-    ProcessProvenance, ProcessRecord, ProcessRef, ProcessRegistration, ProcessSessionDeleteReport,
-    ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone, RecoveryContract,
-    SessionId, SessionScope, SessionScopeId, WaitKind, WaitState, load_process_execution_env,
+    ProcessLeaseSchemaVersionError, ProcessListFilter, ProcessListMode, ProcessObserverBy,
+    ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRef,
+    ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTombstone, RecoveryContract, SessionId, SessionScope, SessionScopeId, WaitKind,
+    WaitState, ensure_process_lease_schema_version, load_process_execution_env,
     persist_process_execution_env, process_runtime_session_ids,
 };
 pub use observation::{

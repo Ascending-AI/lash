@@ -211,14 +211,11 @@ fn turn_routing_state_survives_web_process_reconstruction() {
     let recovered_turns = ActiveTurns::persistent(turns_path).expect("recover turns");
     assert_eq!(recovered_ids.current(), session_id);
     assert_eq!(
-        recovered_turns.for_session(&SessionId::from(session_id.clone())),
+        recovered_turns.for_session(&session_id),
         vec![lash::TurnAddress::new(&session_id, "durable-stop-turn")]
     );
     let recovered_prompt = recovered_turns
-        .prompt_for(
-            &SessionId::from(session_id),
-            &TurnId::from("durable-stop-turn"),
-        )
+        .prompt_for(&session_id, &TurnId::from("durable-stop-turn"))
         .expect("restored prompt");
     assert_eq!(recovered_prompt.text, "actual restored prompt");
     assert_eq!(recovered_prompt.attachment_id, None);
@@ -462,14 +459,9 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = state.current_session_id();
-    let mut events = state
-        .event_tx
-        .subscribe(&SessionId::from(session_id.clone()));
+    let mut events = state.event_tx.subscribe(&session_id);
 
-    state.publish_turn_done(
-        &SessionId::from(session_id),
-        &TurnId::from("transient-turn"),
-    );
+    state.publish_turn_done(&session_id, &TurnId::from("transient-turn"));
 
     assert!(matches!(
         events.try_recv(),
@@ -549,15 +541,10 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = state.current_session_id();
-    let mut events = state
-        .event_tx
-        .subscribe(&SessionId::from(session_id.clone()));
+    let mut events = state.event_tx.subscribe(&session_id);
 
-    state.track_turn(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from("foreground-turn"),
-    );
-    state.publish_trigger_dispatch_done(&SessionId::from(session_id.clone()), "trigger-running");
+    state.track_turn(&session_id, &TurnId::from("foreground-turn"));
+    state.publish_trigger_dispatch_done(&session_id, "trigger-running");
     assert!(
         matches!(
             events.try_recv(),
@@ -566,11 +553,10 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         "trigger dispatch must not publish Done while a foreground turn is active"
     );
 
-    state.active_turns.remove(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from("foreground-turn"),
-    );
-    state.publish_trigger_dispatch_done(&SessionId::from(session_id), "trigger-settled");
+    state
+        .active_turns
+        .remove(&session_id, &TurnId::from("foreground-turn"));
+    state.publish_trigger_dispatch_done(&session_id, "trigger-settled");
     assert!(matches!(
         events.try_recv(),
         Ok(ProductEvent {
@@ -835,13 +821,8 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let session_id = state.current_session_id();
-    let mut events = state
-        .event_tx
-        .subscribe(&SessionId::from(session_id.clone()));
-    state.track_turn(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from("turn-cancel"),
-    );
+    let mut events = state.event_tx.subscribe(&session_id);
+    state.track_turn(&session_id, &TurnId::from("turn-cancel"));
     let session = state
         .core
         .session(&session_id)
@@ -889,7 +870,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     // The execution publisher owns the terminal event; the cancel route
     // publishes nothing for this core-run turn.
     assert!(events.try_recv().is_err(), "cancel route owns no terminal");
-    state.publish_turn_done(&SessionId::from(session_id), &TurnId::from("turn-cancel"));
+    state.publish_turn_done(&session_id, &TurnId::from("turn-cancel"));
     assert!(matches!(
         events.try_recv(),
         Ok(ProductEvent {
@@ -1525,14 +1506,8 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let old_session_id = state.current_session_id();
-    let _deleted_session_events = state
-        .event_tx
-        .subscribe(&SessionId::from(old_session_id.clone()));
-    assert!(
-        state
-            .event_tx
-            .contains(&SessionId::from(old_session_id.clone()))
-    );
+    let _deleted_session_events = state.event_tx.subscribe(&old_session_id);
+    assert!(state.event_tx.contains(&old_session_id));
     let session = state
         .core
         .session(old_session_id.clone())
@@ -1542,11 +1517,8 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
     register_test_trigger(&session).await;
     let started = emit_test_button_trigger(&state.core, ButtonChoice::Red).await;
     assert_remote_trigger_emit_report_round_trip(&started);
-    let trigger_records = assert_remote_trigger_subscription_records_round_trip(
-        &data_dir,
-        &SessionId::from(old_session_id.clone()),
-    )
-    .await;
+    let trigger_records =
+        assert_remote_trigger_subscription_records_round_trip(&data_dir, &old_session_id).await;
     assert_eq!(trigger_records.len(), 1);
     assert_eq!(started.started_process_ids().len(), 1);
     let old_work_before_reset = state
@@ -1566,7 +1538,7 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         &state.lashlang_execution,
         &test_graph(
             "process:old-reset-process",
-            &SessionId::from(old_session_id.clone()),
+            &old_session_id,
             TraceRuntimeSubject::Process {
                 process_id: ProcessId::from("old-reset-process"),
             },
@@ -1577,7 +1549,7 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
     assert_remote_started_process_surface(
         &state.core,
         process_registry.as_ref(),
-        &SessionId::from(old_session_id.clone()),
+        &old_session_id,
         &started.started_process_ids(),
     )
     .await;
@@ -1587,18 +1559,14 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         .expect("add account before reset");
     drop(session);
     let query = Query(SessionQuery {
-        session_id: Some(SessionId::from(old_session_id.clone())),
+        session_id: Some(old_session_id.clone()),
     });
     let Json(snapshot) = Box::pin(reset_chat(State(state.clone()), query))
         .await
         .expect("reset");
 
     assert_ne!(snapshot.settings.session_id, old_session_id);
-    assert!(
-        !state
-            .event_tx
-            .contains(&SessionId::from(old_session_id.clone()))
-    );
+    assert!(!state.event_tx.contains(&old_session_id));
     assert!(snapshot.messages.is_empty());
     assert!(state.messages_snapshot().is_empty());
     assert!(
@@ -1659,19 +1627,19 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         "new session graph index should be empty after reset: {graph_index:#?}"
     );
     core_store_factory
-        .delete_session(&SessionId::from(old_session_id.clone()))
+        .delete_session(&old_session_id)
         .await
         .expect("retire old session for route check");
     let retired_error = Box::pin(app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     ))
     .await
     .expect_err("retired session state must be refused");
     assert_eq!(retired_error.status, StatusCode::CONFLICT);
-    assert!(retired_error.message.contains(&old_session_id));
+    assert!(retired_error.message.contains(old_session_id.as_str()));
     assert!(retired_error.message.contains("was used and deleted"));
     let _ = std::fs::remove_dir_all(data_dir);
 }
@@ -1798,7 +1766,7 @@ async fn run_workbench_turn_via_restate(
     let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
-        session_id: SessionId::from(state.current_session_id()),
+        session_id: state.current_session_id(),
         text: text.to_string(),
         model: state.selected_model(),
         attachment_id: None,
@@ -1811,7 +1779,7 @@ async fn run_workbench_turn_via_restate(
     .expect("Restate-backed workbench turn timed out")
     .expect("finish Restate-backed workbench turn");
     state.track_turn_prompt(
-        &SessionId::from(state.current_session_id()),
+        &state.current_session_id(),
         &turn_id,
         text.to_string(),
         None,

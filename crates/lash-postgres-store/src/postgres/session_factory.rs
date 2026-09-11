@@ -907,18 +907,6 @@ pub(crate) async fn delete_session_tx(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    // Trigger manifests are the one artifact-ref namespace with an exact
-    // session owner. Module, raw-artifact, and process-environment refs are
-    // factory-wide services with no safe session attribution.
-    sqlx::query(
-        "DELETE FROM lash_lashlang_artifacts
-         WHERE namespace = $1 AND artifact_ref = $2",
-    )
-    .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-    .bind(lash_core::TriggerOwnerScope::session(session_id).namespace())
-    .execute(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
     crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
         tx,
         candidates,
@@ -1067,10 +1055,6 @@ pub(crate) async fn delete_process_sessions_tx(
             }
         }
 
-        let trigger_owner_namespaces = session_ids
-            .iter()
-            .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
-            .collect::<Vec<_>>();
         sqlx::query(
             // Delete-time reclaim covers the batch's tombstoned rows plus any
             // tombstoned row owned by an already-deleted session. The ancestry
@@ -1135,12 +1119,6 @@ pub(crate) async fn delete_process_sessions_tx(
              DELETE FROM lash_session_meta
              WHERE session_id = ANY($1)
              RETURNING session_id
-         ),
-         deleted_trigger_manifests AS (
-             DELETE FROM lash_lashlang_artifacts
-             WHERE namespace = $2
-               AND artifact_ref = ANY($3)
-             RETURNING artifact_ref
          )
          SELECT (SELECT count(*) FROM deleted_graph_nodes)
               + (SELECT count(*) FROM deleted_queued_work_batches)
@@ -1149,12 +1127,9 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_pending_turn_inputs)
               + (SELECT count(*) FROM deleted_session_execution_leases)
               + (SELECT count(*) FROM deleted_fork_lineage)
-              + (SELECT count(*) FROM deleted_session_meta)
-              + (SELECT count(*) FROM deleted_trigger_manifests)",
+              + (SELECT count(*) FROM deleted_session_meta)",
         )
         .bind(&session_id_texts[..])
-        .bind(crate::artifact_store::CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-        .bind(&trigger_owner_namespaces)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

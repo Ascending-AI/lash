@@ -41,10 +41,9 @@ impl AppState {
         &self,
         query: &SessionQuery,
         surface: &'static str,
-    ) -> Result<String, AppError> {
+    ) -> Result<SessionId, AppError> {
         let session_id = query.resolve(self)?;
-        self.admit_session_id(&SessionId::from(session_id.clone()), surface)
-            .await?;
+        self.admit_session_id(&session_id, surface).await?;
         Ok(session_id)
     }
 
@@ -64,14 +63,10 @@ impl AppState {
         &self,
         query: &SessionQuery,
         surface: &'static str,
-    ) -> Result<String, AppError> {
+    ) -> Result<SessionId, AppError> {
         let session_id = query.resolve(self)?;
-        self.admit(
-            &SessionId::from(session_id.clone()),
-            surface,
-            SessionAdmission::Delete,
-        )
-        .await?;
+        self.admit(&session_id, surface, SessionAdmission::Delete)
+            .await?;
         Ok(session_id)
     }
 
@@ -101,7 +96,7 @@ impl AppState {
                 session_id,
                 surface,
                 lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
-                    session_id: SessionId::from(session_id.to_string()),
+                    session_id: session_id.clone(),
                 }),
             )),
             // Audited: a failed tombstone read is an untyped factory/backend error; admission cannot proceed without the fact.
@@ -208,7 +203,7 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
         state,
         restate::WorkbenchSessionDeleteWorkflowRequest {
             operation_id: format!("workbench-delete-{}", uuid::Uuid::new_v4()),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             execution_scope,
         },
     )

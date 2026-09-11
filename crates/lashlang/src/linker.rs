@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
-use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -31,7 +31,7 @@ use pass_setup::{Binding, Linker, function_signature};
 mod lower_expr;
 mod pass_validation;
 use pass_validation::{
-    materialize_default_trigger_keys, validate_trigger_operation_subscription_key,
+    StaticTriggerBinding, semantic_trigger_source_key, validate_trigger_operation_subscription_key,
 };
 mod type_helpers;
 use type_helpers::{
@@ -43,11 +43,13 @@ use type_helpers::{
     process_input_record_type, process_input_type, process_type_for_decl,
     shaping_builtin_return_type, shaping_comparable_type, shaping_list_item, shaping_number_type,
     shaping_record_type, shaping_text_type, strip_label_annotation, trigger_target_process_label,
-    trigger_target_process_name, union_type,
+    union_type,
 };
 mod facets;
 pub(crate) use facets::analyze_workflow_program;
-use facets::expression_spans_by_pointer;
+use facets::{
+    expression_spans_by_pointer, recover_workflow_binding, workflow_diagnostic_owner_key,
+};
 #[cfg(test)]
 mod tests;
 
@@ -60,7 +62,13 @@ pub(crate) struct WorkflowLinkAnalysis {
 pub(crate) struct WorkflowLinkNodeFacts {
     pub(crate) available_variables: BTreeMap<String, TypeExpr>,
     pub(crate) expected_arguments: Vec<WorkflowLinkExpectedArgument>,
-    pub(crate) diagnostics: Vec<LinkError>,
+    pub(crate) diagnostics: Vec<WorkflowLinkDiagnostic>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WorkflowLinkDiagnostic {
+    pub(crate) error: LinkError,
+    pub(crate) span: Option<Span>,
 }
 
 #[derive(Clone, Debug)]
@@ -75,4 +83,4 @@ struct ExpectedTypeFacts {
 }
 
 #[cfg(test)]
-use pass_validation::{semantic_trigger_source_key, semantic_trigger_subscription_key};
+use pass_validation::semantic_trigger_subscription_key;

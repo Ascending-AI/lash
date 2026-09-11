@@ -199,7 +199,7 @@ impl CodexProvider {
     /// of them. The Responses dialect Codex speaks has no seed field, and this
     /// adapter sends neither a temperature nor a token cap, for the same
     /// reason it leaves the rest of the sampling surface to the endpoint.
-    fn generation_disposition(req: &LlmRequest, body: &Value) -> GenerationReceipt {
+    fn generation_disposition(req: &LlmRequest, cache_control_emitted: bool) -> GenerationReceipt {
         GenerationReceipt {
             output_token_cap: GenerationOptionOutcome::unsupported(
                 req.generation.output_token_cap.is_some(),
@@ -209,15 +209,25 @@ impl CodexProvider {
             stop_sequences: GenerationOptionOutcome::unsupported(
                 !req.generation.stop_sequences.is_empty(),
             ),
-            cache: lash_llm_transport::cache_intent_disposition(req, Some(body)),
+            cache: lash_llm_transport::cache_intent_disposition(req, cache_control_emitted),
         }
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn build_request_body(
         &self,
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
+        self.build_request_body_with_cache_evidence(req, stream)
+            .map(|(body, _)| body)
+    }
+
+    pub(crate) fn build_request_body_with_cache_evidence(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+    ) -> Result<(Value, bool), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
         let safe_request = req.replay_safe_for(&serving_route);
         let req = safe_request.as_ref();
@@ -265,7 +275,8 @@ impl CodexProvider {
             }
             body["reasoning"] = reasoning;
         }
-        if policy.cache_retention != CacheRetention::None {
+        let cache_control_emitted = policy.cache_retention != CacheRetention::None;
+        if cache_control_emitted {
             body["prompt_cache_key"] = json!(req.continuation_key());
         }
         if let Some(output_spec) = &req.output_spec {
@@ -288,7 +299,7 @@ impl CodexProvider {
                 }
             };
         }
-        Ok(body)
+        Ok((body, cache_control_emitted))
     }
 }
 

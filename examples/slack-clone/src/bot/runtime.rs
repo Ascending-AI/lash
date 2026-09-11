@@ -24,7 +24,10 @@ use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatiblePr
 use super::mcp_client::{DemoElicitationHandler, DemoRootsProvider, DemoSamplingHandler};
 use super::slack_api::SlackApi;
 use super::tools;
-use crate::mcp_server::{API_BASE_URL_ENV, BOT_TOKEN_ENV};
+use crate::mcp_server::{
+    API_BASE_URL_ENV, BOT_TOKEN_ENV, ELICIT_CONFIRMATION_TOOL, LIST_HOST_ROOTS_TOOL,
+    SAMPLE_SUMMARY_TOOL, URL_ELICITATION_TOOL,
+};
 use crate::{log_err, log_out};
 
 const DEMO_MCP_SERVER_NAME: &str = crate::mcp_server::SERVER_NAME;
@@ -314,12 +317,17 @@ fn bot_prompt(include_demo_mcp: bool) -> PromptLayer {
     if include_demo_mcp {
         prompt = prompt.with_contribution(PromptContribution::guidance(
             "MCP workspace tools",
-            "The bundled MCP server exposes workspace reads plus four client-depth demos: \
-             `mcp__slack_clone__sample_summary` asks the host model to summarize, \
-             `mcp__slack_clone__elicit_confirmation` asks the host a structured question, \
-             `mcp__slack_clone__elicit_via_url` exercises a URL flow and completion, and \
-             `mcp__slack_clone__list_host_roots` reads host-supplied workspace roots. Use the \
-             exact tool the request names; do not fabricate any of their results.",
+            format!(
+                "The bundled MCP server exposes workspace reads plus four client-depth demos: \
+                 `{}` asks the host model to summarize, `{}` asks the host a structured \
+                 question, `{}` exercises a URL flow and completion, and `{}` reads \
+                 host-supplied workspace roots. Use the exact tool the request names; do not \
+                 fabricate any of their results.",
+                SAMPLE_SUMMARY_TOOL.as_str(),
+                ELICIT_CONFIRMATION_TOOL.as_str(),
+                URL_ELICITATION_TOOL.as_str(),
+                LIST_HOST_ROOTS_TOOL.as_str(),
+            ),
         ));
     }
     prompt

@@ -11,10 +11,10 @@ pub const STANDARD_PROTOCOL_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     },
     ScenarioContractSpec {
         suite: "standard",
-        test_name: "standard_protocol_scenario_empty_model_response_stops_provider_error",
-        owned_invariant: "Empty provider response terminates through the protocol error boundary.",
-        semantic_oracle: "standard.empty_provider_response_error",
-        required_sim_evidence: &["provider_mutation"],
+        test_name: "standard_protocol_scenario_empty_model_response_finishes_after_checkpoint",
+        owned_invariant: "A valid empty provider response follows the normal completion checkpoint and finishes successfully.",
+        semantic_oracle: "standard.empty_response_finishes",
+        required_sim_evidence: &["provider_turn"],
         oracle_id: "sim.oracle.scenario.standard-contract.v1",
     },
     ScenarioContractSpec {

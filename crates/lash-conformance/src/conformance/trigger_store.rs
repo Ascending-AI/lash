@@ -48,6 +48,55 @@ pub trait TriggerOccurrenceRetentionFaultInjector: Send + Sync {
     async fn clear_occurrence_delete_failure(&self);
 }
 
+/// Raw occurrence access for proving that listing distinguishes corrupt rows
+/// from failures to query the backing store.
+#[async_trait::async_trait]
+pub trait TriggerOccurrenceListingFaultInjector: Send + Sync {
+    async fn insert_malformed_occurrence(&self);
+    async fn make_occurrence_query_unavailable(&self);
+}
+
+/// A corrupt occurrence row makes the whole list unreliable, while a failure
+/// to query the backend retains its separate infrastructure classification.
+pub async fn trigger_occurrence_listing_corruption_law(
+    store: Arc<dyn crate::TriggerStore>,
+    injector: &dyn TriggerOccurrenceListingFaultInjector,
+) {
+    store
+        .ingest_occurrence(button_occurrence(
+            "occurrence-listing-valid-source",
+            "occurrence-listing-valid",
+        ))
+        .await
+        .expect("seed valid occurrence-listing control");
+    injector.insert_malformed_occurrence().await;
+
+    match store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect_err("one malformed occurrence must fail the complete listing")
+    {
+        crate::PluginError::Session(message) => assert!(
+            message.starts_with("failed to decode "),
+            "malformed occurrence must retain the decode diagnostic: {message}"
+        ),
+        error => panic!("malformed occurrence must be a session decode error: {error:?}"),
+    }
+
+    injector.make_occurrence_query_unavailable().await;
+    match store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect_err("an unavailable occurrence query must fail")
+    {
+        crate::PluginError::Session(message) => assert!(
+            !message.starts_with("failed to decode "),
+            "backend query failure must not be reclassified as row decoding: {message}"
+        ),
+        error => panic!("occurrence query failure changed classification: {error:?}"),
+    }
+}
+
 /// Raw receipt access for conformance-suite embedders proving compatibility
 /// with ownerless receipts written before owner namespaces were journaled.
 #[async_trait::async_trait]

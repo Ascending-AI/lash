@@ -8,6 +8,7 @@ use lash::SessionId;
 use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
 use std::net::SocketAddr;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
@@ -580,30 +581,11 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
     }
 }
 
-pub(crate) fn spawn_restate_endpoint(
-    addr: SocketAddr,
-    state: AppState,
-    process_deployment: lash_restate::RestateProcessDeployment,
-    process_worker: lash::durability::DurableProcessWorker,
-) {
-    let endpoint = Endpoint::builder()
-        .bind(WorkbenchTurnWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchQueuedTurnWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchButtonTriggerWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchMailReceivedWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchSessionDeleteWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchProcessCancelWorkflowImpl::new(state.clone()).serve())
-        .bind(WorkbenchCronJobImpl::new(state).serve())
-        .bind(process_deployment.workflow(process_worker).serve())
-        .bind(LashDurableWaitWorkflowImpl.serve())
-        .bind(LashDurableWaitIndexImpl.serve())
-        .build();
-    tokio::spawn(async move {
-        restate_sdk::http_server::HttpServer::new(endpoint)
-            .listen_and_serve(addr)
-            .await;
-    });
-}
+#[path = "restate/endpoint_host.rs"]
+mod endpoint_host;
+pub(crate) use endpoint_host::spawn_owned_restate_endpoint;
+#[cfg(test)]
+pub(crate) use endpoint_host::spawn_restate_endpoint;
 
 pub(crate) async fn submit_user_turn(
     state: &AppState,

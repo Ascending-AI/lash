@@ -90,6 +90,10 @@ impl Recorder {
     pub(crate) async fn start(capture: Capture) -> anyhow::Result<Self> {
         Self::start_at(capture, "https://openrouter.ai".into()).await
     }
+    #[cfg(test)]
+    pub(crate) async fn start_for_test(capture: Capture, origin: String) -> anyhow::Result<Self> {
+        Self::start_at(capture, origin).await
+    }
     async fn start_at(capture: Capture, origin: String) -> anyhow::Result<Self> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let base_url = format!("http://{}/api/v1", listener.local_addr()?);

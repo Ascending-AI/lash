@@ -1,22 +1,78 @@
 use super::*;
 
 impl<'module> Linker<'module> {
+    pub(super) fn derive_default_trigger_key(
+        &self,
+        receiver: &Expr,
+        operation: &AstString,
+        args: &[Expr],
+        scope: &Scope,
+    ) -> Result<Option<String>, LinkError> {
+        if !self.collect_trigger_keys.get()
+            || operation.as_str() != crate::TriggerHostOperation::Register.receiver_method()
+            || !matches!(
+                receiver,
+                Expr::ResourceRef(resource)
+                    if crate::is_trigger_resource_type(resource.resource_type.as_str())
+            )
+        {
+            return Ok(None);
+        }
+        let Ok(call) = crate::register_call_args(args) else {
+            return Ok(None);
+        };
+        if call.subscription_key.is_some() {
+            return Ok(None);
+        }
+        let Some((source_type, source_key)) =
+            static_trigger_source(call.source, &scope.static_trigger_bindings)
+        else {
+            return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: scope.span });
+        };
+        let Some(process) = static_trigger_target(call.target, &scope.static_trigger_bindings)
+        else {
+            return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: scope.span });
+        };
+        if !self.derived_trigger_registrations.borrow_mut().insert((
+            process.clone(),
+            source_type.clone(),
+            source_key.clone(),
+        )) {
+            return Err(LinkError::DuplicateDerivedTriggerSubscriptionKey {
+                process,
+                source_type,
+                span: scope.span,
+            });
+        }
+        Ok(Some(semantic_trigger_subscription_key(
+            &process,
+            &source_type,
+            &source_key,
+        )))
+    }
+
+    pub(super) fn static_trigger_binding_for(
+        &self,
+        expr: &Expr,
+        scope: &Scope,
+    ) -> Option<StaticTriggerBinding> {
+        static_trigger_binding(expr, &scope.static_trigger_bindings)
+    }
+
     pub(super) fn validate_process_arg_binding(
         &self,
         process: &str,
         arg: &str,
         expected_ty: &TypeExpr,
-        actual: Option<&Binding>,
+        actual: &Binding,
         span: Option<Span>,
     ) -> Result<(), LinkError> {
         if let Some(expected_resource) = self.resource_type_for_type(expected_ty) {
             return match actual {
-                Some(Binding::Resource { resource_type })
-                    if *resource_type == expected_resource =>
-                {
+                Binding::Resource { resource_type } if *resource_type == expected_resource => {
                     Ok(())
                 }
-                Some(Binding::Resource { resource_type }) => {
+                Binding::Resource { resource_type } => {
                     Err(LinkError::IncompatibleProcessArgument {
                         process: process.into(),
                         arg: arg.into(),
@@ -49,108 +105,6 @@ impl<'module> Linker<'module> {
         }
     }
 
-    pub(super) fn validate_trigger_operation_args(
-        &self,
-        operation: crate::TriggerHostOperation,
-        args: &[Expr],
-        scope: &Scope,
-    ) -> Result<TypeExpr, LinkError> {
-        match operation {
-            crate::TriggerHostOperation::Register
-            | crate::TriggerHostOperation::Update
-            | crate::TriggerHostOperation::Revive => {
-                let call = crate::register_call_args(args)
-                    .map_err(|_| LinkError::InvalidTriggerRegistration { span: scope.span })?;
-                if let Some(key) = call.subscription_key {
-                    validate_trigger_subscription_key_literal(key, scope.span)?;
-                }
-                let source_ty = self.infer_expr_type(call.source, &mut scope.clone())?;
-                let event_ty = self
-                    .surface
-                    .resources
-                    .trigger_source_event(&source_ty)
-                    .ok_or_else(|| LinkError::UnknownTriggerEventType {
-                        source_ty: format_type_expr(&source_ty),
-                        span: scope.span,
-                    })?;
-                let target_ty = self.infer_expr_type(call.target, &mut scope.clone())?;
-                let params = self.trigger_target_params(call.target, &target_ty, scope.span)?;
-                let mut validation_scope = scope.clone();
-                self.lower_trigger_input_record(
-                    trigger_target_process_label(call.target).as_str(),
-                    &params,
-                    &event_ty,
-                    call.inputs,
-                    &mut validation_scope,
-                )?;
-                if matches!(
-                    operation,
-                    crate::TriggerHostOperation::Update | crate::TriggerHostOperation::Revive
-                ) {
-                    let expected_revision =
-                        trigger_operation_record_entry(args, "expected_revision")
-                            .ok_or(LinkError::InvalidTriggerRegistration { span: scope.span })?;
-                    let revision_ty = self.infer_expr_type_expected(
-                        expected_revision,
-                        &mut scope.clone(),
-                        Some(&TypeExpr::Int),
-                    )?;
-                    if !self.is_type_assignable(&revision_ty, &TypeExpr::Int) {
-                        return Err(LinkError::IncompatibleOperationInput {
-                            operation: operation.receiver_method().to_string(),
-                            expected: format_type_expr(&TypeExpr::Int),
-                            actual: format_type_expr(&revision_ty),
-                            span: scope.span,
-                        });
-                    }
-                }
-                Ok(operation.output_ty())
-            }
-            crate::TriggerHostOperation::List => {
-                let call = crate::list_call_args(args)
-                    .map_err(|_| LinkError::InvalidTriggerList { span: scope.span })?;
-                for (name, expr) in call.entries {
-                    match name.as_str() {
-                        "target" => {
-                            let target_ty = self.infer_expr_type(expr, &mut scope.clone())?;
-                            if !matches!(target_ty, TypeExpr::Process { .. }) {
-                                return Err(LinkError::InvalidTriggerTarget {
-                                    actual: format_type_expr(&target_ty),
-                                    span: scope.span,
-                                });
-                            }
-                        }
-                        "name" | "source_type" => {
-                            let filter_ty = self.infer_expr_type(expr, &mut scope.clone())?;
-                            if !self.is_type_assignable(&filter_ty, &TypeExpr::Str) {
-                                return Err(LinkError::IncompatibleOperationInput {
-                                    operation: operation.receiver_method().to_string(),
-                                    expected: format_type_expr(&TypeExpr::Str),
-                                    actual: format_type_expr(&filter_ty),
-                                    span: scope.span,
-                                });
-                            }
-                        }
-                        "enabled" => {
-                            let filter_ty = self.infer_expr_type(expr, &mut scope.clone())?;
-                            if !self.is_type_assignable(&filter_ty, &TypeExpr::Bool) {
-                                return Err(LinkError::IncompatibleOperationInput {
-                                    operation: operation.receiver_method().to_string(),
-                                    expected: format_type_expr(&TypeExpr::Bool),
-                                    actual: format_type_expr(&filter_ty),
-                                    span: scope.span,
-                                });
-                            }
-                        }
-                        _ => unreachable!("list_call_args rejects unknown trigger filters"),
-                    }
-                }
-                Ok(operation.output_ty())
-            }
-            _ => unreachable!("only definition/list operations use specialized trigger validation"),
-        }
-    }
-
     pub(super) fn lower_trigger_operation_args(
         &self,
         operation: crate::TriggerHostOperation,
@@ -168,18 +122,13 @@ impl<'module> Linker<'module> {
                     .map_err(|_| LinkError::InvalidTriggerList { span: scope.span })?;
                 let mut entries = Vec::with_capacity(call.entries.len());
                 for (name, expr) in call.entries {
+                    let (expr, binding) = self.lower_expr(expr, scope)?;
+                    let filter_ty = binding_type(&binding);
                     match name.as_str() {
                         "target" => {
-                            let target_ty = self.infer_expr_type(expr, &mut scope.clone())?;
-                            if !matches!(target_ty, TypeExpr::Process { .. }) {
-                                return Err(LinkError::InvalidTriggerTarget {
-                                    actual: format_type_expr(&target_ty),
-                                    span: scope.span,
-                                });
-                            }
+                            self.trigger_target_signature(&filter_ty, scope.span)?;
                         }
                         "name" | "source_type" => {
-                            let filter_ty = self.infer_expr_type(expr, &mut scope.clone())?;
                             if !self.is_type_assignable(&filter_ty, &TypeExpr::Str) {
                                 return Err(LinkError::IncompatibleOperationInput {
                                     operation: operation.receiver_method().to_string(),
@@ -190,7 +139,6 @@ impl<'module> Linker<'module> {
                             }
                         }
                         "enabled" => {
-                            let filter_ty = self.infer_expr_type(expr, &mut scope.clone())?;
                             if !self.is_type_assignable(&filter_ty, &TypeExpr::Bool) {
                                 return Err(LinkError::IncompatibleOperationInput {
                                     operation: operation.receiver_method().to_string(),
@@ -202,7 +150,7 @@ impl<'module> Linker<'module> {
                         }
                         _ => unreachable!("list_call_args rejects unknown trigger filters"),
                     }
-                    entries.push((name.clone(), self.lower_expr(expr, scope)?.0));
+                    entries.push((name.clone(), expr));
                 }
                 Ok((vec![Expr::Record(entries)], operation.output_ty()))
             }
@@ -218,7 +166,8 @@ impl<'module> Linker<'module> {
     ) -> Result<(Vec<Expr>, TypeExpr), LinkError> {
         let call = crate::register_call_args(args)
             .map_err(|_| LinkError::InvalidTriggerRegistration { span: scope.span })?;
-        let source_ty = self.infer_expr_type(call.source, &mut scope.clone())?;
+        let (source, source_binding) = self.lower_expr(call.source, scope)?;
+        let source_ty = binding_type(&source_binding);
         let event_ty = self
             .surface
             .resources
@@ -227,12 +176,11 @@ impl<'module> Linker<'module> {
                 source_ty: format_type_expr(&source_ty),
                 span: scope.span,
             })?;
-        let target_ty = self.infer_expr_type(call.target, &mut scope.clone())?;
-        let params = self.trigger_target_params(call.target, &target_ty, scope.span)?;
+        let (target, target_binding) = self.lower_expr(call.target, scope)?;
+        let target_ty = binding_type(&target_binding);
+        let params = self.trigger_target_params(&target_ty, scope.span)?;
         let process = trigger_target_process_label(call.target);
 
-        let source = self.lower_expr(call.source, scope)?.0;
-        let target = self.lower_expr(call.target, scope)?.0;
         let inputs = self.lower_trigger_input_record(
             process.as_str(),
             &params,
@@ -319,7 +267,7 @@ impl<'module> Linker<'module> {
                 process,
                 name.as_str(),
                 &param.ty,
-                binding.as_ref(),
+                &binding,
                 scope.span,
             )?;
             lowered.push((name.clone(), lowered_value));
@@ -341,38 +289,60 @@ impl<'module> Linker<'module> {
 
     pub(super) fn trigger_target_params(
         &self,
-        target: &Expr,
         target_ty: &TypeExpr,
         span: Option<Span>,
     ) -> Result<Vec<ProcessParam>, LinkError> {
-        if let Some(process_name) = trigger_target_process_name(target)
-            && let Some(process) = self.program.process(process_name.as_str())
-        {
-            return Ok(process.params.clone());
-        }
-        let TypeExpr::Process {
-            input, input_count, ..
-        } = target_ty
-        else {
-            return Err(LinkError::InvalidTriggerTarget {
+        self.trigger_target_signature(target_ty, span)?
+            .map(|signature| signature.params().to_vec())
+            .ok_or_else(|| LinkError::InvalidTriggerTarget {
                 actual: format_type_expr(target_ty),
                 span,
-            });
+            })
+    }
+
+    fn trigger_target_signature(
+        &self,
+        target_ty: &TypeExpr,
+        span: Option<Span>,
+    ) -> Result<Option<crate::ProcessSignature>, LinkError> {
+        let resolved = self.resolve_type_aliases(target_ty);
+        let signature = match &resolved {
+            TypeExpr::Process(process) => process.as_signature().cloned(),
+            TypeExpr::Union(items) => {
+                let mut common: Option<crate::ProcessSignature> = None;
+                let mut unknown = false;
+                for item in items {
+                    let TypeExpr::Process(process) = item else {
+                        return Err(LinkError::InvalidTriggerTarget {
+                            actual: format_type_expr(&resolved),
+                            span,
+                        });
+                    };
+                    let Some(signature) = process.as_signature() else {
+                        unknown = true;
+                        continue;
+                    };
+                    match &common {
+                        Some(existing) if existing != signature => {
+                            return Err(LinkError::InvalidTriggerTarget {
+                                actual: format_type_expr(&resolved),
+                                span,
+                            });
+                        }
+                        Some(_) => {}
+                        None => common = Some(signature.clone()),
+                    }
+                }
+                (!unknown).then_some(common).flatten()
+            }
+            _ => {
+                return Err(LinkError::InvalidTriggerTarget {
+                    actual: format_type_expr(&resolved),
+                    span,
+                });
+            }
         };
-        match (input_count, input.as_ref()) {
-            (0, _) => Ok(Vec::new()),
-            (count, TypeExpr::Object(fields)) if *count > 1 => Ok(fields
-                .iter()
-                .map(|field| ProcessParam {
-                    name: field.name.clone(),
-                    ty: field.ty.clone(),
-                })
-                .collect()),
-            _ => Err(LinkError::InvalidTriggerTarget {
-                actual: format_type_expr(target_ty),
-                span,
-            }),
-        }
+        Ok(signature)
     }
 
     pub(super) fn infer_process_output(
@@ -387,577 +357,22 @@ impl<'module> Linker<'module> {
         }
         scope.bind("input", Binding::Value(process_input_type(process)));
         scope.bind("inputs", Binding::Value(process_input_record_type(process)));
-        let completion = self.infer_completion(&process.body, &mut scope)?;
+        self.completion_facts.borrow_mut().clear();
+        self.collect_completion.set(true);
+        let result = self.lower_expr(&process.body, &mut scope);
+        self.collect_completion.set(false);
+        result?;
+        let completion = self
+            .completion_facts
+            .borrow()
+            .get(&(&process.body as *const Expr as usize))
+            .cloned()
+            .unwrap_or_else(Completion::fallthrough);
         let mut outputs = completion.finishes;
         if completion.can_fallthrough {
             outputs.push(TypeExpr::Null);
         }
         Ok(union_type(outputs))
-    }
-
-    pub(super) fn infer_completion(
-        &self,
-        expr: &Expr,
-        scope: &mut Scope,
-    ) -> Result<Completion, LinkError> {
-        match expr {
-            Expr::LabelAnnotated { expr, .. } => self.infer_completion(expr, scope),
-            Expr::Finish(value) => {
-                let expected_return = scope.expected_return.clone();
-                Ok(Completion {
-                    finishes: vec![self.infer_expr_type_expected(
-                        value,
-                        scope,
-                        expected_return.as_ref(),
-                    )?],
-                    can_fallthrough: false,
-                })
-            }
-            Expr::Fail(_) => Ok(Completion {
-                finishes: Vec::new(),
-                can_fallthrough: false,
-            }),
-            Expr::Block(expressions) => {
-                let mut finishes = Vec::new();
-                let mut can_fallthrough = true;
-                for expression in expressions {
-                    if !can_fallthrough {
-                        break;
-                    }
-                    let completion = self.infer_completion(expression, scope)?;
-                    finishes.extend(completion.finishes);
-                    can_fallthrough = completion.can_fallthrough;
-                }
-                Ok(Completion {
-                    finishes,
-                    can_fallthrough,
-                })
-            }
-            Expr::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                self.infer_expr_type(condition, scope)?;
-                let mut then_scope = scope.clone();
-                let then_completion = self.infer_completion(then_block, &mut then_scope)?;
-                let mut else_scope = scope.clone();
-                let else_completion = self.infer_completion(else_block, &mut else_scope)?;
-                scope.join_branches(then_scope, else_scope);
-                let mut finishes = then_completion.finishes;
-                finishes.extend(else_completion.finishes);
-                Ok(Completion {
-                    finishes,
-                    can_fallthrough: then_completion.can_fallthrough
-                        || else_completion.can_fallthrough,
-                })
-            }
-            Expr::For {
-                binding,
-                iterable,
-                body,
-            } => {
-                let iterable_ty = self.infer_expr_type(iterable, scope)?;
-                let item_ty = self.iterable_item_type(&iterable_ty, scope.span)?;
-                let before = scope.clone();
-                let mut body_scope = scope.clone();
-                let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
-                let mut completion = self.infer_completion(body, &mut body_scope)?;
-                body_scope.restore(binding.as_str(), previous);
-                scope.widen_loop(before, body_scope);
-                completion.can_fallthrough = true;
-                Ok(completion)
-            }
-            Expr::While { condition, body } => {
-                self.infer_expr_type(condition, scope)?;
-                let before = scope.clone();
-                let mut body_scope = scope.clone();
-                let mut completion = self.infer_completion(body, &mut body_scope)?;
-                scope.widen_loop(before, body_scope);
-                completion.can_fallthrough = true;
-                Ok(completion)
-            }
-            Expr::Assign { target, expr } => {
-                let expected = self.assignment_target_type(target, scope)?;
-                let ty = self.infer_expr_type_expected(expr, scope, expected.as_ref())?;
-                if target.steps.is_empty() {
-                    scope.bind(target.root.as_str(), self.binding_for_type(&ty));
-                } else {
-                    scope.update_path(target, &ty)?;
-                }
-                Ok(Completion::fallthrough())
-            }
-            other => {
-                self.infer_expr_type(other, scope)?;
-                Ok(Completion::fallthrough())
-            }
-        }
-    }
-
-    pub(super) fn infer_expr_type(
-        &self,
-        expr: &Expr,
-        scope: &mut Scope,
-    ) -> Result<TypeExpr, LinkError> {
-        self.infer_expr_type_expected(expr, scope, None)
-    }
-
-    pub(super) fn infer_expr_type_expected(
-        &self,
-        expr: &Expr,
-        scope: &mut Scope,
-        expected: Option<&TypeExpr>,
-    ) -> Result<TypeExpr, LinkError> {
-        if let (Some(facts), Some(expected)) = (&self.expected_type_facts, expected) {
-            facts.borrow_mut().by_expression.insert(
-                expr as *const Expr as usize,
-                self.resolve_type_aliases(expected),
-            );
-        }
-        self.reject_trigger_event_special_form(expr, scope.span)?;
-        self.validate_expected_literals(expr, expected, scope.span)?;
-        if matches!(expr, Expr::Variable(_) | Expr::Field { .. })
-            && let Some(resource) = self.resolve_module_expr(expr, scope)
-        {
-            return Ok(TypeExpr::Ref(resource.resource_type));
-        }
-        Ok(match expr {
-            Expr::LabelAnnotated { expr, .. } => {
-                self.infer_expr_type_expected(expr, scope, expected)?
-            }
-            Expr::Block(expressions) => {
-                let mut last = TypeExpr::Null;
-                let last_index = expressions.len().saturating_sub(1);
-                for (index, expression) in expressions.iter().enumerate() {
-                    last = self.infer_expr_type_expected(
-                        expression,
-                        scope,
-                        (index == last_index).then_some(expected).flatten(),
-                    )?;
-                }
-                last
-            }
-            Expr::Null
-            | Expr::Undefined
-            | Expr::Bool(_)
-            | Expr::Number(_)
-            | Expr::String(_)
-            | Expr::Break
-            | Expr::Continue => literal_type(expr),
-            Expr::TypeLiteral(_) => binding_type(self.closed_schema_witness_binding(expr).as_ref()),
-            Expr::Variable(name) => {
-                if let Some(binding) = scope.get(name) {
-                    binding_type(Some(&binding))
-                } else if let Some(process_ty) = self.process_types.get(name.as_str()) {
-                    process_ty.clone()
-                } else {
-                    return Err(LinkError::UnknownName {
-                        name: name.to_string(),
-                        span: scope.span,
-                    });
-                }
-            }
-            Expr::ProcessRef { process } => self
-                .process_types
-                .get(process.as_str())
-                .cloned()
-                .ok_or_else(|| LinkError::UnknownProcess {
-                    name: process.to_string(),
-                    span: scope.span,
-                })?,
-            Expr::HostDescriptorConstructor { type_name, .. } => TypeExpr::Ref(type_name.clone()),
-            Expr::Tuple(items) => TypeExpr::List(Box::new(union_type(
-                items
-                    .iter()
-                    .map(|item| {
-                        let expected_item = expected.and_then(|expected| {
-                            match self.resolve_type_aliases(expected) {
-                                TypeExpr::List(item) => Some(*item),
-                                _ => None,
-                            }
-                        });
-                        self.infer_expr_type_expected(item, scope, expected_item.as_ref())
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            ))),
-            Expr::List(items) => TypeExpr::List(Box::new(union_type(
-                items
-                    .iter()
-                    .map(|item| {
-                        let expected_item = expected.and_then(|expected| {
-                            match self.resolve_type_aliases(expected) {
-                                TypeExpr::List(item) => Some(*item),
-                                _ => None,
-                            }
-                        });
-                        self.infer_expr_type_expected(item, scope, expected_item.as_ref())
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            ))),
-            Expr::ListComprehension { element, clauses } => {
-                let mut previous_bindings = Vec::new();
-                for clause in clauses {
-                    match clause {
-                        ListComprehensionClause::For { binding, iterable } => {
-                            let iterable_ty = self.infer_expr_type(iterable, scope)?;
-                            let item_ty = self.iterable_item_type(&iterable_ty, scope.span)?;
-                            previous_bindings.push((
-                                binding.to_string(),
-                                scope.bind(binding.as_str(), self.binding_for_type(&item_ty)),
-                            ));
-                        }
-                        ListComprehensionClause::If { condition } => {
-                            self.infer_expr_type(condition, scope)?;
-                        }
-                    }
-                }
-                let element_ty = self.infer_expr_type(element, scope)?;
-                for (name, previous) in previous_bindings.into_iter().rev() {
-                    scope.restore(name.as_str(), previous);
-                }
-                TypeExpr::List(Box::new(element_ty))
-            }
-            Expr::Record(entries) => TypeExpr::Object(
-                entries
-                    .iter()
-                    .map(|(name, value)| {
-                        let expected_field = expected.and_then(|expected| {
-                            match self.resolve_type_aliases(expected) {
-                                TypeExpr::Object(fields) => fields
-                                    .into_iter()
-                                    .find(|field| field.name == *name)
-                                    .map(|field| field.ty),
-                                _ => None,
-                            }
-                        });
-                        Ok(TypeField {
-                            name: name.clone(),
-                            ty: self.infer_expr_type_expected(
-                                value,
-                                scope,
-                                expected_field.as_ref(),
-                            )?,
-                            optional: false,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, LinkError>>()?,
-            ),
-            Expr::Assign { target, expr } => {
-                let target_expected = self.assignment_target_type(target, scope)?;
-                let ty = self.infer_expr_type_expected(expr, scope, target_expected.as_ref())?;
-                if target.steps.is_empty() {
-                    scope.bind(target.root.as_str(), self.binding_for_type(&ty));
-                } else {
-                    scope.update_path(target, &ty)?;
-                }
-                ty
-            }
-            Expr::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                self.infer_expr_type(condition, scope)?;
-                let mut then_scope = scope.clone();
-                let then_ty =
-                    self.infer_expr_type_expected(then_block, &mut then_scope, expected)?;
-                let mut else_scope = scope.clone();
-                let else_ty =
-                    self.infer_expr_type_expected(else_block, &mut else_scope, expected)?;
-                scope.join_branches(then_scope, else_scope);
-                union_type(vec![then_ty, else_ty])
-            }
-            Expr::For {
-                binding,
-                iterable,
-                body,
-            } => {
-                let iterable_ty = self.infer_expr_type(iterable, scope)?;
-                let item_ty = self.iterable_item_type(&iterable_ty, scope.span)?;
-                let before = scope.clone();
-                let mut body_scope = scope.clone();
-                let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
-                self.infer_expr_type(body, &mut body_scope)?;
-                body_scope.restore(binding.as_str(), previous);
-                scope.widen_loop(before, body_scope);
-                TypeExpr::Null
-            }
-            Expr::While { condition, body } => {
-                self.infer_expr_type(condition, scope)?;
-                let before = scope.clone();
-                let mut body_scope = scope.clone();
-                self.infer_expr_type(body, &mut body_scope)?;
-                scope.widen_loop(before, body_scope);
-                TypeExpr::Null
-            }
-            Expr::StartProcess(start) => self.process_output_type(start.process.as_str()),
-            Expr::ResourceRef(resource) => TypeExpr::Ref(resource.resource_type.clone()),
-            Expr::ReceiverCall {
-                receiver,
-                operation,
-                args,
-            } => {
-                if let Some(mut path) = module_path_for_expr(receiver) {
-                    path.push(operation.clone());
-                    if let Some(constructor) =
-                        self.surface.resources.resolve_value_constructor(&path)
-                    {
-                        return Ok(constructor.output_ty.clone());
-                    }
-                }
-                let resolved_receiver = self
-                    .resolve_module_operation_expr(receiver, operation)
-                    .or_else(|| self.resolve_module_expr(receiver, scope));
-                let (resource_type, receiver_alias) =
-                    if let Some(resource) = resolved_receiver.as_ref() {
-                        (
-                            resource.resource_type.to_string(),
-                            Some(resource.alias.to_string()),
-                        )
-                    } else {
-                        let receiver_ty = self.infer_expr_type(receiver, scope)?;
-                        (
-                            self.resource_type_for_type(&receiver_ty).ok_or_else(|| {
-                                LinkError::UnresolvedReceiver {
-                                    operation: operation.to_string(),
-                                    suggestions: self
-                                        .surface
-                                        .resources
-                                        .operation_suggestions_for_operation(operation.as_str()),
-                                    span: scope.span,
-                                }
-                            })?,
-                            None,
-                        )
-                    };
-                let binding = match receiver_alias.as_deref() {
-                    Some(alias) => self
-                        .surface
-                        .resources
-                        .resolve_module_operation(&resource_type, alias, operation.as_str())
-                        .map(|resolved| resolved.binding),
-                    None => self
-                        .surface
-                        .resources
-                        .resolve_operation(&resource_type, operation),
-                };
-                let binding = binding.ok_or_else(|| LinkError::UnknownResourceOperation {
-                    resource_type: resource_type.clone(),
-                    operation: operation.to_string(),
-                    suggestions: self
-                        .surface
-                        .resources
-                        .operation_suggestions_for_resource_type(&resource_type),
-                    span: scope.span,
-                })?;
-                if crate::is_trigger_resource_type(&resource_type)
-                    && let Some(trigger_operation) =
-                        crate::TriggerHostOperation::from_receiver_method(operation.as_str())
-                {
-                    validate_trigger_operation_subscription_key(
-                        trigger_operation,
-                        args,
-                        scope.span,
-                    )?;
-                    if matches!(
-                        trigger_operation,
-                        crate::TriggerHostOperation::Register
-                            | crate::TriggerHostOperation::List
-                            | crate::TriggerHostOperation::Update
-                            | crate::TriggerHostOperation::Revive
-                    ) {
-                        self.validate_trigger_operation_args(trigger_operation, args, scope)?
-                    } else {
-                        let mut arg_types = Vec::with_capacity(args.len());
-                        for arg in args {
-                            let expected_arg =
-                                expected_call_arg_type(&binding.input_ty, args.len());
-                            arg_types.push(self.infer_expr_type_expected(
-                                arg,
-                                scope,
-                                expected_arg,
-                            )?);
-                        }
-                        let actual_input = call_input_type(arg_types);
-                        if !self.is_type_assignable(&actual_input, &binding.input_ty) {
-                            return Err(LinkError::IncompatibleOperationInput {
-                                operation: operation.to_string(),
-                                expected: format_type_expr(
-                                    &self.resolve_type_aliases(&binding.input_ty),
-                                ),
-                                actual: format_type_expr(&self.resolve_type_aliases(&actual_input)),
-                                span: scope.span,
-                            });
-                        }
-                        self.operation_call_output_type(binding, args)
-                    }
-                } else {
-                    let mut arg_types = Vec::with_capacity(args.len());
-                    for arg in args {
-                        let expected_arg = expected_call_arg_type(&binding.input_ty, args.len());
-                        arg_types.push(self.infer_expr_type_expected(arg, scope, expected_arg)?);
-                    }
-                    let actual_input = call_input_type(arg_types);
-                    if !self.is_type_assignable(&actual_input, &binding.input_ty) {
-                        return Err(LinkError::IncompatibleOperationInput {
-                            operation: operation.to_string(),
-                            expected: format_type_expr(
-                                &self.resolve_type_aliases(&binding.input_ty),
-                            ),
-                            actual: format_type_expr(&self.resolve_type_aliases(&actual_input)),
-                            span: scope.span,
-                        });
-                    }
-                    self.operation_call_output_type(binding, args)
-                }
-            }
-            Expr::Await(inner) => self.infer_expr_type_expected(inner, scope, expected)?,
-            Expr::ResultUnwrap(inner) => self.infer_expr_type_expected(inner, scope, expected)?,
-            Expr::SleepFor(_) | Expr::SleepUntil(_) => TypeExpr::Null,
-            Expr::WaitSignal { .. } => TypeExpr::Any,
-            Expr::SignalRun { .. }
-            | Expr::Cancel(_)
-            | Expr::Print(_)
-            | Expr::Yield(_)
-            | Expr::Wake(_)
-            | Expr::Fail(_) => TypeExpr::Null,
-            Expr::Finish(inner) => {
-                let return_expected = scope.expected_return.clone();
-                self.infer_expr_type_expected(inner, scope, return_expected.as_ref())?
-            }
-            Expr::BuiltinCall { name, args } => {
-                let arg_types = args
-                    .iter()
-                    .map(|arg| self.infer_expr_type(arg, scope))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.validate_shaping_builtin(name.as_str(), &arg_types, scope.span)?;
-                shaping_builtin_return_type(name.as_str(), &arg_types)
-            }
-            Expr::Function(function) => {
-                for capture in &function.captures {
-                    if scope.get(capture).is_none() {
-                        return Err(LinkError::UnknownName {
-                            name: capture.to_string(),
-                            span: scope.span,
-                        });
-                    }
-                }
-                let mut function_scope = Scope::new(scope.process_body, scope.span);
-                for capture in &function.captures {
-                    function_scope.bind(capture, any_binding());
-                }
-                for param in &function.params {
-                    function_scope.bind(param, any_binding());
-                }
-                if let Some(name) = &function.name {
-                    function_scope.bind(name, any_binding());
-                }
-                self.infer_expr_type(&function.body, &mut function_scope)?;
-                TypeExpr::Any
-            }
-            Expr::Call { function, args } => {
-                self.infer_expr_type(function, scope)?;
-                for arg in args {
-                    self.infer_expr_type(arg, scope)?;
-                }
-                TypeExpr::Any
-            }
-            Expr::FunctionCall { function, args } => {
-                for arg in args {
-                    self.infer_expr_type(arg, scope)?;
-                }
-                self.function_signatures
-                    .get(function.as_str())
-                    .map_or(TypeExpr::Any, |signature| signature.return_ty.clone())
-            }
-            Expr::Map { items, function } => {
-                self.infer_expr_type(items, scope)?;
-                self.infer_expr_type(function, scope)?;
-                TypeExpr::List(Box::new(TypeExpr::Any))
-            }
-            Expr::Try(exception) => self.infer_try_expr_type(exception, scope, expected)?,
-            Expr::Throw(value) => {
-                self.infer_expr_type(value, scope)?;
-                TypeExpr::Any
-            }
-            Expr::Return(value) => {
-                self.infer_expr_type(value, scope)?;
-                TypeExpr::Any
-            }
-            Expr::Field { target, field } => {
-                self.field_type(&self.infer_expr_type(target, scope)?, field, scope.span)?
-            }
-            Expr::Index { target, .. } => {
-                self.index_type(&self.infer_expr_type(target, scope)?, scope.span)?
-            }
-            Expr::Unary { op, .. } => match op {
-                crate::ast::UnaryOp::Not => TypeExpr::Bool,
-                crate::ast::UnaryOp::Negate => TypeExpr::Float,
-            },
-            Expr::Binary { left, op, right } => {
-                let left = self.infer_expr_type(left, scope)?;
-                let right = self.infer_expr_type(right, scope)?;
-                self.validate_binary_operands(*op, &left, &right, scope.span)?;
-                binary_return_type(*op)
-            }
-            Expr::JavaScriptUnary { op, expr } => {
-                self.infer_expr_type(expr, scope)?;
-                match op {
-                    crate::ast::JavaScriptUnaryOp::Not => TypeExpr::Bool,
-                    crate::ast::JavaScriptUnaryOp::TypeOf => TypeExpr::Str,
-                    crate::ast::JavaScriptUnaryOp::Plus | crate::ast::JavaScriptUnaryOp::Negate => {
-                        TypeExpr::Float
-                    }
-                }
-            }
-            Expr::JavaScriptBinary { left, op, right } => {
-                self.infer_expr_type(left, scope)?;
-                self.infer_expr_type(right, scope)?;
-                match op {
-                    crate::ast::JavaScriptBinaryOp::StrictEqual
-                    | crate::ast::JavaScriptBinaryOp::StrictNotEqual
-                    | crate::ast::JavaScriptBinaryOp::LooseEqual
-                    | crate::ast::JavaScriptBinaryOp::LooseNotEqual
-                    | crate::ast::JavaScriptBinaryOp::Less
-                    | crate::ast::JavaScriptBinaryOp::LessEqual
-                    | crate::ast::JavaScriptBinaryOp::Greater
-                    | crate::ast::JavaScriptBinaryOp::GreaterEqual => TypeExpr::Bool,
-                    _ => TypeExpr::Any,
-                }
-            }
-            Expr::JavaScriptLogical { left, right, .. } => {
-                self.infer_expr_type(left, scope)?;
-                self.infer_expr_type(right, scope)?;
-                TypeExpr::Any
-            }
-        })
-    }
-
-    pub(super) fn infer_try_expr_type(
-        &self,
-        exception: &crate::ast::TryExpr,
-        scope: &mut Scope,
-        expected: Option<&TypeExpr>,
-    ) -> Result<TypeExpr, LinkError> {
-        let before = scope.clone();
-        let mut try_scope = before.clone();
-        let body_ty = self.infer_expr_type_expected(&exception.body, &mut try_scope, expected)?;
-        let result_ty = if let Some(catch) = &exception.catch {
-            let mut catch_scope = before.clone();
-            let previous = catch_scope.bind(&catch.binding, any_binding());
-            let catch_ty =
-                self.infer_expr_type_expected(&catch.body, &mut catch_scope, expected)?;
-            catch_scope.restore(&catch.binding, previous);
-            scope.join_branches(try_scope, catch_scope);
-            union_type(vec![body_ty, catch_ty])
-        } else {
-            *scope = try_scope;
-            body_ty
-        };
-        if let Some(finally) = &exception.finally {
-            self.infer_expr_type(finally, scope)?;
-        }
-        Ok(result_ty)
     }
 }
 
@@ -1006,200 +421,14 @@ fn validate_trigger_subscription_key_literal(
     Ok(())
 }
 
-#[derive(Clone)]
-enum StaticTriggerBinding {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum StaticTriggerBinding {
     Source {
         source_type: String,
         source_key: String,
     },
     Target(String),
     Json(serde_json::Value),
-}
-
-pub(super) fn materialize_default_trigger_keys(mut program: Program) -> Result<Program, LinkError> {
-    let mut seen = BTreeSet::new();
-    let mut derived_keys = VecDeque::new();
-    for declaration in &program.declarations {
-        if let Declaration::Process(process) = declaration {
-            let mut bindings = process
-                .params
-                .iter()
-                .filter_map(|param| {
-                    let TypeExpr::Ref(source_type) = &param.ty else {
-                        return None;
-                    };
-                    Some((
-                        param.name.to_string(),
-                        StaticTriggerBinding::Source {
-                            source_type: source_type.to_string(),
-                            source_key: semantic_trigger_source_key(
-                                source_type.as_str(),
-                                &serde_json::json!({
-                                    "process_param": param.name.as_str(),
-                                }),
-                            ),
-                        },
-                    ))
-                })
-                .collect();
-            collect_default_trigger_keys(
-                &process.body,
-                &mut bindings,
-                &mut seen,
-                &mut derived_keys,
-            )?;
-        }
-    }
-    collect_default_trigger_keys(
-        &program.main,
-        &mut BTreeMap::new(),
-        &mut seen,
-        &mut derived_keys,
-    )?;
-
-    struct Materializer<'keys> {
-        derived_keys: &'keys mut VecDeque<String>,
-    }
-
-    impl crate::ExprFolder for Materializer<'_> {
-        fn fold_expr(&mut self, expr: Expr) -> Expr {
-            let expr = match expr {
-                Expr::ReceiverCall {
-                    receiver,
-                    operation,
-                    mut args,
-                } if operation.as_str()
-                    == crate::TriggerHostOperation::Register.receiver_method()
-                    && matches!(
-                        receiver.as_ref(),
-                        Expr::ResourceRef(resource)
-                            if crate::is_trigger_resource_type(resource.resource_type.as_str())
-                    )
-                    && crate::register_call_args(&args)
-                        .is_ok_and(|call| call.subscription_key.is_none()) =>
-                {
-                    let key = self
-                        .derived_keys
-                        .pop_front()
-                        .expect("every keyless registration was collected");
-                    if let [Expr::Record(entries)] = args.as_mut_slice() {
-                        entries.push(("subscription_key".into(), Expr::String(key.into())));
-                    }
-                    Expr::ReceiverCall {
-                        receiver,
-                        operation,
-                        args,
-                    }
-                }
-                expr => expr,
-            };
-            crate::fold_expr_children(self, expr)
-        }
-    }
-
-    let mut materializer = Materializer {
-        derived_keys: &mut derived_keys,
-    };
-    for declaration in &mut program.declarations {
-        if let Declaration::Process(process) = declaration {
-            process.body = crate::ExprFolder::fold_expr(
-                &mut materializer,
-                std::mem::replace(&mut process.body, Expr::Null),
-            );
-        }
-    }
-    program.main = crate::ExprFolder::fold_expr(
-        &mut materializer,
-        std::mem::replace(&mut program.main, Expr::Null),
-    );
-    debug_assert!(derived_keys.is_empty());
-    Ok(program)
-}
-
-fn collect_default_trigger_keys(
-    expr: &Expr,
-    bindings: &mut BTreeMap<String, StaticTriggerBinding>,
-    seen: &mut BTreeSet<(String, String, String)>,
-    derived_keys: &mut VecDeque<String>,
-) -> Result<(), LinkError> {
-    match expr {
-        Expr::Block(expressions) => {
-            for expression in expressions {
-                collect_default_trigger_keys(expression, bindings, seen, derived_keys)?;
-            }
-            return Ok(());
-        }
-        Expr::Assign { target, expr } => {
-            collect_default_trigger_keys(expr, bindings, seen, derived_keys)?;
-            if target.is_simple() {
-                if let Some(binding) = static_trigger_binding(expr, bindings) {
-                    bindings.insert(target.root.to_string(), binding);
-                } else {
-                    bindings.remove(target.root.as_str());
-                }
-            }
-            return Ok(());
-        }
-        Expr::If {
-            condition,
-            then_block,
-            else_block,
-        } => {
-            collect_default_trigger_keys(condition, bindings, seen, derived_keys)?;
-            collect_default_trigger_keys(then_block, &mut bindings.clone(), seen, derived_keys)?;
-            collect_default_trigger_keys(else_block, &mut bindings.clone(), seen, derived_keys)?;
-            return Ok(());
-        }
-        Expr::For { iterable, body, .. } => {
-            collect_default_trigger_keys(iterable, bindings, seen, derived_keys)?;
-            collect_default_trigger_keys(body, &mut bindings.clone(), seen, derived_keys)?;
-            return Ok(());
-        }
-        Expr::While { condition, body } => {
-            collect_default_trigger_keys(condition, bindings, seen, derived_keys)?;
-            collect_default_trigger_keys(body, &mut bindings.clone(), seen, derived_keys)?;
-            return Ok(());
-        }
-        Expr::ReceiverCall {
-            receiver,
-            operation,
-            args,
-        } if operation.as_str() == crate::TriggerHostOperation::Register.receiver_method()
-            && matches!(
-                receiver.as_ref(),
-                Expr::ResourceRef(resource) if crate::is_trigger_resource_type(resource.resource_type.as_str())
-            ) =>
-        {
-            if let Ok(call) = crate::register_call_args(args)
-                && call.subscription_key.is_none()
-            {
-                let Some((source_type, source_key)) = static_trigger_source(call.source, bindings)
-                else {
-                    return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: None });
-                };
-                let Some(process) = static_trigger_target(call.target, bindings) else {
-                    return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: None });
-                };
-                if !seen.insert((process.clone(), source_type.clone(), source_key.clone())) {
-                    return Err(LinkError::DuplicateDerivedTriggerSubscriptionKey {
-                        process,
-                        source_type,
-                        span: None,
-                    });
-                }
-                derived_keys.push_back(semantic_trigger_subscription_key(
-                    &process,
-                    &source_type,
-                    &source_key,
-                ));
-            }
-        }
-        _ => {}
-    }
-    for child in expr.children() {
-        collect_default_trigger_keys(child, bindings, seen, derived_keys)?;
-    }
-    Ok(())
 }
 
 fn static_trigger_binding(

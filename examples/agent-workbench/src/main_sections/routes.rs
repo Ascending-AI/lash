@@ -3,6 +3,10 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
+#[path = "routes/host_streams.rs"]
+mod host_streams;
+pub(crate) use host_streams::*;
+
 pub(crate) async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "service": "agent-workbench", "status": "ok" }))
 }
@@ -15,7 +19,7 @@ pub(crate) async fn app_state(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateReadSnapshot>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.state").await?);
+    let session_id = state.admit_session(&query, "api.state").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -225,96 +229,6 @@ pub(crate) async fn retrieve_attachment(
         .expect("valid attachment response"))
 }
 
-pub(crate) async fn session_events(
-    State(state): State<AppState>,
-    Query(query): Query<ProductEventsQuery>,
-) -> Result<Response, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(
-                &SessionQuery {
-                    session_id: query.session_id.clone(),
-                },
-                "api.events",
-            )
-            .await?,
-    );
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
-        })?;
-    let (replay, mut product_events) = state
-        .event_tx
-        .subscribe_after(&session_id, query.cursor.unwrap_or(0));
-    let event_registry = state.event_tx.clone();
-    let (tx, rx) = mpsc::channel::<ProductStreamItem>(64);
-    tokio::spawn(async move {
-        for event in replay {
-            if tx.send(ProductStreamItem::Event { event }).await.is_err() {
-                return;
-            }
-        }
-        loop {
-            match product_events.recv().await {
-                Ok(event) => {
-                    if tx.send(ProductStreamItem::Event { event }).await.is_err() {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(_count)) => {
-                    let _ = tx
-                        .send(ProductStreamItem::Resync {
-                            snapshot: event_registry.snapshot(&session_id),
-                        })
-                        .await;
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
-    Ok(ndjson_response(ReceiverStream::new(rx)))
-}
-
-pub(crate) async fn session_observations(
-    State(state): State<AppState>,
-    Query(query): Query<EventsQuery>,
-) -> Result<Response, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(
-                &SessionQuery {
-                    session_id: query.session_id.clone(),
-                },
-                "api.observations",
-            )
-            .await?,
-    );
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
-        })?;
-    let session = state
-        .open_session_for_observation(&session_id)
-        .await
-        .map_err(|error| state.session_admission_error(&session_id, "api.observations", error))?;
-    let cursor = match query
-        .cursor
-        .as_deref()
-        .filter(|cursor| !cursor.trim().is_empty())
-    {
-        Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
-            .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
-        None => session.observe().recoverable_chat_snapshot().cursor,
-    };
-    let (tx, rx) = mpsc::channel::<ObservationStreamItem>(64);
-    tokio::spawn(async move {
-        forward_session_observations(session, cursor, tx).await;
-    });
-    Ok(ndjson_response(ReceiverStream::new(rx)))
-}
-
 pub(crate) async fn commit_and_submit_user_turn(
     state: AppState,
     cleanup: ActiveTurnSubmissionGuard,
@@ -365,7 +279,7 @@ pub(crate) async fn send_turn(
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
-    let session_id = SessionId::from(state.admit_session(&query, "api.turn").await?);
+    let session_id = state.admit_session(&query, "api.turn").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
@@ -494,7 +408,7 @@ pub(crate) async fn button_trigger(
 ) -> Result<Json<CommandAccepted>, AppError> {
     // Side-effect ingress: the fence refuses before any message is pushed or
     // any workflow submitted for a retired session.
-    let session_id = SessionId::from(state.admit_session(&query, "api.button_trigger").await?);
+    let session_id = state.admit_session(&query, "api.button_trigger").await?;
     let turn_model = model_spec_for_request(
         &state.selected_model(),
         request.model.as_deref(),
@@ -540,7 +454,7 @@ pub(crate) async fn list_triggers(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<WorkbenchTriggerRegistration>>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.triggers.list").await?);
+    let session_id = state.admit_session(&query, "api.triggers.list").await?;
     let records = state
         .trigger_store
         .list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session(
@@ -563,7 +477,7 @@ pub(crate) async fn set_trigger_enabled(
     Query(query): Query<SessionQuery>,
     Json(request): Json<TriggerEnabledRequest>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.triggers.enable").await?);
+    let session_id = state.admit_session(&query, "api.triggers.enable").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     let changed = record.enabled != request.enabled;
     let command = if request.enabled {
@@ -636,7 +550,7 @@ pub(crate) async fn delete_trigger(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.triggers.delete").await?);
+    let session_id = state.admit_session(&query, "api.triggers.delete").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     restate::cancel_cron_job_before_trigger_delete(&state, &session_id, &record).await?;
     state
@@ -755,7 +669,7 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     state: &AppState,
     reason: &str,
 ) -> Result<lash::SessionCommandReceipt, AppError> {
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let session = state.open_session(&session_id).await.map_err(|error| {
         state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
     })?;
@@ -795,7 +709,7 @@ pub(crate) async fn inject_message(
 ) -> Result<Json<CommandAccepted>, AppError> {
     // Side-effect ingress: the fence refuses before mail is delivered or any
     // workflow submitted for a retired session.
-    let session_id = SessionId::from(state.admit_session(&query, "api.accounts.inject").await?);
+    let session_id = state.admit_session(&query, "api.accounts.inject").await?;
     let turn_model = model_spec_for_request(
         &state.selected_model(),
         request.model.as_deref(),
@@ -835,17 +749,14 @@ pub(crate) async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateSnapshot>, AppError> {
-    let old_session_id = SessionId::from(
-        state
-            .admit_session_for_delete(&query, "api.session.delete")
-            .await?,
-    );
+    let old_session_id = state
+        .admit_session_for_delete(&query, "api.session.delete")
+        .await?;
     retire_session(&state, &old_session_id).await?;
     state.event_tx.remove(&old_session_id);
     let retired_dialect = state.requested_dialect(&old_session_id);
     let (new_session_id, replaced_current) =
         state.sessions.replace(&old_session_id, retired_dialect);
-    let new_session_id = SessionId::from(new_session_id);
     state.trace_for_session(
         &old_session_id,
         "api.reset",
@@ -902,11 +813,11 @@ pub(crate) async fn list_work(
     // Only the explicit form is session-bound: the default query serves the
     // runtime-wide registry snapshot (including work retired by a session
     // delete), so it is not fenced on whatever session happens to be current.
-    let session_id = SessionId::from(if query.is_explicit() {
+    let session_id = if query.is_explicit() {
         state.admit_session(&query, "api.work.list").await?
     } else {
         query.resolve(&state)?
-    });
+    };
     let observed = if query.is_explicit() {
         state
             .process_observer
@@ -955,7 +866,7 @@ pub(crate) async fn list_queued_work(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<lash::persistence::QueuedWorkBatch>>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.queued_work.list").await?);
+    let session_id = state.admit_session(&query, "api.queued_work.list").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -977,7 +888,7 @@ pub(crate) async fn run_queued_work_batch(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<QueuedWorkBatchAction>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.queued_work.run").await?);
+    let session_id = state.admit_session(&query, "api.queued_work.run").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
@@ -1059,11 +970,9 @@ pub(crate) async fn cancel_queued_work_batch(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<QueuedWorkBatchAction>, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(&query, "api.queued_work.cancel")
-            .await?,
-    );
+    let session_id = state
+        .admit_session(&query, "api.queued_work.cancel")
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
@@ -1112,9 +1021,7 @@ pub(crate) async fn cancel_work(
     }
     let session_id = match &process.originator {
         lash::process::ProcessOriginator::Session { session_id, .. } => session_id.clone(),
-        lash::process::ProcessOriginator::Host { .. } => {
-            SessionId::from(state.current_session_id())
-        }
+        lash::process::ProcessOriginator::Host { .. } => state.current_session_id(),
     };
     let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());
     restate::submit_process_cancel(
@@ -1204,7 +1111,7 @@ pub(crate) async fn list_lashlang_graphs(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<execution_graphs::LashlangGraphIndex>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.lashlang_graphs").await?);
+    let session_id = state.admit_session(&query, "api.lashlang_graphs").await?;
     let index = execution_graphs::index_for_session(
         &state.process_observer,
         &session_id,
@@ -1219,7 +1126,7 @@ pub(crate) async fn lashlang_graph(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TraceLashlangGraph>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.lashlang_graph").await?);
+    let session_id = state.admit_session(&query, "api.lashlang_graph").await?;
     let graph = execution_graphs::visible_graph_by_key(
         &state.process_observer,
         &session_id,
@@ -1228,115 +1135,6 @@ pub(crate) async fn lashlang_graph(
     )
     .await?;
     Ok(Json(graph))
-}
-
-pub(crate) async fn forward_session_observations(
-    session: lash::LashSession,
-    cursor: SessionCursor,
-    tx: mpsc::Sender<ObservationStreamItem>,
-) {
-    use lash::recoverable_chat::RecoverableChatUpdate;
-
-    if tx
-        .send(ObservationStreamItem::Cursor {
-            cursor: cursor.to_string(),
-        })
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let mut stream = session.observe().subscribe_recoverable_chat(cursor);
-    let mut sequence = 0;
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(RecoverableChatUpdate::Event { event, .. }) => {
-                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(event) => event,
-                    Err(err) => {
-                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                        break;
-                    }
-                };
-                sequence = sequence.saturating_add(1);
-                if tx
-                    .send(ObservationStreamItem::Observation {
-                        event: Box::new(Envelope::new(event)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::TerminalReplacement {
-                event, snapshot, ..
-            }) => {
-                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(event) => event,
-                    Err(err) => {
-                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                        break;
-                    }
-                };
-                sequence = sequence.saturating_add(1);
-                if tx
-                    .send(ObservationStreamItem::TerminalReplacement {
-                        cursor: snapshot.cursor.to_string(),
-                        event: Box::new(Envelope::new(event)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::ResidentReplacement {
-                event, snapshot, ..
-            }) => {
-                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(event) => event,
-                    Err(err) => {
-                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                        break;
-                    }
-                };
-                sequence = sequence.saturating_add(1);
-                if tx
-                    .send(ObservationStreamItem::ResidentReplacement {
-                        cursor: snapshot.cursor.to_string(),
-                        event: Box::new(Envelope::new(event)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {
-                let observation =
-                    RemoteSessionObservation::from_core(lash::observe::SessionObservation {
-                        read_view: snapshot.read_view,
-                        cursor: snapshot.cursor,
-                    });
-                let gap = RemoteLiveReplayGap::from(gap);
-                if tx
-                    .send(ObservationStreamItem::ReplayGap {
-                        observation: Box::new(Envelope::new(observation)),
-                        gap: Box::new(Envelope::new(gap)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Err(err) => {
-                eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                break;
-            }
-        }
-    }
 }
 
 #[derive(Default)]

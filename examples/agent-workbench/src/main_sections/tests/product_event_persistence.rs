@@ -132,6 +132,41 @@ fn product_event_log_rejects_unversioned_product_event_root_with_clear_error() {
 }
 
 #[test]
+fn product_event_log_rejects_unversioned_product_event_array_history() {
+    let data_dir = tempfile::tempdir().expect("legacy product event array tempdir");
+    let path = data_dir.path().join("product-events.json");
+    std::fs::write(
+        &path,
+        r#"{
+            "released-session": [{
+                "event_id": "released-message",
+                "sequence": 1,
+                "type": "message",
+                "message": {
+                    "id": "message",
+                    "role": "assistant",
+                    "text": "legacy event array",
+                    "at": ""
+                }
+            }]
+        }"#,
+    )
+    .expect("write unversioned product event array history");
+
+    let error = match SessionEventRegistry::persistent(path, 4) {
+        Ok(_) => panic!("an unversioned product event array must be rejected"),
+        Err(error) => error,
+    };
+    let typed = error
+        .downcast_ref::<ProductEventLogLoadError>()
+        .expect("product event load failures remain typed");
+    assert!(matches!(
+        typed.source,
+        ProductEventLogDecodeError::UnversionedRoot
+    ));
+}
+
+#[test]
 fn active_turns_reject_bare_legacy_set_with_clear_error() {
     let data_dir = tempfile::tempdir().expect("legacy active turns tempdir");
     let path = data_dir.path().join("active-turns.json");

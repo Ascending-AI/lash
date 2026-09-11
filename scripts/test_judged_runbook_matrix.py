@@ -145,7 +145,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             + len(config["no_rlm_session_only"])
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 66)
+        self.assertEqual(expected, 67)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is

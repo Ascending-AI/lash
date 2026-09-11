@@ -42,12 +42,29 @@ pub async fn effect_host_await_events_cold_instance<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
+    effect_host_await_events_cold_instance_with_active_wait_witness(
+        make,
+        super::effect_host::effect_host_await_event_when_quiescent_waits_for_live_waits,
+    )
+    .await;
+}
+
+/// Run the durable multi-host AwaitEvent suite with an
+/// implementation-owned witness for the active-wait quiescence law.
+pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, W, WFut>(
+    make: F,
+    witness: W,
+) where
+    F: Fn() -> Arc<dyn EffectHost>,
+    W: FnOnce(Arc<dyn EffectHost>) -> WFut,
+    WFut: std::future::Future<Output = ()>,
+{
     let first = make();
     let second = make();
     assert_fresh_instances(&first, &second, "effect_host_await_events_cold_instance");
     drop((first, second));
     super::effect_host::effect_host_local_turn_control_resolves_on_minting_host(make()).await;
-    super::effect_host::effect_host_await_event_when_quiescent_waits_for_live_waits(make()).await;
+    witness(make()).await;
     super::effect_host::effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     let prefix = format!("cold-await-{}", uuid::Uuid::new_v4());
     cold_mint_resolve_observe_all_identities(&make, &prefix).await;

@@ -631,15 +631,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                     let mut records = Vec::new();
                     for row in rows {
-                        let (occurrence_id, json) = row.map_err(process_sqlite_error)?;
-                        match Self::decode_occurrence(json) {
-                            Ok(record) => records.push(record),
-                            Err(err) => tracing::warn!(
-                                error = %err,
-                                occurrence_id,
-                                "skipping malformed trigger occurrence during listing"
-                            ),
-                        }
+                        let (_, json) = row.map_err(process_sqlite_error)?;
+                        records.push(Self::decode_occurrence(json)?);
                     }
                     Ok(records)
                 })())
