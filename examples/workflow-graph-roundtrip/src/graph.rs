@@ -1474,4 +1474,60 @@ finish [state, introduced]
             graph
         );
     }
+
+    #[test]
+    fn api_document_transport_preserves_every_nested_container_kind() {
+        let input = r#"items = [value for value in [1, 2]]
+if true {
+  for item in items {
+    while false {}
+  }
+} else {}
+finish items
+"#;
+        let graph = lashlang::workflow_graph_from_source(input).expect("project container graph");
+        let source = lashlang::workflow_graph_to_source(&graph).expect("render container graph");
+        let document = document_from_graph(1, source.clone(), graph.clone());
+
+        let transported_json =
+            serde_json::to_string(&document).expect("serialize public workflow document");
+        let transported: WorkflowDocument =
+            serde_json::from_str(&transported_json).expect("deserialize public workflow document");
+
+        let container_kinds = transported
+            .nodes
+            .iter()
+            .filter(|node| node.data.kind == "container")
+            .filter_map(|node| node.data.subkind.as_deref())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            container_kinds,
+            BTreeSet::from(["comprehension", "for", "if", "while"])
+        );
+        assert!(transported.nodes.iter().any(|node| {
+            node.data.subkind.as_deref() == Some("if")
+                && node
+                    .data
+                    .children
+                    .iter()
+                    .any(|child| child.slot == "else" && child.node_ids.is_empty())
+        }));
+        assert!(transported.nodes.iter().any(|node| {
+            node.data.subkind.as_deref() == Some("while")
+                && node
+                    .data
+                    .children
+                    .iter()
+                    .any(|child| child.slot == "body" && child.node_ids.is_empty())
+        }));
+
+        let rebuilt = graph_from_document(transported, &graph).expect("rebuild transported graph");
+        let rendered = lashlang::workflow_graph_to_source(&rebuilt)
+            .expect("render transported workflow graph");
+        assert_eq!(rendered, source);
+        assert_eq!(
+            lashlang::workflow_graph_from_source(&rendered).expect("reproject transported source"),
+            graph
+        );
+    }
 }

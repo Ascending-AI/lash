@@ -2255,7 +2255,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
         .json()
         .await
         .expect("workflow document");
-    document.schema_version += 1;
+    document.schema_version -= 1;
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -2268,7 +2268,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     assert_eq!(body["error"]["code"], "unsupported_schema_version");
     assert_eq!(
         body["error"]["details"]["found"],
-        lashlang::WORKFLOW_GRAPH_SCHEMA_VERSION + 1
+        lashlang::WORKFLOW_GRAPH_SCHEMA_VERSION - 1
     );
     assert_eq!(
         body["error"]["details"]["expected"],

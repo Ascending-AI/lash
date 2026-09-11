@@ -33,6 +33,77 @@ fn canonical_get_put_and_put_get() {
 }
 
 #[test]
+fn nested_container_graphs_roundtrip_through_the_canonical_json_codec() {
+    let source = r#"items = [value for value in [1, 2]]
+if true {
+  for item in items {
+    while false {}
+  }
+} else {}
+finish items
+"#;
+    let canonical = canonical_program_source(&parse(source).unwrap()).unwrap();
+    let graph = workflow_graph_from_source(&canonical).unwrap();
+
+    let json = serde_json::to_string(&graph).expect("workflow graph serializes to JSON text");
+    let from_string: WorkflowGraph =
+        serde_json::from_str(&json).expect("serialized workflow graph decodes from JSON text");
+    assert_eq!(from_string, graph);
+
+    let value = serde_json::to_value(&graph).expect("workflow graph serializes to a JSON value");
+    let from_value: WorkflowGraph = serde_json::from_value(value.clone())
+        .expect("serialized workflow graph decodes from a JSON value");
+    assert_eq!(from_value, graph);
+
+    let comprehension = &value["main"]["nodes"][0]["kind"];
+    assert_eq!(comprehension["kind"], "container");
+    assert_eq!(comprehension["container_kind"], "list_comprehension");
+    assert_eq!(
+        comprehension["element"]["nodes"].as_array().unwrap().len(),
+        1
+    );
+
+    let conditional = &value["main"]["nodes"][1]["kind"];
+    assert_eq!(conditional["kind"], "container");
+    assert_eq!(conditional["container_kind"], "if");
+    assert_eq!(conditional["else_graph"]["nodes"], serde_json::json!([]));
+
+    let for_loop = &conditional["then_graph"]["nodes"][0]["kind"];
+    assert_eq!(for_loop["kind"], "container");
+    assert_eq!(for_loop["container_kind"], "for");
+
+    let while_loop = &for_loop["body"]["nodes"][0]["kind"];
+    assert_eq!(while_loop["kind"], "container");
+    assert_eq!(while_loop["container_kind"], "while");
+    assert_eq!(while_loop["body"]["nodes"], serde_json::json!([]));
+
+    let rendered = workflow_graph_to_source(&from_string).expect("decoded graph renders");
+    assert_eq!(rendered, canonical);
+    assert_eq!(
+        workflow_graph_from_source(&rendered).expect("rendered source reprojects"),
+        graph
+    );
+
+    let mut previous_schema = graph.clone();
+    previous_schema.schema_version = WORKFLOW_GRAPH_SCHEMA_VERSION - 1;
+    assert!(matches!(
+        workflow_graph_to_source(&previous_schema),
+        Err(GraphRenderError::UnsupportedSchemaVersion {
+            found,
+            expected: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        }) if found == WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+    ));
+
+    let legacy_json = json.replacen("\"container_kind\":\"if\"", "\"kind\":\"if\"", 1);
+    let legacy_error = serde_json::from_str::<WorkflowGraph>(&legacy_json)
+        .expect_err("the colliding legacy container representation must stay refused");
+    assert!(
+        legacy_error.to_string().contains("duplicate field `kind`"),
+        "unexpected legacy decode error: {legacy_error}"
+    );
+}
+
+#[test]
 fn expression_if_and_direct_else_if_obey_all_lens_laws() {
     let source = r#"choice = (true ? 1 : (false ? 2 : 3))
 if choice == 1 {
@@ -117,7 +188,7 @@ fn invalid_graphs_are_refused() {
 }
 
 #[test]
-fn omitted_container_children_fail_at_decode() {
+fn missing_and_null_container_children_fail_at_decode() {
     let empty = || Box::new(WorkflowSubgraph::default());
     let cases = [
         (
@@ -170,18 +241,27 @@ fn omitted_container_children_fail_at_decode() {
         ),
     ];
 
-    for (container, missing_field) in cases {
-        let mut encoded = serde_json::to_value(container).expect("container serializes");
-        encoded
+    for (container, required_field) in cases {
+        let encoded = serde_json::to_value(container).expect("container serializes");
+
+        let mut missing = encoded.clone();
+        missing
             .as_object_mut()
             .expect("container serializes as an object")
-            .remove(missing_field);
-        let error = serde_json::from_value::<WorkflowContainer>(encoded)
+            .remove(required_field);
+        let error = serde_json::from_value::<WorkflowContainer>(missing)
             .expect_err("omitting a required child must fail at decode");
         assert!(
-            error.to_string().contains(missing_field),
-            "decode error for `{missing_field}` should name the missing field: {error}"
+            error.to_string().contains(required_field),
+            "decode error for `{required_field}` should name the missing field: {error}"
         );
+
+        let mut null = encoded;
+        null.as_object_mut()
+            .expect("container serializes as an object")
+            .insert(required_field.to_string(), serde_json::Value::Null);
+        serde_json::from_value::<WorkflowContainer>(null)
+            .expect_err("a null required child must fail at decode");
     }
 }
 

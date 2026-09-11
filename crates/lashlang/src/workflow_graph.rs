@@ -36,7 +36,7 @@ pub use execution_sites::runtime_execution_site_for_workflow_site;
 pub use facets::*;
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 7;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 8;
 
 /// A deterministic node identifier minted from canonical source and AST position.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -225,7 +225,7 @@ pub enum WorkflowTerminalKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "container_kind", rename_all = "snake_case")]
 pub enum WorkflowContainer {
     If {
         #[serde(default, skip_serializing_if = "Option::is_none")]
