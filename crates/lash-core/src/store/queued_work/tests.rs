@@ -862,8 +862,45 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
     assert_eq!(lease.lease_token, again.lease_token);
     assert_eq!(
         lease.lease_token,
-        "d367bfde39e7d937ecbe2916cb02a5144a7221c318bcdb45aa2939567f176acc"
+        "e6868c695c13e62c7dec54445896e7fcc9a88e863ddd380318c041ec1364b521"
     );
+}
+
+#[test]
+fn lease_token_framing_distinguishes_opaque_identity_boundaries() {
+    let head = ClaimCandidate {
+        batch_id: "qwb-7".to_string(),
+        enqueue_seq: 7,
+        claim_fencing_token: 2,
+        prior_claim_id: None,
+        prior_claim_token: None,
+        config_patch_command: false,
+        delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
+        kind: QueuedWorkKind::Turn,
+        authority: QueuedWorkAuthority::default(),
+        merge_key: None,
+        enqueued_at_ms: 0,
+        turn_causes: Vec::new(),
+        input_texts: Vec::new(),
+    };
+    let left = WorkClaimLease::derive_queued_work(
+        &head,
+        &SessionId::from("a:b"),
+        &LeaseOwnerIdentity::opaque("c", "incarnation"),
+        1_000,
+        5,
+    )
+    .expect("derive left lease");
+    let right = WorkClaimLease::derive_queued_work(
+        &head,
+        &SessionId::from("a"),
+        &LeaseOwnerIdentity::opaque("b:c", "incarnation"),
+        1_000,
+        5,
+    )
+    .expect("derive right lease");
+
+    assert_ne!(left.lease_token, right.lease_token);
 }
 
 #[test]

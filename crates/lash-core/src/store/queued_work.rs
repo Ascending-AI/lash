@@ -932,14 +932,7 @@ impl WorkClaimLease {
             claim_fencing_token,
         )?;
         let claim_id = derive_claim_id(dialect, enqueue_seq, fencing_token);
-        let lease_token = crate::stable_hash::blake3_hex(
-            "lash-queued-work-claim-lease/v2",
-            format!(
-                "{}:{}:{}:{}:{}",
-                session_id, owner.owner_id, owner.incarnation_id, claim_id, now_epoch_ms
-            )
-            .as_bytes(),
-        );
+        let lease_token = derive_claim_lease_token(session_id, owner, &claim_id, now_epoch_ms);
         Ok(Self {
             claim_id,
             lease_token,
@@ -947,6 +940,32 @@ impl WorkClaimLease {
             session_lease_generation,
         })
     }
+}
+
+const QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION: u8 = 3;
+
+/// Derives the opaque ownership token shared by queued-work and turn-input claims.
+///
+/// Strings are length-framed because session and owner identities are opaque UTF-8;
+/// the timestamp is fixed-width. Persisted tokens remain opaque at validation
+/// boundaries: release, settlement, and recovery compare the carried token with
+/// the stored token and never rederive it, so pre-v3 claims stay valid.
+pub(crate) fn derive_claim_lease_token(
+    session_id: &SessionId,
+    owner: &LeaseOwnerIdentity,
+    claim_id: &str,
+    now_epoch_ms: u64,
+) -> String {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.queued-work-claim-lease",
+        QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION,
+    );
+    identity.string(session_id.as_str());
+    identity.string(&owner.owner_id);
+    identity.string(&owner.incarnation_id);
+    identity.string(claim_id);
+    identity.u64(now_epoch_ms);
+    crate::stable_hash::blake3_hex("lash-queued-work-claim-lease/v3", &identity.finish())
 }
 
 /// Derive the durable id for a newly enqueued batch.
