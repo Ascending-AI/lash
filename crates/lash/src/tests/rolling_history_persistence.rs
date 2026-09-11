@@ -97,6 +97,115 @@ fn sqlite_messages(
         .collect()
 }
 
+#[derive(Clone, Copy)]
+enum RepeatedAdminCompactionScope {
+    ParentTurn,
+    RuntimeOperation,
+}
+
+async fn assert_repeated_admin_compactions_with_changed_snapshot(
+    scope_kind: RepeatedAdminCompactionScope,
+    expected_summaries: &[&str],
+) -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = match scope_kind {
+        RepeatedAdminCompactionScope::ParentTurn => "rolling-history-repeat-parent-turn",
+        RepeatedAdminCompactionScope::RuntimeOperation => {
+            "rolling-history-repeat-runtime-operation"
+        }
+    };
+    let effect_host = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
+            .await
+            .expect("open SQLite effect host"),
+    );
+    let mut responses = vec![
+        response_with_usage("first response", 1),
+        response_with_usage("second response", 1),
+    ];
+    responses.extend(
+        expected_summaries
+            .iter()
+            .map(|summary| response_with_usage(summary, 1)),
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(rolling_history_provider(responses))
+        .model(model_spec("rolling-history-model", None, 40_000))
+        .plugin(Arc::new(
+            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+        ))
+        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+            dir.path().join("sessions"),
+        )))
+        .effect_host(effect_host.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    for (turn_id, text) in [
+        ("rolling-history-same-parent-one", "first request"),
+        ("rolling-history-same-parent-two", "second request"),
+    ] {
+        session
+            .turn(TurnInput::text(text))
+            .turn_id(turn_id)
+            .run()
+            .await?;
+    }
+    let execution_scope = match scope_kind {
+        RepeatedAdminCompactionScope::ParentTurn => {
+            lash_core::ExecutionScope::turn(session_id, "rolling-history-same-parent-two")
+        }
+        RepeatedAdminCompactionScope::RuntimeOperation => {
+            lash_core::ExecutionScope::runtime_operation(format!(
+                "rolling-history-repeat-admin:{session_id}"
+            ))
+        }
+    };
+    let shared_scope = effect_host
+        .scoped_static(execution_scope)?
+        .expect("SQLite host supplies the repeated admin scope");
+
+    for expected_summary in expected_summaries {
+        assert!(
+            session
+                .admin()
+                .state()
+                .compact_context(
+                    Some("keep the same administrative focus".to_string()),
+                    shared_scope.clone(),
+                )
+                .await?,
+            "each changed snapshot remains a valid administrative compaction request"
+        );
+        let view = session.read_view();
+        assert_eq!(view.messages().len(), 1);
+        assert!(
+            view.messages()[0].parts[0]
+                .content
+                .contains(expected_summary)
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn repeated_admin_compaction_with_parent_turn_distinguishes_changed_snapshot() -> Result<()> {
+    assert_repeated_admin_compactions_with_changed_snapshot(
+        RepeatedAdminCompactionScope::ParentTurn,
+        &["first summary", "second summary"],
+    )
+    .await
+}
+
+#[tokio::test]
+async fn repeated_admin_compaction_with_runtime_scope_distinguishes_changed_snapshot() -> Result<()>
+{
+    assert_repeated_admin_compactions_with_changed_snapshot(
+        RepeatedAdminCompactionScope::RuntimeOperation,
+        &["first summary", "second summary", "third summary"],
+    )
+    .await
+}
+
 #[tokio::test]
 async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_compaction()
 -> Result<()> {

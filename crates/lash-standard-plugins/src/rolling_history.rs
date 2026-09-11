@@ -8,7 +8,7 @@
 //! so standard lash sessions pick it up automatically.
 
 use lash_sansio::{SessionId, TurnId};
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 
@@ -223,9 +223,138 @@ fn latest_physical_turn_id(state: &SessionSnapshot) -> Option<TurnId> {
         })
 }
 
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+enum CompactionGraphAddress<'a> {
+    NodeIndex(u64),
+    External(&'a str),
+}
+
+#[derive(serde::Serialize)]
+struct CompactionGraphNodeIdentity<'a> {
+    parent: Option<CompactionGraphAddress<'a>>,
+    payload: &'a lash_core::SessionNodePayload,
+}
+
+#[derive(serde::Serialize)]
+struct CompactionSnapshotIdentity<'a> {
+    session_id: &'a SessionId,
+    policy: &'a lash_core::SessionPolicy,
+    graph_nodes: Vec<CompactionGraphNodeIdentity<'a>>,
+    graph_leaf: Option<CompactionGraphAddress<'a>>,
+    current_frame: Option<CompactionGraphAddress<'a>>,
+    turn_index: usize,
+    token_usage: &'a lash_core::TokenUsage,
+    last_prompt_usage: &'a Option<PromptUsage>,
+    protocol_turn_options: &'a lash_core::ProtocolTurnOptions,
+    tool_state_ref: &'a Option<lash_core::store::BlobRef>,
+    tool_state_generation: Option<u64>,
+    plugin_state_ref: &'a Option<lash_core::store::BlobRef>,
+    plugin_state_generations: &'a BTreeMap<String, u64>,
+    execution_state_ref: &'a Option<lash_core::store::BlobRef>,
+    token_ledger: &'a [lash_core::TokenLedgerEntry],
+    checkpoint_ref: &'a Option<lash_core::store::BlobRef>,
+}
+
+#[derive(serde::Serialize)]
+struct CompactionRequestIdentity<'a> {
+    // The graph projection keeps ordered payloads and topology while replacing
+    // runtime-minted node ids with indices and excluding observational node
+    // timestamps. Reconstructing one request therefore cannot acquire ambient
+    // time or randomness, while every child-state payload remains binding.
+    snapshot: CompactionSnapshotIdentity<'a>,
+    prompt_text: &'a str,
+}
+
+fn compaction_graph_address<'a>(
+    node_indices: &BTreeMap<&'a str, u64>,
+    node_id: &'a str,
+) -> CompactionGraphAddress<'a> {
+    node_indices
+        .get(node_id)
+        .copied()
+        .map_or(CompactionGraphAddress::External(node_id), |index| {
+            CompactionGraphAddress::NodeIndex(index)
+        })
+}
+
+fn compaction_request_identity(
+    snapshot: &SessionSnapshot,
+    prompt_text: &str,
+) -> Result<String, ContextError> {
+    let SessionSnapshot {
+        session_id,
+        policy,
+        agent_frames: _, // derived from the graph
+        current_frame_node_id,
+        session_graph,
+        turn_index,
+        token_usage,
+        last_prompt_usage,
+        protocol_turn_options,
+        tool_state_ref,
+        tool_state_generation,
+        plugin_state_ref,
+        plugin_state_generations,
+        execution_state_ref,
+        token_ledger,
+        checkpoint_ref,
+    } = snapshot;
+    let node_indices = session_graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id.as_str(), index as u64))
+        .collect::<BTreeMap<_, _>>();
+    let graph_nodes = session_graph
+        .nodes
+        .iter()
+        .map(|node| CompactionGraphNodeIdentity {
+            parent: node
+                .parent_node_id
+                .as_deref()
+                .map(|node_id| compaction_graph_address(&node_indices, node_id)),
+            payload: &node.payload,
+        })
+        .collect();
+    let identity = CompactionRequestIdentity {
+        snapshot: CompactionSnapshotIdentity {
+            session_id,
+            policy,
+            graph_nodes,
+            graph_leaf: session_graph
+                .leaf_node_id
+                .as_deref()
+                .map(|node_id| compaction_graph_address(&node_indices, node_id)),
+            current_frame: current_frame_node_id
+                .as_deref()
+                .map(|node_id| compaction_graph_address(&node_indices, node_id)),
+            turn_index: *turn_index,
+            token_usage,
+            last_prompt_usage,
+            protocol_turn_options,
+            tool_state_ref,
+            tool_state_generation: *tool_state_generation,
+            plugin_state_ref,
+            plugin_state_generations,
+            execution_state_ref,
+            token_ledger,
+            checkpoint_ref,
+        },
+        prompt_text,
+    };
+    serde_json::to_string(&identity).map_err(|error| {
+        ContextError::Session(format!(
+            "failed to encode rolling-history compaction request identity: {error}"
+        ))
+    })
+}
+
 fn compaction_child_ids(
     parent_session_id: &SessionId,
     state: &SessionSnapshot,
+    request_snapshot: &SessionSnapshot,
+    prompt_text: &str,
     execution_scope: &lash_core::ExecutionScope,
 ) -> Result<(SessionId, TurnId), ContextError> {
     let physical_parent_turn_id = latest_physical_turn_id(state)
@@ -238,8 +367,10 @@ fn compaction_child_ids(
     append_identity_field(&mut identity, parent_session_id);
     append_identity_field(&mut identity, &physical_parent_turn_id);
     append_identity_field(&mut identity, journal_scope.key());
+    let request_identity = compaction_request_identity(request_snapshot, prompt_text)?;
+    append_identity_field(&mut identity, &request_identity);
     let discriminator = lash_sansio::core_support::blake3_domain_hash_hex(
-        "lash-rolling-history-compaction/v1",
+        "lash-rolling-history-compaction/v2",
         identity,
     );
     Ok((
@@ -248,6 +379,28 @@ fn compaction_child_ids(
             "{physical_parent_turn_id}:rolling-history-compaction:{discriminator}"
         )),
     ))
+}
+
+fn prepare_compaction_request(
+    state: &SessionSnapshot,
+    mut prefix_messages: Vec<Message>,
+    instructions: Option<&str>,
+) -> (SessionSnapshot, String) {
+    let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
+    snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
+    strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
+    snapshot.set_execution_state_snapshot(None);
+    snapshot.last_prompt_usage = None;
+    let previous_summary = extract_previous_summary(&prefix_messages);
+    snapshot.replace_active_read_state(&prefix_messages);
+    let base_prompt = match previous_summary {
+        Some(previous_summary) => compaction_update_prompt(&previous_summary),
+        None => COMPACTION_PROMPT.to_string(),
+    };
+    (
+        snapshot.to_snapshot(),
+        with_instructions(&base_prompt, instructions),
+    )
 }
 
 fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
@@ -279,18 +432,13 @@ async fn summarize_compaction_prefix(
         return Ok(None);
     }
 
-    let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
-    snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
-    let mut messages = prefix_messages;
-    strip_all_attachments(&mut messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
-    snapshot.set_execution_state_snapshot(None);
-    snapshot.last_prompt_usage = None;
-    let previous_summary = extract_previous_summary(&messages);
-    snapshot.replace_active_read_state(&messages);
+    let (snapshot, prompt_text) = prepare_compaction_request(state, prefix_messages, instructions);
 
     let (compaction_session_id, turn_id) = compaction_child_ids(
         session_id,
         state,
+        &snapshot,
+        &prompt_text,
         scoped_effect_controller.execution_scope(),
     )?;
     let mut policy = snapshot.policy.clone();
@@ -298,7 +446,7 @@ async fn summarize_compaction_prefix(
     let request = SessionCreateRequest::child(
         session_id,
         SessionStartPoint::Snapshot {
-            snapshot: Box::new(snapshot.to_snapshot()),
+            snapshot: Box::new(snapshot),
         },
         policy,
         PluginOptions::default(),
@@ -314,12 +462,6 @@ async fn summarize_compaction_prefix(
         .create_session(request)
         .await
         .map_err(ContextError::from)?;
-
-    let base_prompt = match previous_summary {
-        Some(prev) => compaction_update_prompt(&prev),
-        None => COMPACTION_PROMPT.to_string(),
-    };
-    let prompt_text = with_instructions(&base_prompt, instructions);
 
     let request = lash_core::facade_support::SessionTurnRequest::new_runtime_internal_compaction(
         &handle.session_id,
@@ -1075,19 +1217,72 @@ mod tests {
         };
         let compaction_scope =
             lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test");
-        let expected_child_ids =
-            compaction_child_ids(&SessionId::from("root"), &state, &compaction_scope)
-                .expect("derive compaction child identity");
+        let instructions = "focus on latest request";
+        let (request_snapshot, prompt_text) =
+            prepare_compaction_request(&state, messages.clone(), Some(instructions));
+        let expected_child_ids = compaction_child_ids(
+            &SessionId::from("root"),
+            &state,
+            &request_snapshot,
+            &prompt_text,
+            &compaction_scope,
+        )
+        .expect("derive compaction child identity");
+        let (retry_snapshot, retry_prompt_text) =
+            prepare_compaction_request(&state, messages.clone(), Some(instructions));
+        assert_eq!(prompt_text, retry_prompt_text);
         assert_eq!(
             expected_child_ids,
-            compaction_child_ids(&SessionId::from("root"), &state, &compaction_scope)
-                .expect("rederive compaction child identity"),
+            compaction_child_ids(
+                &SessionId::from("root"),
+                &state,
+                &retry_snapshot,
+                &retry_prompt_text,
+                &compaction_scope,
+            )
+            .expect("rederive compaction child identity"),
             "retrying the same physical compaction must preserve child identity"
+        );
+        let (same_snapshot, changed_prompt_text) =
+            prepare_compaction_request(&state, messages.clone(), Some("different focus"));
+        assert_ne!(
+            expected_child_ids,
+            compaction_child_ids(
+                &SessionId::from("root"),
+                &state,
+                &same_snapshot,
+                &changed_prompt_text,
+                &compaction_scope,
+            )
+            .expect("derive changed-prompt compaction child identity"),
+            "different compaction prompts under one physical parent need distinct child identity"
+        );
+        let changed_messages = vec![
+            text_message("u1", MessageRole::User, "different old work"),
+            text_message("a1", MessageRole::Assistant, "assistant old"),
+            text_message("u2", MessageRole::User, "latest request"),
+        ];
+        let mut changed_state = state.clone();
+        changed_state.replace_active_read_state(&changed_messages);
+        let (changed_snapshot, changed_prompt_text) =
+            prepare_compaction_request(&changed_state, changed_messages, Some(instructions));
+        assert_eq!(prompt_text, changed_prompt_text);
+        assert_ne!(
+            expected_child_ids,
+            compaction_child_ids(
+                &SessionId::from("root"),
+                &changed_state,
+                &changed_snapshot,
+                &changed_prompt_text,
+                &compaction_scope,
+            )
+            .expect("derive changed-snapshot compaction child identity"),
+            "different request snapshots under one physical parent need distinct child identity"
         );
         let ctx = build_compaction_ctx_with_graph(
             &SessionId::from("root"),
             state,
-            Some("focus on latest request".to_string()),
+            Some(instructions.to_string()),
             manager.clone(),
             trace.clone(),
         );
@@ -1119,7 +1314,7 @@ mod tests {
         let created = manager.created_snapshot();
         assert_eq!(created.len(), 1);
         let expected_discriminator =
-            "dce066be4e685dc5d274bb054ed0273da532c4444936cc79920641c93c904c4b";
+            "ad4e6df12cb8be923c17942c254e80da368bc68537c9a4b44be2612a6f7d9c52";
         let expected_child_session_id = format!("root-compaction:{expected_discriminator}");
         let expected_child_turn_id = format!(
             "rolling-history-compact-test:rolling-history-compaction:{expected_discriminator}"
