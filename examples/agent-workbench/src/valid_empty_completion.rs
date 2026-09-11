@@ -62,7 +62,7 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
         &transport,
     )
     .map_err(|error| error.to_string())?;
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::bounded(1))
+    let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::bounded(1))
         .without_queued_work()
         .effect_host(Arc::new(
             lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
@@ -77,76 +77,109 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
         .provider(provider)
-        .model(model)
+        .model(model);
+    if let Some(marker) = crate::shutdown_marker::factory_from_env("agent-workbench-valid-empty")? {
+        builder = builder.plugin(marker);
+    }
+    let core = builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "agent-workbench-valid-empty",
             uuid::Uuid::new_v4().to_string(),
         ))
         .map_err(|error| error.to_string())?;
-    let session = core
-        .session(format!("valid-empty-{}", uuid::Uuid::new_v4()))
-        .open()
-        .await
-        .map_err(|error| error.to_string())?;
-    let output = session
-        .turn(lash::TurnInput::text(
-            "Complete successfully without producing assistant content.",
-        ))
-        .run()
-        .await
-        .map_err(|error| error.to_string())?;
+    let operation = async {
+        let session = core
+            .session(format!("valid-empty-{}", uuid::Uuid::new_v4()))
+            .open()
+            .await
+            .map_err(|error| error.to_string())?;
+        let output = session
+            .turn(lash::TurnInput::text(
+                "Complete successfully without producing assistant content.",
+            ))
+            .run()
+            .await
+            .map_err(|error| error.to_string())?;
 
-    let assistant = output
-        .assistant_message()
-        .ok_or_else(|| "Standard turn did not finish with an assistant message".to_string())?;
-    let [call] = output.result.llm_calls.as_slice() else {
-        return Err(format!(
-            "expected exactly one LLM call, observed {}",
-            output.result.llm_calls.len()
-        ));
-    };
-    let [attempt] = call.attempts.as_slice() else {
-        return Err(format!(
-            "expected exactly one provider attempt, observed {}",
-            call.attempts.len()
-        ));
-    };
-    let finish_reason = attempt
-        .evidence
-        .as_ref()
-        .and_then(|evidence| evidence.provider_finish_reason.as_deref())
-        .ok_or_else(|| "provider finish evidence was absent".to_string())?;
-    let usage = attempt
-        .usage
-        .as_ref()
-        .ok_or_else(|| "provider usage was absent".to_string())?;
-    let exchanges = transport.exchanges().map_err(|error| error.to_string())?;
+        let assistant = output
+            .assistant_message()
+            .ok_or_else(|| "Standard turn did not finish with an assistant message".to_string())?;
+        let [call] = output.result.llm_calls.as_slice() else {
+            return Err(format!(
+                "expected exactly one LLM call, observed {}",
+                output.result.llm_calls.len()
+            ));
+        };
+        let [attempt] = call.attempts.as_slice() else {
+            return Err(format!(
+                "expected exactly one provider attempt, observed {}",
+                call.attempts.len()
+            ));
+        };
+        let finish_reason = attempt
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.provider_finish_reason.as_deref())
+            .ok_or_else(|| "provider finish evidence was absent".to_string())?;
+        let usage = attempt
+            .usage
+            .as_ref()
+            .ok_or_else(|| "provider usage was absent".to_string())?;
+        let exchanges = transport.exchanges().map_err(|error| error.to_string())?;
 
-    if !output.is_success()
-        || !assistant.is_empty()
-        || format!("{:?}", attempt.outcome) != "Completed"
-        || format!("{:?}", attempt.protocol_position) != "TerminalObserved"
-        || finish_reason != "stop"
-        || usage.input_tokens != 7
-        || usage.output_tokens != 0
-        || exchanges.len() != 1
-    {
-        return Err("valid empty completion did not preserve its success, terminal, usage, and single-attempt invariants".to_string());
+        if !output.is_success()
+            || !assistant.is_empty()
+            || format!("{:?}", attempt.outcome) != "Completed"
+            || format!("{:?}", attempt.protocol_position) != "TerminalObserved"
+            || finish_reason != "stop"
+            || usage.input_tokens != 7
+            || usage.output_tokens != 0
+            || exchanges.len() != 1
+        {
+            return Err("valid empty completion did not preserve its success, terminal, usage, and single-attempt invariants".to_string());
+        }
+
+        Ok(ValidEmptyReport {
+            status: "valid empty completion finished successfully",
+            protocol: "standard",
+            provider: "openai-compatible Provider Wire Script",
+            assistant_bytes: assistant.len(),
+            llm_calls: output.result.llm_calls.len(),
+            provider_exchanges: exchanges.len(),
+            attempt_outcome: format!("{:?}", attempt.outcome),
+            protocol_position: format!("{:?}", attempt.protocol_position),
+            provider_finish_reason: finish_reason.to_string(),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+        })
     }
-
-    Ok(ValidEmptyReport {
-        status: "valid empty completion finished successfully",
-        protocol: "standard",
-        provider: "openai-compatible Provider Wire Script",
-        assistant_bytes: assistant.len(),
-        llm_calls: output.result.llm_calls.len(),
-        provider_exchanges: exchanges.len(),
-        attempt_outcome: format!("{:?}", attempt.outcome),
-        protocol_position: format!("{:?}", attempt.protocol_position),
-        provider_finish_reason: finish_reason.to_string(),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-    })
+    .await;
+    let shutdown = core
+        .shutdown()
+        .await
+        .map_err(|error| format!("shut down valid-empty core: {error}"));
+    let flush = core
+        .flush_trace_sink()
+        .map_err(|error| format!("flush valid-empty trace: {error}"));
+    match (operation, shutdown, flush) {
+        (Err(primary), shutdown, flush) => {
+            if let Err(error) = shutdown {
+                eprintln!("agent-workbench valid-empty: {error}; primary error: {primary}");
+            }
+            if let Err(error) = flush {
+                eprintln!("agent-workbench valid-empty: {error}; primary error: {primary}");
+            }
+            Err(primary)
+        }
+        (Ok(_), Err(error), flush) => {
+            if let Err(flush_error) = flush {
+                eprintln!("agent-workbench valid-empty: {flush_error}; shutdown error: {error}");
+            }
+            Err(error)
+        }
+        (Ok(_), Ok(()), Err(error)) => Err(error),
+        (Ok(report), Ok(()), Ok(())) => Ok(report),
+    }
 }
 
 pub(crate) async fn page() -> Html<&'static str> {
