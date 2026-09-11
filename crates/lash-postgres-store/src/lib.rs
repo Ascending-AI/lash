@@ -24,6 +24,9 @@
 //! shape; no [`SchemaCheck`] relaxes the remaining boundary.
 //! [`PostgresStorage::verify_schema_for`] exposes the same check against a bare
 //! pool so a host can gate its own migration CI on it. See ADR 0052.
+//! [`PostgresStorage::inspect_required_constraints_for`] separately inspects the
+//! registered named `CHECK` definitions and validation/enforcement state. It is
+//! explicit and read-only; normal startup does not run it.
 //!
 //! Do not run schema migrations concurrently with an open or a verification:
 //! lash's advisory lock serializes only the participants that take it.
@@ -322,10 +325,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // backend put settles, and explicit recovery can remove exactly that attempt's
 // intent, so component-83 stores are rejected rather than running the old unsafe
 // re-put lifecycle.
-// Version 85 persists full admitted effect addresses and optional truthful
-// attribution across session, process, wake, and effect payloads. Older
-// components are recreated rather than fabricating scope or session authority.
-const SCHEMA_VERSION: i32 = 85;
+// Version 86 combines full admitted effect addresses and truthful attribution with
+// all-or-none pending-input claim identity and token fencing. Both incompatible
+// component-85 parent shapes are rejected and recreated.
+const SCHEMA_VERSION: i32 = 86;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -702,6 +705,40 @@ impl PostgresStorage {
         verify_schema_shape(connection).await
     }
 
+    /// Inspect the registered named `CHECK` constraints against a pool.
+    ///
+    /// This explicit diagnostic is separate from normal startup. It takes the
+    /// published advisory lock in shared mode, then reads one post-lock
+    /// `REPEATABLE READ` snapshot. It performs no DDL or repair. An empty report
+    /// covers only registered checks; it does not establish component-version
+    /// compatibility, openability, every database constraint, or row integrity.
+    ///
+    /// ```no_run
+    /// # async fn inspect(pool: sqlx::PgPool) -> Result<(), lash_core::StoreError> {
+    /// let report = lash_postgres_store::PostgresStorage::inspect_required_constraints_for(
+    ///     &pool,
+    /// ).await?;
+    /// assert!(report.is_conformant(), "{report:?}");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn inspect_required_constraints_for(
+        pool: &PgPool,
+    ) -> Result<RequiredConstraintReport, StoreError> {
+        required_constraints::inspect_required_constraints_under_advisory_lock(pool).await
+    }
+
+    /// Inspect registered named `CHECK`s on a caller-owned connection.
+    ///
+    /// This form takes no lock and starts no transaction. A migration tool that
+    /// needs one stable view must hold the published advisory key and pass a
+    /// `REPEATABLE READ` transaction, as for [`Self::verify_schema_on`].
+    pub async fn inspect_required_constraints_on(
+        connection: &mut sqlx::PgConnection,
+    ) -> Result<RequiredConstraintReport, StoreError> {
+        required_constraints::inspect_required_constraints(connection).await
+    }
+
     /// The advisory-lock key lash holds while provisioning, opening, or verifying
     /// the schema, as `(namespace, key)` arguments to the `pg_advisory_lock` family.
     ///
@@ -900,6 +937,8 @@ mod preflight;
 mod process_helpers;
 #[path = "postgres/process_registry.rs"]
 mod process_registry;
+#[path = "postgres/required_constraints.rs"]
+mod required_constraints;
 #[path = "postgres/runtime_persistence/mod.rs"]
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
@@ -929,6 +968,9 @@ mod turn_input_settlement;
 
 pub use effect_replay::{
     PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
+};
+pub use lash_core::store_backend_support::required_constraints::{
+    RequiredConstraintFinding, RequiredConstraintReport,
 };
 pub use preflight::PostgresStorePreflight;
 use schema_shape::{

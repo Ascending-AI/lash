@@ -197,11 +197,11 @@ pub struct EmitProcessEventIntent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Trigger declaration consumed by protocol and process-engine implementors.
 ///
-/// A leaf attempt cannot emit a trigger synchronously on ordinal-addressed
-/// journal tiers: an emission that outlives a failed attempt would advertise a
-/// cause that never committed. Declaring this intent instead moves the emission
-/// behind the attempt's own commit, where the recorded occurrence's
-/// `idempotency_key` is the exactly-once backstop for redrive.
+/// A leaf attempt cannot emit a trigger synchronously: an emission that
+/// outlives a failed attempt would advertise a cause that never committed.
+/// Declaring this intent instead moves the emission behind the attempt's own
+/// commit, where the recorded occurrence's `idempotency_key` is the
+/// exactly-once backstop for redrive.
 ///
 /// Three consequences of carrying a whole [`crate::TriggerOccurrenceRequest`]:
 ///

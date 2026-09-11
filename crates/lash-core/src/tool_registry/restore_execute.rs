@@ -1,6 +1,44 @@
 use super::*;
 
 impl ToolRegistry {
+    /// Verify that every effective resident definition retains an executable
+    /// route in this pinned registry. This inspects only the admitted surface
+    /// and its captured source arcs; it never prepares or executes a call.
+    pub(crate) fn validate_resident_catalog_routes(
+        &self,
+        catalog: &crate::ToolCatalog,
+    ) -> Result<(), crate::PluginError> {
+        for definition in &catalog.tools {
+            let tool_id = &definition.manifest.id;
+            let name = &definition.manifest.name;
+            let unavailable = |reason: String| crate::PluginError::ResidentToolRouteUnavailable {
+                tool_id: tool_id.clone(),
+                name: name.clone(),
+                reason,
+            };
+            let authority = self.inner.read_recover();
+            let source_key = {
+                let entry = authority.state.surface.get(tool_id).ok_or_else(|| {
+                    unavailable("the id is absent from the pinned surface".into())
+                })?;
+                if !entry.is_member() {
+                    return Err(unavailable(
+                        "the pinned surface does not admit the id as a member".into(),
+                    ));
+                }
+                entry.binding.source_key().cloned().ok_or_else(|| {
+                    unavailable("the pinned entry is not bound to a live source".into())
+                })?
+            };
+            if !authority.sources.contains_key(&source_key) {
+                return Err(unavailable(format!(
+                    "bound source `{source_key}` is absent from the pinned registry"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn resolve_catalog_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         let (manifest, source) = {
             let authority = self.inner.read_recover();
@@ -59,7 +97,14 @@ impl ToolRegistry {
                 "Granted tool id `{tool_id}` is missing an explicit tool source"
             )));
         };
-        let sources = self.inner.read_recover().sources.clone();
+        let sources = {
+            let authority = self.inner.read_recover();
+            authority
+                .granted_sources
+                .as_ref()
+                .unwrap_or(&authority.sources)
+                .clone()
+        };
         let leaf_source_key = ToolSourceKey::Leaf(source_id.to_string());
         let source = match sources.get(&leaf_source_key) {
             Some(source) => Arc::clone(source),

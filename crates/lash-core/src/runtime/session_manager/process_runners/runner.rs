@@ -70,7 +70,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     scoped_effect_controller,
                     cancellation,
                     handover,
-                );
+                )?;
                 engine.run(engine_context, payload.clone()).await
             }
             // Externally-owned rows are never executed by lash (ADR 0019): the
@@ -96,10 +96,10 @@ impl RuntimeSessionServices {
             return Ok(());
         }
         let run_context = ProcessRunContext::builder(self)
-            .tool_catalog(
+            .tool_surface(
                 self.current
                     .plugins
-                    .resolved_tool_catalog(&self.current.session_id)?,
+                    .pin_resolved_tool_surface(&self.current.session_id)?,
             )
             .scoped_effect_controller(scoped_effect_controller)
             .build()?;
@@ -119,7 +119,7 @@ impl RuntimeSessionServices {
         scoped_effect_controller: crate::ScopedEffectController<'run>,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
-    ) -> crate::ProcessEngineRunContext<'run> {
+    ) -> Result<crate::ProcessEngineRunContext<'run>, crate::PluginError> {
         let session_id = self.current.session_id.clone();
         let plugins = Arc::clone(&self.current.plugins);
         let store = self.current.store.clone();
@@ -143,9 +143,16 @@ impl RuntimeSessionServices {
         let process_work_for_runtime = process_work.clone();
         let cancellation_for_runtime = cancellation.clone();
         let controller_for_context = scoped_effect_controller.clone();
-        let builder = Box::new(move |tool_catalog: Arc<crate::ToolCatalog>| {
+        let tool_surface = plugins.pin_resolved_tool_surface(&session_id)?;
+        let tool_catalog = Arc::clone(&tool_surface.catalog);
+        let builder = Box::new(move |requested_catalog: Arc<crate::ToolCatalog>| {
+            if !Arc::ptr_eq(&requested_catalog, &tool_surface.catalog) {
+                return Err(crate::PluginError::Session(
+                    "process engine runtime context requires its captured tool catalog".into(),
+                ));
+            }
             let run_context = ProcessRunContext::builder(&services)
-                .tool_catalog(tool_catalog)
+                .tool_surface(tool_surface)
                 .scoped_effect_controller(scoped_effect_controller)
                 .causal_invocation(execution_context_for_runtime.causal_invocation.clone())
                 .build()?;
@@ -201,12 +208,13 @@ impl RuntimeSessionServices {
             });
             Ok(crate::ProcessEngineRuntimeContext::new(context, guard))
         });
-        crate::ProcessEngineRunContext::new(
+        Ok(crate::ProcessEngineRunContext::new(
             registration,
             execution_context,
             process_work,
             session_id,
             plugins,
+            tool_catalog,
             store,
             session_store_factory,
             queued_work,
@@ -218,7 +226,7 @@ impl RuntimeSessionServices {
             controller_for_context,
             handover,
             builder,
-        )
+        ))
     }
 }
 

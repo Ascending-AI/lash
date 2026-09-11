@@ -564,8 +564,8 @@ impl LashRuntime {
     /// Run one logical turn using host-prepared message history.
     #[allow(
         clippy::too_many_arguments,
-        reason = "this is the published `LashRuntime::stream_prepared_turn` signature in \
-                  docs/api-surface.snapshot; folding these into a context struct would be a \
+        reason = "this is the published `LashRuntime::stream_prepared_turn` signature; \
+                  folding these into a context struct would be a \
                   public API change, which this ticket forbids"
     )]
     pub async fn stream_prepared_turn(

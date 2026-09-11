@@ -1401,12 +1401,12 @@ mod introspect;
 
 pub(crate) use introspect::{
     ComponentVersion, read_component_version, read_search_path, resolve_installation,
-    verify_schema_migration_source_shape, verify_schema_shape,
+    resolve_tables, verify_schema_migration_source_shape, verify_schema_shape,
 };
 /// Reached only by the artifact-generation and catalog tests, which drive the
 /// introspection directly rather than through a full verification.
 #[cfg(test)]
-pub(crate) use introspect::{normalize_predicate, read_live_shape, resolve_tables};
+pub(crate) use introspect::{normalize_predicate, read_live_shape};
 
 #[path = "schema_shape/tests.rs"]
 #[cfg(test)]

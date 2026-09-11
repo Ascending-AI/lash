@@ -43,8 +43,8 @@ pub(crate) fn rlm_prompt_tool_docs(
         .iter()
         .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
         .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
-        .filter_map(|tool| {
-            let contract = tool_catalog.resolve_contract(&tool.manifest.name)?;
+        .map(|tool| {
+            let contract = &tool.contract;
             let call_path = dialect
                 .tool_call_path(&tool.manifest)
                 .expect("RLM tool catalog registration validates both dialects' bindings");
@@ -82,7 +82,7 @@ pub(crate) fn rlm_prompt_tool_docs(
             } else {
                 format!("await {}? -> {}", compact.signature, compact.returns)
             };
-            Some(format!("`{signature}`\n{notes}"))
+            format!("`{signature}`\n{notes}")
         })
         .collect::<Vec<_>>();
     entries.join("\n\n")
@@ -324,7 +324,7 @@ pub(crate) fn validate_dialect_neutral_tool_prose(
         let contract = ctx
             .resolve_contract
             .as_ref()
-            .and_then(|resolve| resolve(&tool.name));
+            .and_then(|resolve| resolve(tool));
         for prose in model_facing_tool_prose(tool, contract.as_deref()) {
             let AuthoredProse {
                 site,
@@ -476,6 +476,7 @@ mod tests {
     use lash_sansio::SessionId;
     use serde_json::json;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Both shipped dialects, the way a session registers them.
     ///
@@ -510,7 +511,7 @@ mod tests {
         ];
         let contracts: std::collections::BTreeMap<_, _> = tools
             .iter()
-            .map(|tool| (tool.name().to_string(), Arc::new(tool.contract())))
+            .map(|tool| (tool.manifest.id.clone(), Arc::new(tool.contract())))
             .collect();
         let manifests = tools.iter().map(|tool| tool.manifest()).collect::<Vec<_>>();
         let contribution = rlm_tool_catalog(
@@ -519,7 +520,7 @@ mod tests {
                 tools: manifests.clone(),
                 resolve_contract: Some(Arc::new({
                     let contracts = contracts.clone();
-                    move |name| contracts.get(name).cloned()
+                    move |manifest| contracts.get(&manifest.id).cloned()
                 })),
                 tool_access: lash_core::SessionToolAccess::default(),
                 subagent: None,
@@ -531,9 +532,12 @@ mod tests {
         assert!(contribution.is_empty(), "RLM contributes no removals");
         let catalog = build_tool_catalog(ToolCatalogBuildInput {
             tools: manifests,
-            resolve_contract: Some(Arc::new(move |name| contracts.get(name).cloned())),
+            resolve_contract: Some(Arc::new(move |manifest| {
+                contracts.get(&manifest.id).cloned()
+            })),
             contributions: vec![contribution],
-        });
+        })
+        .expect("complete resident definitions");
 
         assert!(catalog.has_callable_tool("fetch_url"));
         assert!(catalog.has_callable_tool("read_file"));
@@ -546,6 +550,99 @@ mod tests {
         assert!(docs.contains("files.read"), "{docs}");
         // No legacy catalogue notes or tier filtering.
         assert!(!docs.contains("Catalogued capabilities:"), "{docs}");
+    }
+
+    #[test]
+    fn native_rlm_and_validation_share_one_pinned_definition_under_registry_drift() {
+        let definition = ToolDefinition::raw(
+            "tool:test/pinned",
+            "pinned_tool",
+            "Pinned schema authority",
+            json!({
+                "type": "object",
+                "properties": { "pinned": { "type": "string" } },
+                "required": ["pinned"],
+                "additionalProperties": false
+            }),
+            json!({ "type": "string" }),
+        )
+        .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
+        let drifted = ToolDefinition::raw(
+            "tool:test/pinned",
+            "pinned_tool",
+            "Drifted provider schema",
+            json!({
+                "type": "object",
+                "properties": { "drifted": { "type": "integer" } },
+                "required": ["drifted"],
+                "additionalProperties": false
+            }),
+            json!({ "type": "integer" }),
+        )
+        .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let resolution_count = Arc::clone(&resolutions);
+        let catalog = build_tool_catalog(ToolCatalogBuildInput {
+            tools: vec![definition.manifest()],
+            resolve_contract: Some(Arc::new(move |_| {
+                let generation = resolution_count.fetch_add(1, Ordering::SeqCst);
+                Some(Arc::new(if generation == 0 {
+                    definition.contract()
+                } else {
+                    drifted.contract()
+                }))
+            })),
+            contributions: Vec::new(),
+        })
+        .expect("first resident definition is pinned");
+
+        let native = catalog.model_tool_specs();
+        assert!(
+            native[0]
+                .input_schema
+                .canonical()
+                .pointer("/properties/pinned")
+                .is_some()
+        );
+        assert!(
+            native[0]
+                .input_schema
+                .canonical()
+                .pointer("/properties/drifted")
+                .is_none()
+        );
+        let docs = rlm_prompt_tool_docs(
+            &catalog,
+            &lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        );
+        assert!(docs.contains("pinned"), "{docs}");
+        let resources = lash_lashlang_runtime::lashlang_resources_from_tool_catalog(&catalog)
+            .expect("pinned contract imports into RLM bindings");
+        let operation = resources
+            .resolve_operation("Authority", "pinned")
+            .expect("resident operation");
+        assert!(
+            matches!(operation.input_ty, lashlang::TypeExpr::Object(ref fields)
+            if fields.iter().any(|field| field.name == "pinned")
+                && fields.iter().all(|field| field.name != "drifted"))
+        );
+        assert!(
+            lash_sansio::validate_tool_input(
+                &catalog.tools[0].contract,
+                &json!({ "pinned": "yes" })
+            )
+            .is_ok()
+        );
+        assert!(
+            lash_sansio::validate_tool_input(&catalog.tools[0].contract, &json!({ "drifted": 1 }))
+                .is_err()
+        );
+        assert_eq!(
+            resolutions.load(Ordering::SeqCst),
+            1,
+            "every projection and validation reuses the captured contract"
+        );
     }
 
     #[test]
@@ -714,7 +811,7 @@ mod tests {
 
         let contracts: std::collections::BTreeMap<_, _> = [update_plan.clone()]
             .iter()
-            .map(|tool| (tool.name().to_string(), Arc::new(tool.contract())))
+            .map(|tool| (tool.manifest.id.clone(), Arc::new(tool.contract())))
             .collect();
         let manifests = vec![update_plan.manifest()];
         let contribution = rlm_tool_catalog(
@@ -723,7 +820,7 @@ mod tests {
                 tools: manifests.clone(),
                 resolve_contract: Some(Arc::new({
                     let contracts = contracts.clone();
-                    move |name| contracts.get(name).cloned()
+                    move |manifest| contracts.get(&manifest.id).cloned()
                 })),
                 tool_access: lash_core::SessionToolAccess::default(),
                 subagent: None,
@@ -734,9 +831,12 @@ mod tests {
         .expect("RLM catalog validates explicit binding");
         let catalog = build_tool_catalog(ToolCatalogBuildInput {
             tools: manifests,
-            resolve_contract: Some(Arc::new(move |name| contracts.get(name).cloned())),
+            resolve_contract: Some(Arc::new(move |manifest| {
+                contracts.get(&manifest.id).cloned()
+            })),
             contributions: vec![contribution],
-        });
+        })
+        .expect("complete resident definitions");
 
         let docs = rlm_prompt_tool_docs(
             &catalog,
@@ -816,7 +916,7 @@ mod tests {
                 session_id: SessionId::from("session"),
                 tools: vec![tool.manifest()],
                 resolve_contract: Some(Arc::new(move |requested| {
-                    (requested == name).then(|| Arc::clone(&contract))
+                    (requested.name == name).then(|| Arc::clone(&contract))
                 })),
                 tool_access: lash_core::SessionToolAccess::default(),
                 subagent: None,
@@ -897,15 +997,18 @@ mod tests {
              e.g. `{ queries: \"list[str]\" }`{{type_literal_hint}}.";
         let tool = tool_with_prose(ProseSite::Schema, authored);
         let contracts: std::collections::BTreeMap<_, _> =
-            [(tool.name().to_string(), Arc::new(tool.contract()))]
+            [(tool.manifest.id.clone(), Arc::new(tool.contract()))]
                 .into_iter()
                 .collect();
         let manifests = vec![tool.manifest()];
         let catalog = build_tool_catalog(ToolCatalogBuildInput {
             tools: manifests,
-            resolve_contract: Some(Arc::new(move |name| contracts.get(name).cloned())),
+            resolve_contract: Some(Arc::new(move |manifest| {
+                contracts.get(&manifest.id).cloned()
+            })),
             contributions: vec![ToolCatalogContribution::default()],
-        });
+        })
+        .expect("complete resident definition");
 
         let lashlang = rlm_prompt_tool_docs(
             &catalog,

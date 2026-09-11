@@ -105,6 +105,13 @@ impl AttemptProcessReads {
     }
 }
 
+// Execution-only binding installed by an immutable resident-source snapshot.
+#[derive(Clone)]
+struct CapturedResidentRoute {
+    tool_id: ToolId,
+    source_name: String,
+}
+
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
@@ -137,6 +144,7 @@ pub struct AttemptContext<'run> {
     completion_key: Option<crate::AwaitEventKey>,
     completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    captured_resident_route: Option<CapturedResidentRoute>,
 }
 
 impl<'run> AttemptContext<'run> {
@@ -193,7 +201,27 @@ impl<'run> AttemptContext<'run> {
             completion_key,
             completion_support,
             phase_probe,
+            captured_resident_route: None,
         }
+    }
+    pub(crate) fn with_captured_resident_route(
+        &self,
+        tool_id: ToolId,
+        source_name: String,
+    ) -> Self {
+        let mut captured = self.clone();
+        captured.captured_resident_route = Some(CapturedResidentRoute {
+            tool_id,
+            source_name,
+        });
+        captured
+    }
+
+    fn captured_resident_name(&self, tool_id: &ToolId) -> Option<&str> {
+        self.captured_resident_route
+            .as_ref()
+            .filter(|route| route.tool_id == *tool_id)
+            .map(|route| route.source_name.as_str())
     }
 
     /// Integrator class 3 identity for the session that owns this recorded attempt.
@@ -1399,13 +1427,25 @@ pub trait ToolProvider: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &AttemptContext<'_>,
     ) -> crate::ToolAttemptOutcome {
-        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(format!(
-                "Unknown tool id: {tool_id}"
-            )));
+        let source_name = match context.captured_resident_name(tool_id) {
+            Some(name) => name,
+            None => {
+                let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+                    return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(
+                        format!("Unknown tool id: {tool_id}"),
+                    ));
+                };
+                return self
+                    .execute_attempt(ToolCall {
+                        name: &manifest.name,
+                        args,
+                        context,
+                    })
+                    .await;
+            }
         };
         self.execute_attempt(ToolCall {
-            name: &manifest.name,
+            name: source_name,
             args,
             context,
         })
@@ -1443,11 +1483,23 @@ pub trait ToolProvider: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &AttemptContext<'_>,
     ) -> ToolOutcome {
-        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
+        let source_name = match context.captured_resident_name(tool_id) {
+            Some(name) => name,
+            None => {
+                let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+                    return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
+                };
+                return self
+                    .execute(ToolCall {
+                        name: &manifest.name,
+                        args,
+                        context,
+                    })
+                    .await;
+            }
         };
         self.execute(ToolCall {
-            name: &manifest.name,
+            name: source_name,
             args,
             context,
         })
@@ -1463,11 +1515,23 @@ pub trait ToolProvider: Send + Sync + 'static {
         args: &serde_json::Value,
         context: &InternalProcessContext<'_>,
     ) -> ToolOutcome {
-        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
+        let source_name = match context.captured_resident_name(tool_id) {
+            Some(name) => name,
+            None => {
+                let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+                    return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
+                };
+                return self
+                    .execute_internal(InternalProcessToolCall {
+                        name: &manifest.name,
+                        args,
+                        context,
+                    })
+                    .await;
+            }
         };
         self.execute_internal(InternalProcessToolCall {
-            name: &manifest.name,
+            name: source_name,
             args,
             context,
         })
@@ -1478,6 +1542,57 @@ pub trait ToolProvider: Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TwoRouteDefaultProvider;
+
+    #[async_trait::async_trait]
+    impl ToolProvider for TwoRouteDefaultProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+            let name = match id.as_str() {
+                "tool:first" => "first",
+                "tool:second" => "second",
+                _ => return None,
+            };
+            Some(
+                ToolDefinition::raw(
+                    id.as_str(),
+                    name,
+                    "captured route isolation witness",
+                    ToolDefinition::default_input_schema(),
+                    serde_json::json!({ "type": "string" }),
+                )
+                .manifest(),
+            )
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+            None
+        }
+
+        async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(serde_json::json!(call.name))
+        }
+    }
+
+    #[tokio::test]
+    async fn captured_resident_route_does_not_bind_an_unrelated_tool_id() {
+        let context = crate::testing::mock_attempt_context()
+            .with_captured_resident_route(ToolId::from("tool:first"), "captured-first".to_string());
+
+        let result = TwoRouteDefaultProvider
+            .execute_by_id(
+                &ToolId::from("tool:second"),
+                &serde_json::json!({}),
+                &context,
+            )
+            .await;
+
+        assert_eq!(result.value_for_projection(), serde_json::json!("second"));
+    }
 
     struct DurableControllerWithoutCompletionKeySupport;
 

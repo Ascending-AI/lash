@@ -115,6 +115,7 @@ impl Compiler {
             loop_contexts: Vec::new(),
             handler_scopes: Vec::new(),
             handler_scope_extents: Vec::new(),
+            handler_chain_digests: Vec::new(),
             pending_finally_sites: Vec::new(),
             functions: Vec::new(),
             pending_functions: Vec::new(),
@@ -160,6 +161,7 @@ impl Compiler {
             resource_operation_batches: self.resource_operation_batches,
             resource_operation_list_batches: self.resource_operation_list_batches,
             functions: self.functions,
+            handler_chain_digests: self.handler_chain_digests,
             handler_scopes: {
                 let mut scopes = self.handler_scope_extents;
                 scopes.sort_unstable_by_key(|scope| scope.handler_ip);
@@ -189,6 +191,16 @@ impl Compiler {
             let root_const_slots = std::mem::take(&mut self.const_slots);
             let root_loops = std::mem::take(&mut self.loop_contexts);
             let root_handler_scopes = std::mem::take(&mut self.handler_scopes);
+            // Every scope a function body opens is closed inside it, so the
+            // chain each function starts and ends with is the empty one. The
+            // digest breakpoints are global to the chunk and carry across.
+            debug_assert_eq!(
+                self.handler_chain_digests
+                    .last()
+                    .map_or(EMPTY_HANDLER_CHAIN_DIGEST, |(_, digest)| *digest),
+                EMPTY_HANDLER_CHAIN_DIGEST,
+                "a function body begins with no handler installed"
+            );
 
             let self_slot = definition.name.as_deref().map(|name| self.push_slot(name));
             let parameter_slots = definition

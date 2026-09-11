@@ -182,7 +182,7 @@ finish result
 }
 
 #[test]
-fn approval_denial_is_typed_until_the_current_lashlang_bridge_stringifies_it() {
+fn approval_denial_preserves_typed_failure_fields_through_lashlang_bridge() {
     run_async_test_on_stack_budget("workbench-approval-deny", || async {
         let directory = tempfile::tempdir().expect("approval tempdir");
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
@@ -252,19 +252,17 @@ finish result
             .expect("denial is handled in Lashlang");
         let final_value = output.final_value().expect("denial wrapper");
         assert_eq!(final_value.get("ok"), Some(&Value::Bool(false)));
-        let serialized_failure = final_value
-            .get("error")
-            .and_then(Value::as_str)
-            .expect("current Lashlang bridge stringifies host errors");
-        let typed_failure: Value =
-            serde_json::from_str(serialized_failure).expect("serialized typed tool failure");
-        assert_eq!(typed_failure.get("class"), Some(&json!("execution")));
-        assert_eq!(typed_failure.get("code"), Some(&json!("approval_denied")));
         assert_eq!(
-            typed_failure.get("message"),
+            final_value.get("error"),
             Some(&json!("the operator denied this change"))
         );
+        let typed_failure = final_value
+            .get("cause")
+            .expect("Lashlang bridge preserves typed tool failure fields");
+        assert_eq!(typed_failure.get("class"), Some(&json!("execution")));
+        assert_eq!(typed_failure.get("code"), Some(&json!("approval_denied")));
         assert_eq!(typed_failure.get("source"), Some(&json!("tool")));
+        assert_eq!(typed_failure["retry"]["type"], "never");
     });
 }
 
@@ -481,16 +479,19 @@ finish result
         }
         lash::Resolution::Err(error) => {
             assert_eq!(value["ok"], false);
-            let failure: Value = serde_json::from_str(value["error"].as_str().unwrap()).unwrap();
-            assert_eq!(failure["class"], "execution");
-            assert_eq!(failure["code"], error.code);
-            assert_eq!(failure["message"], error.message);
+            assert_eq!(value["error"], error.message);
+            assert_eq!(value["cause"]["class"], "execution");
+            assert_eq!(value["cause"]["code"], error.code);
+            assert_eq!(value["cause"]["source"], "tool");
+            assert_eq!(value["cause"]["retry"]["type"], "never");
         }
         lash::Resolution::Timeout => {
             assert_eq!(value["ok"], false);
-            let failure: Value = serde_json::from_str(value["error"].as_str().unwrap()).unwrap();
-            assert_eq!(failure["class"], "timeout");
-            assert_eq!(failure["code"], "tool_completion_timeout");
+            assert_eq!(value["error"], "pending tool completion timed out");
+            assert_eq!(value["cause"]["class"], "timeout");
+            assert_eq!(value["cause"]["code"], "tool_completion_timeout");
+            assert_eq!(value["cause"]["source"], "runtime");
+            assert_eq!(value["cause"]["retry"]["type"], "never");
         }
         lash::Resolution::Cancelled => {
             assert_eq!(value["ok"], false);

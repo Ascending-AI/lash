@@ -530,8 +530,8 @@ impl TriggerRouter {
     ///
     /// This is deliberately not a journaled wrapper around [`Self::emit`]:
     /// delivery starts are themselves effects, and nesting them inside an outer
-    /// effect is what [`crate::ToolContext::triggers`] refuses on
-    /// ordinal-addressed journal tiers.
+    /// effect is what [`crate::ToolContext::triggers`] refuses inside an
+    /// atomic tool attempt.
     #[doc(hidden)]
     pub async fn emit_recorded(
         &self,

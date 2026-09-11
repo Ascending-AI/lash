@@ -7,6 +7,14 @@ use thiserror::Error;
 
 use super::ExecutionHostError;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct ExecutionHostToolFailure {
+    pub(super) class: lash_sansio::ToolFailureClass,
+    pub(super) code: String,
+    pub(super) source: lash_sansio::ToolFailureSource,
+    pub(super) retry: lash_sansio::ToolRetryStatus,
+}
+
 /// A failure while interpolating arguments into a format template.
 #[non_exhaustive]
 #[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
@@ -325,6 +333,9 @@ pub enum RuntimeError {
     /// The `?` operator unwrapped a failed tool result.
     #[error("`?` unwrapped failed tool result: {message}")]
     UnwrappedToolResultFailed { message: String },
+    /// The `?` operator unwrapped a failed host tool result with typed failure metadata.
+    #[error("`?` unwrapped failed tool result: {source}")]
+    UnwrappedHostToolResultFailed { source: ExecutionHostError },
     /// The `?` operator unwrapped a failed module operation.
     #[error("`?` unwrapped failed module operation: {source}")]
     UnwrappedModuleOperationFailed { source: ExecutionHostError },
@@ -554,6 +565,7 @@ impl RuntimeError {
             Self::ValidateTypeLiteralRequired => ErrorTaxonomy::Catchable,
             Self::NotTypeValue { .. } => ErrorTaxonomy::Catchable,
             Self::UnwrappedToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::UnwrappedHostToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::UnwrappedModuleOperationFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::MissingAssignmentIndex => ErrorTaxonomy::Catchable,
             Self::MissingAssignmentField { .. } => ErrorTaxonomy::Catchable,
@@ -685,6 +697,7 @@ impl RuntimeError {
             Self::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
             Self::NotTypeValue { .. } => "NotTypeValue",
             Self::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+            Self::UnwrappedHostToolResultFailed { .. } => "UnwrappedHostToolResultFailed",
             Self::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
             Self::MissingAssignmentIndex => "MissingAssignmentIndex",
             Self::MissingAssignmentField { .. } => "MissingAssignmentField",
@@ -771,6 +784,24 @@ impl RuntimeError {
                 | Self::MemoryLimitExceeded { .. }
                 | Self::FrameDepthExceeded { .. }
         )
+    }
+
+    pub(crate) fn execution_host_error(&self) -> Option<&ExecutionHostError> {
+        match self {
+            Self::UnwrappedHostToolResultFailed { source }
+            | Self::UnwrappedModuleOperationFailed { source }
+            | Self::ProcessStartFailed { source }
+            | Self::SleepFailed { source }
+            | Self::WaitSignalFailed { source }
+            | Self::SignalRunFailed { source }
+            | Self::CancelFailed { source }
+            | Self::ProcessEventFailed { source }
+            | Self::PrintFailed { source }
+            | Self::FinishFailed { source }
+            | Self::FailFailed { source }
+            | Self::ResourceBatchFailed { source } => Some(source),
+            _ => None,
+        }
     }
 }
 
@@ -939,6 +970,9 @@ mod tests {
             },
             RuntimeError::UnwrappedToolResultFailed {
                 message: "tool error".into(),
+            },
+            RuntimeError::UnwrappedHostToolResultFailed {
+                source: host_error(),
             },
             RuntimeError::UnwrappedModuleOperationFailed {
                 source: host_error(),
@@ -1263,6 +1297,9 @@ mod tests {
                 RuntimeError::UnwrappedToolResultFailed { .. } => {
                     "`?` unwrapped failed tool result: tool error"
                 }
+                RuntimeError::UnwrappedHostToolResultFailed { .. } => {
+                    "`?` unwrapped failed tool result: host error"
+                }
                 RuntimeError::UnwrappedModuleOperationFailed { .. } => {
                     "`?` unwrapped failed module operation: host error"
                 }
@@ -1369,264 +1406,150 @@ mod tests {
         }
     }
 
-    /// Every guest-facing code, in declaration order. The list is the pin's
-    /// completeness half: `expected_code` forces each variant to declare one,
-    /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 118] = [
-        "FrameDepthExceeded",
-        "FunctionIndexOverflow",
-        "NonFunctionCall",
-        "FunctionArgumentCount",
-        "UnknownFunction",
-        "ClosureCaptureCountMismatch",
-        "FunctionValueAtHostBoundary",
-        "JavaScriptExoticAtHostBoundary",
-        "EffectInBuiltinCallback",
-        "InstructionBudgetExceeded",
-        "RegExpBudgetExceeded",
-        "ExecutionDeadlineExceeded",
-        "MemoryLimitExceeded",
-        "HostCancelled",
-        "DanglingHeapReference",
-        "HeapIdExhausted",
-        "UnexportedHeapReference",
-        "CyclicHostValue",
-        "ValueDepthLimitExceeded",
-        "UndefinedVariable",
-        "NonListIteration",
-        "SessionProcessAdminOutsideProcess",
-        "ForegroundControlInsideProcess",
-        "UnknownBuiltin",
-        "CannotReadField",
-        "ToolResultExpected",
-        "ToolResultMissingValue",
-        "ToolResultInvalidOk",
-        "CannotIndex",
-        "ImmutableImageFields",
-        "ImmutableImageFieldsThrough",
-        "ImmutableTupleIndexes",
-        "ImmutableTupleIndexesThrough",
-        "CannotAssignField",
-        "CannotAssignThroughField",
-        "CannotAssignIndex",
-        "CannotAssignThroughIndex",
-        "InvalidListAssignmentIndex",
-        "TypeScriptArrayNonIndexPropertyUnsupported",
-        "PendingTool",
-        "InvalidArgumentCount",
-        "EmptyUnsupported",
-        "KeysUnsupported",
-        "ValuesUnsupported",
-        "SliceUnsupported",
-        "FormatTemplateMissing",
-        "FormatTemplateInvalid",
-        "LenUnsupported",
-        "ContainsUnsupported",
-        "InUnsupported",
-        "JoinUnsupported",
-        "PushUnsupported",
-        "ShapingListRequired",
-        "ShapingTextRequired",
-        "ShapingNumberRequired",
-        "ShapingComparableRequired",
-        "ShapingEmptyList",
-        "SortByRecordRequired",
-        "SortByEmptyPath",
-        "SortByMissingPath",
-        "InvalidRangeBound",
-        "InvalidRangeBoundType",
-        "InvalidIntegerDivisionArgument",
-        "InvalidIntegerDivisionArgumentType",
-        "ExpectedNumber",
-        "ExpectedNumberType",
-        "ExpectedText",
-        "InvalidIndex",
-        "InvalidCharacterIndex",
-        "IncompatibleSequenceConcatenation",
-        "ReadOnlyProjectedBinding",
-        "ValidateTypeLiteralRequired",
-        "NotTypeValue",
-        "UnwrappedToolResultFailed",
-        "UnwrappedModuleOperationFailed",
-        "MissingAssignmentIndex",
-        "MissingAssignmentField",
-        "MissingAssignmentKey",
-        "ListAssignmentIndexOutOfBounds",
-        "InvalidJson",
-        "EmptyGrepNeedle",
-        "Format",
-        "ZeroRangeStep",
-        "RangeTooLarge",
-        "IntegerDivisionByZero",
-        "UnknownProcess",
-        "ProcessNotExported",
-        "ProcessRefNotExported",
-        "ArtifactProcessMissing",
-        "ValidationFailed",
-        "StartSiteMissing",
-        "LinkedArtifactMissing",
-        "LinkedProcessNotExported",
-        "ProcessStartFailed",
-        "SleepFailed",
-        "WaitSignalFailed",
-        "SignalRunFailed",
-        "CancelFailed",
-        "ProcessEventFailed",
-        "PrintFailed",
-        "FinishFailed",
-        "FailFailed",
-        "ResourceBatchReceiverOutOfRange",
-        "ResourceBatchArgumentOutOfRange",
-        "InvalidResourceBatchResult",
-        "ResourceBatchFailed",
-        "ResourceBatchResultCount",
-        "ResourceBatchSettlementOrder",
-        "AwaitExpectsHandle",
-        "ResourceListBatchMalformed",
-        "AggregateAwaitLeafOutOfRange",
-        "AggregateAwaitValueOutOfRange",
-        "InvalidAggregateAwaitRecordShape",
-        "VmStackUnderflow",
-        "MissingLoopState",
-        "ContextDependentIntrinsicMisdispatch",
-        "UncaughtException",
-        "InvalidExceptionState",
-    ];
-
+    /// The pin's completeness half: `expected_code` forces each variant to
+    /// declare a code, this forces each declared code to be exercised.
     const RUNTIME_ERROR_VARIANT_COUNT: usize = RUNTIME_ERROR_CODES.len();
 
-    /// Guest-facing codes are a durable contract, so they are pinned here
-    /// exhaustively: renaming a variant breaks this match and forces the
-    /// author to decide, deliberately, whether the code the guest branches on
-    /// changes with it.
-    fn expected_code(error: &RuntimeError) -> &'static str {
-        match error {
-            RuntimeError::FrameDepthExceeded { .. } => "FrameDepthExceeded",
-            RuntimeError::FunctionIndexOverflow => "FunctionIndexOverflow",
-            RuntimeError::NonFunctionCall { .. } => "NonFunctionCall",
-            RuntimeError::FunctionArgumentCount { .. } => "FunctionArgumentCount",
-            RuntimeError::UnknownFunction { .. } => "UnknownFunction",
-            RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
-            RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
-            RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
-            RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
-            RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
-            RuntimeError::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
-            RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
-            RuntimeError::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
-            RuntimeError::HostCancelled => "HostCancelled",
-            RuntimeError::DanglingHeapReference { .. } => "DanglingHeapReference",
-            RuntimeError::HeapIdExhausted => "HeapIdExhausted",
-            RuntimeError::UnexportedHeapReference { .. } => "UnexportedHeapReference",
-            RuntimeError::CyclicHostValue { .. } => "CyclicHostValue",
-            RuntimeError::ValueDepthLimitExceeded { .. } => "ValueDepthLimitExceeded",
-            RuntimeError::UndefinedVariable { .. } => "UndefinedVariable",
-            RuntimeError::NonListIteration => "NonListIteration",
-            RuntimeError::SessionProcessAdminOutsideProcess { .. } => {
-                "SessionProcessAdminOutsideProcess"
+    /// The guest-facing code of every `RuntimeError` variant, in declaration
+    /// order. One list generates both halves of the pin, so they cannot drift:
+    /// the match below is exhaustive, so a new variant does not compile until
+    /// it is listed here, and listing it grows [`RUNTIME_ERROR_CODES`] — which
+    /// the count assertion then holds against the errors actually constructed.
+    macro_rules! runtime_error_code_table {
+        ($($pattern:pat => $code:literal,)*) => {
+            const RUNTIME_ERROR_CODES: [&str; [$($code),*].len()] = [$($code),*];
+
+            /// Guest-facing codes are a durable contract, so they are pinned
+            /// exhaustively: renaming a variant breaks this match and forces
+            /// the author to decide, deliberately, whether the code the guest
+            /// branches on changes with it.
+            fn expected_code(error: &RuntimeError) -> &'static str {
+                match error {
+                    $($pattern => $code,)*
+                }
             }
-            RuntimeError::ForegroundControlInsideProcess { .. } => "ForegroundControlInsideProcess",
-            RuntimeError::UnknownBuiltin { .. } => "UnknownBuiltin",
-            RuntimeError::CannotReadField { .. } => "CannotReadField",
-            RuntimeError::ToolResultExpected { .. } => "ToolResultExpected",
-            RuntimeError::ToolResultMissingValue => "ToolResultMissingValue",
-            RuntimeError::ToolResultInvalidOk => "ToolResultInvalidOk",
-            RuntimeError::CannotIndex { .. } => "CannotIndex",
-            RuntimeError::ImmutableImageFields => "ImmutableImageFields",
-            RuntimeError::ImmutableImageFieldsThrough => "ImmutableImageFieldsThrough",
-            RuntimeError::ImmutableTupleIndexes => "ImmutableTupleIndexes",
-            RuntimeError::ImmutableTupleIndexesThrough => "ImmutableTupleIndexesThrough",
-            RuntimeError::CannotAssignField { .. } => "CannotAssignField",
-            RuntimeError::CannotAssignThroughField { .. } => "CannotAssignThroughField",
-            RuntimeError::CannotAssignIndex { .. } => "CannotAssignIndex",
-            RuntimeError::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
-            RuntimeError::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
-            RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => {
-                "TypeScriptArrayNonIndexPropertyUnsupported"
-            }
-            RuntimeError::PendingTool { .. } => "PendingTool",
-            RuntimeError::InvalidArgumentCount { .. } => "InvalidArgumentCount",
-            RuntimeError::EmptyUnsupported => "EmptyUnsupported",
-            RuntimeError::KeysUnsupported => "KeysUnsupported",
-            RuntimeError::ValuesUnsupported => "ValuesUnsupported",
-            RuntimeError::SliceUnsupported => "SliceUnsupported",
-            RuntimeError::FormatTemplateMissing => "FormatTemplateMissing",
-            RuntimeError::FormatTemplateInvalid { .. } => "FormatTemplateInvalid",
-            RuntimeError::LenUnsupported => "LenUnsupported",
-            RuntimeError::ContainsUnsupported => "ContainsUnsupported",
-            RuntimeError::InUnsupported => "InUnsupported",
-            RuntimeError::JoinUnsupported => "JoinUnsupported",
-            RuntimeError::PushUnsupported => "PushUnsupported",
-            RuntimeError::ShapingListRequired { .. } => "ShapingListRequired",
-            RuntimeError::ShapingTextRequired { .. } => "ShapingTextRequired",
-            RuntimeError::ShapingNumberRequired { .. } => "ShapingNumberRequired",
-            RuntimeError::ShapingComparableRequired { .. } => "ShapingComparableRequired",
-            RuntimeError::ShapingEmptyList { .. } => "ShapingEmptyList",
-            RuntimeError::SortByRecordRequired { .. } => "SortByRecordRequired",
-            RuntimeError::SortByEmptyPath => "SortByEmptyPath",
-            RuntimeError::SortByMissingPath { .. } => "SortByMissingPath",
-            RuntimeError::InvalidRangeBound => "InvalidRangeBound",
-            RuntimeError::InvalidRangeBoundType { .. } => "InvalidRangeBoundType",
-            RuntimeError::InvalidIntegerDivisionArgument { .. } => "InvalidIntegerDivisionArgument",
-            RuntimeError::InvalidIntegerDivisionArgumentType { .. } => {
-                "InvalidIntegerDivisionArgumentType"
-            }
-            RuntimeError::ExpectedNumber => "ExpectedNumber",
-            RuntimeError::ExpectedNumberType { .. } => "ExpectedNumberType",
-            RuntimeError::ExpectedText { .. } => "ExpectedText",
-            RuntimeError::InvalidIndex => "InvalidIndex",
-            RuntimeError::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
-            RuntimeError::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
-            RuntimeError::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
-            RuntimeError::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
-            RuntimeError::NotTypeValue { .. } => "NotTypeValue",
-            RuntimeError::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
-            RuntimeError::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
-            RuntimeError::MissingAssignmentIndex => "MissingAssignmentIndex",
-            RuntimeError::MissingAssignmentField { .. } => "MissingAssignmentField",
-            RuntimeError::MissingAssignmentKey { .. } => "MissingAssignmentKey",
-            RuntimeError::ListAssignmentIndexOutOfBounds => "ListAssignmentIndexOutOfBounds",
-            RuntimeError::InvalidJson { .. } => "InvalidJson",
-            RuntimeError::EmptyGrepNeedle => "EmptyGrepNeedle",
-            RuntimeError::Format(_) => "Format",
-            RuntimeError::ZeroRangeStep => "ZeroRangeStep",
-            RuntimeError::RangeTooLarge { .. } => "RangeTooLarge",
-            RuntimeError::IntegerDivisionByZero { .. } => "IntegerDivisionByZero",
-            RuntimeError::UnknownProcess { .. } => "UnknownProcess",
-            RuntimeError::ProcessNotExported { .. } => "ProcessNotExported",
-            RuntimeError::ProcessRefNotExported { .. } => "ProcessRefNotExported",
-            RuntimeError::ArtifactProcessMissing { .. } => "ArtifactProcessMissing",
-            RuntimeError::ValidationFailed { .. } => "ValidationFailed",
-            RuntimeError::StartSiteMissing => "StartSiteMissing",
-            RuntimeError::LinkedArtifactMissing => "LinkedArtifactMissing",
-            RuntimeError::LinkedProcessNotExported { .. } => "LinkedProcessNotExported",
-            RuntimeError::ProcessStartFailed { .. } => "ProcessStartFailed",
-            RuntimeError::SleepFailed { .. } => "SleepFailed",
-            RuntimeError::WaitSignalFailed { .. } => "WaitSignalFailed",
-            RuntimeError::SignalRunFailed { .. } => "SignalRunFailed",
-            RuntimeError::CancelFailed { .. } => "CancelFailed",
-            RuntimeError::ProcessEventFailed { .. } => "ProcessEventFailed",
-            RuntimeError::PrintFailed { .. } => "PrintFailed",
-            RuntimeError::FinishFailed { .. } => "FinishFailed",
-            RuntimeError::FailFailed { .. } => "FailFailed",
-            RuntimeError::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
-            RuntimeError::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
-            RuntimeError::InvalidResourceBatchResult => "InvalidResourceBatchResult",
-            RuntimeError::ResourceBatchFailed { .. } => "ResourceBatchFailed",
-            RuntimeError::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
-            RuntimeError::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
-            RuntimeError::AwaitExpectsHandle { .. } => "AwaitExpectsHandle",
-            RuntimeError::ResourceListBatchMalformed => "ResourceListBatchMalformed",
-            RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
-            RuntimeError::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
-            RuntimeError::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
-            RuntimeError::VmStackUnderflow => "VmStackUnderflow",
-            RuntimeError::MissingLoopState => "MissingLoopState",
-            RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => {
-                "ContextDependentIntrinsicMisdispatch"
-            }
-            RuntimeError::UncaughtException { .. } => "UncaughtException",
-            RuntimeError::InvalidExceptionState { .. } => "InvalidExceptionState",
-        }
+        };
+    }
+
+    runtime_error_code_table! {
+    RuntimeError::FrameDepthExceeded { .. } => "FrameDepthExceeded",
+    RuntimeError::FunctionIndexOverflow => "FunctionIndexOverflow",
+    RuntimeError::NonFunctionCall { .. } => "NonFunctionCall",
+    RuntimeError::FunctionArgumentCount { .. } => "FunctionArgumentCount",
+    RuntimeError::UnknownFunction { .. } => "UnknownFunction",
+    RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
+    RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+    RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
+    RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
+    RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
+    RuntimeError::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
+    RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
+    RuntimeError::MemoryLimitExceeded { .. } => "MemoryLimitExceeded",
+    RuntimeError::HostCancelled => "HostCancelled",
+    RuntimeError::DanglingHeapReference { .. } => "DanglingHeapReference",
+    RuntimeError::HeapIdExhausted => "HeapIdExhausted",
+    RuntimeError::UnexportedHeapReference { .. } => "UnexportedHeapReference",
+    RuntimeError::CyclicHostValue { .. } => "CyclicHostValue",
+    RuntimeError::ValueDepthLimitExceeded { .. } => "ValueDepthLimitExceeded",
+    RuntimeError::UndefinedVariable { .. } => "UndefinedVariable",
+    RuntimeError::NonListIteration => "NonListIteration",
+    RuntimeError::SessionProcessAdminOutsideProcess { .. } => "SessionProcessAdminOutsideProcess",
+    RuntimeError::ForegroundControlInsideProcess { .. } => "ForegroundControlInsideProcess",
+    RuntimeError::UnknownBuiltin { .. } => "UnknownBuiltin",
+    RuntimeError::CannotReadField { .. } => "CannotReadField",
+    RuntimeError::ToolResultExpected { .. } => "ToolResultExpected",
+    RuntimeError::ToolResultMissingValue => "ToolResultMissingValue",
+    RuntimeError::ToolResultInvalidOk => "ToolResultInvalidOk",
+    RuntimeError::CannotIndex { .. } => "CannotIndex",
+    RuntimeError::ImmutableImageFields => "ImmutableImageFields",
+    RuntimeError::ImmutableImageFieldsThrough => "ImmutableImageFieldsThrough",
+    RuntimeError::ImmutableTupleIndexes => "ImmutableTupleIndexes",
+    RuntimeError::ImmutableTupleIndexesThrough => "ImmutableTupleIndexesThrough",
+    RuntimeError::CannotAssignField { .. } => "CannotAssignField",
+    RuntimeError::CannotAssignThroughField { .. } => "CannotAssignThroughField",
+    RuntimeError::CannotAssignIndex { .. } => "CannotAssignIndex",
+    RuntimeError::CannotAssignThroughIndex { .. } => "CannotAssignThroughIndex",
+    RuntimeError::InvalidListAssignmentIndex => "InvalidListAssignmentIndex",
+    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { .. } => "TypeScriptArrayNonIndexPropertyUnsupported",
+    RuntimeError::PendingTool { .. } => "PendingTool",
+    RuntimeError::InvalidArgumentCount { .. } => "InvalidArgumentCount",
+    RuntimeError::EmptyUnsupported => "EmptyUnsupported",
+    RuntimeError::KeysUnsupported => "KeysUnsupported",
+    RuntimeError::ValuesUnsupported => "ValuesUnsupported",
+    RuntimeError::SliceUnsupported => "SliceUnsupported",
+    RuntimeError::FormatTemplateMissing => "FormatTemplateMissing",
+    RuntimeError::FormatTemplateInvalid { .. } => "FormatTemplateInvalid",
+    RuntimeError::LenUnsupported => "LenUnsupported",
+    RuntimeError::ContainsUnsupported => "ContainsUnsupported",
+    RuntimeError::InUnsupported => "InUnsupported",
+    RuntimeError::JoinUnsupported => "JoinUnsupported",
+    RuntimeError::PushUnsupported => "PushUnsupported",
+    RuntimeError::ShapingListRequired { .. } => "ShapingListRequired",
+    RuntimeError::ShapingTextRequired { .. } => "ShapingTextRequired",
+    RuntimeError::ShapingNumberRequired { .. } => "ShapingNumberRequired",
+    RuntimeError::ShapingComparableRequired { .. } => "ShapingComparableRequired",
+    RuntimeError::ShapingEmptyList { .. } => "ShapingEmptyList",
+    RuntimeError::SortByRecordRequired { .. } => "SortByRecordRequired",
+    RuntimeError::SortByEmptyPath => "SortByEmptyPath",
+    RuntimeError::SortByMissingPath { .. } => "SortByMissingPath",
+    RuntimeError::InvalidRangeBound => "InvalidRangeBound",
+    RuntimeError::InvalidRangeBoundType { .. } => "InvalidRangeBoundType",
+    RuntimeError::InvalidIntegerDivisionArgument { .. } => "InvalidIntegerDivisionArgument",
+    RuntimeError::InvalidIntegerDivisionArgumentType { .. } => "InvalidIntegerDivisionArgumentType",
+    RuntimeError::ExpectedNumber => "ExpectedNumber",
+    RuntimeError::ExpectedNumberType { .. } => "ExpectedNumberType",
+    RuntimeError::ExpectedText { .. } => "ExpectedText",
+    RuntimeError::InvalidIndex => "InvalidIndex",
+    RuntimeError::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
+    RuntimeError::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
+    RuntimeError::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
+    RuntimeError::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
+    RuntimeError::NotTypeValue { .. } => "NotTypeValue",
+    RuntimeError::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+    RuntimeError::UnwrappedHostToolResultFailed { .. } => "UnwrappedHostToolResultFailed",
+    RuntimeError::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
+    RuntimeError::MissingAssignmentIndex => "MissingAssignmentIndex",
+    RuntimeError::MissingAssignmentField { .. } => "MissingAssignmentField",
+    RuntimeError::MissingAssignmentKey { .. } => "MissingAssignmentKey",
+    RuntimeError::ListAssignmentIndexOutOfBounds => "ListAssignmentIndexOutOfBounds",
+    RuntimeError::InvalidJson { .. } => "InvalidJson",
+    RuntimeError::EmptyGrepNeedle => "EmptyGrepNeedle",
+    RuntimeError::Format(_) => "Format",
+    RuntimeError::ZeroRangeStep => "ZeroRangeStep",
+    RuntimeError::RangeTooLarge { .. } => "RangeTooLarge",
+    RuntimeError::IntegerDivisionByZero { .. } => "IntegerDivisionByZero",
+    RuntimeError::UnknownProcess { .. } => "UnknownProcess",
+    RuntimeError::ProcessNotExported { .. } => "ProcessNotExported",
+    RuntimeError::ProcessRefNotExported { .. } => "ProcessRefNotExported",
+    RuntimeError::ArtifactProcessMissing { .. } => "ArtifactProcessMissing",
+    RuntimeError::ValidationFailed { .. } => "ValidationFailed",
+    RuntimeError::StartSiteMissing => "StartSiteMissing",
+    RuntimeError::LinkedArtifactMissing => "LinkedArtifactMissing",
+    RuntimeError::LinkedProcessNotExported { .. } => "LinkedProcessNotExported",
+    RuntimeError::ProcessStartFailed { .. } => "ProcessStartFailed",
+    RuntimeError::SleepFailed { .. } => "SleepFailed",
+    RuntimeError::WaitSignalFailed { .. } => "WaitSignalFailed",
+    RuntimeError::SignalRunFailed { .. } => "SignalRunFailed",
+    RuntimeError::CancelFailed { .. } => "CancelFailed",
+    RuntimeError::ProcessEventFailed { .. } => "ProcessEventFailed",
+    RuntimeError::PrintFailed { .. } => "PrintFailed",
+    RuntimeError::FinishFailed { .. } => "FinishFailed",
+    RuntimeError::FailFailed { .. } => "FailFailed",
+    RuntimeError::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
+    RuntimeError::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
+    RuntimeError::InvalidResourceBatchResult => "InvalidResourceBatchResult",
+    RuntimeError::ResourceBatchFailed { .. } => "ResourceBatchFailed",
+    RuntimeError::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
+    RuntimeError::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
+    RuntimeError::AwaitExpectsHandle { .. } => "AwaitExpectsHandle",
+    RuntimeError::ResourceListBatchMalformed => "ResourceListBatchMalformed",
+    RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
+    RuntimeError::AggregateAwaitValueOutOfRange => "AggregateAwaitValueOutOfRange",
+    RuntimeError::InvalidAggregateAwaitRecordShape => "InvalidAggregateAwaitRecordShape",
+    RuntimeError::VmStackUnderflow => "VmStackUnderflow",
+    RuntimeError::MissingLoopState => "MissingLoopState",
+    RuntimeError::ContextDependentIntrinsicMisdispatch { .. } => "ContextDependentIntrinsicMisdispatch",
+    RuntimeError::UncaughtException { .. } => "UncaughtException",
+    RuntimeError::InvalidExceptionState { .. } => "InvalidExceptionState",
     }
 }

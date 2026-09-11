@@ -131,6 +131,11 @@ pub(super) fn restate_error_message(input: &[u8]) -> Option<String> {
     String::from_utf8(protobuf_len_field(frame.get(8..)?, 2)?.to_vec()).ok()
 }
 
+pub(super) fn restate_error_code(input: &[u8]) -> Option<u16> {
+    let frame = restate_message_frame(input, 0x0002)?;
+    u16::try_from(protobuf_varint_field(frame.get(8..)?, 1)?).ok()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RestateCallFrame {
     pub frame: Bytes,

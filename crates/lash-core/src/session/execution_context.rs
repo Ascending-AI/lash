@@ -1175,10 +1175,7 @@ mod tests {
             plugins,
             tools: Arc::new(NoopTools),
             tool_registry: None,
-            tool_catalog: Arc::new(crate::ToolCatalog::from_tools(
-                vec![tool.manifest()],
-                std::collections::BTreeMap::new(),
-            )),
+            tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(vec![tool])),
             sessions: Arc::new(crate::testing::MockSessionManager::default()),
             session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
             session_graph: Arc::new(crate::testing::MockSessionManager::default()),
@@ -1236,10 +1233,7 @@ mod tests {
             plugins,
             tools: Arc::new(NoopTools),
             tool_registry: None,
-            tool_catalog: Arc::new(crate::ToolCatalog::from_tools(
-                Vec::new(),
-                std::collections::BTreeMap::new(),
-            )),
+            tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
             sessions: Arc::new(crate::testing::MockSessionManager::default()),
             session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
             session_graph: Arc::new(crate::testing::MockSessionManager::default()),

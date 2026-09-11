@@ -80,8 +80,8 @@ pub use session_model::{
 #[doc(hidden)]
 pub use standard_batch::BatchResultRow;
 pub use tool_catalog::{
-    ToolCatalog, ToolCatalogBuildInput, ToolCatalogContribution, ToolCatalogEntry,
-    ToolContractResolver, build_tool_catalog,
+    ToolCatalog, ToolCatalogBuildError, ToolCatalogBuildInput, ToolCatalogContribution,
+    ToolCatalogEntry, ToolContractResolver, build_tool_catalog,
 };
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;

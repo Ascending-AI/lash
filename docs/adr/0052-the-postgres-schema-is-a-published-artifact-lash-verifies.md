@@ -274,8 +274,20 @@ verify against; shape-checking there would be lash verifying itself.
   Lash's *own* `CHECK` constraints are pinned elsewhere rather than left
   unpinned: ADR 0081 puts them in a declared expected-constraints registry that
   the lash-sim schema-congruence gate asserts against the published DDL. That
-  registry reads the committed artifacts, not a live catalog, so it neither
-  widens this fingerprint's object classes nor changes what a host may add.
+  registry remains the single expected-definition source and the generated
+  structural fingerprint remains unchanged.
+
+  Amended 2026-09-11 (FIG-2837): hosts can explicitly call
+  `PostgresStorage::inspect_required_constraints_for` (or the caller-owned-
+  connection `inspect_required_constraints_on`) to compare those registered
+  names and predicates against a live catalog snapshot. The pool form uses the
+  same shared advisory-lock and post-lock `REPEATABLE READ` ordering as
+  `verify_schema_for`. It reports missing, altered, `NOT VALID`, and, on
+  PostgreSQL 18+, `NOT ENFORCED` registered checks while tolerating unrelated
+  additions. Unsupported predicate syntax makes inspection inconclusive rather
+  than clean. This is a separate read-only diagnostic: it performs no repair and
+  normal startup does not call it, so the structural fingerprint's scope and
+  `SchemaCheck` policy remain unchanged.
 
 - A pre-version-9 database's leftover `lash_process_change_seq` sequence is never
   cleaned up now that the artifact is creation-only. Such a database is rejected at

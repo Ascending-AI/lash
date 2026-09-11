@@ -18,7 +18,7 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
-const PREDECESSOR_EXPECTED_RELATIVE_PATH: &str = "../lash-core/tests/fixtures/durable-read-predecessors/schema-60-e7584a69/postgres-expected.json";
+const PREDECESSOR_EXPECTED_RELATIVE_PATH: &str = "../lash-core/tests/fixtures/durable-read-predecessors/schema-61-b18761cc/postgres-expected.json";
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct PostgresVersion {
@@ -94,7 +94,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 85);
+    assert_eq!(PostgresStorage::schema_version(), 86);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -234,6 +234,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         "ALTER TABLE lash_pending_turn_inputs
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state,
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state_ingress,
+             DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_claim_id_token_all_or_none,
              ADD CONSTRAINT ck_pending_turn_inputs_state
                  CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted',
                                   'cancelled', 'completed')),
@@ -241,7 +242,10 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                  CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn'
                          AND state IN ('pending_active', 'accepted', 'cancelled', 'completed'))
                      OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
-                         AND state IN ('deferred_next_turn', 'cancelled', 'completed')));
+                         AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
+             ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                 CHECK ((claim_id IS NULL AND claim_token IS NULL)
+                     OR (claim_id IS NOT NULL AND claim_token IS NOT NULL));
          ALTER TABLE lash_runtime_turn_commits
              DROP CONSTRAINT IF EXISTS lash_runtime_turn_commits_append_identity_all_or_none,
              ADD CONSTRAINT lash_runtime_turn_commits_append_identity_all_or_none
@@ -250,7 +254,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          ALTER TABLE lash_turn_cancel_requests
              ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
          UPDATE lash_schema_versions
-            SET version = 85
+            SET version = 86
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
