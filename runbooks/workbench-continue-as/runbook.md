@@ -4,6 +4,12 @@
 > named-checkpoint screenshot, **three-layer cross-check**, real-token, Abort/RCA, and
 > teardown rules. This runbook adds only the `continue_as` scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Referee an RLM agent-initiated `control.continue_as({ task, seed })` tail-call
 through the workbench browser surface. The scenario proves that one logical composer turn
 can open a fresh `AgentFrame`, carry only its explicit seed into that frame, finish coherently,
@@ -145,8 +151,9 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   interval; those reads legitimately emit session-scoped `agent_workbench.api.work.response`
   custom records even before the first turn. Preserve them, but do not count them as runtime
   conversation activity or require a literally empty session-scoped trace at baseline.
-- Restart with the same exported data/run directories via
-  `bash scripts/agent-workbench-dev.sh restart --port 3200`. Teardown is
+- The restart phase is blocked by FIG-1164. Its historical command is
+  `bash scripts/agent-workbench-dev.sh restart --port 3200`; do not execute it until a verified
+  immutable same-configuration host restart exists. Teardown remains
   `bash scripts/agent-workbench-dev.sh down --port 3200`, followed by removal of
   `/workspace/tmp/fig992a-run/data` only after all evidence has been copied out.
 

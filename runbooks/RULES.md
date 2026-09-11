@@ -243,11 +243,19 @@ evidence wants its debug assertions armed. `scripts/check_judged_build_geometry.
 holds all of this — the profile's settings, the absence of `testing` on any host's
 runtime dependencies, and the `--profile judged` on every judged boot command.
 
-`agent-workbench-restart` is a new helper invocation and does not inherit
-`AGENT_WORKBENCH_RUN_DIR` or `AGENT_WORKBENCH_DATA_DIR` from the original `up` command.
-Export both values in the invoking shell, or repeat the same values on every
-`just agent-workbench-restart <port>` command. Otherwise the helper can silently select
-different run metadata or a different durable data directory.
+## Agent Workbench lifecycle constraint (FIG-1164)
+
+The bundled launcher cannot safely replace a Workbench process behind a Restate deployment
+that may replay. `just agent-workbench-restart <port>` therefore refuses without stopping or
+mutating the stack. `just agent-workbench-reset <port>` is an explicitly destructive recovery
+command: it clears Restate journals and the corresponding application data, and works only for
+a wholly launcher-owned disposable stack. Legacy, external, mixed, or ambiguous stacks are
+refused.
+
+Any runbook that requires durable state to survive a Workbench process replacement is blocked at
+that phase until a separately verified immutable, same-configuration host-restart mechanism is
+available. Keep its state-survival assertions as the acceptance contract. Never substitute
+`agent-workbench-reset`, because deleting the evidence cannot prove persistence.
 
 For an Abort/RCA, use the app's pipeline — UI event handling / HTTP API / turn or trigger
 execution / durable process / store persistence / render — and name the stage the failure
@@ -266,8 +274,8 @@ Browser runbooks inject faults with shell commands — stop a container, replace
 your driver is inside that command it cannot poll the page, so any state that exists **only**
 during the fault is invisible to a driver-side loop: an outage banner, a degraded pill, a
 transient affordance. Its absence from your evidence then proves nothing about the app. These
-windows are short — a workbench web-process restart is about two seconds — so this is the
-normal case, not an edge case.
+fault windows may be short, so this is the normal case rather than an edge case. Workbench
+process-replacement phases are currently blocked by the FIG-1164 lifecycle constraint above.
 
 Move the observation into the page (an interval recording the state into an array the driver
 reads afterwards) or launch the injecting command non-blocking. If an affordance must be *used*

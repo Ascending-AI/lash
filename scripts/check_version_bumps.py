@@ -160,8 +160,12 @@ IDENTIFIER_RENAME_BASELINES = {
     # changes, and the surface that actually changed took its honest bump
     # (SESSION_HEAD_META_SCHEMA_VERSION 5 -> 6, now guarded on this struct
     # directly). SESSION_NODE_BODY_SCHEMA_VERSION stays 10.
+    # FIG-2880: removing tool_access's serde default changes head-owned
+    # PersistedSessionConfig only; head version 8 fences those bytes. Node
+    # bodies and checkpoint/blob references are unchanged, so node version 12
+    # remains current. Both independent reviews verified this boundary.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "sha256:9e1a721520f9c423cf5bbe3e67bdc666bd13b80032e8c7567e15f5f1d4eb602b"
+        "sha256:18682ce7b019aea9ce6d4b8ff46c3cec91cf0f908b0443992570c9a7dca26d2f"
     ),
     "crates/lash-core/src/runtime/process/validation.rs:"
     "PROCESS_REGISTRATION_FAMILY_VERSION": (

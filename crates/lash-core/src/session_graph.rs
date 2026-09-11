@@ -391,7 +391,6 @@ pub struct PersistedSessionConfig {
     pub generation: crate::GenerationOptions,
     /// Authority inputs needed to reconstruct the same tool policy on a
     /// stateless worker. Catalog membership remains separate host curation.
-    #[serde(default)]
     pub tool_access: crate::SessionToolAccess,
     /// Subagent authority is part of durable session construction rather than
     /// ambient worker state.

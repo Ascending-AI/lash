@@ -1216,8 +1216,9 @@ fn authority_hidden_dispatch_context(
     provider: Arc<dyn ToolProvider>,
 ) -> ToolDispatchContext<'static> {
     let (event_tx, _event_rx) = mpsc::channel(8);
-    let mut tool_access = crate::SessionToolAccess::default();
-    tool_access.hidden_tools.insert("hidden".to_string());
+    let tool_access = crate::SessionToolAccess::ambient()
+        .with_hidden_tools(["hidden"])
+        .expect("valid hidden name");
     let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
         "test_tools",
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),

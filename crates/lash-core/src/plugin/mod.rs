@@ -93,7 +93,7 @@ pub use session_types::{
     OpenAgentFrameResult, PluginOwned, SessionContextOverlay, SessionCreateRequest, SessionHandle,
     SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
     SessionObserverIntentAttribution, SessionPluginSource, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionToolAccess, SubagentSessionContext,
+    SessionStartPoint, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
 };
 pub use state::{
     KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateError,

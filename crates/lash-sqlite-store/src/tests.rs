@@ -14,6 +14,15 @@ fn public_session_schema_version_tracks_the_internal_schema_version() {
     assert_eq!(SESSION_SCHEMA_VERSION, crate::schema::SCHEMA_VERSION);
 }
 
+#[tokio::test]
+async fn explicit_tool_access_survives_sqlite_recovery_and_invalid_bytes_refuse() {
+    let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
+    lash_conformance::session_tool_access_durable_recovery(Arc::new(
+        SqliteSessionStoreFactory::new(dir.path()),
+    ))
+    .await;
+}
+
 #[test]
 fn session_execution_lease_identity_check_rejects_a_partial_write() {
     let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");

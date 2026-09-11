@@ -1109,7 +1109,7 @@ pub use plugin::{
     PluginStateStore, ProcessEngineContributionContext, ProtocolBeforeLlmCallContext,
     ProtocolLlmCallAction, SessionContextOverlay, SessionCreateRequest, SessionGraphService,
     SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateService, SessionToolAccess, SubagentSessionContext,
+    SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,

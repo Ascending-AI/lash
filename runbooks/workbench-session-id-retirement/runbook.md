@@ -4,6 +4,12 @@
 > screenshot, polling, real-token, Abort/RCA, and teardown rules. This runbook adds only
 > the session-id retirement scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove that a durable session id is single-use. Populate one named session,
 delete it through the Workbench API, and require every attempt to reopen that exact id to
 fail with the typed HTTP 409 retirement response and its explanatory message on the
@@ -220,9 +226,10 @@ Abort/RCA rule, tear down, and mark every Phase-5 score item
 **not run because Phase 4 aborted**. Do not restart merely to produce a second verdict
 from an invalid prerequisite.
 
-Run
-`AGENT_WORKBENCH_DATA_DIR=<same-data-dir> just agent-workbench-restart <port>` and poll
-`/healthz`. Require:
+**Blocked by FIG-1164.** The historical command was
+`AGENT_WORKBENCH_DATA_DIR=<same-data-dir> just agent-workbench-restart <port>`. Do not execute it
+until a verified immutable same-configuration host restart exists. After that mechanism runs,
+poll `/healthz`. Require:
 
 - a new Workbench PID;
 - `<data-dir>/session-id`, the default `/api/state` response, and a browser page at

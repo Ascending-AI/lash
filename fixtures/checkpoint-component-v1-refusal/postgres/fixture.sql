@@ -997,7 +997,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 -- Data for Name: lash_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"config": {"model": {"id": "", "limits": {"context_window_tokens": 1}, "variant": "provider_default"}, "prompt": {}, "generation": {}, "provider_id": "", "turn_budget": "unbounded"}, "session_id": "durable-read-fixture", "schema_version": 8, "current_frame_node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940"}', '6bc9b88db965ed5528312d3cfe7473be11dad8c8c6207379ea683348c6c405b0', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
+INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"config": {"model": {"id": "", "limits": {"context_window_tokens": 1}, "variant": "provider_default"}, "prompt": {}, "generation": {}, "provider_id": "", "tool_access": {"mode": "ambient"}, "turn_budget": "unbounded"}, "session_id": "durable-read-fixture", "schema_version": 9, "current_frame_node_id": "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940"}', '6bc9b88db965ed5528312d3cfe7473be11dad8c8c6207379ea683348c6c405b0', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
 
 
 --

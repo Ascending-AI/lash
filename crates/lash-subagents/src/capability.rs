@@ -127,10 +127,10 @@ impl SubagentSpawnContext<'_> {
             ));
         }
         let mut tool_access = request.tool_access.clone();
-        if child_depth >= MAX_SUBAGENT_DEPTH {
+        if child_depth >= MAX_SUBAGENT_DEPTH && !tool_access.hides(RECURSIVE_SUBAGENT_TOOL) {
             tool_access
-                .hidden_tools
-                .insert(RECURSIVE_SUBAGENT_TOOL.to_string());
+                .hide_tool(RECURSIVE_SUBAGENT_TOOL)
+                .map_err(|error| error.to_string())?;
         }
         Ok(request
             .with_tool_access(tool_access)

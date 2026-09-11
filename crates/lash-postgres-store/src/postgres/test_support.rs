@@ -9,6 +9,50 @@ use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, S
 
 #[async_trait::async_trait]
 impl StoreTestSupport for PostgresSessionStore {
+    async fn rewrite_session_tool_access_for_testing(
+        &self,
+        schema_version: u32,
+        tool_access: Option<serde_json::Value>,
+    ) -> Result<(), StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let head_json: String = sqlx::query_scalar(
+            "SELECT head_json FROM lash_sessions WHERE session_id = $1 FOR UPDATE",
+        )
+        .bind(self.session_id.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let mut head: serde_json::Value = serde_json::from_str(&head_json).map_err(|error| {
+            StoreError::Backend(format!("failed to decode test session head: {error}"))
+        })?;
+        head["schema_version"] = serde_json::json!(schema_version);
+        let config = head
+            .get_mut("config")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| {
+                StoreError::Backend("test session head has no config object".to_string())
+            })?;
+        match tool_access {
+            Some(tool_access) => {
+                config.insert("tool_access".to_string(), tool_access);
+            }
+            None => {
+                config.remove("tool_access");
+            }
+        }
+        let head_json = serde_json::to_string(&head).map_err(|error| {
+            StoreError::Backend(format!("failed to encode test session head: {error}"))
+        })?;
+        sqlx::query("UPDATE lash_sessions SET head_json = $2 WHERE session_id = $1")
+            .bind(self.session_id.as_str())
+            .bind(head_json)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+
     async fn stamp_session_state_version_and_corrupt_payload_for_testing(
         &self,
         version: u32,

@@ -234,12 +234,12 @@ fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
     assert_eq!(state.protocol_turn_options, checkpoint_options);
 }
 
-/// Refusal witness: the immediate-predecessor v7 head is rejected after the
-/// effect-address identity cutover by the strict schema-version fence every
-/// store backend decodes through.
+/// Refusal witness: both parents independently used version 8 for incompatible
+/// effect-identity and resident-tool-authority payloads, so the combined build
+/// rejects that immediate predecessor through every store backend's strict fence.
 #[test]
-fn immediate_predecessor_head_meta_v7_is_refused() {
-    const PREDECESSOR: u32 = 7;
+fn immediate_predecessor_head_meta_v8_is_refused() {
+    const PREDECESSOR: u32 = 8;
     assert_eq!(
         PREDECESSOR + 1,
         SESSION_HEAD_META_SCHEMA_VERSION,
@@ -250,7 +250,7 @@ fn immediate_predecessor_head_meta_v7_is_refused() {
         "SessionHeadMeta",
         SESSION_HEAD_META_SCHEMA_VERSION,
     )
-    .expect_err("v7 session head must be refused");
+    .expect_err("v8 session head must be refused");
     assert!(matches!(
         err,
         StoreError::UnsupportedRecordSchemaVersion {

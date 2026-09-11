@@ -9,15 +9,18 @@
 use super::*;
 use crate::SessionId;
 
-const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
+// Version 2 (FIG-2880) carries explicit ambient/restricted resident-tool
+// authority in the shared persisted-config projection.
+const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
+const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
 // Version 2 (FIG-2765): staged usage rows carry their usage disposition through
 // the usage-payload identity, so a retried usage-ledger commit whose rows gained
 // a hole or a correction no longer matches a v1 receipt. Version 3 (FIG-2765 fix
 // round): the v4 payload identity projects each hole's descriptor instead of a
 // count, moving every unreported row's payload hash again. The projection and
-// domain are unchanged; the version is the fence.
-const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+// domain are unchanged; the version is the fence. Version 4 (FIG-2880) carries
+// the same explicit resident-tool authority as the other boundary operations.
+const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
 
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
@@ -127,9 +130,9 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
 }
 
 /// Compute the versioned canonical request identity for one adopting
-/// operation. Every version-1 encoding hashes the shared request projection
-/// under an operation-owned domain string, so identical bytes for different
-/// operations can never collide into one identity family.
+/// operation. Every operation hashes the shared request projection under its
+/// own domain string, so identical bytes for different operations can never
+/// collide into one identity family.
 pub(super) fn semantic_boundary_request_identity(
     commit: &RuntimeCommit,
     operation: crate::store::SemanticBoundaryOperation,
@@ -190,12 +193,13 @@ mod semantic_boundary_request_identity_tests {
         // per adopting operation. Any projection change requires an explicit
         // per-operation encoding-version bump and corpus replacement. To
         // refresh after an intentional grammar change:
-        // UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 cargo test -p lash-core \
-        //   semantic_boundary_request_identity_v1_golden_corpus -- --exact
+        // export UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1
+        // cargo test -p lash-internal-core \
+        //   semantic_boundary_request_identity_v1_golden_corpus
         let rows = [
-            ("record-config", "protocol-materialization", 1),
-            ("create-session", "child-1", 1),
-            ("usage-ledger", "child-turn", 3),
+            ("record-config", "protocol-materialization", 2),
+            ("create-session", "child-1", 2),
+            ("usage-ledger", "child-turn", 4),
         ]
         .into_iter()
         .map(|(key, boundary, expected_version)| {

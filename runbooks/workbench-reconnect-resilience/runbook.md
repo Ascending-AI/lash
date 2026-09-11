@@ -5,6 +5,12 @@
 > **three-layer cross-check**, real-token, Abort/RCA, and teardown rules. This runbook adds
 > only the reconnect-resilience scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Referee the *client's reconnection machine*. Every other workbench runbook
 drives the shell while the web process it talks to stays alive; `workbench-engine-restart`
 bounces the Restate container underneath a living web process. Nothing drives the opposite
@@ -75,18 +81,14 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 
 ## Scenario-specific golden rules
 
-1. **Replace only the web process.** `bash scripts/agent-workbench-dev.sh down --port <p>`
-   runs `stop_started_restate`, which `docker rm -f`s the port-derived Restate container and
-   destroys the durable invocation this scenario depends on. The narrow restart is
-   `bash scripts/agent-workbench-dev.sh restart --port <p>` (equivalently
-   `just agent-workbench-restart <p>`): it calls `stop_pid_file` on the recorded PID —
-   `SIGTERM` to the process group, `SIGKILL` after 15s — then `run_up`, whose `ensure_restate`
-   sees the running container and reuses it. Gate that the container **id and start time are
-   unchanged** across the restart and that the workbench **PID changed**. A `down`/`up` pair,
-   or an unchanged PID, voids the phase. Per [../RULES.md](../RULES.md), `restart` does not
-   inherit `AGENT_WORKBENCH_DATA_DIR` / `AGENT_WORKBENCH_RUN_DIR` — export both, or the
-   replacement process silently picks a different durable directory and the scenario becomes
-   a fresh-session test wearing a restart's clothes.
+1. **Replace only the web process (blocked by FIG-1164).** A `down`/`up` pair destroys the
+   durable invocation this scenario depends on, and destructive reset is equally invalid. The
+   historical narrow commands were `bash scripts/agent-workbench-dev.sh restart --port <p>` and
+   `just agent-workbench-restart <p>`; both now refuse safely. Do not execute this phase until a
+   verified immutable same-configuration host restart exists. That mechanism must keep the
+   Restate container **id and start time unchanged**, change the Workbench **PID**, and use the
+   same `AGENT_WORKBENCH_DATA_DIR` / `AGENT_WORKBENCH_RUN_DIR`. An unchanged PID or different
+   durable directory voids the phase.
 2. **Gate on the phase, and read it where the phase actually lives.** The phase is not a
    single element. `#shellStatus` is hidden **exactly** when the phase is `live`, and its
    `#shellStatusText` carries `workbench unreachable — retrying` (`unavailable`) or
@@ -220,10 +222,11 @@ Note also that the interruption is deliberately *not* an interruption of executi
 was submitted to Restate, so the sleep is durable and the replacement process picks the
 invocation back up.
 
-**2b — restart only the web process.** Run `bash scripts/agent-workbench-dev.sh restart
---port <p>` with the exported data and run directories. Gate: the recorded PID is gone and
-the new PID differs; the Restate container id and `StartedAt` are unchanged; `/healthz`
-answers again.
+**2b — restart only the web process (blocked by FIG-1164).** Stop this scenario here. Retain
+`bash scripts/agent-workbench-dev.sh restart --port <p>` as the historical command, but do not
+execute it until a verified immutable same-configuration host restart exists. Run that mechanism
+with the exported data and run directories, then gate that the recorded PID is gone and the new
+PID differs, the Restate container id and `StartedAt` are unchanged, and `/healthz` answers again.
 
 **2c — require the phase to leave live and return, unassisted.** From the sampler timeline,
 require at least one sample whose phase is `reconnecting` or `unavailable`, and a later

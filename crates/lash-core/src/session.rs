@@ -734,18 +734,18 @@ mod tool_catalog_cache_tests {
     #[test]
     fn authority_fingerprint_covers_hidden_tools_and_explicit_definitions() {
         let base = crate::SessionToolAccess::default();
-        let mut hidden = base.clone();
-        hidden.hidden_tools.insert("hidden".to_string());
-        let explicit = crate::SessionToolAccess {
-            tools: vec![crate::ToolDefinition::raw(
-                "tool:explicit",
-                "explicit",
-                "authority-defined tool",
-                crate::ToolDefinition::default_input_schema(),
-                serde_json::json!({ "type": "string" }),
-            )],
-            ..crate::SessionToolAccess::default()
-        };
+        let hidden = base
+            .clone()
+            .with_hidden_tools(["hidden"])
+            .expect("valid hidden name");
+        let explicit = crate::SessionToolAccess::restricted([crate::ToolDefinition::raw(
+            "tool:explicit",
+            "explicit",
+            "authority-defined tool",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        )])
+        .expect("valid restricted definition");
 
         assert_ne!(
             tool_catalog_authority_fingerprint(&base),
@@ -754,6 +754,46 @@ mod tool_catalog_cache_tests {
         assert_ne!(
             tool_catalog_authority_fingerprint(&base),
             tool_catalog_authority_fingerprint(&explicit)
+        );
+    }
+
+    #[test]
+    fn ambient_and_restricted_empty_select_distinct_resident_catalogs() {
+        let ambient = admission_probe_plugins(
+            Arc::new(AdmissionProbeProvider {
+                contract_available: true,
+                prepare_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            crate::SessionToolAccess::ambient(),
+        );
+        assert!(
+            ambient
+                .resolved_tool_catalog(&SessionId::from("ambient-access"))
+                .expect("ambient resident catalog")
+                .has_callable_tool("resident")
+        );
+
+        let restricted = admission_probe_plugins(
+            Arc::new(AdmissionProbeProvider {
+                contract_available: true,
+                prepare_calls: Arc::new(AtomicUsize::new(0)),
+            }),
+            crate::SessionToolAccess::restricted([]).expect("restricted empty is valid"),
+        );
+        assert!(
+            restricted
+                .resolved_tool_catalog(&SessionId::from("restricted-empty-access"))
+                .expect("restricted-empty resident catalog")
+                .tools
+                .is_empty()
+        );
+        assert!(
+            restricted
+                .tool_registry()
+                .export_state()
+                .iter()
+                .any(|(_, entry)| entry.manifest().name == "resident" && entry.is_member()),
+            "restricted access curates the session catalog without changing registry membership"
         );
     }
 
@@ -828,10 +868,9 @@ mod tool_catalog_cache_tests {
             "request admission updates the registry captured at the next durable turn boundary"
         );
 
-        let hidden_access = crate::SessionToolAccess {
-            tools: Vec::new(),
-            hidden_tools: ["alpha".to_string()].into_iter().collect(),
-        };
+        let hidden_access = crate::SessionToolAccess::ambient()
+            .with_hidden_tools(["alpha"])
+            .expect("valid hidden name");
         let hidden = session
             .pin_tool_surface(&SessionId::from("pinned-surface"), &hidden_access, None)
             .expect("authority-hidden request surface");
@@ -1124,10 +1163,8 @@ mod tool_catalog_cache_tests {
         let renamed_surface = session
             .pin_tool_surface(
                 &SessionId::from("admission-probe"),
-                &crate::SessionToolAccess {
-                    tools: vec![renamed],
-                    hidden_tools: Default::default(),
-                },
+                &crate::SessionToolAccess::restricted([renamed])
+                    .expect("valid restricted definition"),
                 None,
             )
             .expect("the same ToolId retains its pinned route under an authority-owned alias");
@@ -1151,10 +1188,7 @@ mod tool_catalog_cache_tests {
         );
         let error = match session.pin_tool_surface(
             &SessionId::from("admission-probe"),
-            &crate::SessionToolAccess {
-                tools: vec![missing],
-                hidden_tools: Default::default(),
-            },
+            &crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
             None,
         ) {
             Ok(_) => panic!("missing resident route must be refused before advertisement"),
@@ -1183,10 +1217,7 @@ mod tool_catalog_cache_tests {
                 contract_available: true,
                 prepare_calls: Arc::clone(&prepare_calls),
             }),
-            crate::SessionToolAccess {
-                tools: vec![missing],
-                hidden_tools: Default::default(),
-            },
+            crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
         );
 
         let error = plugins

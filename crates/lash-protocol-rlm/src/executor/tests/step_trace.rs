@@ -36,6 +36,7 @@ async fn run_step(code: &str) -> (ExecResponse, Vec<lash_core::facade_support::T
         Arc::new(BindingRecordingDeferredProvider {
             executions: executions.clone(),
             observed_bindings: Default::default(),
+            enumerations: Default::default(),
         }),
         lash_core::ToolCatalog::default(),
         lash_core::testing::exec_code_invocation(

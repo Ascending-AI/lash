@@ -4,6 +4,12 @@
 > polling, the three-layer cross-check, real-token use, Abort/RCA, restart environment,
 > and teardown ownership. This runbook adds only the deferred-tool scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove the production Workbench deferred-tool path with a real model: the
 resident `tools.search` capability returns a non-resident utility and persists its grant,
 the model calls that utility in a separate next Lashlang block, and the same grant remains
@@ -30,9 +36,11 @@ the model's surrounding prose.
 3. **Execution is evidence.** Require a completed deferred call whose raw tool id is
    `workbench_deferred_text_sha256`, plus the exact digest in the assistant reply. A
    model-computed digest without the tool call fails.
-4. **Restart means the web process.** Use `just agent-workbench-restart <port>` with the
-   same explicit `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_DATA_DIR`. Restate, the
-   data directory, the session id, and `deferred-tool-grants.db` must remain unchanged.
+4. **Restart means the web process (blocked by FIG-1164).** The historical command was
+   `just agent-workbench-restart <port>` with the same explicit
+   `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_DATA_DIR`. Do not execute it until a verified
+   immutable same-configuration host restart exists. Restate, the data directory, the session
+   id, and `deferred-tool-grants.db` must remain unchanged.
 5. **No second search after restart.** Snapshot the trace byte offset before Phase 3.
    The post-restart slice must contain `workbench_deferred_text_sha256` and no
    `search_tools`; otherwise the run did not prove grant persistence.
@@ -47,8 +55,8 @@ the model's surrounding prose.
   `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig1116-deferred-data` and
   `AGENT_WORKBENCH_RUN_DIR=/workspace/tmp/fig1116-deferred-run`.
 - Boot with both variables exported and `AGENT_WORKBENCH_OPEN=0 just agent-workbench
-  <port>`. Gate `GET /healthz` → 200. Restart with those same exports and
-  `just agent-workbench-restart <port>`.
+  <port>`. Gate `GET /healthz` → 200. The next historical step used those same exports with
+  `just agent-workbench-restart <port>`; it is blocked by FIG-1164 and must not be executed.
 - UI truth: rendered session id, idle/running pill, transcript rows, composer, and
   visible assistant digest.
 - HTTP truth: `GET /healthz` and `GET /api/state?session_id=<S>`.
@@ -105,8 +113,10 @@ newest transcript rows visible.
 ## Phase 2 — Restart with the same durable state
 
 Record the current `trace.jsonl` byte length, Workbench PID, session id, Restate
-container id, and SHA-256 of `01-grants.json`. Run `just agent-workbench-restart <port>`
-with the same explicit run/data variables. Poll `/healthz`; reload the same session URL.
+container id, and SHA-256 of `01-grants.json`. The historical
+`just agent-workbench-restart <port>` step with the same explicit run/data variables is blocked
+by FIG-1164; stop this scenario here until a verified immutable same-configuration host restart
+exists. After that mechanism runs, poll `/healthz` and reload the same session URL.
 
 Require a new Workbench PID, unchanged Restate container id, unchanged session id, and
 the Phase 1 transcript reconstructed exactly. Query SQLite again and require the

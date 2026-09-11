@@ -62,6 +62,61 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         }),
     }
 }
+
+#[test]
+fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
+    let build = |session_id: &str, tool_access: lash_core::SessionToolAccess| {
+        let factory = crate::RlmProtocolPluginFactory::new(
+            crate::RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
+                .instruction_limit(crate::InstructionBound::instructions(1000))
+                .wall_clock(crate::WallClockBound::secs(1))
+                .memory_limit(crate::MemoryBound::mebibytes(1))
+                .build(),
+            lashlang::global_in_memory_lashlang_artifact_store(),
+        )
+        .with_process_lifecycle(false);
+        lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)])
+            .build_session_with_parent(
+                session_id,
+                None,
+                lash_core::plugin::SessionCreationConfig {
+                    authority: lash_core::plugin::SessionAuthorityContext {
+                        tool_access,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .expect("RLM protocol session")
+    };
+
+    let ambient = build("rlm-ambient", lash_core::SessionToolAccess::ambient());
+    assert!(
+        ambient
+            .resolved_tool_catalog(&SessionId::from("rlm-ambient"))
+            .expect("ambient RLM catalog")
+            .has_callable_tool("continue_as")
+    );
+
+    let restricted = build(
+        "rlm-restricted-empty",
+        lash_core::SessionToolAccess::restricted([]).expect("restricted empty is valid"),
+    );
+    let catalog = restricted
+        .resolved_tool_catalog(&SessionId::from("rlm-restricted-empty"))
+        .expect("restricted-empty RLM catalog");
+    assert!(catalog.tools.is_empty());
+    assert!(
+        crate::tool_catalog::rlm_prompt_tool_docs(
+            &catalog,
+            &crate::dialect::lashlang_test_dialect(),
+            crate::protocol::RlmPromptFeatures::default(),
+        )
+        .is_empty()
+    );
+}
+
 fn text(text: &str) -> LlmOutputPart {
     LlmOutputPart::Text {
         text: text.to_string(),

@@ -603,7 +603,6 @@ pub struct SessionCreateRequest {
     /// Unknown or pruned ids do not fail session creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observed_processes: Vec<crate::ProcessId>,
-    #[serde(default)]
     pub tool_access: SessionToolAccess,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SubagentSessionContext>,
@@ -783,18 +782,362 @@ impl SessionCreateRequest {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Explicit resident-tool authority for one session.
+///
+/// Ambient access uses the host registry's captured resident definitions.
+/// Restricted access uses only the complete definitions carried here; an empty
+/// restricted set therefore means no resident tools. Exact-name hiding is a
+/// separate projection policy in both modes.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionToolAccess {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<ToolDefinition>,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub hidden_tools: BTreeSet<String>,
+    resident: SessionResidentToolAccess,
+    hidden_tools: BTreeSet<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SessionResidentToolAccess {
+    Ambient,
+    Restricted(Vec<ToolDefinition>),
+}
+
+/// Refusal from checked [`SessionToolAccess`] construction or decoding.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SessionToolAccessError {
+    #[error("restricted tool definition at index {index} has an empty name")]
+    EmptyToolName { index: usize },
+    #[error("restricted tool name `{name}` appears more than once")]
+    DuplicateToolName { name: String },
+    #[error("restricted tool id `{tool_id}` appears more than once")]
+    DuplicateToolId { tool_id: crate::ToolId },
+    #[error("hidden tool name at index {index} is empty")]
+    EmptyHiddenToolName { index: usize },
+    #[error("hidden tool name `{name}` appears more than once")]
+    DuplicateHiddenToolName { name: String },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+enum SessionToolAccessWire {
+    Ambient {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hidden_tools: Vec<String>,
+    },
+    Restricted {
+        tools: Vec<ToolDefinition>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hidden_tools: Vec<String>,
+    },
+}
+
+impl Default for SessionToolAccess {
+    fn default() -> Self {
+        Self::ambient()
+    }
 }
 
 impl SessionToolAccess {
+    /// Selects the host registry's captured resident tool definitions.
+    pub fn ambient() -> Self {
+        Self {
+            resident: SessionResidentToolAccess::Ambient,
+            hidden_tools: BTreeSet::new(),
+        }
+    }
+
+    /// Selects exactly the supplied complete resident definitions.
+    pub fn restricted(
+        tools: impl IntoIterator<Item = ToolDefinition>,
+    ) -> Result<Self, SessionToolAccessError> {
+        let tools = tools.into_iter().collect::<Vec<_>>();
+        Self::validate_restricted_tools(&tools)?;
+        Ok(Self {
+            resident: SessionResidentToolAccess::Restricted(tools),
+            hidden_tools: BTreeSet::new(),
+        })
+    }
+
+    /// Applies exact-name hiding independently from resident membership.
+    pub fn with_hidden_tools(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, SessionToolAccessError> {
+        for (index, name) in names.into_iter().enumerate() {
+            self.insert_hidden_tool(name.into(), index)?;
+        }
+        Ok(self)
+    }
+
+    /// Adds one exact hidden name while preserving checked authority invariants.
+    pub fn hide_tool(&mut self, name: impl Into<String>) -> Result<(), SessionToolAccessError> {
+        self.insert_hidden_tool(name.into(), self.hidden_tools.len())
+    }
+
+    /// Returns the explicit restricted definitions, or `None` for ambient access.
+    pub fn restricted_tools(&self) -> Option<&[ToolDefinition]> {
+        match &self.resident {
+            SessionResidentToolAccess::Ambient => None,
+            SessionResidentToolAccess::Restricted(tools) => Some(tools),
+        }
+    }
+
+    /// Returns the exact names hidden after resident membership is selected.
+    pub fn hidden_tools(&self) -> &BTreeSet<String> {
+        &self.hidden_tools
+    }
+
     /// Lets protocol implementors apply the session's persisted tool-hiding policy by exact name.
     pub fn hides(&self, name: &str) -> bool {
         self.hidden_tools.contains(name)
+    }
+
+    fn validate_restricted_tools(tools: &[ToolDefinition]) -> Result<(), SessionToolAccessError> {
+        let mut names = BTreeSet::new();
+        let mut ids = BTreeSet::new();
+        for (index, tool) in tools.iter().enumerate() {
+            if tool.manifest.name.trim().is_empty() {
+                return Err(SessionToolAccessError::EmptyToolName { index });
+            }
+            if !names.insert(tool.manifest.name.clone()) {
+                return Err(SessionToolAccessError::DuplicateToolName {
+                    name: tool.manifest.name.clone(),
+                });
+            }
+            if !ids.insert(tool.manifest.id.clone()) {
+                return Err(SessionToolAccessError::DuplicateToolId {
+                    tool_id: tool.manifest.id.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn insert_hidden_tool(
+        &mut self,
+        name: String,
+        index: usize,
+    ) -> Result<(), SessionToolAccessError> {
+        if name.trim().is_empty() {
+            return Err(SessionToolAccessError::EmptyHiddenToolName { index });
+        }
+        if !self.hidden_tools.insert(name.clone()) {
+            return Err(SessionToolAccessError::DuplicateHiddenToolName { name });
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for SessionToolAccess {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let hidden_tools = self.hidden_tools.iter().cloned().collect::<Vec<_>>();
+        match &self.resident {
+            SessionResidentToolAccess::Ambient => SessionToolAccessWire::Ambient { hidden_tools },
+            SessionResidentToolAccess::Restricted(tools) => SessionToolAccessWire::Restricted {
+                tools: tools.clone(),
+                hidden_tools,
+            },
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionToolAccess {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = SessionToolAccessWire::deserialize(deserializer)?;
+        let (access, hidden_tools) = match wire {
+            SessionToolAccessWire::Ambient { hidden_tools } => (Self::ambient(), hidden_tools),
+            SessionToolAccessWire::Restricted {
+                tools,
+                hidden_tools,
+            } => (
+                Self::restricted(tools).map_err(serde::de::Error::custom)?,
+                hidden_tools,
+            ),
+        };
+        access
+            .with_hidden_tools(hidden_tools)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod session_tool_access_tests {
+    use super::{SessionToolAccess, SessionToolAccessError};
+
+    fn tool(id: &str, name: &str) -> crate::ToolDefinition {
+        crate::ToolDefinition::raw(
+            id,
+            name,
+            format!("{name} description"),
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        )
+    }
+
+    #[test]
+    fn ambient_and_restricted_empty_have_distinct_canonical_encodings() {
+        assert_eq!(
+            serde_json::to_value(SessionToolAccess::ambient()).expect("serialize ambient"),
+            serde_json::json!({ "mode": "ambient" })
+        );
+        let restricted = SessionToolAccess::restricted([]).expect("empty restriction is valid");
+        assert_eq!(
+            serde_json::to_value(&restricted).expect("serialize restricted empty"),
+            serde_json::json!({ "mode": "restricted", "tools": [] })
+        );
+        assert_eq!(
+            restricted
+                .restricted_tools()
+                .expect("explicit restricted mode")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn checked_construction_rejects_invalid_restricted_definitions() {
+        let empty_name = SessionToolAccess::restricted([tool("tool:empty", " ")])
+            .expect_err("blank name must refuse");
+        assert_eq!(
+            empty_name,
+            SessionToolAccessError::EmptyToolName { index: 0 }
+        );
+
+        let duplicate_name = SessionToolAccess::restricted([
+            tool("tool:first", "duplicate"),
+            tool("tool:second", "duplicate"),
+        ])
+        .expect_err("duplicate name must refuse");
+        assert_eq!(
+            duplicate_name,
+            SessionToolAccessError::DuplicateToolName {
+                name: "duplicate".to_string()
+            }
+        );
+
+        let duplicate_id = SessionToolAccess::restricted([
+            tool("tool:duplicate", "first"),
+            tool("tool:duplicate", "second"),
+        ])
+        .expect_err("duplicate id must refuse");
+        assert!(matches!(
+            duplicate_id,
+            SessionToolAccessError::DuplicateToolId { tool_id }
+                if tool_id.as_str() == "tool:duplicate"
+        ));
+
+        assert_eq!(
+            SessionToolAccess::ambient()
+                .with_hidden_tools([" "])
+                .expect_err("blank hidden name must refuse"),
+            SessionToolAccessError::EmptyHiddenToolName { index: 0 }
+        );
+        assert_eq!(
+            SessionToolAccess::ambient()
+                .with_hidden_tools(["duplicate", "duplicate"])
+                .expect_err("duplicate hidden name must refuse"),
+            SessionToolAccessError::DuplicateHiddenToolName {
+                name: "duplicate".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn decoded_authority_rejects_missing_unknown_and_malformed_modes() {
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({ "mode": "unknown" }),
+            serde_json::json!({ "mode": "restricted" }),
+            serde_json::json!({ "mode": "ambient", "tools": [] }),
+            serde_json::json!({ "mode": "restricted", "tools": "all" }),
+        ] {
+            assert!(
+                serde_json::from_value::<SessionToolAccess>(value.clone()).is_err(),
+                "malformed access unexpectedly decoded: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn decoded_authority_uses_the_same_name_and_id_checks() {
+        let duplicate_names = serde_json::json!({
+            "mode": "restricted",
+            "tools": [tool("tool:first", "same"), tool("tool:second", "same")]
+        });
+        let error = serde_json::from_value::<SessionToolAccess>(duplicate_names)
+            .expect_err("duplicate names must refuse on decode");
+        assert!(
+            error
+                .to_string()
+                .contains("name `same` appears more than once")
+        );
+
+        let duplicate_ids = serde_json::json!({
+            "mode": "restricted",
+            "tools": [tool("tool:same", "first"), tool("tool:same", "second")]
+        });
+        let error = serde_json::from_value::<SessionToolAccess>(duplicate_ids)
+            .expect_err("duplicate ids must refuse on decode");
+        assert!(
+            error
+                .to_string()
+                .contains("id `tool:same` appears more than once")
+        );
+
+        let duplicate_hidden = serde_json::json!({
+            "mode": "ambient",
+            "hidden_tools": ["hidden", "hidden"]
+        });
+        let error = serde_json::from_value::<SessionToolAccess>(duplicate_hidden)
+            .expect_err("duplicate hidden names must refuse on decode");
+        assert!(
+            error
+                .to_string()
+                .contains("hidden tool name `hidden` appears more than once")
+        );
+    }
+
+    #[test]
+    fn restricted_roundtrip_preserves_complete_definition_and_opaque_null_binding() {
+        let mut definition = tool("tool:restricted", "restricted");
+        definition
+            .manifest
+            .bindings
+            .insert("opaque".to_string(), serde_json::Value::Null);
+        let access = SessionToolAccess::restricted([definition.clone()])
+            .expect("valid restricted definition")
+            .with_hidden_tools(["restricted"])
+            .expect("valid hidden name");
+
+        let encoded = serde_json::to_value(&access).expect("serialize restricted access");
+        let decoded: SessionToolAccess =
+            serde_json::from_value(encoded).expect("decode restricted access");
+        let [decoded_definition] = decoded
+            .restricted_tools()
+            .expect("restricted definition survives")
+        else {
+            panic!("expected exactly one restricted definition")
+        };
+        assert_eq!(decoded_definition.manifest, definition.manifest);
+        assert_eq!(
+            decoded_definition.contract().input_schema,
+            definition.contract().input_schema
+        );
+        assert_eq!(
+            decoded_definition.contract().output_schema,
+            definition.contract().output_schema
+        );
+        assert_eq!(
+            decoded_definition.manifest.bindings.get("opaque"),
+            Some(&serde_json::Value::Null)
+        );
+        assert!(decoded.hides("restricted"));
     }
 }
 
