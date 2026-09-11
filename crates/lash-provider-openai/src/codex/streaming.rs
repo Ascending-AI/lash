@@ -131,7 +131,7 @@ impl CodexProvider {
         credential: &CodexCredential,
         credential_generation: u64,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
-        let (full_body, cache_control_emitted) = self
+        let request_body_with_cache_evidence = self
             .build_request_body_with_cache_evidence(&req, true)
             .map_err(CodexWebSocketAttemptError::before_send)?;
         let timeouts = self.options.llm_timeouts();
@@ -150,15 +150,14 @@ impl CodexProvider {
                 .await?;
             let reused_connection = lease.reused;
             let plan = self.websocket_request_plan(
-                &full_body,
+                &request_body_with_cache_evidence.0,
                 lease.continuation.as_ref(),
                 allow_cached_context && lease.reusable,
             );
             match self
                 .run_websocket_attempt(
                     &req,
-                    &full_body,
-                    cache_control_emitted,
+                    &request_body_with_cache_evidence,
                     lease,
                     &plan,
                     retry_state,
@@ -203,13 +202,13 @@ impl CodexProvider {
     async fn run_websocket_attempt(
         &self,
         req: &LlmRequest,
-        full_body: &Value,
-        cache_control_emitted: bool,
+        request_body_with_cache_evidence: &(Value, bool),
         lease: CodexWebsocketLease,
         plan: &CodexWebsocketRequestPlan,
         retry_state: CodexWebsocketRetryState,
         timeouts: LlmTimeouts,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
+        let (full_body, cache_control_emitted) = request_body_with_cache_evidence;
         let mut attempt = CodexWebsocketAttemptGuard::new(self, lease);
         let stream_events = req.stream_events.clone();
         let provider_trace = req.provider_trace.clone();
@@ -335,7 +334,7 @@ impl CodexProvider {
                     http_summary: Some(self.websocket_http_summary(&diagnostics)),
                     generation_disposition: Some(Self::generation_disposition(
                         req,
-                        cache_control_emitted,
+                        *cache_control_emitted,
                     )),
                     ..Default::default()
                 }));
@@ -357,7 +356,7 @@ impl CodexProvider {
                 );
                 partial.terminal_reason = LlmTerminalReason::Unknown;
                 partial.generation_disposition =
-                    Some(Self::generation_disposition(req, cache_control_emitted));
+                    Some(Self::generation_disposition(req, *cache_control_emitted));
                 return Err(CodexWebSocketAttemptError::during_stream(
                     error
                         .with_request_body(request_body.clone())
@@ -414,7 +413,7 @@ impl CodexProvider {
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
             partial.generation_disposition =
-                Some(Self::generation_disposition(req, cache_control_emitted));
+                Some(Self::generation_disposition(req, *cache_control_emitted));
             return Err(CodexWebSocketAttemptError::during_stream(
                 LlmTransportError::new("Codex WebSocket ended before response.completed")
                     .with_request_body(request_body)
@@ -440,7 +439,7 @@ impl CodexProvider {
         );
         response.http_summary = Some(self.websocket_http_summary(&diagnostics));
         response.generation_disposition =
-            Some(Self::generation_disposition(req, cache_control_emitted));
+            Some(Self::generation_disposition(req, *cache_control_emitted));
         attempt.finish(continuation);
         Ok(response)
     }
