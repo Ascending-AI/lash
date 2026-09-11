@@ -2,7 +2,170 @@ use crate::support::{
     Arc, EffectHost, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeEnvironment,
     RuntimePersistence, SessionStoreFactory,
 };
+use lash_core::facade_support::ScopedEffectControllerFacadeOps as _;
 use lash_sansio::SessionId;
+use std::time::Instant;
+
+/// Routes only Lash's reserved turn-control promises to the session store.
+/// All effect execution and ordinary await-event operations stay on the
+/// configured Native host.
+struct StoreDelegatedTurnControlHost {
+    owner: Arc<dyn EffectHost>,
+    authority: lash_core::TurnCancellationAuthority,
+}
+
+impl StoreDelegatedTurnControlHost {
+    fn resolver_for_key(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Arc<dyn lash_core::AwaitEventResolver> {
+        if key.wait.is_turn_control() {
+            self.authority.resolver()
+        } else {
+            Arc::clone(&self.owner) as Arc<dyn lash_core::AwaitEventResolver>
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for StoreDelegatedTurnControlHost {
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        if wait.is_turn_control() {
+            self.authority
+                .resolver()
+                .prepare_completion_key(scope, wait, may_defer)
+                .await
+        } else {
+            self.owner
+                .prepare_completion_key(scope, wait, may_defer)
+                .await
+        }
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        if wait.is_turn_control() {
+            self.authority.resolver().await_event_key(scope, wait).await
+        } else {
+            self.owner.await_event_key(scope, wait).await
+        }
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.resolver_for_key(key)
+            .resolve_await_event(key, resolution)
+            .await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.resolver_for_key(key).peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.resolver_for_key(key)
+            .await_await_event(key, cancel, deadline)
+            .await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.authority
+            .resolver()
+            .revoke_await_events_for_session(session_id)
+            .await?;
+        self.owner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.authority
+            .resolver()
+            .cancel_await_events_for_session(session_id)
+            .await?;
+        self.owner.cancel_await_events_for_session(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl EffectHost for StoreDelegatedTurnControlHost {
+    fn turn_attach(&self) -> Option<Arc<dyn lash_core::facade_support::TurnAttach>> {
+        self.owner.turn_attach()
+    }
+
+    fn scoped<'run>(
+        &'run self,
+        scope: lash_core::ExecutionScope,
+    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        self.owner.scoped(scope)
+    }
+
+    fn scoped_static(
+        &self,
+        scope: lash_core::ExecutionScope,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.owner.scoped_static(scope)
+    }
+
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
+    async fn turn_control_binding<'a>(
+        &'a self,
+        scoped: &'a lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::TurnControlBinding<'a>, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlBinding::HostOwned {
+            resolver: self,
+            peek: self.owner.scoped(scoped.execution_scope().clone())?,
+        })
+    }
+
+    async fn retire_effect_journal(
+        &self,
+        retirement: lash_core::EffectJournalRetirement,
+    ) -> Result<usize, lash_core::RuntimeError> {
+        self.owner.retire_effect_journal(retirement).await
+    }
+
+    async fn reinstate_effect_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.owner.reinstate_effect_scope(scope).await
+    }
+
+    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
+        self.owner.effect_scope_fence_database()
+    }
+
+    fn bind_process_registry(&self, binding: lash_core::ProcessRegistryBinding) {
+        self.owner.bind_process_registry(binding);
+    }
+}
 
 /// Immutable owner-issued capabilities for one successfully opened session.
 ///
@@ -34,10 +197,26 @@ impl BoundSession {
         queued: Arc<dyn QueuedWorkSubstrate>,
         catalog: Option<Arc<dyn SessionStoreFactory>>,
     ) -> Self {
+        let configured_effect_host = Arc::clone(&env.core.control.effect_host);
+        let effect_host = if configured_effect_host.turn_control_authority_owner()
+            == lash_core::TurnControlAuthorityOwner::SessionStore
+        {
+            store
+                .turn_cancellation_authority()
+                .map(|authority| {
+                    Arc::new(StoreDelegatedTurnControlHost {
+                        owner: Arc::clone(&configured_effect_host),
+                        authority,
+                    }) as Arc<dyn EffectHost>
+                })
+                .unwrap_or(configured_effect_host)
+        } else {
+            configured_effect_host
+        };
         Self {
             session_id,
             store,
-            effect_host: Arc::clone(&env.core.control.effect_host),
+            effect_host,
             process,
             queued,
             trigger_store: env.trigger_store.clone(),

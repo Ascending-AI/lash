@@ -122,6 +122,28 @@ impl Store {
         #[cfg(not(feature = "testing"))]
         let conn = SqliteConnection::open_with_policy(path, options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
+        let signing_secret = conn
+            .call(|connection| {
+                connection.query_row(
+                    "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+            })
+            .await?;
+        let authority = lash_core::TurnCancellationAuthority::new(
+            format!("sqlite:{}", path.to_string_lossy()),
+            Arc::new(
+                lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                    crate::await_event::sqlite_await_events(
+                        conn.clone(),
+                        Arc::new(crate::scope_fence::RegistryAttachment::default()),
+                        signing_secret,
+                        Arc::clone(&clock),
+                    ),
+                ),
+            ),
+        );
         let process_registry_attached = if let Some(process_registry_path) = process_registry_path {
             attach_process_registry(&conn, process_registry_path, options.connection_policy)
                 .await?;
@@ -131,6 +153,7 @@ impl Store {
         };
         Ok(Self {
             conn,
+            turn_cancellation_authority: Some(authority),
             session_id: OnceLock::new(),
             clock,
             #[cfg(feature = "lashlang")]
@@ -151,6 +174,7 @@ impl Store {
         let conn = SqliteConnection::open_readonly(path).await?;
         Ok(Self {
             conn,
+            turn_cancellation_authority: None,
             session_id: OnceLock::new(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "lashlang")]
@@ -226,9 +250,32 @@ impl Store {
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory_with_policy(options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
+        let signing_secret = conn
+            .call(|connection| {
+                connection.query_row(
+                    "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+            })
+            .await?;
+        let authority = lash_core::TurnCancellationAuthority::new(
+            format!("sqlite-memory:{}", uuid::Uuid::new_v4()),
+            Arc::new(
+                lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                    crate::await_event::sqlite_await_events(
+                        conn.clone(),
+                        Arc::new(crate::scope_fence::RegistryAttachment::default()),
+                        signing_secret,
+                        Arc::clone(&clock),
+                    ),
+                ),
+            ),
+        );
         warn_process_registry_not_wired(constructor);
         Ok(Self {
             conn,
+            turn_cancellation_authority: Some(authority),
             session_id: OnceLock::new(),
             clock,
             #[cfg(feature = "lashlang")]

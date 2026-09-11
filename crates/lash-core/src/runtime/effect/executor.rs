@@ -18,6 +18,7 @@ mod language_runtime;
 mod scoped;
 mod task_panic;
 mod trigger;
+mod turn_control_authority;
 
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
@@ -26,8 +27,7 @@ pub use control::{
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
     ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnControlBinding, TurnControlParticipation,
-    await_event_scope_not_retirable,
+    ToolIntentSubmissionGuard, TurnControlBinding, await_event_scope_not_retirable,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,
@@ -36,6 +36,9 @@ pub(crate) use control::{
 pub use controller_error::RuntimeEffectControllerError;
 pub use native_controller::NativeRuntimeEffectController;
 pub use trigger::TriggerLocalExecution;
+pub use turn_control_authority::{
+    TurnCancellationAuthority, TurnControlAuthorityOwner, TurnControlParticipation,
+};
 
 use crate::LlmRequest as CoreLlmRequest;
 use crate::ProcessRegistry;

@@ -90,20 +90,107 @@ fn bound_driver(host: Arc<NativeEffectHost>, address: &TurnAddress) -> TurnWorkD
 }
 
 #[tokio::test]
+async fn first_gate_winner_owns_policy_and_conflict_cannot_escalate() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("policy-conflict");
+    let store = Arc::new(InMemorySessionStore::default());
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let accepted = request(address.clone(), "accepted-defer")
+        .undelivered(TurnCancelDisposition::Defer)
+        .mode(TurnCancelMode::AfterStep);
+    assert!(matches!(
+        driver
+            .request_cancel(accepted.clone())
+            .await
+            .unwrap()
+            .outcome,
+        TurnCancelOutcome::Requested(_)
+    ));
+
+    let conflict = driver
+        .request_cancel(
+            request(address.clone(), "conflicting-drop")
+                .undelivered(TurnCancelDisposition::Drop)
+                .mode(TurnCancelMode::Immediate),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        conflict.outcome,
+        TurnCancelOutcome::PolicyConflict {
+            requested: TurnCancelDisposition::Drop,
+            ref accepted,
+        } if accepted.request_id == "accepted-defer"
+            && accepted.undelivered == TurnCancelDisposition::Defer
+    ));
+    let escalation = escalation_key(host.as_ref(), &address).await.unwrap();
+    assert_eq!(host.peek_await_event(&escalation).await.unwrap(), None);
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .unwrap()
+            .unwrap()
+            .request,
+        accepted,
+    );
+}
+
+#[tokio::test]
+async fn same_policy_escalation_preserves_original_policy_acceptor() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("policy-escalation-acceptor");
+    let store = Arc::new(InMemorySessionStore::default());
+    let driver = TurnWorkDriver::for_session(host, address.session_id.clone(), store.clone());
+    let accepted = request(address.clone(), "accepted-after-step")
+        .undelivered(TurnCancelDisposition::Drop)
+        .mode(TurnCancelMode::AfterStep);
+    driver.request_cancel(accepted.clone()).await.unwrap();
+    let escalated = driver
+        .request_cancel(
+            request(address.clone(), "timing-escalation")
+                .undelivered(TurnCancelDisposition::Drop)
+                .mode(TurnCancelMode::Immediate),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(escalated.outcome, TurnCancelOutcome::Escalated(_)));
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .unwrap()
+            .unwrap()
+            .request,
+        accepted,
+        "the durable policy projection retains the base-gate acceptor",
+    );
+}
+
+#[tokio::test]
 async fn orphan_recovery_uses_only_the_existing_gate_terminal() {
     let host = Arc::new(NativeEffectHost::default());
     let cancel_address = address("orphan-cancel-winner");
     let evidence = request(cancel_address.clone(), "durable-intent")
         .undelivered(crate::TurnCancelDisposition::Drop)
         .evidence();
-    let decision = ActiveTurnControl::reconcile_orphan_cancel_intent(
-        host.as_ref(),
-        &cancel_address,
-        evidence.clone(),
-    )
-    .await
-    .expect("reconcile durable intent")
-    .expect("gate remains addressable");
+    let cancel_key = cancel_gate_key(host.as_ref(), &cancel_address)
+        .await
+        .unwrap();
+    assert!(matches!(
+        host.resolve_await_event(
+            &cancel_key,
+            gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone())).unwrap(),
+        )
+        .await
+        .unwrap(),
+        ResolveOutcome::Accepted
+    ));
+    let decision = ActiveTurnControl::peek_orphan_repair_decision(host.as_ref(), &cancel_address)
+        .await
+        .expect("observe durable cancellation")
+        .expect("gate remains addressable");
     assert_eq!(
         decision,
         crate::TurnCancelRepairDecision::CancellationWon(evidence.clone())
@@ -126,15 +213,10 @@ async fn orphan_recovery_uses_only_the_existing_gate_terminal() {
             .expect("seal completion"),
         None
     );
-    let losing = request(complete_address.clone(), "losing-intent").evidence();
     assert_eq!(
-        ActiveTurnControl::reconcile_orphan_cancel_intent(
-            host.as_ref(),
-            &complete_address,
-            losing,
-        )
-        .await
-        .expect("observe completion winner"),
+        ActiveTurnControl::peek_orphan_repair_decision(host.as_ref(), &complete_address)
+            .await
+            .expect("observe completion winner"),
         Some(crate::TurnCancelRepairDecision::CancellationDidNotWin)
     );
 
@@ -143,13 +225,9 @@ async fn orphan_recovery_uses_only_the_existing_gate_terminal() {
         .await
         .expect("revoke orphan scope");
     assert_eq!(
-        ActiveTurnControl::reconcile_orphan_cancel_intent(
-            host.as_ref(),
-            &revoked_address,
-            request(revoked_address.clone(), "unknown").evidence(),
-        )
-        .await
-        .expect("revoked is an explicit no-authority result"),
+        ActiveTurnControl::peek_orphan_repair_decision(host.as_ref(), &revoked_address)
+            .await
+            .expect("revoked is an explicit no-authority result"),
         None
     );
 }
@@ -668,7 +746,7 @@ async fn session_deletion_revokes_control_promises() {
 }
 
 #[tokio::test]
-async fn revoked_target_does_not_resolve_a_failing_catalog() {
+async fn store_delegated_native_authority_resolves_catalog_before_local_registry() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("revoked-failing-catalog");
     host.revoke_await_events_for_session(&address.session_id)
@@ -677,17 +755,13 @@ async fn revoked_target_does_not_resolve_a_failing_catalog() {
     let catalog = Arc::new(CatalogProbeFactory::new(true));
     let driver = TurnWorkDriver::for_catalog(host, catalog.clone());
 
-    let receipt = driver
+    let error = driver
         .request_cancel(request(address, "request-after-delete"))
         .await
-        .expect("revoked outcome precedes catalog resolution");
+        .expect_err("the catalog is needed to recover Native promise authority");
 
-    assert!(matches!(
-        receipt.outcome,
-        TurnCancelOutcome::UnknownOrRevoked
-    ));
-    assert!(receipt.record.is_none());
-    assert_eq!(catalog.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeStore);
+    assert_eq!(catalog.opens.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -1004,7 +1078,7 @@ async fn weaker_repeat_and_recovery_preserve_the_accepted_escalation() {
     let base = request(address.clone(), "after-step-a").mode(TurnCancelMode::AfterStep);
     assert!(matches!(
         driver
-            .request_cancel(base)
+            .request_cancel(base.clone())
             .await
             .expect("accept base request")
             .outcome,
@@ -1039,17 +1113,13 @@ async fn weaker_repeat_and_recovery_preserve_the_accepted_escalation() {
             .expect("read projected winner")
             .expect("winner remains durable")
             .request,
-        escalation
+        base
     );
 
-    let recovered = ActiveTurnControl::reconcile_orphan_cancel_intent(
-        host.as_ref(),
-        &address,
-        escalation.evidence(),
-    )
-    .await
-    .expect("reconcile after owner recovery")
-    .expect("gate pair remains addressable");
+    let recovered = ActiveTurnControl::peek_orphan_repair_decision(host.as_ref(), &address)
+        .await
+        .expect("observe after owner recovery")
+        .expect("gate pair remains addressable");
     assert!(matches!(
         recovered,
         crate::TurnCancelRepairDecision::CancellationWon(ref evidence)
@@ -1112,7 +1182,7 @@ async fn final_settlement_refreshes_cached_base_to_an_already_projected_escalati
             .expect("read projected escalation")
             .expect("escalation row")
             .request,
-        escalation
+        base
     );
 
     let settled = active
@@ -1142,7 +1212,9 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
         .await
         .expect("active control");
 
-    let base = request(address.clone(), "after-step-base").mode(TurnCancelMode::AfterStep);
+    let base = request(address.clone(), "after-step-base")
+        .undelivered(crate::TurnCancelDisposition::Drop)
+        .mode(TurnCancelMode::AfterStep);
     driver
         .request_cancel(base)
         .await
@@ -1179,14 +1251,17 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
         TurnCancelOutcome::Escalated(ref evidence)
             if evidence.request_id == immediate.request_id
     ));
-    assert_eq!(
-        store
-            .turn_cancel_request_intent(&address)
-            .await
-            .expect("snapshot after same-header gate acceptance"),
-        before_gate_acceptance,
-        "gate acceptance alone does not mutate the identical durable header"
-    );
+    let after_gate_acceptance = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot after same-header gate acceptance");
+    assert!(matches!(
+        (&before_gate_acceptance, &after_gate_acceptance),
+        (
+            TurnCancelIntentSnapshot::Present { revision: before, .. },
+            TurnCancelIntentSnapshot::Present { request, revision: after },
+        ) if request.request_id == "after-step-base" && after > before
+    ));
 
     let settled = active
         .settle_before_commit(host.as_ref(), false, None)
@@ -1222,10 +1297,15 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
     commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(settled);
     commit.interrupted_turn_cancel_intent = Some(before_gate_acceptance);
+    assert!(matches!(
+        store.commit_runtime_state(commit.clone()).await,
+        Err(crate::StoreError::TurnCancelIntentChanged { .. })
+    ));
+    commit.interrupted_turn_cancel_intent = Some(after_gate_acceptance);
     let receipt = store
         .commit_runtime_state(commit)
         .await
-        .expect("same-header snapshot commits the gate winner");
+        .expect("refreshed same-header snapshot commits the gate winner");
     assert_eq!(receipt.turn_cancel_input_outcome.len(), 1);
     assert_eq!(
         receipt.turn_cancel_input_outcome.affected_inputs[0].input_id,

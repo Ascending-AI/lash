@@ -164,6 +164,7 @@ pub use triggers::SqliteTriggerStore;
 /// tokio-rusqlite handle to one database thread).
 pub struct Store {
     conn: SqliteConnection,
+    turn_cancellation_authority: Option<lash_core::TurnCancellationAuthority>,
     session_id: OnceLock<SessionId>,
     clock: Arc<dyn lash_core::Clock>,
     #[cfg(feature = "lashlang")]

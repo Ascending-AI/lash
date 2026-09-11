@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use lash_core::facade_support::NativeRuntimeEffectController;
+use lash_core::SessionStoreFactory;
+use lash_core::facade_support::{NativeEffectHost, NativeRuntimeEffectController};
 use lash_core::runtime::{TurnAddress, TurnCancelOutcome, TurnCancelRequest, TurnWorkDriver};
 use lash_core::{
     AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, RuntimeErrorCode,
     ScopedEffectController, TurnControlBinding,
 };
 use lash_sqlite_store::SqliteEffectHost;
+use lash_sqlite_store::SqliteSessionStoreFactory;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
@@ -99,4 +101,54 @@ async fn turn_control_durable_journaled_binding_remains_run_scoped() {
             panic!("durable controller must own its journaled turn control")
         }
     }
+}
+
+#[tokio::test]
+async fn native_turn_control_reopens_through_durable_core_authority() {
+    let dir = tempfile::tempdir().expect("temporary durable-core directory");
+    let factory = SqliteSessionStoreFactory::new(dir.path());
+    let address = TurnAddress::new("native-reopen-session", "native-reopen-turn");
+    let create = lash_core::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
+        session_id: address.session_id.clone(),
+        relation: lash_core::SessionRelation::Root,
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let first_store = factory.create_store(&create).await.expect("create store");
+    let first = TurnWorkDriver::for_session(
+        Arc::new(NativeEffectHost::default()),
+        address.session_id.clone(),
+        first_store,
+    )
+    .request_cancel(TurnCancelRequest::new(
+        address.clone(),
+        "native-persistent-cancel",
+        None,
+    ))
+    .await
+    .expect("resolve persistent Native cancellation");
+    assert!(matches!(first.outcome, TurnCancelOutcome::Requested(_)));
+
+    let reopened = factory
+        .open_existing_store_by_id(&address.session_id)
+        .await
+        .expect("reopen catalog")
+        .expect("session exists");
+    let repeated = TurnWorkDriver::for_session(
+        Arc::new(NativeEffectHost::default()),
+        address.session_id.clone(),
+        reopened,
+    )
+    .request_cancel(TurnCancelRequest::new(
+        address,
+        "native-persistent-cancel",
+        None,
+    ))
+    .await
+    .expect("observe cancellation after fresh Native host reopen");
+    assert!(matches!(
+        repeated.outcome,
+        TurnCancelOutcome::AlreadyRequested(ref evidence)
+            if evidence.request_id == "native-persistent-cancel"
+    ));
 }

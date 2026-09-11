@@ -111,6 +111,10 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
     for core_outcome in [
         lash_core::facade_support::TurnCancelOutcome::Requested(evidence.clone()),
         lash_core::facade_support::TurnCancelOutcome::AlreadyRequested(evidence.clone()),
+        lash_core::facade_support::TurnCancelOutcome::PolicyConflict {
+            requested: lash_core::facade_support::TurnCancelDisposition::Drop,
+            accepted: evidence.clone(),
+        },
         lash_core::facade_support::TurnCancelOutcome::CompletionWonRace,
         lash_core::facade_support::TurnCancelOutcome::UnknownOrRevoked,
     ] {

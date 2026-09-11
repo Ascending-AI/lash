@@ -75,6 +75,11 @@ pub(crate) enum TurnCancelReceipt {
     UnknownOrRevoked {
         address: lash::TurnAddress,
     },
+    PolicyConflict {
+        address: lash::TurnAddress,
+        requested: lash::TurnCancelDisposition,
+        accepted: lash::TurnCancellationEvidence,
+    },
 }
 
 impl TurnCancelReceipt {

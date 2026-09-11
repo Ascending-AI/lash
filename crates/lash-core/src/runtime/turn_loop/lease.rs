@@ -438,24 +438,28 @@ impl LashRuntime {
                         break;
                     }
                 };
-                let decision = match observed.request() {
-                    Some(request) => {
-                    match crate::runtime::turn_control::ActiveTurnControl::reconcile_orphan_cancel_intent(
-                        turn_control_resolver,
-                        &address,
-                        request.evidence(),
-                    )
-                    .await
+                let decision = match crate::runtime::turn_control::ActiveTurnControl::peek_orphan_repair_decision(
+                    turn_control_resolver,
+                    &address,
+                )
+                .await
+                {
+                    Ok(Some(crate::TurnCancelRepairDecision::NoCancellationIntent))
+                        if observed.request().is_some() =>
                     {
-                        Ok(Some(decision)) => decision,
-                        Ok(None) => break,
-                        Err(err) => {
-                            tracing::warn!(session_id = %self.state.session_id, turn_id = %turn_id, error = %err, event = "turn_input.cancel_gate_reconcile_failed");
-                            break;
-                        }
+                        // A promise close must first be durably authorized under
+                        // the live lane fence. Never let a stale repair owner
+                        // resolve shared authority before the store can reject
+                        // its later mutation.
+                        tracing::warn!(session_id = %self.state.session_id, turn_id = %turn_id, event = "turn_input.cancel_closure_authorization_required");
+                        break;
                     }
+                    Ok(Some(decision)) => decision,
+                    Ok(None) => break,
+                    Err(err) => {
+                        tracing::warn!(session_id = %self.state.session_id, turn_id = %turn_id, error = %err, event = "turn_input.cancel_gate_peek_failed");
+                        break;
                     }
-                    None => crate::TurnCancelRepairDecision::NoCancellationIntent,
                 };
                 match store
                     .repair_orphaned_active_turn_inputs(

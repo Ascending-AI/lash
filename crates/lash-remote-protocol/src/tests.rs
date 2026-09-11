@@ -1131,6 +1131,10 @@ fn remote_turn_cancel_envelopes_round_trip() {
         RemoteTurnCancelOutcome::AlreadyRequested {
             cancellation: evidence.clone(),
         },
+        RemoteTurnCancelOutcome::PolicyConflict {
+            requested: RemoteTurnCancelDisposition::Drop,
+            accepted: evidence.clone(),
+        },
         RemoteTurnCancelOutcome::CompletionWonRace,
         RemoteTurnCancelOutcome::UnknownOrRevoked,
     ] {
@@ -1526,7 +1530,10 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 58, "process DTO wire-shape pin");
+    assert_eq!(
+        REMOTE_PROTOCOL_VERSION, 59,
+        "turn-cancel policy-conflict wire-shape pin"
+    );
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {

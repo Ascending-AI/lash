@@ -338,6 +338,7 @@ pub struct PostgresSessionStoreFactory {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
     pool: PgPool,
+    await_event_signing_secret: Arc<[u8]>,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core::Clock>,
 }
@@ -347,6 +348,7 @@ pub struct PostgresSessionStore {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
     pool: PgPool,
+    await_event_signing_secret: Arc<[u8]>,
     clock: Arc<dyn lash_core::Clock>,
     session_id: SessionId,
     #[cfg(test)]
@@ -735,6 +737,7 @@ impl PostgresStorage {
         warn_postgres_process_registry_not_wired(path);
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
+            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             process_registry_shared: false,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -749,6 +752,7 @@ impl PostgresStorage {
     ) -> PostgresSessionStoreFactory {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
+            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             process_registry_shared: true,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
@@ -768,6 +772,7 @@ impl PostgresStorage {
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
+            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             session_id: session_id.into(),
             #[cfg(any(test, feature = "testing"))]

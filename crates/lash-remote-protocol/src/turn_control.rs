@@ -72,6 +72,10 @@ pub enum RemoteTurnCancelOutcome {
     AlreadyRequested {
         cancellation: RemoteTurnCancellationEvidence,
     },
+    PolicyConflict {
+        requested: RemoteTurnCancelDisposition,
+        accepted: RemoteTurnCancellationEvidence,
+    },
     CompletionWonRace,
     UnknownOrRevoked,
 }
@@ -82,6 +86,7 @@ impl RemoteTurnCancelOutcome {
             Self::Requested { cancellation } | Self::AlreadyRequested { cancellation } => {
                 cancellation.validate()
             }
+            Self::PolicyConflict { accepted, .. } => accepted.validate(),
             Self::CompletionWonRace | Self::UnknownOrRevoked => Ok(()),
         }
     }

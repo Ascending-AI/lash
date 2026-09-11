@@ -764,6 +764,9 @@ lash::TurnCancelOutcome::AlreadyRequested::0
 lash::TurnCancelOutcome::CompletionWonRace
 lash::TurnCancelOutcome::Escalated
 lash::TurnCancelOutcome::Escalated::0
+lash::TurnCancelOutcome::PolicyConflict
+lash::TurnCancelOutcome::PolicyConflict::accepted
+lash::TurnCancelOutcome::PolicyConflict::requested
 lash::TurnCancelOutcome::Requested
 lash::TurnCancelOutcome::Requested::0
 lash::TurnCancelOutcome::UnknownOrRevoked
@@ -1386,6 +1389,7 @@ lash::durability::EffectHost::retire_effect_journal
 lash::durability::EffectHost::scoped
 lash::durability::EffectHost::scoped_static
 lash::durability::EffectHost::turn_attach
+lash::durability::EffectHost::turn_control_authority_owner
 lash::durability::EffectHost::turn_control_binding
 lash::durability::EffectJournalIdentity
 lash::durability::EffectJournalIdentity::key
@@ -3125,6 +3129,7 @@ lash::persistence::TurnInputStore::record_turn_cancel_request
 lash::persistence::TurnInputStore::repair_orphaned_active_turn_inputs
 lash::persistence::TurnInputStore::turn_cancel_request
 lash::persistence::TurnInputStore::turn_cancel_request_intent
+lash::persistence::TurnInputStore::turn_cancellation_authority
 lash::persistence::TurnInputStore::turn_is_committed
 lash::persistence::TurnWorkPayload
 lash::persistence::TurnWorkPayload::agent_frame_task
@@ -7200,6 +7205,9 @@ lash::remote::turn_control::RemoteTurnCancelOutcome
 lash::remote::turn_control::RemoteTurnCancelOutcome::AlreadyRequested
 lash::remote::turn_control::RemoteTurnCancelOutcome::AlreadyRequested::cancellation
 lash::remote::turn_control::RemoteTurnCancelOutcome::CompletionWonRace
+lash::remote::turn_control::RemoteTurnCancelOutcome::PolicyConflict
+lash::remote::turn_control::RemoteTurnCancelOutcome::PolicyConflict::accepted
+lash::remote::turn_control::RemoteTurnCancelOutcome::PolicyConflict::requested
 lash::remote::turn_control::RemoteTurnCancelOutcome::Requested
 lash::remote::turn_control::RemoteTurnCancelOutcome::Requested::cancellation
 lash::remote::turn_control::RemoteTurnCancelOutcome::UnknownOrRevoked

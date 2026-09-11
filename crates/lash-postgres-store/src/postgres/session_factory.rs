@@ -21,6 +21,7 @@ impl PostgresSessionStoreFactory {
     fn store_for(&self, session_id: SessionId) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
+            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             clock: Arc::clone(&self.clock),
             session_id,
             #[cfg(any(test, feature = "testing"))]

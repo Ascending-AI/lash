@@ -387,6 +387,33 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
     ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
+
+-- Cancellation-only durable promises for Native sessions. These tables live
+-- in durable core so reopening the session recovers the same authority without
+-- migrating unrelated Native effects into the effect journal.
+CREATE TABLE IF NOT EXISTS await_event_meta (
+    singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+    signing_secret  BLOB NOT NULL
+);
+INSERT INTO await_event_meta (singleton, signing_secret)
+VALUES (1, randomblob(32))
+ON CONFLICT(singleton) DO NOTHING;
+CREATE TABLE IF NOT EXISTS await_event_waits (
+    key_id          TEXT PRIMARY KEY,
+    scope_json      TEXT NOT NULL,
+    wait_json       TEXT NOT NULL,
+    session_id      TEXT,
+    turn_control    INTEGER NOT NULL CHECK (turn_control IN (0, 1)),
+    terminal_json   TEXT,
+    created_at_ms   INTEGER NOT NULL,
+    resolved_at_ms  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_await_event_waits_session
+    ON await_event_waits(session_id);
+CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
+    session_id      TEXT PRIMARY KEY,
+    revoked_at_ms   INTEGER NOT NULL
+);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -555,7 +582,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 56 composes that contract with the monotonic turn-cancel intent
 /// revision used by cancellation publication CAS. Component-55 stores are
 /// rejected rather than admitting either half of the composed schema.
-pub(crate) const SCHEMA_VERSION: i32 = 56;
+/// Version 57 adds the cancellation-only await-event authority used by Native
+/// sessions without importing the unrelated effect journal.
+pub(crate) const SCHEMA_VERSION: i32 = 57;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

@@ -2,6 +2,22 @@ use super::*;
 
 #[async_trait::async_trait]
 impl TurnInputStore for PostgresSessionStore {
+    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+        let resolver = crate::await_event::postgres_await_events(
+            self.pool.clone(),
+            Arc::clone(&self.await_event_signing_secret),
+            Arc::clone(&self.clock),
+        );
+        Some(lash_core::TurnCancellationAuthority::new(
+            "postgres:lash_await_event",
+            Arc::new(
+                lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                    resolver,
+                ),
+            ),
+        ))
+    }
+
     async fn turn_is_committed(
         &self,
         address: &lash_core::facade_support::TurnAddress,

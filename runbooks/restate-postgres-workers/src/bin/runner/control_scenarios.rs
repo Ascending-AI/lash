@@ -228,6 +228,11 @@ pub(super) async fn drive_turn_control_scenarios(
         TurnCancelOutcome::UnknownOrRevoked => {
             anyhow::bail!("completion/cancel race unexpectedly targeted a revoked gate")
         }
+        TurnCancelOutcome::PolicyConflict { accepted, .. } => {
+            anyhow::bail!(
+                "completion/cancel race unexpectedly found a conflicting accepted policy: {accepted:?}"
+            )
+        }
     }
     let _ = wait_for_terminal_result(storage.pool(), &race.workflow_id).await?;
 

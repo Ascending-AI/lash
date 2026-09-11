@@ -16,6 +16,7 @@ use crate::{RuntimeError, RuntimeErrorCode};
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{EffectGroupHandle, GroupSettlement, LoserPolicy, RuntimeEffectGroup};
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
+use super::{TurnControlAuthorityOwner, TurnControlParticipation};
 
 // =============================================================================
 // Effect host + controller trait + scope + error
@@ -818,13 +819,6 @@ pub enum RuntimeEffectFailureDisposition {
     RecordTurnFailure,
 }
 
-/// Whether turn-control reads participate in a durable controller journal.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnControlParticipation {
-    Local,
-    DurableJournaled,
-}
-
 /// How turn-control promises are addressed for one turn. Exhaustive: there is
 /// no third arrangement, and no field is optional.
 pub enum TurnControlBinding<'a> {
@@ -1613,6 +1607,10 @@ pub fn await_event_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
 /// Deployment-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
+    /// Declares the owner of reserved turn-control promises for this host.
+    fn turn_control_authority_owner(&self) -> TurnControlAuthorityOwner {
+        TurnControlAuthorityOwner::EffectHost
+    }
     /// Project the terminal attachment owned by this same effect deployment.
     /// Durable hosts override this projection; native hosts use keyed promises through the host.
     fn turn_attach(&self) -> Option<Arc<dyn crate::TurnAttach>> {

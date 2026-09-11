@@ -18,13 +18,12 @@ loss. The final commit remains governed by the session-head CAS and any claim-ow
 (ADR 0029), after the owner reads and settles the pre-commit cancellation gate;
 lease loss alone does not reject a current-head commit.
 
-The cancellation receipt reports only the outcome of addressing the keyed promise. Delivery
-geometry is a property of the `TurnWorkDriver` and effect controller the Host Application
-configured. The inline path uses a bounded process-global in-memory registry and is same-process
-control only: a driver in another OS process can resolve its own local gate but cannot signal the
-owner's gate. Cross-process cancellation and replay observation require a controller-backed
-deployment such as Restate. A host decides whether a Stop control can honestly promise
-cross-process delivery from the deployment it constructed, not from a receipt field.
+The cancellation receipt reports only the outcome of addressing the keyed promise. Persistent
+Native sessions delegate the three reserved turn-control aliases to the session store's SQL
+promise coordinator; Native effects and all other waits remain process-local. Reopening the same
+SQLite catalog or PostgreSQL database therefore recovers the same cancellation keys. A configured
+durable effect host such as Restate retains ownership of its own turn-control authority and its
+journaled observations.
 
 Who cancelled is host-domain data: Lash records an opaque host-supplied origin and never interprets
 it, mirroring ADR 0026's treatment of host-supplied capability data. Process-local token entry
@@ -49,13 +48,15 @@ the demonstrated break-glass is an admin `KILL`, run last because a killed handl
 the shared-session lease.
 
 The keyed-promise implementation uses the existing `AwaitEventResolver` operations and the
-configured effect controller's journal. Reserved `TurnCancelGate` and
+configured cancellation authority. Reserved `TurnCancelGate` and
 `TurnTerminal` identities are indexed as control promises: ordinary durable-wait
 cancellation does not sweep them, while session deletion revokes them. This adds
-no second replay journal (ADR 0012), no store polling/watch path, and no claim
+no second replay journal (ADR 0012) and no claim
 TTL. The gate is the only stop signal: nothing waits on, polls, or coordinates
 through the store to learn that a turn was cancelled, so the wait stays on the
-work-driver seam (ADR 0016). A live owner does hold an
+work-driver seam (ADR 0016). The shared SQL coordinator may poll its own
+authoritative promise row after a missed notification; intent and projection
+rows are never polled as a stop signal. A live owner does hold an
 engine-native keyed-promise observation; Restate implements that observation
 through `LashDurableWaitWorkflow` ingress with bounded retry, not its Admin API.
 The inline registry drains live gate/terminal entries after terminal publication
@@ -105,12 +106,15 @@ stop honours at its boundary. The undelivered-input disposition applies in
 both modes; a stop never drains queued work.
 
 The gate itself stays first-writer-wins, so a stronger request cannot rewrite
-it. Escalation rides a third reserved promise, `TurnCancelEscalation`,
-written only by an `Immediate` request that found the gate holding an
-`AfterStep` request; the durable record upgrades to the stronger request and
-the receipt reports `Escalated`. A same-or-weaker request still reports
-`AlreadyRequested`. Lash ships no escalation timer; "abort if the step has
-not finished after N seconds" is host policy expressed as a second request.
+it. Its accepted request permanently owns the undelivered-input policy.
+Escalation rides a third reserved promise, `TurnCancelEscalation`, written only
+by an `Immediate` request with the same policy that found the gate holding an
+`AfterStep` request; escalation changes timing while the durable base projection
+retains the original policy acceptor. A different policy reports
+`PolicyConflict { requested, accepted }` before touching escalation. A
+same-or-weaker request still reports `AlreadyRequested`. Lash ships no
+escalation timer; "abort if the step has not finished after N seconds" is host
+policy expressed as a second request.
 
 Restate durable waits carry the gate payload. The wake an awakeable
 journals is derived from the gate resolution that settled it, so an

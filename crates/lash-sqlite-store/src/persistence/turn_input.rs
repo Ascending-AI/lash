@@ -2,6 +2,10 @@ use super::*;
 
 #[async_trait::async_trait]
 impl TurnInputStore for Store {
+    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+        self.turn_cancellation_authority.clone()
+    }
+
     async fn turn_is_committed(
         &self,
         address: &lash_core::facade_support::TurnAddress,

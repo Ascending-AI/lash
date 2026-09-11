@@ -229,6 +229,10 @@ impl AwaitEventResolver for NativeEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for NativeEffectHost {
+    fn turn_control_authority_owner(&self) -> super::TurnControlAuthorityOwner {
+        super::TurnControlAuthorityOwner::SessionStore
+    }
+
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
         self
     }
