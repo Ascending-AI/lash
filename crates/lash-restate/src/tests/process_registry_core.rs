@@ -17,6 +17,15 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
                         0 => lash_core::LlmResponse {
                             parts: vec![
                                 lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-process-cancel".to_string(),
+                                    tool_name: "cancel_process".to_string(),
+                                    input_json: serde_json::json!({
+                                        "process_id": "fig1293-control-target",
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
                                     call_id: "fig1293-spawn-agent".to_string(),
                                     tool_name: "spawn_agent".to_string(),
                                     input_json: serde_json::json!({
@@ -82,6 +91,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     let process_registry = process_registry();
+    fig1293_seed_control_target(&process_registry, &SessionId::from(session_id)).await;
     let plugin_factories = fig1293_migrated_tool_factories();
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     context.install_process_worker(
@@ -134,10 +144,11 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     assert_eq!(
         attempt_names,
         vec![
+            "cancel_process".to_string(),
             lash_core::testing::FIXTURE_ECHO_TOOL.to_string(),
             lash_core::testing::FIXTURE_ECHO_TOOL.to_string(),
         ],
-        "batch children are attempts; batch and spawn_agent are not"
+        "cancel_process and batch children are attempts; batch and spawn_agent are not"
     );
     let outer_batch = before
         .iter()
@@ -168,6 +179,10 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     assert!(
         !outer_outcome_json.contains(r#""status":"refused""#),
         "every migrated Restate public intent must execute: {outer_outcome_json}",
+    );
+    assert!(
+        outer_outcome_json.contains(r#""kind":"cancel_process""#),
+        "the retained process-controls cancel intent must execute: {outer_outcome_json}",
     );
     let direct_orchestration_children = before
         .iter()
@@ -238,6 +253,13 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     assert_eq!(
         outputs,
         vec![
+            (
+                "cancel_process".to_string(),
+                serde_json::json!({
+                    "process_id": "fig1293-control-target",
+                    "status": "cancelled",
+                }),
+            ),
             (
                 "spawn_agent".to_string(),
                 serde_json::json!("child literal")

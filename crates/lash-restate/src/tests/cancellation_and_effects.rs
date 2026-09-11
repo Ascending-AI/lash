@@ -1155,6 +1155,31 @@ pub(super) fn fig1293_migrated_tool_factories()
     ]
 }
 
+pub(super) async fn fig1293_seed_control_target(
+    registry: &Arc<dyn ProcessRegistry>,
+    session_id: &SessionId,
+) {
+    registry
+        .register_process_with_observers(
+            ProcessRegistration::new(
+                "fig1293-control-target",
+                ProcessInput::External {
+                    metadata: serde_json::json!({"fixture": "fig1293"}),
+                },
+                lash_core::RecoveryContract::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.stdin".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[SessionId::from(session_id.to_string())],
+        )
+        .await
+        .expect("register FIG-1293 control target");
+}
+
 pub(super) struct RestateParentEndIntentProvider {
     pub(super) calls: Arc<AtomicUsize>,
 }

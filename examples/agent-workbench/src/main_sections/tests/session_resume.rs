@@ -252,7 +252,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
+        mcp_search: None,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),

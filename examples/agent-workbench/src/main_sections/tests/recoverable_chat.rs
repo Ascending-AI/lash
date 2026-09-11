@@ -149,7 +149,7 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
+        mcp_search: None,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(channel_capacity),

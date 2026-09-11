@@ -149,7 +149,7 @@ async fn store_maintenance_fixture(
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
+        mcp_search: None,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),

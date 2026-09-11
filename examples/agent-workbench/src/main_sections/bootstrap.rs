@@ -52,6 +52,34 @@ pub(crate) fn configure_workbench_plugins(
     plugins.push(mcp);
 }
 
+/// Build the workbench's web-search MCP plugin.
+///
+/// Construction is deliberately infallible for an unreachable server: only a
+/// configuration error fails, while a down server stays registered and
+/// reconnects in the background. The returned factory is retained so
+/// `web_configured` can be queried live rather than snapshotted at boot.
+pub(crate) async fn build_search_mcp(
+    url: &str,
+) -> AnyhowResult<Arc<lash_plugin_mcp::McpPluginFactory>> {
+    Ok(Arc::new(
+        lash_plugin_mcp::McpPluginFactory::builder(BTreeMap::from([(
+            WORKBENCH_SEARCH_MCP_SERVER.to_string(),
+            lash_plugin_mcp::McpServerConfig::streamable_http(url),
+        )]))
+        .build()
+        .await
+        .context("connect agent-workbench MCP servers")?,
+    ))
+}
+
+/// Whether the search MCP server is connected right now.
+pub(crate) fn search_mcp_configured(factory: &lash_plugin_mcp::McpPluginFactory) -> bool {
+    factory
+        .server_statuses()
+        .iter()
+        .any(|status| status.server_name == WORKBENCH_SEARCH_MCP_SERVER && status.connected)
+}
+
 pub(crate) async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt::init();
@@ -332,17 +360,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // no API key and no auth headers. Construction never fails on an
     // unreachable server: the pool keeps reconnecting in the background and
     // the model-facing tools appear once it is up, so an offline boot degrades
-    // to "no web tools" rather than refusing to start. `web_configured`
-    // reports the observed connection state, not whether a key was supplied.
-    let mcp_search = Arc::new(
-        lash_plugin_mcp::McpPluginFactory::builder(BTreeMap::from([(
-            WORKBENCH_SEARCH_MCP_SERVER.to_string(),
-            lash_plugin_mcp::McpServerConfig::streamable_http(WORKBENCH_SEARCH_MCP_URL),
-        )]))
-        .build()
-        .await
-        .context("connect agent-workbench MCP servers")?,
-    );
+    // to "no web tools" rather than refusing to start. `web_configured` is
+    // derived live from this factory's status, never snapshotted at boot.
+    let mcp_search = build_search_mcp(WORKBENCH_SEARCH_MCP_URL).await?;
     for status in mcp_search.server_statuses() {
         eprintln!(
             "agent-workbench MCP server {}: connected={}, tools={}, last_error={}",
@@ -352,11 +372,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             status.last_error.as_deref().unwrap_or("none")
         );
     }
-    let web_configured = mcp_search
-        .server_statuses()
-        .iter()
-        .any(|status| status.server_name == WORKBENCH_SEARCH_MCP_SERVER && status.connected);
-    let plugin_mcp: Arc<dyn PluginFactory> = mcp_search;
+    let plugin_mcp: Arc<dyn PluginFactory> = Arc::clone(&mcp_search) as Arc<dyn PluginFactory>;
     let plugin_mail_world = mail_world.clone();
     let plugin_approvals = approvals.clone();
     let core = builder
@@ -411,7 +427,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 model,
                 model_variant: Some(model_variant),
             })),
-            web_configured,
+            mcp_search: Some(mcp_search),
             trace_sink: Some(Arc::clone(&trace_sink)),
             lashlang_execution,
             event_tx,
@@ -437,7 +453,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
                 "rlm_dialect": rlm_dialect.language_id(),
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
-                "web_configured": state.web_configured,
+                "web_configured": state.web_configured(),
                 "store_backend": stores.backend,
                 "restate_endpoint_addr": restate_endpoint_addr.to_string(),
                 "restate_ingress_url": state.restate_ingress_url,
@@ -830,5 +846,29 @@ mod startup_tests {
             "",
         )
         .expect("a dev provider scenario supports keyless startup");
+    }
+
+    /// An offline boot must degrade to "no web tools", never refuse to start.
+    ///
+    /// `build_search_mcp` is the exact construction path `async_main` uses; an
+    /// unreachable URL keeps the server registered for background reconnect and
+    /// reports it as not connected.
+    #[tokio::test]
+    async fn unreachable_search_mcp_degrades_without_failing_startup() {
+        let factory = build_search_mcp("http://127.0.0.1:1/mcp")
+            .await
+            .expect("an unreachable MCP server must not fail workbench startup");
+        let statuses = factory.server_statuses();
+
+        assert!(
+            statuses
+                .iter()
+                .any(|status| status.server_name == WORKBENCH_SEARCH_MCP_SERVER),
+            "the search server must stay registered while it reconnects: {statuses:?}"
+        );
+        assert!(
+            !search_mcp_configured(&factory),
+            "an unreachable server must not report web tools as configured"
+        );
     }
 }

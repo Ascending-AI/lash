@@ -214,7 +214,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
+        mcp_search: None,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(1024),

@@ -110,6 +110,11 @@ const POSTGRES_PROCESS_PARENT_ATOMICITY: AgentScenarioCoverage = agent_scenario_
     "PostgreSQL process-parent atomicity",
     "Facade worker, Standard plugin, Lashlang process graph, and durable PostgreSQL ParentEnd fault recovery."
 );
+const PROCESS_TOOL_COMPOSITION: AgentScenarioCoverage = agent_scenario_coverage!(
+    agent_scenario_process_tool_composition,
+    "process tool composition",
+    "Facade composition of process cancellation, subagent spawn/await, and protocol batch."
+);
 
 const PLUGIN_OPERATIONS: AgentScenarioCoverage = agent_scenario_coverage!(
     agent_scenario_plugin_task_query_command,
@@ -132,11 +137,12 @@ const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
     PARALLEL_SPAWN_AND_JOIN,
     TUPLE_VALUES_AS_JSON_ARRAYS,
     POSTGRES_PROCESS_PARENT_ATOMICITY,
+    PROCESS_TOOL_COMPOSITION,
 ];
 
 #[test]
 fn agent_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 14);
+    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 15);
     let mut names = BTreeSet::new();
     for coverage in AGENT_SCENARIO_COVERAGE {
         #[cfg(feature = "rlm")]
@@ -154,6 +160,56 @@ fn agent_scenario_coverage_metadata_is_unique_and_complete() {
             coverage.test_name
         );
     }
+}
+
+#[cfg(feature = "rlm")]
+#[test]
+fn agent_scenario_process_tool_composition() -> Result<()> {
+    run_async_test_on_stack_budget("agent-scenario-process-tool-composition", || async {
+        run_agent_turn_scenario(
+            AgentScenario::new(
+                PROCESS_TOOL_COMPOSITION.scenario_name,
+                "Exercise process cancellation, subagent spawn/await, and protocol batch.",
+            )
+            .responses([
+                lashlang_block(
+                    r#"
+process worker() {
+  sleep for "1s"
+  finish { done: true }
+}
+running = start worker()
+cancelled = await processes.cancel({ process_id: running.id })?
+child = await agents.spawn({
+  capability: "default",
+  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  seed: { chunk: ["a", "b"] },
+  output: Type { len: int }
+})?
+batched = await tools.batch({ tool_calls: [
+  { tool: "app_lookup", parameters: {} },
+  { tool: "app_lookup", parameters: {} }
+] })?
+finish {
+  cancel_status: cancelled.status,
+  child_len: child.len,
+  batch_count: len(batched.results)
+}"#,
+                ),
+                lashlang_block("finish { len: len(chunk) }"),
+            ])
+            .expected_final_value(serde_json::json!({
+                "cancel_status": "cancelled",
+                "child_len": 2,
+                "batch_count": 2
+            }))
+            .tool_provider(Arc::new(AppTools))
+            .install_subagents()
+            .install_process_composition(),
+        )
+        .await?;
+        Ok(())
+    })
 }
 
 #[cfg(feature = "rlm")]

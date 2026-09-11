@@ -1,8 +1,7 @@
 //! The benchmark harness's own plugin stack.
 //!
-//! It replaces the deleted `lash-standard-plugins` bundle: the harness composes
-//! only the plugins its scenarios exercise, so it does not inherit the shell or
-//! web tool families the bundle used to install.
+//! The harness composes only the plugins its scenarios exercise, so it does not
+//! inherit tool families (shell, web) it never drives.
 
 use std::sync::Arc;
 

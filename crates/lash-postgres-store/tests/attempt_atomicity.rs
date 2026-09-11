@@ -756,6 +756,15 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                         0 => lash_core::LlmResponse {
                             parts: vec![
                                 lash_core::LlmOutputPart::ToolCall {
+                                    call_id: "fig1293-process-cancel".to_string(),
+                                    tool_name: "cancel_process".to_string(),
+                                    input_json: serde_json::json!({
+                                        "process_id": "fig1293-control-target",
+                                    })
+                                    .to_string(),
+                                    replay: None,
+                                },
+                                lash_core::LlmOutputPart::ToolCall {
                                     call_id: "fig1293-spawn-agent".to_string(),
                                     tool_name: "spawn_agent".to_string(),
                                     input_json: serde_json::json!({
@@ -845,6 +854,32 @@ fn fig1293_fault_batch_model() -> lash_core::facade_support::ProviderHandle {
         })
         .build()
         .into_handle()
+}
+
+async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegistry>) {
+    registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                "fig1293-control-target",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::json!({"fixture": "fig1293"}),
+                },
+                // The control target is a fixture-owned external process. It
+                // must not enter the durable worker worklist, whose racing
+                // `first_started` events would make the signal sequence depend
+                // on scheduler timing instead of the law's literal journal.
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.stdin".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+            &[SessionId::from("fig1293-restate-migrated-tools")],
+        )
+        .await
+        .expect("register FIG-1293 control target");
 }
 
 async fn fig1293_runtime(
@@ -973,6 +1008,13 @@ async fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::Assemb
     assert_eq!(
         outputs,
         vec![
+            (
+                "cancel_process".to_string(),
+                serde_json::json!({
+                    "process_id": "fig1293-control-target",
+                    "status": "cancelled",
+                }),
+            ),
             (
                 "spawn_agent".to_string(),
                 serde_json::json!("child literal"),
@@ -1104,6 +1146,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
 
     let inline_registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());
+    fig1293_seed_control_target(&inline_registry).await;
     let (inline_model, inline_model_calls) = fig1293_model();
     let native_effect_host: Arc<dyn EffectHost> =
         Arc::new(lash_core::facade_support::NativeEffectHost::default());
@@ -1128,6 +1171,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
 
     let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(storage.process_registry());
+    fig1293_seed_control_target(&postgres_registry).await;
     let (postgres_model, postgres_model_calls) = fig1293_model();
     let first_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let postgres_policy = fig1293_policy();
@@ -1225,10 +1269,38 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let RuntimeEffectOutcome::ToolBatch { launches, .. } = outer_outcome else {
         panic!("outer FIG-1293 PostgreSQL outcome must be a tool batch")
     };
-    assert_eq!(launches.len(), 2);
+    assert_eq!(launches.len(), 3);
     assert!(
         !outer_outcome_json.contains(r#""status":"refused""#),
         "every migrated PostgreSQL public intent must execute: {outer_outcome_json}",
+    );
+    let executed_intent_kinds = [
+        (
+            "start_process",
+            outer_outcome_json
+                .matches(r#""kind":"start_process""#)
+                .count(),
+        ),
+        (
+            "signal_process",
+            outer_outcome_json
+                .matches(r#""kind":"signal_process""#)
+                .count(),
+        ),
+        (
+            "cancel_process",
+            outer_outcome_json
+                .matches(r#""kind":"cancel_process""#)
+                .count(),
+        ),
+    ];
+    assert_eq!(
+        executed_intent_kinds,
+        [
+            ("start_process", 0),
+            ("signal_process", 0),
+            ("cancel_process", 1),
+        ],
     );
     let direct_orchestration_children = envelopes
         .iter()
@@ -1269,8 +1341,12 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     attempt_names.sort();
     assert_eq!(
         attempt_names,
-        vec!["fig1293_echo".to_string(), "fig1293_echo".to_string(),],
-        "spawn_agent and the parent batch have no PostgreSQL ToolAttempt frame",
+        vec![
+            "cancel_process".to_string(),
+            "fig1293_echo".to_string(),
+            "fig1293_echo".to_string(),
+        ],
+        "cancel_process and batch children are attempts; spawn_agent and the parent batch are not",
     );
 }
 
@@ -1309,6 +1385,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     }
 
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    fig1293_seed_control_target(&registry).await;
     let (model, model_calls) = fig1293_model();
     let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
