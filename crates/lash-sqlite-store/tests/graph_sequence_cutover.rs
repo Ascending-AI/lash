@@ -1,6 +1,6 @@
 use lash_sqlite_store::{SESSION_SCHEMA_VERSION, Store};
 
-const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 54;
+const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 55;
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
