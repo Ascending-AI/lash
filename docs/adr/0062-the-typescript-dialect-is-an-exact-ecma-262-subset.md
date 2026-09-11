@@ -138,8 +138,11 @@ variant does not compile until it declares its class.
 tool or effect failure satisfies `error instanceof Error`, renders as
 `EffectError: <host text>` under `String(error)`, and carries the host's own text
 as `message`; a catchable runtime fault is the same value branded
-`RuntimeError`. The typed payload — `code` and `details` — rides on `cause`, the
-one ECMA-documented slot an error carries for exactly this. The brand is what a
+`RuntimeError`. The typed payload rides on `cause`, the one ECMA-documented slot
+an error carries for exactly this. Runtime faults expose `code` and `details`;
+tool failures additionally expose their stable `class`, `source`, and full
+`retry` disposition while the tool's message remains the Error's `message`.
+The brand is what a
 JavaScript library would write as `class EffectError extends Error`: the value
 model has no prototype to subclass and no own slot to write `name` into, so
 `name` is a property of the error object itself and `instanceof` answers `Error`
@@ -167,18 +170,17 @@ anything that round-trips through JSON — hands back a plain record, and the gu
 sees `instanceof Error` false and an ordinary mutable object. Nothing re-brands a
 record as an error.
 
-An `allSettled` rejection reason is that same `Error`, and that is where a
-contract limit surfaces. `ExecutionHostError` carries a message and nothing
-else, so the finest identity available for a leaf that is never unwrapped is the
-host's own text; the reason reports the generic `ResourceOperationFailed` rather
-than claiming an unwrap error's code, which would be simply wrong for a leaf
-nothing unwrapped. Giving rejections a discriminable code requires a code
-channel on the effect-host contract that every host would have to populate. That
-is named here as an accepted v1 limit rather than faked at the dialect.
+An `allSettled` rejection reason is that same `Error`. `ExecutionHostError`
+still accepts message-only failures from general hosts, which retain their
+generic runtime code. A tool bridge instead attaches the tool failure's stable
+classification to the host error, so a leaf that is never unwrapped keeps the
+same discriminable code, source, and retry disposition without requiring every
+unrelated host to fabricate them.
 
-Lashlang is untouched: without reference semantics it has no way to construct a
-JavaScript error object, so its `catch` clause keeps the flat
-`{ name, message, code, details }` record it has always been handed. (The heap
+Without reference semantics Lashlang has no way to construct a JavaScript error
+object, so its `catch` clause keeps the flat record it has always been handed.
+For tool failures that record adds direct `class`, `source`, and `retry` fields
+to `{ name, message, code, details }`. (The heap
 itself is shared machinery, not a per-dialect one: the error-family branch that
 answers an assignment to an exotic with a heap `TypeError` sits above this
 choice and is reachable wherever such a receiver exists.) One seam decides which
@@ -386,7 +388,5 @@ that each entry is a limit taken knowingly.
 - Host operators inherit a deployment requirement: more than 2 GiB of address
   space must be available for a cap-sized cell, or large cells fail closed with
   a resource diagnostic.
-- Two limits are named as owed work rather than closed: a code channel on the
-  effect-host contract, which would make aggregate rejections discriminable,
-  and cycle-capable durable graph encoding, which several rejections above are
-  standing in for.
+- Cycle-capable durable graph encoding remains owed work; several rejections
+  above stand in for it.
