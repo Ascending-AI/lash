@@ -114,11 +114,39 @@ Session owner keys use the existing raw nonempty/no-NUL opaque grammar, so a whi
 session key remains valid. Host owner keys use the existing trimmed nonempty/no-NUL check. The
 five execution-scope journal encodings remain byte-for-byte version 2.
 
-The runtime effect envelope, direct effect identity, remote protocol, trace schema, process
-registration fingerprint, RLM snapshot, wake envelope, and affected store generations are a
-coordinated cutover. Old affected encodings must refuse; there is no compatibility alias or
-fabricated default authority. Drain in-flight work before deployment and recreate only owned
-development/test stores when the refusal says recreation is required.
+These versions move together in the FIG-2828 cutover:
+
+| Surface | Previous | Current |
+| --- | ---: | ---: |
+| Remote protocol | 58 | 59 |
+| Trace schema | 19 | 20 |
+| Direct-effect identity family | 2 | 3 |
+| Runtime effect envelope hash domain | v2 | v3 |
+| Process registration family | 4 | 5 |
+| Process wake-delivery format | 2 | 3 |
+| Append-request identity encoding | 3 | 4 |
+| RLM snapshot | 17 | 18 |
+| SQLite durable core | 54 | 55 |
+| SQLite process registry | 32 | 33 |
+| SQLite effect journal | 17 | 18 |
+| PostgreSQL component | 83 | 84 |
+| Session-head metadata | 7 | 8 |
+| Session-node body | 12 | 13 |
+| Durable-read fixture | 59 | 60 |
+
+Journal identity remains v2 for all five execution-scope variants, and process-transfer identity
+remains v1. Those unchanged byte contracts are separate from the affected formats above.
+
+This release is a fresh-trust-domain redeployment boundary. Do not perform a rolling upgrade or
+mix old and new hosts, workers, Restate handlers, or remote peers. Drain in-flight work, stop the
+old deployment, and provision the replacement SQLite/PostgreSQL stores and Restate state from
+this build together; PostgreSQL component 83 has no migration to 84 and the replacement database
+must be created from this build's `schema.sql`. Reset the tombstones, await-event revocation
+ledger, effect journal, and Restate state as one operation, then start every producer and consumer
+on the same build. Old affected encodings must refuse; there is no compatibility alias or
+fabricated default authority. This runbook does not authorize deleting or rewriting a shared
+store: production replacement requires the deployment owner's approved drain and provisioning
+procedure, while local verification may recreate only stores owned by the current test or orb.
 
 ## Pass record
 
