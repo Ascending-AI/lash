@@ -439,6 +439,24 @@ kind = "rust_items"
 paths = ["crates/lash-core/src/runtime/process/model.rs"]
 symbols = ["ProcessLease"]
 
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core/src/runtime/process/lease_serde.rs"]
+symbols = [
+  "ProcessLeaseField",
+  "visit_seq",
+  "visit_map",
+  "buffer_process_lease_field",
+  "decode_process_lease_field",
+  "decode_process_lease_owner",
+  "normalize_lease_owner_identifiers",
+  "unsigned_lease_owner_identifier",
+  "content_deserializer",
+  "normalize_utf8_bytes",
+  "normalize_utf8_data",
+  "deserialize",
+]
+
 [[surface]]
 constant = "SESSION_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-core/src/store/checkpoint.rs"
