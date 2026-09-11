@@ -356,11 +356,7 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
             .await
             .expect("materialize FIG-1067 cron session"),
     );
-    let record = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
     let job_key = format!("{session_id}:{}", record.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
@@ -374,7 +370,7 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -390,7 +386,7 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         &trace_path,
         "agent_workbench.cron.restate.sync_cancelled",
         "trigger_disabled",
-        &SessionId::from(session_id),
+        &session_id,
         &job_key,
     );
 }
@@ -413,11 +409,7 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
             .await
             .expect("materialize FIG-1067 cron session"),
     );
-    let record = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
     lash::triggers::TriggerStore::execute_command(
         trigger_store.as_ref(),
         "disable:fig1067-enable-test",
@@ -445,7 +437,7 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: true }),
     )
@@ -468,7 +460,7 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
         &trace_path,
         "agent_workbench.cron.restate.sync_upserted",
         "trigger_enabled",
-        &SessionId::from(session_id),
+        &session_id,
         &job_key,
     );
 }
@@ -491,11 +483,7 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
             .await
             .expect("materialize FIG-1067 cron session"),
     );
-    let record = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
     let job_key = format!("{session_id}:{}", record.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
@@ -509,7 +497,7 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         }),
     )
     .await
@@ -526,7 +514,7 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         &trace_path,
         "agent_workbench.cron.restate.sync_cancelled",
         "trigger_deleted",
-        &SessionId::from(session_id),
+        &session_id,
         &job_key,
     );
 }
@@ -543,14 +531,9 @@ async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
-    let record = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
-    let job_key =
-        crate::restate::cron_job_key(&SessionId::from(session_id.clone()), &record.source_key);
+    materialize_cron_test_session(&state, &session_id).await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    let job_key = crate::restate::cron_job_key(&session_id, &record.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
@@ -560,7 +543,7 @@ async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         }),
     )
     .await
@@ -597,14 +580,9 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     )
     .await;
     let session_a = state.current_session_id();
-    materialize_cron_test_session(&state, &SessionId::from(session_a.clone())).await;
-    let record_a = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_a.clone()),
-    )
-    .await;
-    let key_a =
-        crate::restate::cron_job_key(&SessionId::from(session_a.clone()), &record_a.source_key);
+    materialize_cron_test_session(&state, &session_a).await;
+    let record_a = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_a).await;
+    let key_a = crate::restate::cron_job_key(&session_a, &record_a.source_key);
     let session_b = "fig1067-session-b";
     let key_b = crate::restate::cron_job_key(&SessionId::from(session_b), "cron-source:b");
     state.restate_cron_job_keys.lock_recover().insert(
@@ -621,7 +599,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
 
     crate::restate::sync_cron_jobs_after_trigger_mutation(
         &state,
-        &SessionId::from(session_a.clone()),
+        &session_a,
         "two_session_regression",
         &record_a,
     )
@@ -674,11 +652,7 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
     )
     .await;
     let session_id = state.current_session_id();
-    let record = register_fig1067_button_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    let record = register_fig1067_button_subscription(trigger_store.as_ref(), &session_id).await;
     let dead_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind dead ingress probe");
@@ -692,7 +666,7 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state.clone()),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id)),
+            session_id: Some(session_id),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -714,12 +688,8 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
-    let record = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    materialize_cron_test_session(&state, &session_id).await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
     let disabled = lash::triggers::TriggerStore::execute_command(
         trigger_store.as_ref(),
         "disable:fig1067-reconciliation-pin",
@@ -738,10 +708,7 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = disabled else {
         panic!("disable must return a mutation receipt");
     };
-    let job_key = crate::restate::cron_job_key(
-        &SessionId::from(session_id.clone()),
-        &receipt.record_snapshot.source_key,
-    );
+    let job_key = crate::restate::cron_job_key(&session_id, &receipt.record_snapshot.source_key);
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&job_key);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
@@ -750,7 +717,7 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
         axum::extract::Path(receipt.record_snapshot.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id)),
+            session_id: Some(session_id),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -775,12 +742,8 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
-    let record = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    materialize_cron_test_session(&state, &session_id).await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
     let dead_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind dead ingress probe");
@@ -798,7 +761,7 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
         axum::extract::Path(record.subscription_key.clone()),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
     )
@@ -829,12 +792,8 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
     )
     .await;
     let session_id = state.current_session_id();
-    materialize_cron_test_session(&state, &SessionId::from(session_id.clone())).await;
-    let record = register_fig1067_cron_subscription(
-        trigger_store.as_ref(),
-        &SessionId::from(session_id.clone()),
-    )
-    .await;
+    materialize_cron_test_session(&state, &session_id).await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
     let dead_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind dead ingress probe");
@@ -852,7 +811,7 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         }),
     )
     .await;

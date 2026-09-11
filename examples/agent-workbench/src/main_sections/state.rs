@@ -377,7 +377,7 @@ pub(crate) struct SessionQuery {
 }
 
 impl SessionQuery {
-    pub(crate) fn resolve(&self, state: &AppState) -> Result<String, AppError> {
+    pub(crate) fn resolve(&self, state: &AppState) -> Result<SessionId, AppError> {
         let Some(session_id) = self.session_id.as_deref() else {
             return Ok(state.current_session_id());
         };
@@ -392,7 +392,7 @@ impl SessionQuery {
                 "session_id must be 1-128 ASCII letters, digits, '.', '_' or '-'",
             ));
         }
-        Ok(session_id.to_string())
+        Ok(SessionId::from(session_id))
     }
 
     pub(crate) fn is_explicit(&self) -> bool {
@@ -730,7 +730,7 @@ impl SessionEventRegistry {
     pub(crate) fn sender(&self, session_id: &SessionId) -> broadcast::Sender<ProductEvent> {
         let mut senders = self.senders.lock_recover();
         senders
-            .entry(SessionId::from(session_id.to_string()))
+            .entry(session_id.clone())
             .or_insert_with(|| broadcast::channel(self.channel_capacity).0)
             .clone()
     }
@@ -776,9 +776,7 @@ impl SessionEventRegistry {
         let event_id = event_id.into();
         let event = {
             let mut histories = self.histories.lock_recover();
-            let history = histories
-                .entry(SessionId::from(session_id.to_string()))
-                .or_default();
+            let history = histories.entry(session_id.clone()).or_default();
             if !history.event_ids.insert(event_id.clone()) {
                 return false;
             }
@@ -1063,7 +1061,7 @@ impl ActiveTurnSubmissionGuard {
         Self {
             active_turns: state.active_turns.clone(),
             failure_publisher: Some(state.clone()),
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             turn_id: TurnId::from(turn_id.to_string()),
             armed: true,
         }
@@ -1077,7 +1075,7 @@ impl ActiveTurnSubmissionGuard {
         Self {
             active_turns,
             failure_publisher: None,
-            session_id: SessionId::from(session_id.to_string()),
+            session_id: session_id.clone(),
             turn_id: TurnId::from(turn_id.to_string()),
             armed: true,
         }
@@ -1536,7 +1534,7 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
     ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
         let session_id = request
             .session_id
-            .unwrap_or_else(|| SessionId::from(self.sessions.current()));
+            .unwrap_or_else(|| self.sessions.current());
         // A trigger process may finish while a foreground turn still owns this
         // session's ingress. Its wake stays in the durable queued-work store;
         // terminalization calls `claim_and_run_pending` again after releasing
@@ -1599,7 +1597,7 @@ impl WorkbenchQueuedWorkSubmitter {
             .store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::default(),
                 policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
             })
