@@ -439,7 +439,8 @@ pub mod plugins {
     /// Both are runtime-implemented — a plugin receives one, never writes one.
     pub use lash_core::{
         AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
-        SessionGraphService, SessionStateService, SessionToolAccess, SubagentSessionContext,
+        SessionGraphService, SessionStateService, SessionToolAccess, SessionToolAccessError,
+        SubagentSessionContext,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{

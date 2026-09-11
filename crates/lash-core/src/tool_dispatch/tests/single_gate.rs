@@ -21,8 +21,9 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
     )
     .await
     .expect("runtime session");
-    let mut tool_access = crate::SessionToolAccess::default();
-    tool_access.hidden_tools.insert("hidden".to_string());
+    let tool_access = crate::SessionToolAccess::ambient()
+        .with_hidden_tools(["hidden"])
+        .expect("valid hidden name");
     let pinned = session
         .pin_tool_surface(&SessionId::from("root"), &tool_access, None)
         .expect("authority-hidden pinned surface");

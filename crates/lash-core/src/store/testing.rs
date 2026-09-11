@@ -11,6 +11,21 @@ use super::{RuntimeCommit, RuntimeTurnCommitStamp, StoreError};
 /// `cfg`-gated `raw_blobs_for_testing`).
 #[async_trait::async_trait]
 pub trait StoreTestSupport: Send + Sync {
+    /// Rewrite the versioned session-head authority bytes in the real backend.
+    ///
+    /// `None` removes `config.tool_access`; `Some` writes the supplied raw JSON.
+    /// Conformance uses this only to prove current malformed records and
+    /// predecessor formats refuse through production read paths.
+    async fn rewrite_session_tool_access_for_testing(
+        &self,
+        _schema_version: u32,
+        _tool_access: Option<serde_json::Value>,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "rewrite_session_tool_access_for_testing",
+        })
+    }
+
     /// Conformance seam for a marker guarding bytes the current codec cannot read.
     async fn stamp_session_state_version_and_corrupt_payload_for_testing(
         &self,

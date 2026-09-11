@@ -100,7 +100,9 @@ impl Capability for CustomRequestCapability {
         ctx: SubagentSpawnContext<'_>,
     ) -> Result<lash_core::SessionCreateRequest, String> {
         let mut tool_access = ctx.base_tool_access.clone();
-        tool_access.hidden_tools.insert("custom_hidden".to_string());
+        tool_access
+            .hide_tool("custom_hidden")
+            .map_err(|error| error.to_string())?;
         let request = lash_core::SessionCreateRequest::child(
             ctx.parent_session_id,
             lash_core::SessionStartPoint::CurrentSession,
@@ -126,8 +128,9 @@ fn capability_can_build_complete_spawn_request() {
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let mut tool_access = lash_core::SessionToolAccess::default();
-    tool_access.hidden_tools.insert("base_hidden".to_string());
+    let tool_access = lash_core::SessionToolAccess::ambient()
+        .with_hidden_tools(["base_hidden"])
+        .expect("valid hidden name");
 
     let request = build_spawn_create_request(SpawnCreateRequestInput {
         registry: &registry,
@@ -149,8 +152,8 @@ fn capability_can_build_complete_spawn_request() {
         lash_core::SessionStartPoint::CurrentSession
     ));
     assert_eq!(request.usage_source.as_deref(), Some("custom-subagent"));
-    assert!(request.tool_access.hidden_tools.contains("base_hidden"));
-    assert!(request.tool_access.hidden_tools.contains("custom_hidden"));
+    assert!(request.tool_access.hidden_tools().contains("base_hidden"));
+    assert!(request.tool_access.hidden_tools().contains("custom_hidden"));
     assert_eq!(
         request.subagent.expect("subagent context").capability,
         "custom"
@@ -387,7 +390,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
     );
     assert_ne!(child_policy.model.id, stale_choice.id);
     assert_eq!(child_policy.model.id, "live-parent");
-    assert!(request.tool_access.tools.is_empty());
+    assert!(request.tool_access.restricted_tools().is_none());
 
     let structured_request = build_spawn_create_request(SpawnCreateRequestInput {
         registry: &registry,
@@ -425,7 +428,7 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
         extras.final_answer_format,
         Some(lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue)
     ));
-    assert!(structured_request.tool_access.tools.is_empty());
+    assert!(structured_request.tool_access.restricted_tools().is_none());
 }
 
 #[tokio::test]

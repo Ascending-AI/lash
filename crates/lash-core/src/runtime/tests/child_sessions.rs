@@ -678,10 +678,11 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
             )
             .with_session_id("filtered-child")
             .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork)
-            .with_tool_access(crate::SessionToolAccess {
-                tools: Vec::new(),
-                hidden_tools: ["memory_probe".to_string()].into_iter().collect(),
-            }),
+            .with_tool_access(
+                crate::SessionToolAccess::ambient()
+                    .with_hidden_tools(["memory_probe"])
+                    .expect("valid hidden name"),
+            ),
         )
         .await
         .expect("hidden tool policy should survive fork");

@@ -174,6 +174,19 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset postgres process change clock");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn explicit_tool_access_survives_postgres_recovery_and_invalid_bytes_refuse() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres tool-access recovery: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    lash_conformance::session_tool_access_durable_recovery(Arc::new(
+        storage.session_store_factory(),
+    ))
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_fence_integrity_conformance_when_configured() {
     let Some(database_url) = database_url() else {

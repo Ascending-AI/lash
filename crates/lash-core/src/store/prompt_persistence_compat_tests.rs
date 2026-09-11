@@ -31,14 +31,6 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         old_writer_object.remove("generation").is_some(),
         "the compatibility probe also strips the field introduced by FIG-1895"
     );
-    assert!(
-        old_writer_object.remove("tool_access").is_some(),
-        "the compatibility probe strips authority made explicit by FIG-1954"
-    );
-    assert!(
-        old_writer_object.remove("subagent").is_some(),
-        "the compatibility probe strips subagent authority made explicit by FIG-1954"
-    );
     assert_eq!(
         old_writer_value,
         serde_json::json!({
@@ -48,9 +40,11 @@ fn legacy_config_keeps_prompt_absence_distinct() {
                 "variant": "provider_default",
                 "limits": { "context_window_tokens": 1 }
             },
-            "turn_budget": "unbounded"
+            "turn_budget": "unbounded",
+            "tool_access": { "mode": "ambient" },
+            "subagent": null
         }),
-        "the remaining value must be exactly the pre-FIG-1376 writer shape"
+        "prompt/generation absence stays independently testable while access remains explicit"
     );
 
     let restored: crate::PersistedSessionConfig =
@@ -67,7 +61,7 @@ fn legacy_config_keeps_prompt_absence_distinct() {
 }
 
 #[test]
-fn legacy_config_without_authority_decodes_as_unrestricted_root() {
+fn persisted_config_without_tool_access_is_refused() {
     let legacy = serde_json::json!({
         "provider_id": "provider",
         "model": {
@@ -80,11 +74,9 @@ fn legacy_config_without_authority_decodes_as_unrestricted_root() {
         "generation": {}
     });
 
-    let restored: crate::PersistedSessionConfig =
-        serde_json::from_value(legacy).expect("legacy authority-free config must decode");
-
-    assert_eq!(restored.tool_access, crate::SessionToolAccess::default());
-    assert_eq!(restored.subagent, None);
+    let error = serde_json::from_value::<crate::PersistedSessionConfig>(legacy)
+        .expect_err("missing persisted tool authority must refuse");
+    assert!(error.to_string().contains("missing field `tool_access`"));
 }
 
 #[test]
@@ -101,7 +93,10 @@ fn current_config_serializes_default_authority_explicitly() {
     })
     .expect("serialize current config");
 
-    assert_eq!(value.get("tool_access"), Some(&serde_json::json!({})));
+    assert_eq!(
+        value.get("tool_access"),
+        Some(&serde_json::json!({ "mode": "ambient" }))
+    );
     assert_eq!(value.get("subagent"), Some(&serde_json::Value::Null));
 }
 

@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 61,
+  "fixture_schema_version": 62,
   "head_revision": 4,
   "node_ids_in_read_order": [
     "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
@@ -29,7 +29,9 @@
       "turn_budget": "unbounded",
       "prompt": {},
       "generation": {},
-      "tool_access": {},
+      "tool_access": {
+        "mode": "ambient"
+      },
       "subagent": null,
       "protocol_turn_options": {
         "schema_version": 1,
@@ -164,7 +166,9 @@
       "turn_budget": "unbounded",
       "prompt": {},
       "generation": {},
-      "tool_access": {},
+      "tool_access": {
+        "mode": "ambient"
+      },
       "subagent": null,
       "protocol_turn_options": {
         "schema_version": 1,
@@ -396,7 +400,9 @@
       "turn_budget": "unbounded",
       "prompt": {},
       "generation": {},
-      "tool_access": {},
+      "tool_access": {
+        "mode": "ambient"
+      },
       "subagent": null,
       "protocol_turn_options": {
         "schema_version": 1,
@@ -462,8 +468,8 @@
       "append_request_identity": {
         "kind": "semantic_boundary",
         "operation": "record-config",
-        "identity_encoding_version": 1,
-        "request_identity_hash": "920632f13344cc15e14ff77cabe913b4513128c6722e1df029e3bbe84b66f4e9"
+        "identity_encoding_version": 2,
+        "request_identity_hash": "49dd99643b07683557b72ca3d614183793aea1e1389876ede6728cbd312dbc97"
       }
     },
     "completed_queue_claims": [],

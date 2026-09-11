@@ -11,6 +11,40 @@ fn tool_names(session: &lash_core::facade_support::PluginSession) -> Vec<String>
         .clone()
 }
 
+fn standard_session_with_access(
+    session_id: &str,
+    tool_access: lash_core::SessionToolAccess,
+) -> Arc<lash_core::facade_support::PluginSession> {
+    PluginHost::new(vec![Arc::new(
+        lash_protocol_standard::StandardProtocolPluginFactory::new(),
+    )])
+    .build_session_with_parent(
+        session_id,
+        None,
+        lash_core::plugin::SessionCreationConfig {
+            authority: lash_core::plugin::SessionAuthorityContext {
+                tool_access,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .expect("standard protocol session")
+}
+
+#[test]
+fn standard_protocol_distinguishes_ambient_from_restricted_empty_access() {
+    let ambient =
+        standard_session_with_access("standard-ambient", lash_core::SessionToolAccess::ambient());
+    assert!(tool_names(&ambient).contains(&"batch".to_string()));
+
+    let restricted = standard_session_with_access(
+        "standard-restricted-empty",
+        lash_core::SessionToolAccess::restricted([]).expect("restricted empty is valid"),
+    );
+    assert!(tool_names(&restricted).is_empty());
+}
+
 #[test]
 fn standard_protocol_owns_batch_not_processes() {
     let session = PluginHost::new(vec![Arc::new(
