@@ -708,7 +708,7 @@ impl LashRuntime {
             session,
             policy: resolved_turn_policy,
             host: self.host.clone(),
-            turn_id: crate::TurnId::from(scoped_effect_controller.scope_id()),
+            turn_id: trace_turn_id.clone(),
             scoped_effect_controller: scoped_effect_controller.clone(),
             session_id: self.state.session_id.clone(),
             turn_index,

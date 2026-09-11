@@ -81,7 +81,7 @@ fn turn_cancel_peek_replay_key(
         ExecutionScope::Turn {
             session_id,
             turn_id,
-        } if session_id == &address.session_id && turn_id == &address.turn_id
+        } if session_id == address.session_id && turn_id == address.turn_id
     ) {
         return causal_identity.to_string();
     }
