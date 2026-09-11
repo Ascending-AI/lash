@@ -158,6 +158,7 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "rlm", "--locked"],
 ]
