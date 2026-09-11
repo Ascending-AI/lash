@@ -266,6 +266,27 @@ struct CompactionRequestIdentity<'a> {
     prompt_text: &'a str,
 }
 
+fn canonicalize_json_objects(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                canonicalize_json_objects(value);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            // Reinsert every object in lexical key order so the wire bytes stay
+            // canonical with either serde_json's default map or preserve_order.
+            let mut entries = std::mem::take(object).into_iter().collect::<Vec<_>>();
+            for (_, value) in &mut entries {
+                canonicalize_json_objects(value);
+            }
+            entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+            object.extend(entries);
+        }
+        _ => {}
+    }
+}
+
 fn compaction_graph_address<'a>(
     node_indices: &BTreeMap<&'a str, u64>,
     node_id: &'a str,
@@ -343,6 +364,12 @@ fn compaction_request_identity(
         },
         prompt_text,
     };
+    let mut identity = serde_json::to_value(identity).map_err(|error| {
+        ContextError::Session(format!(
+            "failed to encode rolling-history compaction request identity: {error}"
+        ))
+    })?;
+    canonicalize_json_objects(&mut identity);
     serde_json::to_string(&identity).map_err(|error| {
         ContextError::Session(format!(
             "failed to encode rolling-history compaction request identity: {error}"
@@ -1314,7 +1341,7 @@ mod tests {
         let created = manager.created_snapshot();
         assert_eq!(created.len(), 1);
         let expected_discriminator =
-            "ad4e6df12cb8be923c17942c254e80da368bc68537c9a4b44be2612a6f7d9c52";
+            "b40f268283d3fa70c6e175a5b6d7aeca855dec8aa307ba6304ea244ac14ce9f7";
         let expected_child_session_id = format!("root-compaction:{expected_discriminator}");
         let expected_child_turn_id = format!(
             "rolling-history-compact-test:rolling-history-compaction:{expected_discriminator}"
@@ -1355,6 +1382,41 @@ mod tests {
             events[1].1,
             lash_core::TraceEvent::RollingHistoryCompactionCompleted { summary_nodes: 1 }
         );
+    }
+
+    #[test]
+    fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
+        let mut state = SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded));
+        state.session_id = SessionId::from("retry-map-parent");
+        for slot in [
+            lash_core::PromptSlot::Intro,
+            lash_core::PromptSlot::Execution,
+            lash_core::PromptSlot::Guidance,
+            lash_core::PromptSlot::ProjectInstructions,
+            lash_core::PromptSlot::RuntimeContext,
+            lash_core::PromptSlot::Environment,
+        ] {
+            state.policy.prompt.slots.insert(slot, Default::default());
+        }
+
+        let snapshot_value = serde_json::to_value(&state).expect("serialize snapshot");
+        let expected = compaction_request_identity(&state, "same prompt")
+            .expect("encode original compaction request identity");
+        for _ in 0..64 {
+            let reconstructed: SessionSnapshot = serde_json::from_value(snapshot_value.clone())
+                .expect("reconstruct equivalent snapshot");
+            assert_eq!(
+                snapshot_value,
+                serde_json::to_value(&reconstructed).expect("serialize reconstructed snapshot"),
+                "the reconstructed snapshot must remain semantically equal"
+            );
+            assert_eq!(
+                expected,
+                compaction_request_identity(&reconstructed, "same prompt")
+                    .expect("encode reconstructed compaction request identity"),
+                "equivalent nested prompt maps must have one canonical request identity"
+            );
+        }
     }
 
     #[tokio::test]
