@@ -79,7 +79,9 @@ fn tool_callable_from_authority(access: &SessionToolAccess, name: &str) -> bool 
     if access.hides(name) {
         return false;
     }
-    access.tools.is_empty() || access.tools.iter().any(|tool| tool.name() == name)
+    access
+        .restricted_tools()
+        .is_none_or(|tools| tools.iter().any(|tool| tool.name() == name))
 }
 
 pub struct StandardShell {

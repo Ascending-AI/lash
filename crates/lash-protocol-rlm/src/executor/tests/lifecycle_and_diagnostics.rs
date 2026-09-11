@@ -100,6 +100,7 @@ pub(super) async fn execute_and_collect_inventory(
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
+                enumerations: Default::default(),
             }),
             lash_core::ToolCatalog::default(),
             lash_core::testing::exec_code_invocation(

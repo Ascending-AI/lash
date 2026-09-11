@@ -271,9 +271,15 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // the enclosing head so hydration reaches that intended boundary.
     sqlx::query(
         "UPDATE lash_sessions
-            SET head_json = jsonb_set(head_json::jsonb, '{schema_version}', to_jsonb($1::bigint))::text",
+            SET head_json = jsonb_set(
+                jsonb_set(head_json::jsonb, '{schema_version}', to_jsonb($1::bigint)),
+                '{config,tool_access}',
+                '{\"mode\":\"ambient\"}'::jsonb
+            )::text",
     )
-    .bind(i64::from(lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION))
+    .bind(i64::from(
+        lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+    ))
     .execute(&pool)
     .await
     .expect("refresh refusal fixture head schema without changing its checkpoint");

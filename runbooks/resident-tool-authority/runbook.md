@@ -1,9 +1,12 @@
 # Resident tool definition authority
 
 This deterministic runbook validates that every effective resident catalog
-entry owns one complete definition and retains an executable route. Read
+entry owns one complete definition and retains an executable route. It also
+proves that explicit ambient and restricted access survive durable recovery
+without turning a restricted empty set into ambient authority. Read
 [`../RULES.md`](../RULES.md) first. The witnesses use only in-memory providers;
-they make no model or network call.
+the durable phase uses isolated SQLite and PostgreSQL fixtures. No phase makes
+a model or external network call.
 
 Choose the warm fork and an evidence directory owned by this run. The command
 uses `pipefail`, so `tee` cannot hide a failed test process.
@@ -39,13 +42,16 @@ orb gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
     test(~pinned_source_retains_exactly_known_nonadvertised_resident_id) |
     test(~resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route) |
     test(~process_run_context_captures_catalog_and_execution_route_together) |
+    test(~ambient_and_restricted_empty_select_distinct_resident_catalogs) |
+    test(~standard_protocol_distinguishes_ambient_from_restricted_empty_access) |
+    test(~rlm_catalog_distinguishes_ambient_from_restricted_empty_access) |
     test(~deferred_call_executes_through_grant_without_mutating_catalog) |
     test(~typescript_deferred_call_executes_through_the_same_grant_path)
   "
 ' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/resident-tool-authority.log"
 ```
 
-Expect exactly eighteen tests and `18 passed; 0 failed`. The positive witnesses
+Expect exactly twenty-one tests and `21 passed; 0 failed`. The positive witnesses
 prove that native tool schemas, RLM documentation and host bindings, and
 argument validation retain the same catalog-owned contract even when the
 source resolver would return a different definition later. A restricted
@@ -68,15 +74,55 @@ curation does not become an admission failure. A provider that resolves a known
 resident ID to a different manifest ID is refused before the source cache or
 registry state can change, so it cannot replace another advertised route.
 
-The deferred witnesses prove that replay does not resolve a current contract,
-that a hidden provider stays outside the resident snapshot, and that core,
-Lashlang, and TypeScript grants continue through the existing deferred
-execution path without mutating the resident catalog.
+The explicit-access witnesses prove that ambient authority retains captured
+residents while restricted empty produces no resident native tools or RLM
+documentation. The deferred witnesses start from that restricted empty
+catalog: a separately granted tool remains executable in Lashlang and
+TypeScript without becoming a resident, re-enumerating the provider, or
+consulting a later registry definition.
 
-Abort if the filter runs fewer or more than eighteen tests, a resolver is called
+Abort if the filter runs fewer or more than twenty-one tests, a resolver is called
 after catalog construction, any negative case reaches preparation, a same-ID
 alias or old request loses its route, or a deferred call is admitted through
 resident membership.
+
+## Phase 2 — durable authority bytes
+
+Run the SQLite witness directly. Then run the PostgreSQL witness against a
+caller-owned disposable database inside `orb gate`; derive its container name
+from `ORB_GATE_ID` and let Docker allocate the host port. Remove the container
+on exit. Never point this phase at a shared database.
+
+```bash
+orb gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
+  set -o pipefail
+  . ./env.sh
+  cargo nextest run -p lash-internal-sqlite-store \
+    -E "test(explicit_tool_access_survives_sqlite_recovery_and_invalid_bytes_refuse)"
+
+  container="lash-access-${ORB_GATE_ID//[^[:alnum:]_.-]/-}"
+  trap '\''docker rm -f "$container" >/dev/null 2>&1 || true'\'' EXIT
+  docker run -d --rm --name "$container" \
+    -e POSTGRES_USER=lash -e POSTGRES_PASSWORD=lash -e POSTGRES_DB=lash \
+    -p 127.0.0.1::5432 postgres:16-alpine >/dev/null
+  until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+    sleep 1
+  done
+  port="$(docker port "$container" 5432/tcp | sed '\''s/.*://'\'')"
+  export LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash"
+  export LASH_REQUIRE_POSTGRES=1
+  cargo nextest run -p lash-internal-postgres-store \
+    -E "test(explicit_tool_access_survives_postgres_recovery_and_invalid_bytes_refuse)"
+' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/tool-access-durable-readback.log"
+```
+
+Expect one SQLite test and one PostgreSQL test to pass. Each witness writes
+restricted empty authority through the production store, drops and reopens the
+store, and reads it through the production recovery path. It then rewrites the
+real backend row to prove that the predecessor session-head version and current
+missing, null, malformed, unknown, empty-name, duplicate-name, and duplicate-ID
+authority bytes refuse. Abort if PostgreSQL reports a skip, either filter runs
+zero tests, or any malformed record restores as ambient.
 
 ## Scorecard
 
@@ -92,3 +138,6 @@ resident membership.
 | Known nonadvertised residents retain their exact route | restored resident remains curated, nonorphaned, and executable | | `resident-tool-authority.log` |
 | Known resident identity mismatches fail atomically | mismatched exact-ID resolution is refused without state or advertised-route changes | | `resident-tool-authority.log` |
 | Deferred replay and execution retain their grant authority | four deferred witnesses pass | | `resident-tool-authority.log` |
+| Ambient and restricted empty remain distinct in native and RLM catalogs | explicit-access witnesses retain ambient residents and render no restricted residents | | `resident-tool-authority.log` |
+| Restricted empty survives real backend recovery | SQLite and PostgreSQL reopen with restricted mode and zero resident definitions | | `tool-access-durable-readback.log` |
+| Historical and malformed access bytes fail closed | predecessor plus current invalid-row cases refuse in both backends | | `tool-access-durable-readback.log` |

@@ -1326,10 +1326,9 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
             Some(SessionId::from("parent")),
             crate::plugin::SessionCreationConfig {
                 authority: crate::plugin::SessionAuthorityContext {
-                    tool_access: crate::SessionToolAccess {
-                        tools: Vec::new(),
-                        hidden_tools: ["hidden_after_rotation".to_string()].into_iter().collect(),
-                    },
+                    tool_access: crate::SessionToolAccess::ambient()
+                        .with_hidden_tools(["hidden_after_rotation"])
+                        .expect("valid hidden name"),
                     ..crate::plugin::SessionAuthorityContext::default()
                 },
                 ..Default::default()

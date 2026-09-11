@@ -589,14 +589,14 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
 }
 
 #[test]
-fn boxed_runtime_authority_keeps_flat_json_and_legacy_defaults() {
+fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     state
         .authority
         .tool_access
-        .hidden_tools
-        .insert("hidden".to_string());
+        .hide_tool("hidden")
+        .expect("valid hidden name");
     state.authority.subagent = Some(crate::SubagentSessionContext {
         parent_session_id: SessionId::from("parent"),
         capability: "research".to_string(),
@@ -614,20 +614,18 @@ fn boxed_runtime_authority_keeps_flat_json_and_legacy_defaults() {
 
     let object = value.as_object_mut().expect("runtime state object");
     object.remove("tool_access");
-    object.remove("subagent");
-    let legacy: RuntimeSessionState =
-        serde_json::from_value(value).expect("legacy authority-free runtime state");
-    assert_eq!(
-        legacy.authority.tool_access,
-        crate::SessionToolAccess::default()
-    );
-    assert!(legacy.authority.subagent.is_none());
+    let error = serde_json::from_value::<RuntimeSessionState>(value)
+        .expect_err("missing serialized tool authority must refuse");
+    assert!(error.to_string().contains("missing field `tool_access`"));
 
     let current = serde_json::to_value(RuntimeSessionState::new(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
     )))
     .expect("serialize current runtime state");
-    assert_eq!(current.get("tool_access"), Some(&serde_json::json!({})));
+    assert_eq!(
+        current.get("tool_access"),
+        Some(&serde_json::json!({ "mode": "ambient" }))
+    );
     assert_eq!(current.get("subagent"), Some(&serde_json::Value::Null));
 }
 

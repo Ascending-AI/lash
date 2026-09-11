@@ -83,10 +83,10 @@ impl PluginSession {
         .map(|owned| owned.value)
         .collect::<Vec<_>>();
         contributions.push(self.tool_catalog_overlay.clone());
-        let (tools, resolve_contract) = if ctx.tool_access.tools.is_empty() {
-            (ctx.tools, ctx.resolve_contract)
-        } else {
-            let definitions = Arc::new(ctx.tool_access.tools.clone());
+        let (tools, resolve_contract) = if let Some(definitions) =
+            ctx.tool_access.restricted_tools()
+        {
+            let definitions = Arc::new(definitions.to_vec());
             (
                 definitions.iter().map(|tool| tool.manifest()).collect(),
                 Some(Arc::new(move |manifest: &ToolManifest| {
@@ -98,6 +98,8 @@ impl PluginSession {
                         .map(|tool| Arc::new(tool.contract()))
                 }) as lash_sansio::ToolContractResolver),
             )
+        } else {
+            (ctx.tools, ctx.resolve_contract)
         };
         let authority_hidden_tools = tools
             .iter()

@@ -145,10 +145,9 @@ impl crate::ProcessToolVisibilityFilter for AllowNamedProcess {
 
 fn hidden_authority(tool_name: &str) -> SessionAuthorityContext {
     SessionAuthorityContext {
-        tool_access: crate::SessionToolAccess {
-            tools: Vec::new(),
-            hidden_tools: [tool_name.to_string()].into_iter().collect(),
-        },
+        tool_access: crate::SessionToolAccess::ambient()
+            .with_hidden_tools([tool_name])
+            .expect("valid hidden name"),
         ..SessionAuthorityContext::default()
     }
 }
@@ -271,10 +270,9 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     let provider: Arc<dyn crate::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
     let authority = SessionAuthorityContext {
-        tool_access: crate::SessionToolAccess {
-            tools: Vec::new(),
-            hidden_tools: [hidden.name.to_string()].into_iter().collect(),
-        },
+        tool_access: crate::SessionToolAccess::ambient()
+            .with_hidden_tools([hidden.name])
+            .expect("valid hidden name"),
         subagent: Some(crate::SubagentSessionContext {
             parent_session_id: SessionId::from("authority-parent"),
             capability: "authority-capability".to_string(),
@@ -1208,10 +1206,11 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
             )
             .with_session_id("fork-child")
             .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork)
-            .with_tool_access(crate::SessionToolAccess {
-                tools: Vec::new(),
-                hidden_tools: [hidden.name.to_string()].into_iter().collect(),
-            }),
+            .with_tool_access(
+                crate::SessionToolAccess::ambient()
+                    .with_hidden_tools([hidden.name])
+                    .expect("valid hidden name"),
+            ),
         )
         .await
         .expect("fork child from standing parent");

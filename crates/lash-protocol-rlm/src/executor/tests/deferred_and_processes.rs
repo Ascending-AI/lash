@@ -48,11 +48,61 @@ impl lash_lashlang_runtime::DeferredToolResolver for CountingDeferredResolver {
 pub(super) struct BindingRecordingDeferredProvider {
     pub(super) executions: Arc<AtomicUsize>,
     pub(super) observed_bindings: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    pub(super) enumerations: Arc<AtomicUsize>,
+}
+
+fn restricted_empty_deferred_context(
+    provider: Arc<dyn lash_core::ToolProvider>,
+    session_id: &str,
+) -> (
+    lash_core::RuntimeExecutionContext<'static>,
+    Arc<lash_core::ToolRegistry>,
+) {
+    let mut factories = lash_core::testing::test_standard_protocol_factories();
+    factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        "deferred_grant_provider",
+        lash_core::plugin::PluginSpec::new().with_tool_provider(provider),
+    )));
+    let session = lash_core::facade_support::PluginHost::new(factories)
+        .build_session_with_parent(
+            session_id,
+            None,
+            lash_core::plugin::SessionCreationConfig {
+                authority: lash_core::plugin::SessionAuthorityContext {
+                    tool_access: lash_core::SessionToolAccess::restricted([])
+                        .expect("restricted empty is valid"),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .expect("restricted-empty deferred session");
+    let catalog = session
+        .resolved_tool_catalog(&lash_core::SessionId::from(session_id))
+        .expect("restricted-empty catalog");
+    assert!(catalog.tools.is_empty());
+    let registry = session.tool_registry();
+    assert!(
+        lash_core::ToolProvider::resolve_manifest_by_id(
+            registry.as_ref(),
+            &lash_core::ToolId::from("tool:web_fetch"),
+        )
+        .is_none(),
+        "the separately grantable tool is absent from resident membership"
+    );
+    (
+        lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            session.tools(),
+            catalog.as_ref().clone(),
+        ),
+        registry,
+    )
 }
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for BindingRecordingDeferredProvider {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        self.enumerations.fetch_add(1, Ordering::SeqCst);
         Vec::new()
     }
 
@@ -109,6 +159,7 @@ impl lash_lashlang_runtime::DeferredToolResolver for BindingDeferredResolver {
                 let resolution = if *path == "web.fetch" {
                     lash_lashlang_runtime::Resolution::Resolved(Box::new(
                         lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition())
+                            .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID)
                             .with_execution_binding(serde_json::json!({
                                 "kind": "test",
                                 "route": "deferred"
@@ -283,6 +334,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
         let resolver_calls = Arc::new(AtomicUsize::new(0));
         let executions = Arc::new(AtomicUsize::new(0));
         let observed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let enumerations = Arc::new(AtomicUsize::new(0));
         let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
             Arc::new(BindingDeferredResolver {
                 calls: Arc::clone(&resolver_calls),
@@ -291,11 +343,11 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::clone(&executions),
                 observed_bindings: Arc::clone(&observed_bindings),
+                enumerations: Arc::clone(&enumerations),
             });
-        let ctx = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
-            provider,
-            lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
-        );
+        let (ctx, registry) =
+            restricted_empty_deferred_context(provider, "restricted-empty-lashlang-deferred");
+        let enumerations_after_catalog = enumerations.load(Ordering::SeqCst);
         assert!(ctx.tool_catalog().tools.is_empty());
 
         let mut state = RlmExecutionState::new();
@@ -327,6 +379,11 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
         assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(
+            enumerations.load(Ordering::SeqCst),
+            enumerations_after_catalog,
+            "deferred execution must not re-enumerate provider residents"
+        );
+        assert_eq!(
             response
                 .calls
                 .iter()
@@ -344,6 +401,14 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
             state.deferred_resolutions.get("web.fetch"),
             Some(lash_lashlang_runtime::Resolution::Resolved(_))
         ));
+        assert!(
+            lash_core::ToolProvider::resolve_manifest_by_id(
+                registry.as_ref(),
+                &lash_core::ToolId::from("tool:web_fetch"),
+            )
+            .is_none(),
+            "grant execution must not promote the deferred tool into resident membership"
+        );
     });
 }
 
@@ -353,6 +418,7 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
         let resolver_calls = Arc::new(AtomicUsize::new(0));
         let executions = Arc::new(AtomicUsize::new(0));
         let observed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let enumerations = Arc::new(AtomicUsize::new(0));
         let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
             Arc::new(BindingDeferredResolver {
                 calls: Arc::clone(&resolver_calls),
@@ -361,11 +427,11 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::clone(&executions),
                 observed_bindings: Arc::clone(&observed_bindings),
+                enumerations: Arc::clone(&enumerations),
             });
-        let ctx = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
-            provider,
-            lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
-        );
+        let (ctx, registry) =
+            restricted_empty_deferred_context(provider, "restricted-empty-typescript-deferred");
+        let enumerations_after_catalog = enumerations.load(Ordering::SeqCst);
 
         let mut state = RlmExecutionState::for_engine("typescript");
         let response = execute_code_with_dialect_and_bounds(
@@ -393,11 +459,24 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
         );
         assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
         assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            enumerations.load(Ordering::SeqCst),
+            enumerations_after_catalog,
+            "deferred execution must not re-enumerate provider residents"
+        );
         assert!(ctx.tool_catalog().tools.is_empty());
         assert!(matches!(
             state.deferred_resolutions.get("web.fetch"),
             Some(lash_lashlang_runtime::Resolution::Resolved(_))
         ));
+        assert!(
+            lash_core::ToolProvider::resolve_manifest_by_id(
+                registry.as_ref(),
+                &lash_core::ToolId::from("tool:web_fetch"),
+            )
+            .is_none(),
+            "grant execution must not promote the deferred tool into resident membership"
+        );
     });
 }
 
@@ -407,6 +486,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
         let resolver_calls = Arc::new(AtomicUsize::new(0));
         let executions = Arc::new(AtomicUsize::new(0));
         let observed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let enumerations = Arc::new(AtomicUsize::new(0));
         let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
             Arc::new(BindingDeferredResolver {
                 calls: Arc::clone(&resolver_calls),
@@ -415,6 +495,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::clone(&executions),
                 observed_bindings: Arc::clone(&observed_bindings),
+                enumerations,
             });
         let ctx = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
             provider,
