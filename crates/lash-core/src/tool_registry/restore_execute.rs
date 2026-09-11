@@ -16,9 +16,9 @@ impl ToolRegistry {
                 name: name.clone(),
                 reason,
             };
+            let authority = self.inner.read_recover();
             let source_key = {
-                let state = self.state.read_recover();
-                let entry = state.surface.get(tool_id).ok_or_else(|| {
+                let entry = authority.state.surface.get(tool_id).ok_or_else(|| {
                     unavailable("the id is absent from the pinned surface".into())
                 })?;
                 if !entry.is_member() {
@@ -30,7 +30,7 @@ impl ToolRegistry {
                     unavailable("the pinned entry is not bound to a live source".into())
                 })?
             };
-            if !self.sources.read_recover().contains_key(&source_key) {
+            if !authority.sources.contains_key(&source_key) {
                 return Err(unavailable(format!(
                     "bound source `{source_key}` is absent from the pinned registry"
                 )));

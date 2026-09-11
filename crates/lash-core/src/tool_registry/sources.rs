@@ -18,7 +18,10 @@ impl ToolSourceExecutor for OrchestratingToolSource {
         "orchestrating"
     }
 
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor> {
         Arc::new(Self::new(self.definition.clone()))
     }
 
@@ -189,10 +192,22 @@ impl ToolProviderSource {
         None
     }
 
-    fn snapshot(&self) -> PinnedToolProviderSource {
-        let index = ToolProviderIndex::from_providers(&self.providers);
+    fn snapshot(&self, known_resident_ids: &BTreeSet<ToolId>) -> PinnedToolProviderSource {
+        let mut index = ToolProviderIndex::from_providers(&self.providers);
+        let advertised_ids = index.by_id.keys().cloned().collect();
+        for id in known_resident_ids {
+            if index.by_id.contains_key(id) {
+                continue;
+            }
+            for (provider_idx, provider) in self.providers.iter().enumerate() {
+                if let Some(manifest) = provider.resolve_manifest_by_id(id) {
+                    index.insert(manifest, provider_idx);
+                    break;
+                }
+            }
+        }
         *self.tools.write_recover() = index.clone();
-        PinnedToolProviderSource::new(self.id.clone(), index, &self.providers)
+        PinnedToolProviderSource::new(self.id.clone(), index, advertised_ids, &self.providers)
     }
 }
 
@@ -202,8 +217,11 @@ impl ToolSourceExecutor for ToolProviderSource {
         &self.id
     }
 
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(self.snapshot())
+    fn snapshot_execution_source(
+        &self,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor> {
+        Arc::new(self.snapshot(known_resident_ids))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -332,10 +350,16 @@ struct PinnedToolProviderSource {
     id: String,
     routes: BTreeMap<ToolId, PinnedProviderRoute>,
     by_name: BTreeMap<String, ToolId>,
+    advertised_ids: BTreeSet<ToolId>,
 }
 
 impl PinnedToolProviderSource {
-    fn new(id: String, index: ToolProviderIndex, providers: &[Arc<dyn ToolProvider>]) -> Self {
+    fn new(
+        id: String,
+        index: ToolProviderIndex,
+        advertised_ids: BTreeSet<ToolId>,
+        providers: &[Arc<dyn ToolProvider>],
+    ) -> Self {
         let routes = index
             .by_id
             .into_iter()
@@ -348,6 +372,7 @@ impl PinnedToolProviderSource {
             id,
             routes,
             by_name: index.by_name,
+            advertised_ids,
         }
     }
 
@@ -362,25 +387,29 @@ impl PinnedToolProviderSource {
 
 /// Resident-only view of a provider group captured by one advertisement.
 ///
-/// The source layer has already resolved each id to a provider and manifest,
-/// so execution calls the provider's name-shaped hook directly. Calling its
-/// by-id convenience hook would let the provider rematerialize a later live
-/// advertisement and defeat this snapshot. Grant-authorized deferred calls do
-/// not use this type; they retain the original live source.
+/// The source layer has already resolved each id to a provider and manifest.
+/// Execution preserves the provider's authoritative by-id override; the
+/// sealed invocation context gives only the default trait implementation the
+/// captured source name, so it need not rematerialize a later advertisement.
+/// Grant-authorized deferred calls retain the original live source.
 #[async_trait::async_trait]
 impl ToolSourceExecutor for PinnedToolProviderSource {
     fn id(&self) -> &str {
         &self.id
     }
 
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor> {
         Arc::new(self.clone())
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         self.routes
-            .values()
-            .map(|route| route.manifest.clone())
+            .iter()
+            .filter(|(id, _)| self.advertised_ids.contains(*id))
+            .map(|(_, route)| route.manifest.clone())
             .collect()
     }
 
@@ -450,13 +479,11 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
                 format_args!("Unknown tool id: {tool_id}"),
             ));
         };
+        let captured =
+            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
         route
             .provider
-            .execute_attempt(ToolCall {
-                name: &route.manifest.name,
-                args,
-                context,
-            })
+            .execute_attempt_by_id(tool_id, args, &captured)
             .await
     }
 
@@ -469,14 +496,9 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
         let Some(route) = self.route(tool_id) else {
             return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
-        route
-            .provider
-            .execute(ToolCall {
-                name: &route.manifest.name,
-                args,
-                context,
-            })
-            .await
+        let captured =
+            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
+        route.provider.execute_by_id(tool_id, args, &captured).await
     }
 
     async fn execute_internal_by_id(
@@ -488,13 +510,11 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
         let Some(route) = self.route(tool_id) else {
             return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
         };
+        let captured =
+            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
         route
             .provider
-            .execute_internal(crate::InternalProcessToolCall {
-                name: &route.manifest.name,
-                args,
-                context,
-            })
+            .execute_internal_by_id(tool_id, args, &captured)
             .await
     }
 }

@@ -203,7 +203,10 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     fn id(&self) -> &str;
     /// Enumerate this source once and capture immutable resident execution
     /// routes for the resulting advertisement.
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor>;
+    fn snapshot_execution_source(
+        &self,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor>;
     fn source_key(&self) -> ToolSourceKey {
         ToolSourceKey::Leaf(self.id().to_string())
     }

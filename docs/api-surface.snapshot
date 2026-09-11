@@ -5902,6 +5902,7 @@ lash::provider::LlmStreamEvidence::merge
 lash::provider::LlmStreamEvidence::provider_usage
 lash::provider::LlmStreamEvidence::request_body
 lash::provider::LlmStreamEvidence::response_metadata
+lash::provider::LlmStreamEvidence::response_started
 lash::provider::LlmTimeouts
 lash::provider::LlmTimeouts::chunk_timeout
 lash::provider::LlmTimeouts::request_timeout

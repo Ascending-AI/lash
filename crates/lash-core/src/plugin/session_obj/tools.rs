@@ -4,13 +4,27 @@ use std::sync::Arc;
 
 use super::*;
 
+#[derive(Clone)]
+pub(crate) struct ResolvedToolSurface {
+    pub(crate) registry: Arc<crate::ToolRegistry>,
+    pub(crate) catalog: Arc<crate::ToolCatalog>,
+}
+
 impl PluginSession {
-    pub fn resolved_tool_catalog(
+    pub(crate) fn pin_resolved_tool_surface(
         &self,
         session_id: &SessionId,
-    ) -> Result<Arc<crate::ToolCatalog>, PluginError> {
-        let tools = self.tools.tool_manifests();
-        let contract_provider = Arc::clone(&self.tools);
+    ) -> Result<ResolvedToolSurface, PluginError> {
+        let registry = Arc::new(
+            self.tool_registry
+                .pin_session_surface(true, Vec::new())
+                .map_err(|error| {
+                    PluginError::Session(format!("failed to pin direct tool surface: {error}"))
+                })?,
+        );
+        let provider = Arc::clone(&registry) as Arc<dyn crate::ToolProvider>;
+        let tools = provider.tool_manifests();
+        let contract_provider = Arc::clone(&provider);
         let resolve_contract: lash_sansio::ToolContractResolver =
             Arc::new(move |manifest: &ToolManifest| {
                 contract_provider.resolve_contract_by_id(&manifest.id)
@@ -23,9 +37,18 @@ impl PluginSession {
             subagent: self.subagent.clone(),
             extensions: self.extensions.clone(),
         })?;
-        self.tool_registry
-            .validate_resident_catalog_routes(&catalog)?;
-        Ok(Arc::new(catalog))
+        registry.validate_resident_catalog_routes(&catalog)?;
+        Ok(ResolvedToolSurface {
+            registry,
+            catalog: Arc::new(catalog),
+        })
+    }
+
+    pub fn resolved_tool_catalog(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Arc<crate::ToolCatalog>, PluginError> {
+        Ok(self.pin_resolved_tool_surface(session_id)?.catalog)
     }
 
     /// Project every Tool Catalog member to a JSON record for host-owned

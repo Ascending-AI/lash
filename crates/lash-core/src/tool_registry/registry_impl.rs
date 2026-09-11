@@ -393,9 +393,10 @@ impl ToolRegistry {
             let retired = authority
                 .sources
                 .insert(source_key.clone(), Arc::clone(&source));
-            let retired_granted = authority.granted_sources.as_mut().and_then(|sources| {
-                sources.insert(source_key.clone(), Arc::clone(&live_source))
-            });
+            let retired_granted = authority
+                .granted_sources
+                .as_mut()
+                .and_then(|sources| sources.insert(source_key.clone(), Arc::clone(&live_source)));
             authority.source_revision = next_source_revision;
             if let Some(next_state_revision) = next_state_revision {
                 authority.state.surface = next_state.surface;

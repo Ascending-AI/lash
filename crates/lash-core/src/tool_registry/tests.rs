@@ -181,7 +181,10 @@ impl ToolSourceExecutor for LazyOrchestratingBatchSource {
         "lazy-orchestrating"
     }
 
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor> {
         Arc::new(Self)
     }
 
@@ -488,7 +491,10 @@ impl ToolSourceExecutor for ExternalMockSource {
         "external"
     }
 
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor> {
         Arc::new(Self)
     }
 
@@ -548,7 +554,10 @@ impl ToolSourceExecutor for ExactResolvingSource {
         "exact"
     }
 
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor> {
         Arc::new(self.clone())
     }
 
@@ -599,7 +608,10 @@ impl ToolSourceExecutor for NamedExactSource {
         self.id
     }
 
-    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Arc<dyn ToolSourceExecutor> {
         Arc::new(Self { id: self.id })
     }
 
@@ -1486,6 +1498,164 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         registry.export_state().entries().is_empty(),
         "grant execution must not add hidden providers to registry state"
     );
+}
+
+#[tokio::test]
+async fn pinned_source_preserves_provider_by_id_overrides() {
+    struct OverrideProvider;
+
+    impl OverrideProvider {
+        fn definition() -> ToolDefinition {
+            test_tool("override_route", "by-id override witness")
+                .with_activation(crate::ToolActivation::Internal)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for OverrideProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            manifests(vec![Self::definition()])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            (name == Self::definition().name()).then(|| Arc::new(Self::definition().contract()))
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("name-route"))
+        }
+
+        async fn execute_by_id(
+            &self,
+            _tool_id: &crate::ToolId,
+            _args: &serde_json::Value,
+            _context: &crate::AttemptContext<'_>,
+        ) -> ToolOutcome {
+            ToolOutcome::ok(json!("id-route"))
+        }
+
+        async fn execute_attempt_by_id(
+            &self,
+            _tool_id: &crate::ToolId,
+            _args: &serde_json::Value,
+            _context: &crate::AttemptContext<'_>,
+        ) -> crate::ToolAttemptOutcome {
+            crate::ToolAttemptOutcome::done(
+                crate::ToolOutcomeDone::ok(json!("id-attempt-route")),
+                crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+                    crate::EmitProcessEventIntent {
+                        session_id: SessionId::from("registry-test"),
+                        process_id: crate::ProcessId::from("override-target"),
+                        event_type: "override.observed".to_string(),
+                        payload: json!({}),
+                    },
+                )]),
+            )
+        }
+
+        async fn execute_internal_by_id(
+            &self,
+            _tool_id: &crate::ToolId,
+            _args: &serde_json::Value,
+            _context: &crate::InternalProcessContext<'_>,
+        ) -> ToolOutcome {
+            ToolOutcome::ok(json!("id-internal-route"))
+        }
+    }
+
+    let registry = ToolRegistry::from_tool_provider(Arc::new(OverrideProvider))
+        .expect("override provider registry")
+        .compose_session_catalog(true, Vec::new())
+        .expect("pinned override provider registry");
+    let id = tool_id("override_route");
+    let args = json!({});
+    let attempt = test_attempt_context();
+
+    let normal = registry.execute_by_id(&id, &args, &attempt).await;
+    assert_eq!(normal.value_for_projection(), json!("id-route"));
+
+    let attempted = registry.execute_attempt_by_id(&id, &args, &attempt).await;
+    let crate::ToolAttemptOutcome::Done { result, intents } = attempted else {
+        panic!("override attempt completes")
+    };
+    assert_eq!(
+        result.into_output().value_for_projection(),
+        json!("id-attempt-route")
+    );
+    assert_eq!(intents.intents.len(), 1, "the by-id intent is preserved");
+
+    let tool_context = test_tool_context();
+    let internal = crate::InternalProcessContext::__for_testing(&tool_context);
+    let internal_result = registry.execute_internal_by_id(&id, &args, &internal).await;
+    assert_eq!(
+        internal_result.value_for_projection(),
+        json!("id-internal-route")
+    );
+}
+
+#[tokio::test]
+async fn pinned_source_retains_exactly_known_nonadvertised_resident_id() {
+    struct KnownResidentProvider;
+
+    impl KnownResidentProvider {
+        fn definition() -> ToolDefinition {
+            test_tool("known_resident", "known but not advertised")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for KnownResidentProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<ToolManifest> {
+            (id == Self::definition().id()).then(|| Self::definition().manifest())
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+            None
+        }
+
+        fn resolve_contract_by_id(&self, id: &crate::ToolId) -> Option<Arc<ToolContract>> {
+            (id == Self::definition().id()).then(|| Arc::new(Self::definition().contract()))
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("known-resident"))
+        }
+    }
+
+    let registry = ToolRegistry::from_tool_provider(Arc::new(KnownResidentProvider))
+        .expect("known resident provider registry");
+    let mut entries = BTreeMap::new();
+    entries.insert(
+        tool_id("known_resident"),
+        ToolStateEntry::new(KnownResidentProvider::definition().manifest()),
+    );
+    registry
+        .restore_state(ToolState::new(registry.generation(), entries))
+        .expect("the exact-id resolver restores the resident binding");
+
+    let pinned = registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("known resident survives request refresh");
+    let entry = pinned
+        .export_state()
+        .get(&tool_id("known_resident"))
+        .expect("known resident remains in state")
+        .clone();
+    assert!(entry.is_member(), "resident curation remains admitted");
+    assert!(!entry.is_orphaned(), "the exact live route remains bound");
+
+    let result = pinned
+        .execute_by_id(
+            &tool_id("known_resident"),
+            &json!({}),
+            &test_attempt_context(),
+        )
+        .await;
+    assert_eq!(result.value_for_projection(), json!("known-resident"));
 }
 
 #[test]
