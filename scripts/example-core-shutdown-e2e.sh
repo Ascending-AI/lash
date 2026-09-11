@@ -10,6 +10,18 @@ scorecard="$artifact_root/scorecard.tsv"
 printf 'case\tmarker_count\ttrace\tprocess_reaped\tdetail\n' >"$scorecard"
 
 owned_pids=()
+wait_status=0
+forget_pid() {
+  local forgotten="$1" pid
+  local remaining=()
+  for pid in "${owned_pids[@]}"; do
+    if [[ "$pid" != "$forgotten" ]]; then
+      remaining+=("$pid")
+    fi
+  done
+  owned_pids=("${remaining[@]}")
+}
+
 cleanup() {
   local pid
   for pid in "${owned_pids[@]}"; do
@@ -50,16 +62,15 @@ wait_http() {
 
 wait_reaped() {
   local pid="$1" label="$2"
-  local attempt
-  for attempt in $(seq 1 300); do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      wait "$pid" 2>/dev/null || true
-      return
-    fi
-    sleep 0.1
-  done
-  echo "$label did not exit within 30 seconds" >&2
-  return 1
+  if ! timeout 30s tail --pid="$pid" -f /dev/null >/dev/null 2>&1; then
+    echo "$label did not exit within 30 seconds" >&2
+    return 1
+  fi
+  set +e
+  wait "$pid"
+  wait_status=$?
+  set -e
+  forget_pid "$pid"
 }
 
 app_child() {
@@ -114,6 +125,11 @@ run_agent_service_signal() {
   app="$(app_child "$runner" agent-service)"
   kill -TERM "$app"
   wait_reaped "$runner" agent-service-signal
+  assert_count "$wait_status" 0 agent-service-signal-exit
+  if kill -0 "$app" 2>/dev/null; then
+    echo "agent-service app child remained live after cargo runner exit" >&2
+    return 1
+  fi
   count="$(marker_count "$marker" agent-service)"
   assert_count "$count" 1 agent-service-signal-marker
   grep -q 'agent-service shutdown complete' "$log"
@@ -150,6 +166,10 @@ PY
   runner=$!
   owned_pids+=("$runner")
   wait_reaped "$runner" agent-service-bind-error
+  if [[ "$wait_status" == 0 ]]; then
+    echo "agent-service bind-error command unexpectedly succeeded" >&2
+    return 1
+  fi
   kill -TERM "$holder"
   wait_reaped "$holder" agent-service-bind-holder
   count="$(marker_count "$marker" agent-service)"
@@ -198,6 +218,11 @@ run_workbench_signal_with_streams_and_fixture() {
   app="$(app_child "$runner" agent-workbench)"
   kill -TERM "$app"
   wait_reaped "$runner" workbench-signal
+  assert_count "$wait_status" 0 workbench-signal-exit
+  if kill -0 "$app" 2>/dev/null; then
+    echo "agent-workbench app child remained live after cargo runner exit" >&2
+    return 1
+  fi
   wait_reaped "$events" workbench-events-stream
   wait_reaped "$observations" workbench-observations-stream
   count="$(marker_count "$marker" agent-workbench)"
@@ -243,6 +268,10 @@ PY
   runner=$!
   owned_pids+=("$runner")
   wait_reaped "$runner" workbench-bind-error
+  if [[ "$wait_status" == 0 ]]; then
+    echo "agent-workbench bind-error command unexpectedly succeeded" >&2
+    return 1
+  fi
   kill -TERM "$holder"
   wait_reaped "$holder" workbench-bind-holder
   count="$(marker_count "$marker" agent-workbench)"
