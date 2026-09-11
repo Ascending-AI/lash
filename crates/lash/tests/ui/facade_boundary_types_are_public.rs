@@ -184,7 +184,7 @@ impl TurnInputStore for FacadeStore {
     async fn list_pending_turn_inputs(
         &self,
         _session_id: &SessionId,
-    ) -> Result<Vec<lash::PendingTurnInput>, StoreError> {
+    ) -> Result<Vec<lash::PendingTurnInputRead>, StoreError> {
         Ok(Vec::new())
     }
 

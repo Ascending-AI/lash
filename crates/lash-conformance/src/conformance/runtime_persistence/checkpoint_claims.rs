@@ -733,12 +733,12 @@ pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
     assert_eq!(
         pending
             .iter()
-            .map(|row| row.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![input.input_id.as_str()],
         "the input claim must roll back with the refused queued-work claim"
     );
-    assert_eq!(pending[0].state, crate::TurnInputState::PendingActive);
+    assert_eq!(pending[0].input.state, crate::TurnInputState::PendingActive);
 }
 
 /// Prove checkpoint admission probes stay read-only for empty queues and for

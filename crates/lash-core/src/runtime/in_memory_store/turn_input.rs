@@ -170,10 +170,10 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<crate::PendingTurnInput>, crate::store::StoreError> {
+    ) -> Result<Vec<crate::PendingTurnInputRead>, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
-        let live_generation = self.live_session_lease_generation(session_id, now);
+        let live_lease = self.live_session_lease(session_id, now);
         let mut inputs = self
             .pending_turn_inputs
             .lock_recover()
@@ -185,11 +185,17 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                         crate::TurnInputState::PendingActive
                             | crate::TurnInputState::DeferredNextTurn
                     )
-                    && (!entry.claim.live_under(live_generation))
             })
-            .map(|entry| entry.input.clone())
+            .map(|entry| match live_lease {
+                Some((generation, lease_expires_at_ms))
+                    if entry.claim.live_under(Some(generation)) =>
+                {
+                    crate::PendingTurnInputRead::held(entry.input.clone(), lease_expires_at_ms)
+                }
+                _ => crate::PendingTurnInputRead::pending(entry.input.clone()),
+            })
             .collect::<Vec<_>>();
-        inputs.sort_by_key(|input| input.enqueue_seq);
+        inputs.sort_by_key(|read| read.input.enqueue_seq);
         Ok(inputs)
     }
 

@@ -611,6 +611,26 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn in_memory_held_turn_input_visibility_survives_claim_holder_crash() {
+        let substrates = Arc::new(Mutex::new(
+            BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
+        ));
+        Box::pin(held_turn_input_visibility_survives_claim_holder_crash(
+            move |scenario| {
+                let mut substrates = substrates.lock_recover();
+                let substrate = Arc::clone(
+                    substrates
+                        .entry(scenario.to_string())
+                        .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
+                );
+                crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
+            },
+            |_| ConformanceInvocation::native(),
+        ))
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn in_memory_session_graph_state_machine_properties() {
         Box::pin(session_graph_state_machine("in-memory", |_| async {
             Arc::new(crate::InMemorySessionStoreFactory::new())

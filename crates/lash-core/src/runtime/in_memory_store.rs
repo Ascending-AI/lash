@@ -432,16 +432,27 @@ impl InMemorySessionStore {
         )
     }
 
+    /// The generation and exact expiry of the session's currently-live
+    /// execution lease, or `None` when no live lease holds the session.
+    fn live_session_lease(&self, session_id: &SessionId, now: u64) -> Option<(u64, u64)> {
+        let leases = self.session_execution_leases.lock_recover();
+        leases
+            .get(session_id)
+            .filter(|lease| lease.is_live(now))
+            .and_then(|lease| {
+                lease
+                    .held_fields()
+                    .map(|fields| (lease.fencing_token, fields.expires_at_epoch_ms))
+            })
+    }
+
     /// The fencing token of the session's currently-live execution lease, or
     /// `None` when no live lease holds the session. A queued-work or turn-input
     /// claim is live for lease-less host callers exactly when the generation it
     /// pins equals this value (ADR 0029).
     fn live_session_lease_generation(&self, session_id: &SessionId, now: u64) -> Option<u64> {
-        let leases = self.session_execution_leases.lock_recover();
-        leases
-            .get(session_id)
-            .filter(|lease| lease.is_live(now))
-            .map(|lease| lease.fencing_token)
+        self.live_session_lease(session_id, now)
+            .map(|(generation, _)| generation)
     }
 
     fn release_session_execution_lease_in_memory(

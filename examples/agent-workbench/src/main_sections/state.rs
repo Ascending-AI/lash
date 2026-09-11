@@ -78,7 +78,7 @@ pub(crate) struct StateSnapshot {
     pub(crate) observation: RemoteSessionObservation,
     pub(crate) product_events: ProductEventSnapshot,
     pub(crate) active_turns: Vec<lash::TurnAddress>,
-    pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInput>,
+    pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
     pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
     pub(crate) turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
@@ -1612,7 +1612,12 @@ impl WorkbenchQueuedWorkSubmitter {
             .await
             .map_err(lash::runtime::RuntimeEffectControllerError::from)?
             .into_iter()
-            .any(|input| matches!(input.ingress, lash::persistence::TurnInputIngress::NextTurn));
+            .any(|read| {
+                matches!(
+                    read.input.ingress,
+                    lash::persistence::TurnInputIngress::NextTurn
+                )
+            });
         Ok(!queued.is_empty() || next_turn_inputs)
     }
 }

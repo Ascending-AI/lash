@@ -18,7 +18,7 @@ Pending Turn Input is runtime admission evidence for submitted user `TurnInput`.
 - It is not product editing state. Product edits create new source keys, and hosts map product suffix concepts to pending-input ids or source keys before calling Lash.
 - `source_key` is the immutable idempotency key for a submitted revision. Exact replay of the same source key and submitted ingress/input content returns the existing record. Reusing the source key with changed ingress or input content is a store conflict.
 - Cancellation returns typed outcomes: cancelled, already claimed/accepted, already completed, already cancelled, or not found.
-- Cancelled and completed rows remain as tombstones so idempotency and cancellation outcomes stay observable until host-scheduled `RuntimePersistence::vacuum()` prunes them. Pending-list APIs hide terminal rows and live claims.
+- Cancelled and completed rows remain as tombstones so idempotency and cancellation outcomes stay observable until host-scheduled `RuntimePersistence::vacuum()` prunes them. Pending-list APIs hide terminal rows. They return every open row through a separate read projection: an unheld or reclaimable row is pending, while a claim matching the currently live Session Execution Lease generation is held and carries that lease's exact expiry. Held is not a persisted `TurnInputState` and does not infer that the holder process is alive.
 - Runtime suffix cancellation is same-session admission order only: the anchor row's `enqueue_seq` and all later pending-input records.
 - Lash does not copy Flue's submission journal. In-flight turn recovery remains durable effect-host replay; pending-input records cover admission, claim, cancellation, and terminal evidence.
 

@@ -27,6 +27,7 @@ mod claim_honesty;
 mod counterexample;
 mod generator;
 mod interrupted_claim_laws;
+mod pending_input_read_model;
 #[cfg(test)]
 mod tests;
 mod usage_conservation;
@@ -1671,8 +1672,10 @@ async fn assert_model_agreement(
         .list_pending_turn_inputs(&session_id())
         .await
         .map_err(|error| error.to_string())?;
-    if json(&actual_inputs)? != json(&pending_inputs(model))? {
-        return Err("pending turn-input projection differs from lifecycle model".to_string());
+    if json(&actual_inputs)? != json(&pending_input_read_model::pending_input_reads(model))? {
+        return Err(
+            "pending turn-input projection differs from lifecycle and live-claim model".to_string(),
+        );
     }
     let applications = store
         .list_turn_input_applications(&session_id())

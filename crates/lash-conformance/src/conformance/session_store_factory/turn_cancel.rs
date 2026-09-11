@@ -174,7 +174,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                 .await
                 .expect("list pending inputs after repair")
                 .into_iter()
-                .map(|input| input.input_id)
+                .map(|read| read.input.input_id)
                 .collect::<Vec<_>>(),
             match disposition {
                 crate::TurnCancelDisposition::Defer => vec![dropped.input_id, untouched.input_id],

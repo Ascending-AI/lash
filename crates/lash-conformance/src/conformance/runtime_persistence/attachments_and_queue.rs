@@ -1407,7 +1407,7 @@ pub(super) async fn assert_both_retained_claims_are_visible_and_cancellable(
             .await
             .expect("list turn inputs after claim generation stopped being live")
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![input.input_id.as_str()],
         "a turn-input claim whose generation is no longer live must be visible"

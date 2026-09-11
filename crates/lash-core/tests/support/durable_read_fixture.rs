@@ -1060,9 +1060,12 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .await
         .expect("durable fixture drift: pending-input read failed");
     assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].input_id, expected.pending_input_id);
-    assert_eq!(pending[0].source_key.as_deref(), Some(INPUT_SOURCE_KEY));
-    assert!(pending[0].state.is_next_turn_pending());
+    assert_eq!(pending[0].input.input_id, expected.pending_input_id);
+    assert_eq!(
+        pending[0].input.source_key.as_deref(),
+        Some(INPUT_SOURCE_KEY)
+    );
+    assert!(pending[0].input.state.is_next_turn_pending());
     assert_eq!(
         serde_json::to_value(&pending[0].input).expect("encode fixture pending input"),
         serde_json::to_value(TurnInput::text("durable read pending input"))

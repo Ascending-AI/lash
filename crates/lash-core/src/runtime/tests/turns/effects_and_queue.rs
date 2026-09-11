@@ -247,7 +247,7 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
     .await
     .expect("pending inputs after frame follow");
     assert_eq!(pending_after_follow.len(), 1);
-    assert_ne!(pending_after_follow[0].input_id, first.input_id);
+    assert_ne!(pending_after_follow[0].input.input_id, first.input_id);
     let requests_after_follow = requests.lock_recover().clone();
     assert_eq!(requests_after_follow.len(), 2);
     assert!(request_contains_text(
@@ -378,7 +378,7 @@ pub(super) async fn committed_frame_handoff_survives_before_inline_claim_and_pum
     assert!(
         inputs
             .iter()
-            .all(|input| input.input_id != inbound.input_id)
+            .all(|input| input.input.input_id != inbound.input_id)
     );
     let queued = crate::store::QueuedWorkStore::list_pending_queued_work(
         store.as_ref(),
@@ -560,7 +560,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     assert!(
         inputs
             .iter()
-            .all(|input| input.input_id != inbound.input_id)
+            .all(|input| input.input.input_id != inbound.input_id)
     );
 }
 
@@ -624,7 +624,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
     assert!(
         inputs
             .iter()
-            .all(|input| input.input_id != inbound.input_id)
+            .all(|input| input.input.input_id != inbound.input_id)
     );
 }
 
@@ -1624,7 +1624,7 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
     assert!(
         inputs
             .iter()
-            .all(|input| input.input_id != inbound.input_id)
+            .all(|input| input.input.input_id != inbound.input_id)
     );
 }
 

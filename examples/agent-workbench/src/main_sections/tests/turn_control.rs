@@ -230,8 +230,8 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect("list pending inputs");
     assert_eq!(pending.len(), 2);
-    assert_eq!(pending[0].input_id, injected.input_id);
-    assert_eq!(pending[1].input_id, queued.input_id);
+    assert_eq!(pending[0].input.input_id, injected.input_id);
+    assert_eq!(pending[1].input.input_id, queued.input_id);
     session.close().await.expect("close session");
 
     let Json(snapshot) = Box::pin(app_state(
@@ -246,8 +246,14 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
             && message.text == "restored active prompt"
     }));
     assert_eq!(snapshot.pending_turn_inputs.len(), 2);
-    assert_eq!(snapshot.pending_turn_inputs[0].input_id, injected.input_id);
-    assert_eq!(snapshot.pending_turn_inputs[1].input_id, queued.input_id);
+    assert_eq!(
+        snapshot.pending_turn_inputs[0].input.input_id,
+        injected.input_id
+    );
+    assert_eq!(
+        snapshot.pending_turn_inputs[1].input.input_id,
+        queued.input_id
+    );
 
     crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from("running-turn"))
         .await
@@ -263,7 +269,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect("list pending inputs after turn settle");
     assert_eq!(after_settle.len(), 1);
-    assert_eq!(after_settle[0].input_id, queued.input_id);
+    assert_eq!(after_settle[0].input.input_id, queued.input_id);
     session.close().await.expect("close session after settle");
 
     state.track_turn(&session_id, &TurnId::from("settle-race-turn"));
@@ -299,7 +305,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect("list pending inputs after settle race");
     assert_eq!(after_race.len(), 1);
-    assert_eq!(after_race[0].input_id, queued.input_id);
+    assert_eq!(after_race[0].input.input_id, queued.input_id);
     session
         .close()
         .await

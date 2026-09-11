@@ -753,13 +753,15 @@ impl lash_core::TurnInputStore for SnapshotStore {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
+    ) -> std::result::Result<Vec<lash_core::PendingTurnInputRead>, lash_core::store::StoreError>
+    {
         Ok(self
             .pending_turn_inputs
             .lock_recover()
             .iter()
             .filter(|input| input.session_id == session_id)
             .cloned()
+            .map(lash_core::PendingTurnInputRead::pending)
             .collect())
     }
 
@@ -1104,7 +1106,8 @@ impl lash_core::TurnInputStore for BoundSessionStore {
     async fn list_pending_turn_inputs(
         &self,
         _session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
+    ) -> std::result::Result<Vec<lash_core::PendingTurnInputRead>, lash_core::store::StoreError>
+    {
         Ok(Vec::new())
     }
 

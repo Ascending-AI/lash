@@ -1418,6 +1418,22 @@ pub(crate) fn pending_turn_input_from_row(
     })
 }
 
+pub(crate) fn pending_turn_input_read_from_row(
+    row: PgRow,
+) -> Result<lash_core::PendingTurnInputRead, StoreError> {
+    let lease_expires_at_ms = row
+        .get::<Option<i64>, _>("live_lease_expires_at_ms")
+        .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
+        .transpose()?;
+    let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
+    Ok(match lease_expires_at_ms {
+        Some(lease_expires_at_ms) => {
+            lash_core::PendingTurnInputRead::held(input, lease_expires_at_ms)
+        }
+        None => lash_core::PendingTurnInputRead::pending(input),
+    })
+}
+
 pub(crate) async fn load_pending_turn_input(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,

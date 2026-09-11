@@ -166,7 +166,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     assert!(
         pending
             .iter()
-            .all(|input| input.input_id != undelivered.input_id),
+            .all(|input| input.input.input_id != undelivered.input_id),
         "Drop evidence must keep the undelivered input out of every later claim"
     );
     let record = inner_store

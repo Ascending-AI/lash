@@ -157,27 +157,28 @@ impl TurnInputStore for Store {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::PendingTurnInput>, StoreError> {
+    ) -> Result<Vec<lash_core::PendingTurnInputRead>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
-                let outcome: Result<Vec<lash_core::PendingTurnInput>, StoreError> = (|| {
+                let outcome: Result<Vec<lash_core::PendingTurnInputRead>, StoreError> = (|| {
                     let rows = {
                         let mut stmt = conn
                             .prepare(&format!(
-                                "SELECT {PENDING_TURN_INPUT_COLUMNS}
+                                "SELECT {PENDING_TURN_INPUT_COLUMNS},
+                                        (SELECT sel.lease_expires_at_ms
+                                         FROM session_execution_leases sel
+                                         WHERE pending_turn_inputs.claim_token IS NOT NULL
+                                           AND sel.session_id = ?1
+                                           AND sel.lease_token IS NOT NULL
+                                           AND sel.lease_expires_at_ms > ?4
+                                           AND sel.lease_fencing_token
+                                               = pending_turn_inputs.claim_session_lease_generation)
+                                            AS live_lease_expires_at_ms
                                  FROM pending_turn_inputs
                                  WHERE session_id = ?1
                                    AND state IN (?2, ?3)
-                                   AND (claim_token IS NULL OR NOT EXISTS (
-                                        SELECT 1 FROM session_execution_leases sel
-                                        WHERE sel.session_id = ?1
-                                          AND sel.lease_token IS NOT NULL
-                                          AND sel.lease_expires_at_ms > ?4
-                                          AND sel.lease_fencing_token
-                                              = pending_turn_inputs.claim_session_lease_generation
-                                   ))
                                  ORDER BY enqueue_seq ASC"
                             ))
                             .map_err(sqlite_error)?;
@@ -189,12 +190,16 @@ impl TurnInputStore for Store {
                                     lash_core::TurnInputState::DeferredNextTurn.as_str(),
                                     now as i64
                                 ],
-                                pending_turn_input_row_from_sql,
+                                pending_turn_input_read_row_from_sql,
                             )
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
-                    rows.into_iter().map(pending_turn_input_from_row).collect()
+                    rows.into_iter()
+                        .map(|(row, lease_expires_at_ms)| {
+                            pending_turn_input_read_from_row(row, lease_expires_at_ms)
+                        })
+                        .collect()
                 })(
                 );
                 Ok(outcome)

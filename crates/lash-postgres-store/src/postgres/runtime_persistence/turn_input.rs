@@ -176,7 +176,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::PendingTurnInput>, StoreError> {
+    ) -> Result<Vec<lash_core::PendingTurnInputRead>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -184,18 +184,19 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(&format!(
-            "SELECT {PENDING_TURN_INPUT_COLUMNS}
+            "SELECT {PENDING_TURN_INPUT_COLUMNS},
+                    (SELECT sel.lease_expires_at_ms
+                     FROM lash_session_execution_leases sel
+                     WHERE lash_pending_turn_inputs.claim_token IS NOT NULL
+                       AND sel.session_id = $1
+                       AND sel.lease_token IS NOT NULL
+                       AND sel.lease_expires_at_ms > $4
+                       AND sel.lease_fencing_token
+                           = lash_pending_turn_inputs.claim_session_lease_generation)
+                        AS live_lease_expires_at_ms
              FROM lash_pending_turn_inputs
              WHERE session_id = $1
                AND state IN ($2, $3)
-               AND (claim_token IS NULL OR NOT EXISTS (
-                    SELECT 1 FROM lash_session_execution_leases sel
-                    WHERE sel.session_id = $1
-                      AND sel.lease_token IS NOT NULL
-                      AND sel.lease_expires_at_ms > $4
-                      AND sel.lease_fencing_token
-                          = lash_pending_turn_inputs.claim_session_lease_generation
-               ))
              ORDER BY enqueue_seq ASC"
         ))
         .bind(session_id.as_str())
@@ -207,8 +208,7 @@ impl TurnInputStore for PostgresSessionStore {
         .map_err(store_sqlx_error)?;
         let inputs = rows
             .into_iter()
-            .map(pending_turn_input_row)
-            .map(|row| row.and_then(pending_turn_input_from_row))
+            .map(pending_turn_input_read_from_row)
             .collect::<Result<Vec<_>, StoreError>>()?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(inputs)

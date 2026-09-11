@@ -435,7 +435,7 @@ impl From<RuntimeTurnWorkClaimPhase> for RuntimeScenarioPhase {
 pub(crate) struct RuntimeNextTurnInputClaimPhase {
     pub(crate) expected_aliases: Vec<&'static str>,
     pub(crate) expected_texts: Vec<&'static str>,
-    pub(crate) pending_turn_inputs_hidden_after_claim: bool,
+    pub(crate) verify_pending_turn_inputs_held_after_claim: bool,
 }
 
 impl RuntimeNextTurnInputClaimPhase {
@@ -453,8 +453,8 @@ impl RuntimeNextTurnInputClaimPhase {
         self
     }
 
-    pub(crate) fn expect_pending_hidden_after_claim(mut self) -> Self {
-        self.pending_turn_inputs_hidden_after_claim = true;
+    pub(crate) fn expect_pending_held_after_claim(mut self) -> Self {
+        self.verify_pending_turn_inputs_held_after_claim = true;
         self
     }
 }
@@ -663,7 +663,7 @@ async fn assert_pending_turn_inputs(
     assert_eq!(
         pending
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
         expectations
             .iter()
@@ -684,14 +684,14 @@ async fn assert_pending_turn_inputs(
     );
     for (input, expected) in pending.iter().zip(expectations) {
         assert_eq!(
-            input.state, expected.state,
+            input.input.state, expected.state,
             "{scenario_name} pending turn-input state changed for `{}`",
             expected.alias
         );
         match expected.ingress {
             RuntimePendingTurnInputIngressExpectation::NextTurn => {
                 assert!(
-                    matches!(input.ingress, TurnInputIngress::NextTurn),
+                    matches!(input.input.ingress, TurnInputIngress::NextTurn),
                     "{scenario_name} expected `{}` to be pending for the next turn",
                     expected.alias
                 );

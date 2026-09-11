@@ -56,9 +56,9 @@ CAS plus the batch-ownership check described below. Concretely:
   (`is_definitely_dead_for_claimant`) drops out of the claim filters entirely — a
   dead owner's generation can never equal the caller's validated-live one, so
   generation mismatch subsumes it.
-- Host-facing paths that hold no lease (cancelling a queued batch, hiding
-  live-claimed rows from pending snapshots, cancelling a pending turn input)
-  derive liveness from the lease row itself in the same transaction: a claim is
+- Host-facing paths that hold no lease (cancelling a queued batch, projecting
+  held status in pending-input reads, cancelling a pending turn input) derive
+  liveness from the lease row itself in the same transaction: a claim is
   live iff the session's `session_execution_leases` row is live (lease token
   present and `lease_expires_at_ms > now`) **and** its `lease_fencing_token`
   equals the row's `claim_session_lease_generation`. The SQL backends evaluate
@@ -112,8 +112,11 @@ reclaim-mediated rejection LAW would be a contract break.
   claimed rows become claimable. Re-claiming them supersedes the old completion.
 - Claim liveness for lease-less callers is derived from the lease row join, so a
   released or superseded generation immediately makes its claims pending and
-  cancellable again — a claim is never shown as live to a lease-less reader under
-  a lease its owner no longer holds.
+  cancellable again. While the matching generation's lease is live, the
+  pending-input read returns the row as held with that lease row's exact expiry;
+  it does not infer whether the worker is alive. Expiry alone does not revoke the
+  predecessor's completion authority: the read returns the row as pending until
+  successor reclaim mediates supersession.
 - The abandon levers stay for immediate handback but are no longer load-bearing
   for correctness: once an owner loses the lease its claims are eligible for
   successor re-claim, and that re-claim supersedes the old completion.

@@ -363,10 +363,10 @@ impl AppState {
             .map_err(terminal_error)?;
         let first_completed = pending_after_follow
             .iter()
-            .all(|input| input.input_id != first.input_id);
+            .all(|input| input.input.input_id != first.input_id);
         let second_pending_before_drain = pending_after_follow
             .iter()
-            .any(|input| input.input_id == second.input_id);
+            .any(|input| input.input.input_id == second.input_id);
         let second_turn = session
             .queued_turn()
             .drain_id(format!("{}:second-drain", request.workflow_id))

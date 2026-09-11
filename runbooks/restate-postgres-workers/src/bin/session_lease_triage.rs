@@ -1001,16 +1001,14 @@ async fn direct_turn_recovery(
     provider.wait_until_parked().await?;
 
     // The provider has not returned, so nothing of this turn has been driven to
-    // a commit. The accepted row is already durable, but it is *not* claimable:
-    // the parked turn holds it under its own claim, and the pending listing
-    // deliberately hides rows a live claim owns. Zero claimable inputs here is
-    // therefore the observable, and the durability of the row is proved after
-    // the kill, when a peer that was told nothing recovers it.
-    let claimable_while_parked = store
+    // a commit. The accepted row is already durable and visible as held with
+    // the matching lease expiry, but it is not claimable. Its durability is
+    // also proved after the kill, when a peer that was told nothing recovers it.
+    let pending_reads_while_parked = store
         .list_pending_turn_inputs(&session_id)
         .await
         .map_err(anyhow::Error::msg)
-        .context("read the session's claimable inputs while the direct drive is parked")?;
+        .context("read the session's pending inputs while the direct drive is parked")?;
 
     // Kill the worker: abort the future mid-drive and drop the core behind it.
     // No release, no abandonment, no cancellation runs.
@@ -1072,7 +1070,7 @@ async fn direct_turn_recovery(
             .as_ref()
             .and_then(|acceptance| acceptance.source_key.clone()),
         "seed_acceptance_settled": seed_acceptance_settled,
-        "claimable_while_parked": claimable_while_parked.len(),
+        "pending_reads_while_parked": pending_reads_while_parked,
         "recovered_input_id": recovered_application
             .map(|application| application.input_id.clone()),
         "drain_ran": drain_ran,

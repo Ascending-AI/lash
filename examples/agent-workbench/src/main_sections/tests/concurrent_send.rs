@@ -1774,7 +1774,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         mid_turn
             .pending_turn_inputs
             .iter()
-            .map(|input| turn_input_text(&input.input))
+            .map(|input| turn_input_text(&input.input.input))
             .collect::<Vec<_>>(),
         vec!["second send".to_string()],
         "the queued send must be durably pending, not held in browser memory"

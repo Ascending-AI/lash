@@ -473,10 +473,10 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .expect("outbox at switch commit");
     let inbound_completed = pending_at_commit
         .iter()
-        .all(|input| input.input_id != first.input_id);
+        .all(|input| input.input.input_id != first.input_id);
     let second_still_pending = pending_at_commit
         .iter()
-        .any(|input| input.input_id == second.input_id);
+        .any(|input| input.input.input_id == second.input_id);
     let expected_frame_id = lash_core::facade_support::frame_node_id(
         &SessionId::from("logical-turn-sim"),
         lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
@@ -537,7 +537,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             .await
             .expect("pending after follow-on")
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![second.input_id.as_str()]
     );

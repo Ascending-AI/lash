@@ -66,12 +66,12 @@ pub(super) async fn pending_turn_inputs_source_keys_order_cancel_and_cross_sessi
     assert_eq!(
         listed
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![first.input_id.as_str(), second.input_id.as_str()]
     );
-    assert!(listed[0].enqueue_seq < listed[1].enqueue_seq);
-    assert!(listed.iter().all(|input| input.session_id == "root"));
+    assert!(listed[0].input.enqueue_seq < listed[1].input.enqueue_seq);
+    assert!(listed.iter().all(|read| read.input.session_id == "root"));
 
     let cancelled = store
         .cancel_pending_turn_input(&SessionId::from("root"), &second.input_id)
@@ -92,7 +92,7 @@ pub(super) async fn pending_turn_inputs_source_keys_order_cancel_and_cross_sessi
             .await
             .expect("list after cancel")
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![first.input_id.as_str()]
     );
@@ -196,7 +196,7 @@ pub(super) async fn pending_turn_input_bulk_and_suffix_cancellation(
             .await
             .expect("list after bulk cancellation")
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![second.input_id.as_str()]
     );
@@ -314,7 +314,7 @@ pub(super) async fn pending_turn_input_bulk_and_suffix_cancellation(
             .await
             .expect("list after suffix cancellation")
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![second.input_id.as_str()]
     );
@@ -394,26 +394,48 @@ pub(super) async fn pending_turn_input_claims_reclaim_complete_and_fence(
         }
         other => panic!("live claimed pending input must not be cancellable, got {other:?}"),
     }
+    let lease_observation = store
+        .get_session_execution_lease(&SessionId::from("root"))
+        .await
+        .expect("observe live lease for claimed inputs");
+    let live_lease = lease_observation
+        .lease
+        .expect("the claim's session lease must remain held");
     assert!(
-        store
-            .list_pending_turn_inputs(&SessionId::from("root"))
-            .await
-            .expect("list claimed inputs")
-            .is_empty(),
-        "live claimed pending inputs must be hidden from queue previews"
+        lease_observation.observed_at_epoch_ms < live_lease.expires_at_epoch_ms,
+        "the claim projection is only held while its matching lease is live"
     );
+    let claimed_reads = store
+        .list_pending_turn_inputs(&SessionId::from("root"))
+        .await
+        .expect("list claimed inputs");
+    assert_eq!(
+        claimed_reads
+            .iter()
+            .map(|read| read.input.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![first.input_id.as_str(), second.input_id.as_str()]
+    );
+    assert!(claimed_reads.iter().all(|read| {
+        read.status
+            == crate::PendingTurnInputReadStatus::Held {
+                lease_expires_at_ms: live_lease.expires_at_epoch_ms,
+            }
+    }));
 
     store
         .abandon_turn_input_claim(&claim)
         .await
         .expect("abandon pending input claim");
-    assert_eq!(
-        store
-            .list_pending_turn_inputs(&SessionId::from("root"))
-            .await
-            .expect("list after abandon")
-            .len(),
-        2
+    let abandoned_reads = store
+        .list_pending_turn_inputs(&SessionId::from("root"))
+        .await
+        .expect("list after abandon");
+    assert_eq!(abandoned_reads.len(), 2);
+    assert!(
+        abandoned_reads
+            .iter()
+            .all(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Pending))
     );
     let reclaimed = store
         .claim_next_turn_inputs(
@@ -429,6 +451,17 @@ pub(super) async fn pending_turn_input_claims_reclaim_complete_and_fence(
         reclaimed.fencing_token > claim.fencing_token,
         "reclaiming abandoned pending inputs must advance the fencing token"
     );
+    let reclaimed_reads = store
+        .list_pending_turn_inputs(&SessionId::from("root"))
+        .await
+        .expect("list reclaimed inputs");
+    assert_eq!(reclaimed_reads.len(), 2);
+    assert!(reclaimed_reads.iter().all(|read| {
+        read.status
+            == crate::PendingTurnInputReadStatus::Held {
+                lease_expires_at_ms: live_lease.expires_at_epoch_ms,
+            }
+    }));
 
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -442,12 +475,18 @@ pub(super) async fn pending_turn_input_claims_reclaim_complete_and_fence(
         .await
         .expect_err("stale turn-input completion must fail");
     assert!(matches!(err, StoreError::TurnInputClaimSuperseded { .. }));
+    let reads_after_stale_completion = store
+        .list_pending_turn_inputs(&SessionId::from("root"))
+        .await
+        .expect("list reclaimed live inputs");
+    assert_eq!(reads_after_stale_completion.len(), 2);
     assert!(
-        store
-            .list_pending_turn_inputs(&SessionId::from("root"))
-            .await
-            .expect("list reclaimed live inputs")
-            .is_empty(),
+        reads_after_stale_completion.iter().all(|read| {
+            read.status
+                == crate::PendingTurnInputReadStatus::Held {
+                    lease_expires_at_ms: live_lease.expires_at_epoch_ms,
+                }
+        }),
         "stale completion must not abandon the live reclaimed claim"
     );
 
@@ -802,17 +841,17 @@ pub(super) async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     assert_eq!(
         pending_after_interrupt
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![active_keep.input_id.as_str()],
         "cancelled active and next-turn inputs must not be resurrected by interrupt deferral"
     );
     assert!(matches!(
-        pending_after_interrupt[0].ingress,
+        pending_after_interrupt[0].input.ingress,
         crate::TurnInputIngress::NextTurn
     ));
     assert_eq!(
-        pending_after_interrupt[0].state,
+        pending_after_interrupt[0].input.state,
         crate::TurnInputState::DeferredNextTurn
     );
 
@@ -939,7 +978,7 @@ pub(super) async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrup
     assert_eq!(
         pending_after_interrupt
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![
             unaccepted.input_id.as_str(),
@@ -950,12 +989,12 @@ pub(super) async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrup
     );
     let deferred_after_interrupt = pending_after_interrupt
         .iter()
-        .filter(|input| input.ingress.active_turn_id().is_none())
+        .filter(|read| read.input.ingress.active_turn_id().is_none())
         .collect::<Vec<_>>();
     assert_eq!(
         deferred_after_interrupt
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![
             unaccepted.input_id.as_str(),
@@ -963,14 +1002,14 @@ pub(super) async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrup
         ],
         "accepted active inputs must be completed and only unaccepted matching active inputs become next-turn work"
     );
-    assert!(deferred_after_interrupt.iter().all(|input| {
-        matches!(input.ingress, crate::TurnInputIngress::NextTurn)
-            && input.state == crate::TurnInputState::DeferredNextTurn
+    assert!(deferred_after_interrupt.iter().all(|read| {
+        matches!(read.input.ingress, crate::TurnInputIngress::NextTurn)
+            && read.input.state == crate::TurnInputState::DeferredNextTurn
     }));
     assert!(
         pending_after_interrupt
             .iter()
-            .any(|input| input.ingress.active_turn_id() == Some(&TurnId::from("other-turn"))),
+            .any(|read| read.input.ingress.active_turn_id() == Some(&TurnId::from("other-turn"))),
         "inputs for other active turns must not be deferred by this interrupt"
     );
 
@@ -1009,7 +1048,9 @@ pub(super) async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrup
             .await
             .expect("list after completing deferred input")
             .iter()
-            .all(|input| input.ingress.active_turn_id() == Some(&TurnId::from("other-turn"))),
+            .all(|read| {
+                read.input.ingress.active_turn_id() == Some(&TurnId::from("other-turn"))
+            }),
         "inputs for other active turns must not be deferred by this interrupt"
     );
 }
@@ -1072,17 +1113,26 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .expect("list pending inputs after the turn-scoped repair");
     let repaired_row = pending
         .iter()
-        .find(|input| input.input_id == orphaned.input_id)
+        .find(|read| read.input.input_id == orphaned.input_id)
         .expect("the repaired input is still queued");
-    assert_eq!(repaired_row.state, crate::TurnInputState::DeferredNextTurn);
-    assert_eq!(repaired_row.ingress, crate::TurnInputIngress::NextTurn);
+    assert_eq!(
+        repaired_row.input.state,
+        crate::TurnInputState::DeferredNextTurn
+    );
+    assert_eq!(
+        repaired_row.input.ingress,
+        crate::TurnInputIngress::NextTurn
+    );
     let untouched_row = pending
         .iter()
-        .find(|input| input.input_id == other.input_id)
+        .find(|read| read.input.input_id == other.input_id)
         .expect("the other turn's input is still queued");
-    assert_eq!(untouched_row.state, crate::TurnInputState::PendingActive);
     assert_eq!(
-        untouched_row.ingress.active_turn_id(),
+        untouched_row.input.state,
+        crate::TurnInputState::PendingActive
+    );
+    assert_eq!(
+        untouched_row.input.ingress.active_turn_id(),
         Some(&crate::TurnId::from(other_turn_id)),
         "a row pinned to a turn that can still deliver must never be swept"
     );
@@ -1154,10 +1204,10 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     for input_id in [other.input_id.as_str(), follow_on.input_id.as_str()] {
         let row = after_exclusion
             .iter()
-            .find(|input| input.input_id == input_id)
+            .find(|read| read.input.input_id == input_id)
             .expect("the excluded row is still queued");
-        assert_eq!(row.state, crate::TurnInputState::PendingActive);
-        assert!(row.ingress.active_turn_id().is_some());
+        assert_eq!(row.input.state, crate::TurnInputState::PendingActive);
+        assert!(row.input.ingress.active_turn_id().is_some());
     }
     // A row this caller's own live generation holds is never an orphan, even
     // while the lane-generation scope is sweeping around it.
@@ -1189,15 +1239,21 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .expect("list pending inputs after abandoning the claim");
     let restored_row = after_abandon
         .iter()
-        .find(|input| input.input_id == orphaned.input_id)
+        .find(|read| read.input.input_id == orphaned.input_id)
         .expect("the abandoned input is still queued");
-    assert_eq!(restored_row.state, crate::TurnInputState::DeferredNextTurn);
-    assert_eq!(restored_row.ingress, crate::TurnInputIngress::NextTurn);
+    assert_eq!(
+        restored_row.input.state,
+        crate::TurnInputState::DeferredNextTurn
+    );
+    assert_eq!(
+        restored_row.input.ingress,
+        crate::TurnInputIngress::NextTurn
+    );
     assert!(
         after_abandon
             .iter()
-            .all(|input| input.ingress.active_turn_id().is_none()
-                && input.state == crate::TurnInputState::DeferredNextTurn),
+            .all(|read| read.input.ingress.active_turn_id().is_none()
+                && read.input.state == crate::TurnInputState::DeferredNextTurn),
         "no input may stay pinned to a turn once no live claim protects it"
     );
 
@@ -1243,11 +1299,11 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .expect("list pending inputs after the refused repair");
     let untouched = after_refusal
         .iter()
-        .find(|input| input.input_id == stranded.input_id)
+        .find(|read| read.input.input_id == stranded.input_id)
         .expect("the refused row is still queued");
-    assert_eq!(untouched.state, crate::TurnInputState::PendingActive);
+    assert_eq!(untouched.input.state, crate::TurnInputState::PendingActive);
     assert_eq!(
-        untouched.ingress.active_turn_id(),
+        untouched.input.ingress.active_turn_id(),
         Some(&crate::TurnId::from("fig1573-superseded-turn")),
         "a refused repair must leave the row exactly as it found it"
     );

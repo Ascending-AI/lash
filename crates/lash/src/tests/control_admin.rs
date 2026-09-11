@@ -330,7 +330,7 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
     assert_eq!(
         inputs
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![pending.input_id.as_str()]
     );

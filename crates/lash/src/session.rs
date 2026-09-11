@@ -16,9 +16,9 @@ use crate::support::{
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
-    QueuedWorkClaim, TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch, QueuedWorkClaim,
+    TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
 };
 use lash_core::runtime::{UnreportedUsageAttempt, UsageReconciliationReport};
 use lash_core::{
@@ -891,8 +891,13 @@ impl LashSession {
             })
     }
 
-    /// Returns the turn inputs currently awaiting consumption.
-    pub async fn pending_turn_inputs(&self) -> Result<Vec<PendingTurnInput>> {
+    /// Returns every open turn input and its factual read-time claim status.
+    ///
+    /// A held input remains present with the exact expiry of the matching live
+    /// session-execution lease. That status does not prove the holder is alive;
+    /// resubmitting while it is held creates another admission unless the host
+    /// reuses the same source key.
+    pub async fn pending_turn_inputs(&self) -> Result<Vec<PendingTurnInputRead>> {
         let observation = self.runtime.observe();
         let store = self.binding.store();
         store

@@ -257,6 +257,60 @@ pub struct PendingTurnInput {
     pub input: TurnInput,
 }
 
+/// Host-facing projection of one open pending turn-input record.
+///
+/// This projection is separate from [`PendingTurnInput`] because a row's
+/// durable lifecycle state and its read-time claim status answer different
+/// questions. A live matching session-execution-lease generation makes the
+/// row held; an expired, released, or mismatched generation leaves it pending
+/// for successor reclaim under ADR 0029.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct PendingTurnInputRead {
+    /// The durable admission record.
+    pub input: PendingTurnInput,
+    /// Its factual status at the read's store-clock instant.
+    pub status: PendingTurnInputReadStatus,
+}
+
+impl PendingTurnInputRead {
+    /// Project an open row that no live matching claim currently holds.
+    pub fn pending(input: PendingTurnInput) -> Self {
+        Self {
+            input,
+            status: PendingTurnInputReadStatus::Pending,
+        }
+    }
+
+    /// Project an open row held by the currently live matching lease generation.
+    pub fn held(input: PendingTurnInput, lease_expires_at_ms: u64) -> Self {
+        Self {
+            input,
+            status: PendingTurnInputReadStatus::Held {
+                lease_expires_at_ms,
+            },
+        }
+    }
+}
+
+/// Read-time claim status of an open pending turn input.
+///
+/// `Held` reports only durable lease facts. It does not assert that the holder
+/// process is alive, and lease expiry does not itself supersede the holder's
+/// completion authority.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PendingTurnInputReadStatus {
+    /// No currently live matching lease generation holds the row.
+    Pending,
+    /// The row's claim matches the currently live session lease generation.
+    Held {
+        /// Exact expiry stored on that matching session-execution lease.
+        lease_expires_at_ms: u64,
+    },
+}
+
 /// Durable acceptance evidence returned to an ingress caller.
 ///
 /// The receipt deliberately carries only stable routing and idempotency

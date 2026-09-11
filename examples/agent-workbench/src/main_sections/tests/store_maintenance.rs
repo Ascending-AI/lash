@@ -264,7 +264,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
     assert_eq!(
         pending_before
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![retained.input_id.as_str()],
         "only the uncancelled input is still pending"
@@ -305,7 +305,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
     assert_eq!(
         pending_after
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![retained.input_id.as_str()],
         "the live pending input survives the vacuum untouched"

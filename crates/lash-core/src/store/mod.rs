@@ -1046,14 +1046,18 @@ pub trait TurnInputStore: Send + Sync {
         input: crate::PendingTurnInputDraft,
     ) -> Result<crate::PendingTurnInput, StoreError>;
 
-    /// List pending user inputs available for reconciliation or queue preview.
+    /// List open user inputs for reconciliation or queue preview.
     ///
-    /// This excludes completed/cancelled rows and rows currently held by a live
-    /// claim. Expired claims are visible again according to their state.
+    /// Completed and cancelled rows are excluded. A claim matching the
+    /// currently live session-execution-lease generation is returned as
+    /// [`PendingTurnInputReadStatus::Held`](crate::PendingTurnInputReadStatus::Held)
+    /// with that lease's exact expiry. Expired, released, and mismatched
+    /// generations are returned as pending under ADR 0029; this read never
+    /// infers whether a holder process is alive.
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<crate::PendingTurnInput>, StoreError>;
+    ) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
 
     /// Read canonical input applications from durable turn-commit records.
     ///

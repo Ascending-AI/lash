@@ -157,7 +157,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
+    ) -> Result<Vec<crate::PendingTurnInputRead>, StoreError> {
         self.inner().list_pending_turn_inputs(session_id).await
     }
 
@@ -630,7 +630,7 @@ where
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
+    ) -> Result<Vec<crate::PendingTurnInputRead>, StoreError> {
         RuntimePersistenceDecorator::list_pending_turn_inputs(self, session_id).await
     }
 

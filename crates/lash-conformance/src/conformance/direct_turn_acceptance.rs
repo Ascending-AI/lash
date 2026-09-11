@@ -102,9 +102,10 @@ fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
 /// instead of the accepted row settles no application for it.
 ///
 /// Mid-drive the session offers *no* claimable input, because the accepted row
-/// is held by this turn's own claim — the ordinary pending listing deliberately
-/// hides rows a live claim owns. (The complementary ordering proof, that the row
-/// is durable before anything executes, is
+/// is held by this turn's own claim. The ordinary pending listing still returns
+/// that row with the factual held status and the matching live lease's exact
+/// expiry. (The complementary ordering proof, that the row is durable before
+/// anything executes, is
 /// [`orphaned_direct_turn_input_is_drivable_by_another_worker`], where the drive
 /// aborts before committing and the row is still there.)
 pub async fn direct_turn_accepts_before_driving(
@@ -128,7 +129,11 @@ pub async fn direct_turn_accepts_before_driving(
                         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
                         .await
                         .expect("read the session's pending inputs mid-drive");
-                    *probe.lock().expect("probe lock") = Some(pending.len());
+                    let lease = store
+                        .get_session_execution_lease(&SessionId::from(SESSION_ID))
+                        .await
+                        .expect("read the matching session lease mid-drive");
+                    *probe.lock().expect("probe lock") = Some((pending, lease));
                     Ok(text_response("accepted"))
                 }
             })
@@ -155,14 +160,31 @@ pub async fn direct_turn_accepts_before_driving(
         .await
         .expect("run the direct acceptance conformance turn");
 
-    let pending_count = probe
+    let (pending, lease_observation) = probe
         .lock()
         .expect("probe lock")
+        .clone()
         .expect("the provider must have run");
+    assert_eq!(pending.len(), 1, "the held input must remain visible");
+    let held = &pending[0];
+    let lease = lease_observation
+        .lease
+        .expect("the executing turn must still hold its session lease");
+    assert!(
+        lease_observation.observed_at_epoch_ms < lease.expires_at_epoch_ms,
+        "the control read must observe a still-live lease"
+    );
     assert_eq!(
-        pending_count, 0,
-        "the input a direct turn is driving is held by its own claim, so nothing is claimable \
-         while it runs"
+        held.status,
+        crate::PendingTurnInputReadStatus::Held {
+            lease_expires_at_ms: lease.expires_at_epoch_ms,
+        },
+        "the held marker must carry the exact matching session-lease expiry"
+    );
+    assert_eq!(
+        held.input.state,
+        crate::TurnInputState::DeferredNextTurn,
+        "held is a read status, not a persisted TurnInputState"
     );
 
     let acceptance = turn
@@ -170,6 +192,10 @@ pub async fn direct_turn_accepts_before_driving(
         .as_ref()
         .expect("a store-backed direct turn exposes its acceptance identity");
     let input_id = acceptance.input_id.clone();
+    assert_eq!(
+        held.input.input_id, input_id,
+        "the held projection must name the acceptance this turn is driving"
+    );
     assert_eq!(acceptance.session_id, SESSION_ID);
     assert_eq!(
         acceptance.source_key, None,
@@ -191,7 +217,7 @@ pub async fn direct_turn_accepts_before_driving(
             .await
             .expect("read pending inputs")
             .iter()
-            .all(|pending| pending.input_id != input_id),
+            .all(|pending| pending.input.input_id != input_id),
         "a committed turn leaves no pending acceptance behind"
     );
 
@@ -262,6 +288,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     let input_id = orphaned
         .first()
         .expect("an abandoned direct turn leaves its acceptance durable and rediscoverable")
+        .input
         .input_id
         .clone();
     drop(first_driver);
@@ -321,7 +348,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
             .await
             .expect("read pending inputs after recovery")
             .iter()
-            .all(|pending| pending.input_id != input_id),
+            .all(|pending| pending.input.input_id != input_id),
         "recovery settles the row rather than leaving it claimable forever"
     );
 }
@@ -652,7 +679,7 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
         .await
         .expect("list pending inputs after the unclaimed settlement")
         .iter()
-        .all(|pending| pending.input_id != open.input_id),
+        .all(|pending| pending.input.input_id != open.input_id),
         "an unclaimed settlement retires the row it named"
     );
 

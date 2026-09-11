@@ -423,14 +423,19 @@ impl GeneratedRuntimeWorld {
             ready = async {
                 runtime_session.provider_schedule.wait_until_blocked(exchange_index, 0).await;
                 // The same model rows that admission will claim must now be
-                // absent from the runtime's pending-input view, which excludes
-                // live claims. No boundary is delivered during this wait and the
-                // first wire gate is closed, so these rows cannot have been
-                // cancelled or completed. An empty admission needs no store read.
+                // visible as held in the runtime's pending-input view. No
+                // boundary is delivered during this wait and the first wire
+                // gate is closed, so these rows cannot have been cancelled or
+                // completed. An empty admission needs no store read.
                 while !expected_claims.is_empty() {
                     let pending = runtime_session.session.pending_turn_inputs().await
                         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-                    if pending.iter().all(|input| !expected_claims.contains(&input.input_id)) {
+                    if expected_claims.iter().all(|input_id| {
+                        pending.iter().any(|read| {
+                            &read.input.input_id == input_id
+                                && matches!(read.status, lash::PendingTurnInputReadStatus::Held { .. })
+                        })
+                    }) {
                         break;
                     }
                     tokio::task::yield_now().await;

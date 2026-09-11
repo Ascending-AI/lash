@@ -138,17 +138,38 @@ impl RuntimeScenarioContext {
             "{} claimed next-turn input payloads changed",
             self.name
         );
-        if phase.pending_turn_inputs_hidden_after_claim {
-            assert!(
-                self.store()
-                    .list_pending_turn_inputs(&self.session_id)
-                    .await
-                    .unwrap_or_else(|err| panic!(
+        if phase.verify_pending_turn_inputs_held_after_claim {
+            let reads = self
+                .store()
+                .list_pending_turn_inputs(&self.session_id)
+                .await
+                .unwrap_or_else(|err| {
+                    panic!(
                         "{} failed to list pending turn inputs after claim: {err}",
                         self.name
-                    ))
-                    .is_empty(),
-                "{} live claimed turn inputs should be hidden from queue preview",
+                    )
+                });
+            assert_eq!(
+                reads
+                    .iter()
+                    .map(|read| read.input.input_id.as_str())
+                    .collect::<Vec<_>>(),
+                claim
+                    .inputs
+                    .iter()
+                    .map(|input| input.input_id.as_str())
+                    .collect::<Vec<_>>(),
+                "{} live claimed turn inputs must remain visible",
+                self.name
+            );
+            assert!(
+                reads.iter().all(|read| {
+                    read.status
+                        == crate::PendingTurnInputReadStatus::Held {
+                            lease_expires_at_ms: lease.expires_at_epoch_ms,
+                        }
+                }),
+                "{} live claimed turn inputs must report the matching lease expiry",
                 self.name
             );
         }
