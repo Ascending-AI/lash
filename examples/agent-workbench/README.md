@@ -227,6 +227,16 @@ returns `ToolOutcome::Pending`. The right-rail approval ledger and
 `GET /api/approvals` list those waits; approve and deny actions resolve the
 existing key through `LashCore::completions()`.
 
+`GET /api/sessions/{session_id}/waits` separately demonstrates the
+deployment-administrative discovery read. It returns every currently
+registered, unresolved durable wait for that session, not approval requests;
+tool arguments, classification, and decision history remain in the approval
+ledger. The result is a concurrent snapshot, so a key can settle before an
+operator acts on it. Because each returned key carries the authority accepted
+by `Completions::resolve`, the example protects the route with both session
+observation and deployment-operator authorization; production hosts must apply
+their own equivalent policy.
+
 Approval is host policy. Lash core will never grow a manifest approval flag or
 approval/revert API: hosts decide which tools need sign-off, how operators are
 authorized, and what approve or deny means. Lash supplies only the durable

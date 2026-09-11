@@ -1714,11 +1714,29 @@ async fn postgres_await_event_key_mint_is_pure_and_signatures_match_sqlite_when_
         first, second,
         "concurrent openers must read one store secret"
     );
+    let observer = storage.effect_host();
+    assert!(
+        observer
+            .list_outstanding_await_event_keys(&SessionId::from("unknown-pure-key-session"))
+            .await
+            .expect("unknown session read")
+            .is_empty()
+    );
+    assert!(
+        observer
+            .list_outstanding_await_event_keys(&SessionId::from("pure-key-session"))
+            .await
+            .expect("minted-only session read")
+            .is_empty()
+    );
     let wait_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_await_event_waits")
         .fetch_one(storage.pool())
         .await
         .expect("count await-event waits");
-    assert_eq!(wait_count, 0, "key mint must not register a promise row");
+    assert_eq!(
+        wait_count, 0,
+        "key mint and administrative reads must not register a promise row"
+    );
     let secret: Vec<u8> = sqlx::query_scalar(
         "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
     )

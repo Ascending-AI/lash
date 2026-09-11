@@ -767,6 +767,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn non_enumerable_effect_host_reports_typed_unsupported() {
+        let error = RecordingEffectHost::default()
+            .list_outstanding_await_event_keys(&SessionId::from("unsupported-session"))
+            .await
+            .expect_err("the default host implementation must not claim an empty registry");
+        assert_eq!(error.code, crate::RuntimeErrorCode::AwaitEventUnsupported);
+    }
+
+    #[tokio::test]
     async fn recording_effect_host_records_selected_scope_and_envelope() {
         let host = RecordingEffectHost::default();
         let scope = ExecutionScope::runtime_operation("trigger:button-1");

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use lash_core::facade_support::await_event_coordinator::{
     AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
-    PersistedPromise, TerminalCas,
+    PersistedPromise, RegisteredAwaitEvent, TerminalCas,
 };
 use lash_core::{RuntimeError, RuntimeErrorCode};
 use sqlx::postgres::{PgPool, PgRow};
@@ -210,6 +210,31 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
             .map_or(PersistedPromise::Pending, |terminal_json| {
                 PersistedPromise::Resolved { terminal_json }
             }))
+    }
+
+    async fn list_pending_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<RegisteredAwaitEvent>, RuntimeError> {
+        sqlx::query(
+            "SELECT key_id, scope_json, wait_json
+             FROM lash_await_event_waits
+             WHERE session_id = $1 AND terminal_json IS NULL
+             ORDER BY key_id",
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| RegisteredAwaitEvent {
+                    key_id: row.get("key_id"),
+                    scope_json: row.get("scope_json"),
+                    wait_json: row.get("wait_json"),
+                })
+                .collect()
+        })
+        .map_err(store_error)
     }
 
     async fn revoke_session(

@@ -13,7 +13,7 @@ use pretty_assertions::assert_eq;
 
 /// Number of named Layer-A vector groups executed by
 /// [`effect_host_await_events_cold_instance`].
-pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 9;
+pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 10;
 
 async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreFactory> {
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
@@ -76,6 +76,7 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     cold_scope_retirement_survives_reopen(&make, &prefix).await;
     cold_cancel_sweep_excludes_turn_control(&make, &prefix).await;
     cold_terminal_attach_both_orders(&make, &prefix).await;
+    super::effect_host::effect_host_lists_registered_unresolved_waits(make(), make(), make()).await;
 }
 
 async fn cold_replayed_parked_owner<F>(make: &F, prefix: &str)

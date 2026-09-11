@@ -1930,13 +1930,34 @@ async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
         "concurrent openers must read one store secret"
     );
 
+    let observer = SqliteEffectHost::open(&path)
+        .await
+        .expect("administrative read host");
+    assert!(
+        observer
+            .list_outstanding_await_event_keys(&SessionId::from("unknown-pure-key-session"))
+            .await
+            .expect("unknown session read")
+            .is_empty()
+    );
+    assert!(
+        observer
+            .list_outstanding_await_event_keys(&SessionId::from("pure-key-session"))
+            .await
+            .expect("minted-only session read")
+            .is_empty()
+    );
+
     let connection = rusqlite::Connection::open(&path).expect("open raw effect database");
     let wait_count: i64 = connection
         .query_row("SELECT COUNT(*) FROM await_event_waits", [], |row| {
             row.get(0)
         })
         .expect("count await-event waits");
-    assert_eq!(wait_count, 0, "key mint must not register a promise row");
+    assert_eq!(
+        wait_count, 0,
+        "key mint and administrative reads must not register a promise row"
+    );
     let secret_shape: (i64, i64) = connection
         .query_row(
             "SELECT COUNT(*), length(MAX(signing_secret)) FROM await_event_meta",
