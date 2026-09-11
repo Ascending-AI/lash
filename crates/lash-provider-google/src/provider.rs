@@ -28,7 +28,9 @@ impl GoogleOAuthProvider {
             stop_sequences: GenerationOptionOutcome::applied(
                 !req.generation.stop_sequences.is_empty(),
             ),
-            cache: lash_llm_transport::cache_intent_disposition(req, None),
+            // Cloud Code reports cached-token usage, but Lash emits no
+            // prompt-cache directive in this request dialect.
+            cache: lash_llm_transport::cache_intent_disposition(req, false),
         }
     }
 

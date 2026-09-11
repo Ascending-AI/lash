@@ -80,11 +80,22 @@ impl OpenAiProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<Value, LlmTransportError> {
-        self.inner.build_responses_request_body_for_route(
-            req,
-            stream,
-            &self.route_identity(&req.model),
-        )
+        self.build_responses_request_body_with_cache_evidence(req, stream)
+            .map(|(body, _)| body)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn build_responses_request_body_with_cache_evidence(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+    ) -> Result<(Value, bool), LlmTransportError> {
+        self.inner
+            .build_responses_request_body_for_route_with_cache_evidence(
+                req,
+                stream,
+                &self.route_identity(&req.model),
+            )
     }
 }
 
