@@ -69,7 +69,7 @@ REGISTRATION_BASELINES = {
     # FIG-2945: the public serialized sans-IO turn checkpoint is enrolled at
     # v2 when completed pre-dispatch reporting joins its pending effect vocabulary.
     "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
-        "sha256:b9464c87b8fa8bf9c49507ff8e47817b50023f7cc939eee290d43f177167a084"
+        "sha256:ee760686edf120042dd150c32569bc1a4d46d56ab14a165c140351ec6db0a6c5"
     ),
     # FIG-2164: native channel surfaces are new relative to main. Parked
     # state honestly advanced from lane v1 to v2 when unused prose was removed;

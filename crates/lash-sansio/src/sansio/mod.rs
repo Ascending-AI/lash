@@ -46,7 +46,9 @@ pub use turn_protocol::{
 };
 mod machine_state;
 use machine_state::{EffectDeliveryStatus, MachineState};
-pub use machine_state::{TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnMachine};
+pub use machine_state::{
+    TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine,
+};
 mod helpers;
 mod turn_machine;
 use helpers::{checked_turn_usage_from_llm_usage, refine_terminal_reason_for_context_window};

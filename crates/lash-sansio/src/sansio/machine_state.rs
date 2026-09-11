@@ -87,6 +87,26 @@ impl<M: TurnProtocol> TurnCheckpoint<M> {
     }
 }
 
+/// Failure to restore a checkpoint written by an unsupported future schema.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TurnCheckpointRestoreError {
+    /// The checkpoint was written by a newer schema than this build can read.
+    UnsupportedSchemaVersion { actual: u32, supported: u32 },
+}
+
+impl std::fmt::Display for TurnCheckpointRestoreError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedSchemaVersion { actual, supported } => write!(
+                formatter,
+                "turn checkpoint is schema version {actual}, but this build reads at most {supported}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TurnCheckpointRestoreError {}
+
 impl<M: TurnProtocol> Clone for MachineState<M> {
     fn clone(&self) -> Self {
         match self {

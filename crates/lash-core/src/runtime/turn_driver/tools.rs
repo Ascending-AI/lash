@@ -184,20 +184,9 @@ impl RuntimeTurnDriver<'_> {
                             .complete_tool_call(call_id.clone(), replay, dispatch_outcome)
                             .await
                             .completed;
-                        send_turn_activity(
-                            event_tx,
-                            crate::session::tool_activity_id(&call_id),
-                            crate::TurnEvent::ToolCallCompleted {
-                                call_id: Some(call_id.clone()),
-                                name: completed.tool_name.clone(),
-                                args: completed.args.clone(),
-                                output: completed.output.clone(),
-                                duration_ms: completed.duration_ms,
-                                graph_key: None,
-                                parent_call_id: None,
-                            },
-                        )
-                        .await;
+                        // `complete_tool_call` owns both trace and activity
+                        // completion reporting, including replayed pending
+                        // batch outcomes. Sending here would duplicate activity.
                         results[source_index] = Some(completed);
                     }
                 }

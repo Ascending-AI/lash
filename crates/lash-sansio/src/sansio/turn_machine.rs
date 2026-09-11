@@ -122,12 +122,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn restore_from_checkpoint(
         config: TurnMachineConfig<M>,
         checkpoint: TurnCheckpoint<M>,
-    ) -> Self {
+    ) -> Result<Self, TurnCheckpointRestoreError> {
+        if checkpoint.schema_version > TURN_CHECKPOINT_SCHEMA_VERSION {
+            return Err(TurnCheckpointRestoreError::UnsupportedSchemaVersion {
+                actual: checkpoint.schema_version,
+                supported: TURN_CHECKPOINT_SCHEMA_VERSION,
+            });
+        }
         let side_effect_outbox = checkpoint
             .pending_effects
             .into_iter()
             .collect::<VecDeque<_>>();
-        Self {
+        Ok(Self {
             config,
             state: checkpoint.state,
             side_effect_outbox,
@@ -143,7 +149,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             termination: checkpoint.termination,
             synced_protocol_iteration: checkpoint.synced_protocol_iteration,
             observed_cancellation: None,
-        }
+        })
     }
 
     fn driver_context(&self) -> DriverContextView<'_, M> {

@@ -183,12 +183,6 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         id: EffectId,
         calls: Vec<PendingToolCall>,
     },
-    /// Report completed tool calls that the protocol refused before dispatch.
-    ///
-    /// The host emits the shared tool lifecycle pair for these calls. Turn
-    /// accounting is emitted separately by the machine immediately after this
-    /// effect, preserving `Started` before the accounting completion record.
-    ReportToolCalls { completed: Vec<CompletedToolCall> },
     /// Execute a protocol-owned code block.
     ExecCode {
         id: EffectId,
@@ -220,6 +214,12 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         event_delta: Vec<SessionHistoryRecord<M::Event>>,
         protocol_iteration: usize,
     },
+    /// Report completed tool calls that the protocol refused before dispatch.
+    ///
+    /// The host emits the shared tool lifecycle pair for these calls. Turn
+    /// accounting is emitted separately by the machine immediately after this
+    /// effect, preserving `Started` before the accounting completion record.
+    ReportToolCalls { completed: Vec<CompletedToolCall> },
 }
 
 impl<M: TurnProtocol> Clone for Effect<M> {
@@ -373,10 +373,6 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     StartTools {
         calls: Vec<PendingToolCall>,
     },
-    /// Report completed tool calls that were refused before host dispatch.
-    ReportToolCalls {
-        completed: Vec<CompletedToolCall>,
-    },
     StartExec {
         language: String,
         code: String,
@@ -395,6 +391,10 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
         evidence: crate::TurnCancellationEvidence,
     },
     Finish(TurnOutcome),
+    /// Report completed tool calls that were refused before host dispatch.
+    ReportToolCalls {
+        completed: Vec<CompletedToolCall>,
+    },
 }
 
 pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {

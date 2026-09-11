@@ -50,8 +50,9 @@ pub use sansio::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, LlmCallError,
     PendingToolCall, ProjectorContext, ProtocolDriverHandle, Response,
-    TURN_CHECKPOINT_SCHEMA_VERSION, TurnCause, TurnCheckpoint, TurnMachine, TurnMachineConfig,
-    TurnProtocol, UnitTurnProtocol, WaitingExecState, WaitingLlmState, render_turn_causes_prompt,
+    TURN_CHECKPOINT_SCHEMA_VERSION, TurnCause, TurnCheckpoint, TurnCheckpointRestoreError,
+    TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol, WaitingExecState,
+    WaitingLlmState, render_turn_causes_prompt,
 };
 pub use schema_contract::{
     ProjectionMode, ProviderSchemaCapabilities, ResolvedSchema, SchemaContract, SchemaDialect,

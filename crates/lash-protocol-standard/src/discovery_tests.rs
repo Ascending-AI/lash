@@ -1,4 +1,6 @@
 use super::*;
+use lash_sansio::sync::MutexExt;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
@@ -197,6 +199,22 @@ fn trace_lifecycle_count(entries: &[Value], call_id: &str, kind: &str) -> usize 
         .count()
 }
 
+#[derive(Default)]
+struct RecordingTurnActivities(Mutex<Vec<lash_core::TurnActivity>>);
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::TurnActivitySink for RecordingTurnActivities {
+    async fn emit(&self, activity: lash_core::TurnActivity) {
+        self.0.lock_recover().push(activity);
+    }
+}
+
+impl RecordingTurnActivities {
+    fn snapshot(&self) -> Vec<lash_core::TurnActivity> {
+        self.0.lock_recover().clone()
+    }
+}
+
 async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     let calls = Arc::new(AtomicUsize::new(0));
     let saw_refusal_text = Arc::new(AtomicBool::new(false));
@@ -282,13 +300,15 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     .await
     .expect("runtime");
 
+    let turn_activities = RecordingTurnActivities::default();
     let turn = runtime
         .stream_turn(
             lash_core::TurnInput::text("exercise discovery refusal"),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scoped_controller,
-            ),
+            )
+            .with_turn_events(&turn_activities),
         )
         .await
         .expect("turn");
@@ -361,6 +381,36 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
             })
             .expect("completion position");
         assert!(started < completed, "ordered lifecycle for {call_id}");
+    }
+    let activities = turn_activities.snapshot();
+    for call_id in if mixed {
+        vec!["refused-call", "admitted-call"]
+    } else {
+        vec!["refused-call"]
+    } {
+        let expected_correlation = lash_core::TurnActivityId::new(format!("tool:{call_id}"));
+        let lifecycle = activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                lash_core::TurnEvent::ToolCallStarted {
+                    call_id: Some(observed),
+                    ..
+                } if observed == call_id => Some(("started", &activity.correlation_id)),
+                lash_core::TurnEvent::ToolCallCompleted {
+                    call_id: Some(observed),
+                    ..
+                } if observed == call_id => Some(("completed", &activity.correlation_id)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            lifecycle,
+            [
+                ("started", &expected_correlation),
+                ("completed", &expected_correlation),
+            ],
+            "exactly one ordered activity pair keyed by {call_id}: {activities:?}"
+        );
     }
     let _ = std::fs::remove_file(trace_path);
 }

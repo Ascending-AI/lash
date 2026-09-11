@@ -467,9 +467,10 @@ async fn assert_standard_tool_lifecycle(
         test_host_config_with_trace_path(trace_path.clone()),
     )
     .await;
+    let turn_events = RecordingTurnEvents::default();
 
     let turn = runtime
-        .run_turn_assembled(
+        .stream_turn(
             TurnInput {
                 items: vec![InputItem::Text {
                     text: "call the tool".to_string(),
@@ -479,11 +480,14 @@ async fn assert_standard_tool_lifecycle(
                 protocol_extension: None,
                 turn_context: crate::TurnContext::default(),
             },
-            CancellationToken::new(),
-            named_turn_scope(
-                &SessionId::from("root"),
-                &TurnId::from("trace-standard-tool-turn"),
-            ),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("trace-standard-tool-turn"),
+                ),
+            )
+            .with_turn_events(&turn_events),
         )
         .await
         .expect("turn");
@@ -547,6 +551,42 @@ async fn assert_standard_tool_lifecycle(
         started_position < completed_position,
         "Started must precede Completed: {entries:?}"
     );
+
+    let activities = turn_events.snapshot();
+    let lifecycle = activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            crate::TurnEvent::ToolCallStarted {
+                call_id: Some(observed),
+                ..
+            } if observed == call_id => Some("started"),
+            crate::TurnEvent::ToolCallCompleted {
+                call_id: Some(observed),
+                ..
+            } if observed == call_id => Some("completed"),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lifecycle,
+        ["started", "completed"],
+        "exactly one ordered activity pair keyed by {call_id}: {activities:?}"
+    );
+    let expected_correlation = crate::TurnActivityId::new(format!("tool:{call_id}"));
+    assert!(
+        activities
+            .iter()
+            .filter(|activity| {
+                matches!(
+                    &activity.event,
+                    crate::TurnEvent::ToolCallStarted { call_id: Some(observed), .. }
+                        | crate::TurnEvent::ToolCallCompleted { call_id: Some(observed), .. }
+                        if observed == call_id
+                )
+            })
+            .all(|activity| activity.correlation_id == expected_correlation),
+        "tool activity correlation remains keyed by call id: {activities:?}"
+    );
     // Span identity is stamped from session/turn context so the tool nests
     // under its turn as `tool:<call_id>`.
     let expected_graph_node_id = format!("tool:{call_id}");
@@ -573,6 +613,157 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
         Vec::new(),
     ))
     .await;
+}
+
+struct PendingBatchOutcomeController;
+
+impl crate::AwaitEventResolver for PendingBatchOutcomeController {}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for PendingBatchOutcomeController {
+    async fn execute_effect(
+        &self,
+        envelope: crate::RuntimeEffectEnvelope,
+        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        match envelope.command {
+            crate::RuntimeEffectCommand::ToolBatch { batch } => {
+                assert_eq!(batch.calls.len(), 1);
+                let call_id = batch.calls[0].call.call_id.clone();
+                let turn_id = envelope
+                    .invocation
+                    .scope
+                    .turn_id
+                    .clone()
+                    .expect("turn-scoped tool batch");
+                Ok(crate::RuntimeEffectOutcome::ToolBatch {
+                    launches: vec![crate::runtime::ToolCallLaunch::Pending {
+                        key: Box::new(crate::AwaitEventKey {
+                            scope: crate::ExecutionScope::turn(
+                                envelope.invocation.scope.session_id.clone(),
+                                turn_id,
+                            ),
+                            wait: crate::AwaitEventWaitIdentity::tool_completion(call_id),
+                            key_id: "pending-batch-key".to_string(),
+                            signature: "pending-batch-signature".to_string(),
+                        }),
+                        pending: crate::PendingCompletion::default(),
+                        duration_ms: 7,
+                    }],
+                    triggers: Vec::new(),
+                    settlement_order: vec![0],
+                })
+            }
+            crate::RuntimeEffectCommand::AwaitEvent { .. } => {
+                Ok(crate::RuntimeEffectOutcome::AwaitEvent {
+                    resolution: crate::Resolution::Ok(serde_json::json!("resolved")),
+                })
+            }
+            command => {
+                local_executor
+                    .execute(crate::RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        command,
+                    ))
+                    .await
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
+    let call_id = "call-pending";
+    let transport = mock_provider(vec![
+        MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::ToolCall {
+                    call_id: call_id.to_string(),
+                    tool_name: "echo_tool".to_string(),
+                    input_json: r#"{"value":"pending"}"#.to_string(),
+                    replay: None,
+                }],
+                ..LlmResponse::default()
+            }),
+        },
+        completed_text_call("done"),
+    ]);
+    let trace_path = std::env::temp_dir().join(format!(
+        "lash-pending-tool-trace-{}-{}.jsonl",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EchoTool),
+        transport,
+        test_host_config_with_trace_path(trace_path.clone()),
+    )
+    .await;
+    let controller: Arc<dyn crate::RuntimeEffectController> =
+        Arc::new(PendingBatchOutcomeController);
+    let turn_events = RecordingTurnEvents::default();
+
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("call the pending tool"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                crate::ScopedEffectController::shared(
+                    controller,
+                    crate::ExecutionScope::turn("root", "pending-tool-turn"),
+                )
+                .expect("scoped controller"),
+            )
+            .with_turn_events(&turn_events),
+        )
+        .await
+        .expect("turn");
+
+    assert_eq!(turn.tool_calls.len(), 1);
+    assert_eq!(turn.tool_calls[0].call_id.as_deref(), Some(call_id));
+    let entries = std::fs::read_to_string(&trace_path)
+        .expect("read pending trace")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace entry"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| {
+                entry.get("type").and_then(serde_json::Value::as_str) == Some("tool_call_completed")
+                    && entry.get("call_id").and_then(serde_json::Value::as_str) == Some(call_id)
+            })
+            .count(),
+        1,
+        "pending resolution owns exactly one trace completion: {entries:?}"
+    );
+    let activities = turn_events.snapshot();
+    let completions = activities
+        .iter()
+        .filter(|activity| {
+            matches!(
+                &activity.event,
+                crate::TurnEvent::ToolCallCompleted { call_id: Some(observed), .. }
+                    if observed == call_id
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        completions.len(),
+        1,
+        "pending resolution owns exactly one activity completion: {activities:?}"
+    );
+    assert_eq!(
+        completions[0].correlation_id,
+        crate::TurnActivityId::new(format!("tool:{call_id}"))
+    );
+
+    let _ = std::fs::remove_file(trace_path);
 }
 
 #[tokio::test]

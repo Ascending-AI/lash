@@ -731,13 +731,49 @@ mod tests {
         );
     }
 
+    #[derive(Default)]
+    struct ToolLifecycleTraceSink {
+        lifecycle: Mutex<Vec<(String, &'static str)>>,
+    }
+
+    impl lash_trace::TraceSink for ToolLifecycleTraceSink {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            let entry = match &record.event {
+                lash_trace::TraceEvent::ToolCallStarted {
+                    call_id: Some(call_id),
+                    ..
+                } => Some((call_id.clone(), "started")),
+                lash_trace::TraceEvent::ToolCallCompleted {
+                    call_id: Some(call_id),
+                    ..
+                } => Some((call_id.clone(), "completed")),
+                _ => None,
+            };
+            if let Some(entry) = entry {
+                self.lifecycle.lock_recover().push(entry);
+            }
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn batch_failures_before_dispatch_emit_ordered_per_call_lifecycle_pairs() {
         let (turn_tx, mut turn_rx) = tokio::sync::mpsc::channel(8);
+        let trace_sink = Arc::new(ToolLifecycleTraceSink::default());
+        let erased_trace_sink: Arc<dyn lash_trace::TraceSink> = trace_sink.clone();
+        let tracing = crate::session::execution_context::RuntimeExecutionTracing::new(
+            erased_trace_sink,
+            lash_trace::TraceContext::default(),
+            lash_trace::TraceContext::default(),
+        );
         let context = batch_failure_context(Arc::new(BatchFailureEffectController::new(
             BatchFailureResponse::EffectDecodeError,
         )))
-        .with_turn_event_sender(turn_tx);
+        .with_turn_event_sender(turn_tx)
+        .with_tracing(Some(tracing));
 
         context
             .call_tool_batch(vec![
@@ -783,6 +819,17 @@ mod tests {
                     ..
                 } if observed == call_id
             ));
+            let trace_lifecycle = trace_sink
+                .lifecycle
+                .lock_recover()
+                .iter()
+                .filter_map(|(observed, event)| (observed == call_id).then_some(*event))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                trace_lifecycle,
+                ["started", "completed"],
+                "exactly one ordered trace pair keyed by {call_id}"
+            );
         }
         assert!(
             turn_rx.try_recv().is_err(),
