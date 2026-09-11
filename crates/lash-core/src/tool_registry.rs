@@ -89,8 +89,18 @@ pub(crate) mod facade_ops {
         ) -> Result<ToolSourceHandle, ReconfigureError> {
             let source_id = {
                 let mut inner = self.inner.write_recover();
-                inner.state.next_live_source_id += 1;
-                format!("live:{}", inner.state.next_live_source_id)
+                let next_live_source_id = inner
+                    .state
+                    .next_live_source_id
+                    .checked_add(1)
+                    .ok_or_else(|| {
+                        ReconfigureError::Validation("tool registry live source id overflow".into())
+                    })?;
+                let state_revision =
+                    super::registry_impl::checked_state_revision(inner.state_revision)?;
+                inner.state.next_live_source_id = next_live_source_id;
+                inner.state_revision = state_revision;
+                format!("live:{next_live_source_id}")
             };
             self.upsert_source(Arc::new(ToolProviderSource::new(
                 source_id.clone(),

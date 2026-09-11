@@ -4,7 +4,9 @@ use serde_json::json;
 use std::sync::{
     Arc, Barrier, Mutex,
     atomic::{AtomicBool, Ordering},
+    mpsc,
 };
+use std::time::Duration;
 
 struct MutableAdmissionSource {
     id: &'static str,
@@ -103,6 +105,40 @@ impl ToolSourceExecutor for MutableAdmissionSource {
         _context: &crate::AttemptContext<'_>,
     ) -> ToolOutcome {
         ToolOutcome::ok(json!(tool))
+    }
+}
+
+struct ReentrantDropProvider {
+    registry: Option<Arc<Mutex<Option<ToolRegistry>>>>,
+    read_completed: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for ReentrantDropProvider {
+    fn tool_manifests(&self) -> Vec<ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        unreachable!("drop probe is never executed")
+    }
+}
+
+impl Drop for ReentrantDropProvider {
+    fn drop(&mut self) {
+        let Some(registry) = &self.registry else {
+            return;
+        };
+        let registry = registry
+            .lock_recover()
+            .clone()
+            .expect("drop probe registry installed");
+        let _ = registry.tool_manifests();
+        self.read_completed.store(true, Ordering::SeqCst);
     }
 }
 
@@ -238,6 +274,99 @@ fn stale_refresh_retries_instead_of_overwriting_newer_curation() {
 }
 
 #[test]
+fn same_generation_restore_fences_an_in_flight_refresh() {
+    let names = Arc::new(Mutex::new(vec!["alpha".to_string()]));
+    let registry = ToolRegistry::empty();
+    registry
+        .upsert_source(Arc::new(MutableAdmissionSource::ungated(
+            "source",
+            Arc::clone(&names),
+        )))
+        .expect("source admission");
+    let mut restored = registry.export_state();
+    restored
+        .set_membership(&ToolId::from("tool:alpha"), false)
+        .expect("edit restored curation");
+    let public_generation = restored.generation();
+
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let gated = Arc::new(MutableAdmissionSource::unarmed_gate(
+        "source",
+        names,
+        Arc::clone(&entered),
+        Arc::clone(&release),
+    ));
+    registry
+        .upsert_source(Arc::clone(&gated) as Arc<dyn ToolSourceExecutor>)
+        .expect("replace source with gated equivalent");
+    assert_eq!(registry.generation(), public_generation);
+
+    gated.arm();
+    let refreshing = {
+        let registry = registry.clone();
+        std::thread::spawn(move || registry.refresh_sources())
+    };
+    entered.wait();
+
+    let report = registry
+        .restore_state(restored)
+        .expect("same-generation restore");
+    assert_eq!(report.generation, public_generation);
+    release.wait();
+    refreshing
+        .join()
+        .expect("refresh thread")
+        .expect("refresh retries after restore");
+
+    assert_eq!(registry.generation(), public_generation);
+    assert!(
+        !registry
+            .export_state()
+            .get(&ToolId::from("tool:alpha"))
+            .expect("alpha remains present")
+            .is_member(),
+        "refresh must preserve curation installed by a same-generation restore"
+    );
+}
+
+#[test]
+fn removed_provider_destructor_reenters_registry_after_unlock() {
+    let registry = ToolRegistry::from_tool_provider(Arc::new(ReentrantDropProvider {
+        registry: None,
+        read_completed: Arc::new(AtomicBool::new(false)),
+    }))
+    .expect("base registry");
+    let registry_slot = Arc::new(Mutex::new(Some(registry.clone())));
+    let read_completed = Arc::new(AtomicBool::new(false));
+    let handle = registry
+        .add_tool_provider(Arc::new(ReentrantDropProvider {
+            registry: Some(Arc::clone(&registry_slot)),
+            read_completed: Arc::clone(&read_completed),
+        }))
+        .expect("drop probe source admission");
+
+    let (finished_tx, finished_rx) = mpsc::sync_channel(1);
+    let removing = {
+        let registry = registry.clone();
+        std::thread::spawn(move || {
+            let result = registry.remove_source(&handle);
+            let _ = finished_tx.send(result);
+        })
+    };
+
+    finished_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("source removal deadlocked in the provider destructor")
+        .expect("source removal");
+    removing.join().expect("removal thread");
+    assert!(
+        read_completed.load(Ordering::SeqCst),
+        "the provider destructor completed its public registry read"
+    );
+}
+
+#[test]
 fn concurrent_ambiguous_admission_commits_one_source_and_one_generation() {
     let registry = ToolRegistry::empty();
     let entered = Arc::new(Barrier::new(3));
@@ -355,4 +484,31 @@ fn source_revision_overflow_leaves_source_and_surface_unmodified() {
     drop(authority);
     assert_eq!(registry.export_state().entries(), before.entries());
     assert_eq!(registry.generation(), generation);
+}
+
+#[test]
+fn state_revision_overflow_leaves_restored_surface_unmodified() {
+    let names = Arc::new(Mutex::new(vec!["alpha".to_string()]));
+    let registry = ToolRegistry::empty();
+    registry
+        .upsert_source(Arc::new(MutableAdmissionSource::ungated("source", names)))
+        .expect("source admission");
+    let before = registry.export_state();
+    let generation = before.generation();
+    let mut restored = before.clone();
+    restored
+        .set_membership(&ToolId::from("tool:alpha"), false)
+        .expect("edit restored curation");
+    registry.inner.write_recover().state_revision = u64::MAX;
+
+    let error = registry
+        .restore_state(restored)
+        .expect_err("state revision overflow must refuse restore");
+
+    assert!(
+        matches!(error, ReconfigureError::Validation(message) if message.contains("state revision overflow"))
+    );
+    assert_eq!(registry.export_state().entries(), before.entries());
+    assert_eq!(registry.generation(), generation);
+    assert_eq!(registry.inner.read_recover().state_revision, u64::MAX);
 }

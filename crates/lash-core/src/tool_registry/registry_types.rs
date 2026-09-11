@@ -165,6 +165,9 @@ pub(super) struct ToolRegistryInner {
     /// Changes whenever the live source map changes, even when the admitted
     /// surface is byte-equivalent and its generation therefore stays stable.
     pub(super) source_revision: u64,
+    /// Changes whenever private registry state changes, including restores
+    /// that intentionally preserve or adopt the public generation.
+    pub(super) state_revision: u64,
     pub(super) sources: BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     pub(super) state: ToolRegistryState,
 }
