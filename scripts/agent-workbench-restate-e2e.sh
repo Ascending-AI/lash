@@ -300,6 +300,34 @@ if len(executables) != 1:
 print(executables[0])
 PY
 )"
+conformance_executable="$(python3 - "$build_log" <<'PY'
+import json
+import sys
+
+executables = []
+with open(sys.argv[1], encoding="utf-8") as stream:
+    for line in stream:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        target = event.get("target", {})
+        if (
+            event.get("reason") == "compiler-artifact"
+            and event.get("package_id", "").endswith(
+                "/crates/lash-conformance#lash-internal-conformance@0.0.0-dev"
+            )
+            and target.get("name") == "lash_conformance"
+            and "lib" in target.get("kind", [])
+            and event.get("profile", {}).get("test")
+            and event.get("executable")
+        ):
+            executables.append(event["executable"])
+if len(executables) != 1:
+    raise SystemExit(f"expected one lash-conformance lib test executable, found {executables!r}")
+print(executables[0])
+PY
+)"
 
 set +e
 RESTATE_INGRESS_URL="$ingress_url" \
@@ -315,9 +343,14 @@ if ((test_status != 0)); then
   exit "$test_status"
 fi
 
-cargo test -p lash-internal-core --locked \
+companion_output="$artifact_dir/companion.log"
+"$conformance_executable" \
   turn_input_claims_supersede_across_session_lease_generations \
-  2>&1 | tee -a "$test_output"
+  --test-threads=1 2>&1 | tee "$companion_output" | tee -a "$test_output"
+if ! grep -Fq 'test result: ok. 2 passed; 0 failed' "$companion_output"; then
+  echo 'companion gate: FAILED (expected two passing turn-input lease-generation tests)' >&2
+  exit 1
+fi
 if grep -Fn 'panicked at' "$test_output" >&2; then
   echo "panic gate: FAILED ('panicked at' found in agent-workbench Restate E2E output)" >&2
   exit 1
