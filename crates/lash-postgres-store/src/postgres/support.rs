@@ -324,11 +324,16 @@ pub(crate) fn decode_versioned_msgpack_record<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let value: serde_json::Value = rmp_serde::from_slice(bytes)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))?;
+    let value: serde_json::Value =
+        rmp_serde::from_slice(bytes).map_err(|err| StoreError::StoredDataCorrupt {
+            record_kind,
+            message: format!("failed to decode {record_kind}: {err}"),
+        })?;
     lash_core::store::ensure_supported_record_schema_version(record_kind, &value, expected)?;
-    rmp_serde::from_slice(bytes)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))
+    rmp_serde::from_slice(bytes).map_err(|err| StoreError::StoredDataCorrupt {
+        record_kind,
+        message: format!("failed to decode {record_kind}: {err}"),
+    })
 }
 
 pub(crate) fn block_on_detached<T: Send + 'static>(
@@ -670,7 +675,14 @@ fn decode_session_head_meta_row(
         &head_json,
         "SessionHeadMeta",
         lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
-    )?;
+    )
+    .map_err(|error| match error {
+        StoreError::Backend(message) => StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message,
+        },
+        error => error,
+    })?;
     Ok(Some(SessionHeadMeta::assemble(
         payload,
         u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
