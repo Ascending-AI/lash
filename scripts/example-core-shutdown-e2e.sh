@@ -77,6 +77,11 @@ app_descendant() {
   local runner="$1" expected="$2"
   local attempt parent child cmdline
   for attempt in $(seq 1 100); do
+    cmdline="$(tr '\0' ' ' <"/proc/$runner/cmdline" 2>/dev/null || true)"
+    if [[ "$cmdline" == *"$expected"* ]]; then
+      printf '%s\n' "$runner"
+      return
+    fi
     local frontier=("$runner")
     local next=()
     while ((${#frontier[@]})); do
