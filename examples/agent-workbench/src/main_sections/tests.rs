@@ -932,7 +932,7 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
+            WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
@@ -1018,7 +1018,7 @@ finish initial
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
+            WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
@@ -1083,7 +1083,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
+            WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
@@ -1291,7 +1291,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(Arc::clone(&process_registry))
         .trigger_store(trigger_store)
         .advanced()
@@ -1465,7 +1465,7 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         .provider(provider)
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
@@ -1971,7 +1971,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .trigger_store(Arc::clone(&trigger_store))
         .trace_sink(Arc::clone(&trace_sink))
         .trace_level(TraceLevel::Extended)
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
         .effect_host(turn_deployment.effect_host())
         .process_work(process_deployment.process_work())
@@ -2291,7 +2291,7 @@ fn test_workbench_core(
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
         .store_factory(session_store_factory)
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(process_registry)
         .trigger_store(trigger_store)
         .advanced()

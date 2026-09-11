@@ -17,11 +17,8 @@ for manifest in crates/*/Cargo.toml; do
     continue
   fi
 
-  # lash-tools owns cwd-root and shell-runtime access; FIG-1739 notes that
-  # crate's boundary ruling is still pending, so exclude its complete source.
-  if [[ "$crate_dir" == "crates/lash-tools" ]]; then
-    continue
-  fi
+  # lash-tools owned cwd-root and shell-runtime access; FIG-1739's pending
+  # boundary ruling retired with the crate, so no exclusion remains.
   scanned_src_dirs+=("$crate_dir/src")
 done
 

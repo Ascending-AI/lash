@@ -32,21 +32,20 @@ rendered session id, and the prompt/trace language id. Save `00-ready.png`,
 
 ## Phase 1 — Aggregate rejection through the shipped web authorities
 
-The assigned Agent Workbench host registers the real `search_web` and
-`fetch_url` providers as the `web.search` and `web.fetch` authorities in
-`examples/agent-workbench/src/main_sections/plugins.rs:142-157` (the
-manifests and bindings are defined in
-`crates/lash-tools/src/web/web_search.rs:119-169` and
-`crates/lash-tools/src/web/fetch_url.rs:124-157`). It also registers
-`tools.search` for deferred discovery in
-`examples/agent-workbench/src/deferred_tools.rs:422-461`.
+The assigned Agent Workbench host attaches the free Parallel Search MCP server
+as the `parallel` authority in
+`examples/agent-workbench/src/main_sections/bootstrap.rs`; its web-search and
+web-fetch tools surface as `mcp__parallel__web_search_*` /
+`mcp__parallel__web_fetch_*` (Lashlang `parallel.web_search_<digest>` /
+`parallel.web_fetch_<digest>`). It also registers `tools.search` for deferred
+discovery in `examples/agent-workbench/src/deferred_tools.rs`.
 There are no delayed-rejecting A/B test tools in this shipped catalogue, so
 the row must not require an operator to add them.
 
-Ask the model to call `web.search({ query: "" })` and
-`web.fetch({ url: "" })` in one `Promise.all`, catch the aggregate failure,
-and finish with the fixed marker `aggregate-rejected`. Both are real host
-authorities and reject their invalid arguments before making a network request.
+Ask the model to call the Parallel web-search and web-fetch tools with
+deliberately invalid arguments in one `Promise.all`, catch the aggregate
+failure, and finish with the fixed marker `aggregate-rejected`. Both are real
+host authorities and validate their arguments before making a network request.
 Require one aggregate execution, two completed tool attempts, two structured
 `invalid_tool_args` failures, and the fixed marker. Do not assert a wall-clock
 winner or an A/B marker. Save `01-promise-{dom,state,trace}.json` and

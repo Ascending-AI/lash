@@ -278,8 +278,6 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "agent.foreground_tool_call_round_trip",
         "agent.started_process_tool_call_graph",
         "agent.durable_input_suspension_resolution",
-        "agent.shell_results_are_data",
-        "agent.shell_output_print_projection_survives",
         "agent.started_process_subagent_spawn",
         "agent.nested_process_start_await",
         "agent.session_turn_process_child",
@@ -290,14 +288,6 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
             panic!("positive fixture should prove Agent replay-backed fact {contract}: {err}");
         }
     }
-    assert!(
-        scenario_contract_generated_facts_for_semantic(
-            "agent.shell_output_print_projection_survives",
-            &events,
-        )
-        .is_ok(),
-        "positive fixture should prove Agent shell output projection facts"
-    );
     assert!(
         scenario_contract_generated_facts_for_semantic(
             "agent.durable_input_suspension_resolution",
@@ -605,18 +595,6 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "unexpected RLM tool-control-fail replay failure: {err}"
     );
 
-    let mut shell_projection_lost = events.clone();
-    shell_projection_lost.retain(|event| event.boundary_id != "session-001:provider:003");
-    let err = scenario_contract_generated_facts_for_semantic(
-        "agent.shell_output_print_projection_survives",
-        &shell_projection_lost,
-    )
-    .expect_err("Agent shell projection fact must require later same-actor provider projection");
-    assert!(
-        err.contains("same-actor provider projection"),
-        "unexpected Agent shell projection failure: {err}"
-    );
-
     let mut foreground_tool_missing = events.clone();
     mutate_contract_execution(
         &mut foreground_tool_missing,
@@ -699,31 +677,6 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
     assert!(
         err.contains("fixed-source replay validation"),
         "unexpected Agent subagent-spawn replay failure: {err}"
-    );
-
-    let mut shell_results_stringly = events.clone();
-    mutate_contract_execution(
-        &mut shell_results_stringly,
-        "agent.shell_results_are_data",
-        |execution| {
-            execution
-                .pointer_mut("/result/final_value/missing_exit")
-                .expect("shell missing exit")
-                .clone_from(&json!("1"));
-            execution
-                .pointer_mut("/result/runtime_final_value_facts/semantic_value/missing_exit")
-                .expect("shell missing exit semantic")
-                .clone_from(&json!("1"));
-        },
-    );
-    let err = scenario_contract_generated_facts_for_semantic(
-        "agent.shell_results_are_data",
-        &shell_results_stringly,
-    )
-    .expect_err("Agent shell result fact must preserve numeric shell data");
-    assert!(
-        err.contains("fixed-source replay validation"),
-        "unexpected Agent shell-results replay failure: {err}"
     );
 
     let mut nested_process_count_lost = events.clone();

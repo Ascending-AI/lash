@@ -75,16 +75,6 @@ const DIRECT_COMPLETION_ATTEMPT_RETRY: AgentScenarioCoverage = agent_scenario_co
     "direct completion atomic attempt retry",
     "A tool-attempt retry re-executes its opaque direct completion exactly once."
 );
-const SHELL_RESULTS_ARE_DATA: AgentScenarioCoverage = agent_scenario_coverage!(
-    agent_scenario_shell_nonzero_and_pipeline_results_are_data,
-    "shell nonzero and pipeline results are data",
-    "Shell failures and pipelines remain data at the facade boundary."
-);
-const SHELL_OUTPUT_VARIABLE: AgentScenarioCoverage = agent_scenario_coverage!(
-    agent_scenario_shell_output_survives_print_projection_in_variable,
-    "shell output survives print projection in variable",
-    "Large shell output survives print projection and remains addressable."
-);
 const STARTED_PROCESS_SUBAGENT: AgentScenarioCoverage = agent_scenario_coverage!(
     agent_scenario_started_process_labeled_subagent_spawn,
     "started process labeled subagent spawn",
@@ -120,11 +110,6 @@ const POSTGRES_PROCESS_PARENT_ATOMICITY: AgentScenarioCoverage = agent_scenario_
     "PostgreSQL process-parent atomicity",
     "Facade worker, Standard plugin, Lashlang process graph, and durable PostgreSQL ParentEnd fault recovery."
 );
-const FIG1293_MIGRATED_TOOL_COMPOSITION: AgentScenarioCoverage = agent_scenario_coverage!(
-    agent_scenario_fig1293_migrated_tool_composition,
-    "FIG-1293 migrated tool composition",
-    "Facade composition of tracked and detached shell starts, stdin signalling, process cancellation, subagent spawn/await, and protocol batch."
-);
 
 const PLUGIN_OPERATIONS: AgentScenarioCoverage = agent_scenario_coverage!(
     agent_scenario_plugin_task_query_command,
@@ -140,8 +125,6 @@ const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
     DURABLE_INPUT_REQUEST,
     PROCESS_LLM_QUERY,
     DIRECT_COMPLETION_ATTEMPT_RETRY,
-    SHELL_RESULTS_ARE_DATA,
-    SHELL_OUTPUT_VARIABLE,
     STARTED_PROCESS_SUBAGENT,
     NESTED_PROCESS_START_AWAIT,
     SESSION_TURN_PROCESS_CHILD,
@@ -149,12 +132,11 @@ const AGENT_SCENARIO_COVERAGE: &[AgentScenarioCoverage] = &[
     PARALLEL_SPAWN_AND_JOIN,
     TUPLE_VALUES_AS_JSON_ARRAYS,
     POSTGRES_PROCESS_PARENT_ATOMICITY,
-    FIG1293_MIGRATED_TOOL_COMPOSITION,
 ];
 
 #[test]
 fn agent_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 17);
+    assert_eq!(AGENT_SCENARIO_COVERAGE.len(), 14);
     let mut names = BTreeSet::new();
     for coverage in AGENT_SCENARIO_COVERAGE {
         #[cfg(feature = "rlm")]
@@ -172,88 +154,6 @@ fn agent_scenario_coverage_metadata_is_unique_and_complete() {
             coverage.test_name
         );
     }
-}
-
-#[cfg(feature = "rlm")]
-#[test]
-fn agent_scenario_fig1293_migrated_tool_composition() -> Result<()> {
-    run_async_test_on_stack_budget("agent-scenario-fig1293-composition", || async {
-        run_agent_turn_scenario(
-            AgentScenario::new(
-                FIG1293_MIGRATED_TOOL_COMPOSITION.scenario_name,
-                "Exercise the complete FIG-1293 migrated tool composition.",
-            )
-            .responses([
-                lashlang_block(
-                    r#"
-tracked = await shell.start({ cmd: "cat", login: false })?
-written = await shell.write({ process_id: tracked.process_id, chars: "fig1293\n" })?
-cancelled = await processes.cancel({ process_id: tracked.process_id })?
-detached = await shell.start({ cmd: "sleep 1", login: false, detach: true })?
-child = await agents.spawn({
-  capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
-  seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-batched = await tools.batch({ tool_calls: [
-  { tool: "app_lookup", parameters: {} },
-  { tool: "app_lookup", parameters: {} }
-] })?
-finish {
-  tracked_running: tracked.running,
-  write_status: written.status,
-  write_has_sequence: written.sequence > 0,
-  cancel_status: cancelled.status,
-  detached_status: detached.status,
-  detached_done: detached.done,
-  child_len: child.len,
-  batch_count: len(batched.results)
-}"#,
-                ),
-                lashlang_block("finish { len: len(chunk) }"),
-            ])
-            .expected_final_value(serde_json::json!({
-                "tracked_running": true,
-                "write_status": "signalled",
-                "write_has_sequence": true,
-                "cancel_status": "cancelled",
-                "detached_status": "detached",
-                "detached_done": true,
-                "child_len": 2,
-                "batch_count": 2
-            }))
-            .tool_provider(Arc::new(AppTools))
-            .install_subagents()
-            .install_shell_processes(),
-        )
-        .await?;
-        Ok(())
-    })
-}
-
-#[cfg(feature = "rlm")]
-#[test]
-fn shell_start_is_visible_through_the_spawning_session_observer() -> Result<()> {
-    run_async_test_on_stack_budget("shell-process-admission-visibility", || async {
-        run_agent_turn_scenario(
-            AgentScenario::new(
-                "shell process admission visibility",
-                "Start and await one tracked shell process.",
-            )
-            .response(lashlang_block(
-                r#"
-handle = await shell.start({ cmd: "printf shell-visible", login: false })?
-result = (await handle)?
-finish { status: result.status }"#,
-            ))
-            .expected_final_value(serde_json::json!({ "status": "completed" }))
-            .observer_visible_process("shell", "printf shell-visible")
-            .install_shell_processes(),
-        )
-        .await?;
-        Ok(())
-    })
 }
 
 #[cfg(feature = "rlm")]
@@ -410,79 +310,6 @@ fn agent_scenario_process_llm_query_with_typed_output() -> Result<()> {
 fn agent_scenario_direct_completion_attempt_retry_reinvokes_provider_once() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-direct-completion-attempt-retry", || async {
         run_agent_direct_completion_attempt_retry_scenario().await
-    })
-}
-
-#[cfg(feature = "rlm")]
-#[test]
-fn agent_scenario_shell_nonzero_and_pipeline_results_are_data() -> Result<()> {
-    run_async_test_on_stack_budget("agent-scenario-shell-results-are-data", || async {
-        run_agent_turn_scenario(
-            AgentScenario::new(
-                SHELL_RESULTS_ARE_DATA.scenario_name,
-                "Run shell commands and report their result metadata.",
-            )
-            .response(lashlang_block(
-                r#"
-pipe = await shell.exec({ cmd: "yes line | head -n 3", login: false })?
-missing = await shell.exec({ cmd: "test -f /tmp/agent-scenario-definitely-missing-file", login: false })?
-finish {
-  pipe_exit: pipe.exit_code,
-  pipe_output: pipe.output,
-  missing_exit: missing.exit_code,
-  missing_status: missing.status
-}"#,
-            ))
-            .expected_final_value(serde_json::json!({
-                "pipe_exit": 0,
-                "pipe_output": "line\nline\nline\n",
-                "missing_exit": 1,
-                "missing_status": "completed"
-            }))
-            .tool_provider(Arc::new(lash_tools::shell::shell_provider(
-                lash_tools::shell::StandardShell::new(),
-            ))),
-        )
-        .await?;
-        Ok(())
-    })
-}
-
-#[cfg(feature = "rlm")]
-#[test]
-fn agent_scenario_shell_output_survives_print_projection_in_variable() -> Result<()> {
-    run_async_test_on_stack_budget("agent-scenario-shell-output-variable", || async {
-        run_agent_turn_scenario(
-            AgentScenario::new(
-                SHELL_OUTPUT_VARIABLE.scenario_name,
-                "Run a large shell command, inspect it, then report retained metadata.",
-            )
-            .responses([
-                lashlang_block(
-                    r#"
-big = await shell.exec({ cmd: "yes x | head -c 60000", login: false })?
-print big.output"#,
-                ),
-                lashlang_block(
-                    r#"
-finish {
-  chars: len(big.output),
-  tail: slice(big.output, 59996, null),
-  has_full_output_path: big.full_output_path == null ? false : len(big.full_output_path) > 0
-}"#,
-                ),
-            ])
-            .expected_final_value(serde_json::json!({
-                "chars": 60000,
-                "tail": "x\nx\n",
-                "has_full_output_path": true
-            }))
-            .tool_provider(Arc::new(lash_tools::shell::shell_provider(
-                lash_tools::shell::StandardShell::new(),
-            ))),
-        )
-        .await?;
-        Ok(())
     })
 }
 

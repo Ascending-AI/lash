@@ -11,6 +11,11 @@ pub(crate) const WORKBENCH_MAX_TURNS: usize = 128;
 /// above ordinary repair and far below a loop worth paying for.
 pub(crate) const WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS: usize = 12;
 
+/// The free Parallel Search MCP server backing the workbench's web tools. It
+/// needs no API key and no auth headers.
+pub(crate) const WORKBENCH_SEARCH_MCP_SERVER: &str = "parallel";
+const WORKBENCH_SEARCH_MCP_URL: &str = "https://search.parallel.ai/mcp";
+
 pub(crate) fn apply_workbench_lease_timings(
     config: lash::durability::RuntimeHostConfig,
 ) -> lash::durability::RuntimeHostConfig {
@@ -24,15 +29,15 @@ pub(crate) fn apply_workbench_lease_timings(
 
 pub(crate) fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
-    tavily_api_key: String,
     mail_world: mail::MailWorld,
     subagent_registry: Arc<lash_subagents::CapabilityRegistry>,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
+    mcp: Arc<dyn PluginFactory>,
 ) {
     plugins.push(Arc::new(RollingHistoryPluginFactory::default()));
     plugins.push(Arc::new(
-        WorkbenchPluginFactory::new(tavily_api_key)
+        WorkbenchPluginFactory::new()
             .with_mail_world(mail_world)
             .with_deferred_tools(deferred_tools)
             .with_approvals(approvals),
@@ -44,6 +49,7 @@ pub(crate) fn configure_workbench_plugins(
         lash_subagents::SubagentsPluginFactory::new(subagent_registry)
             .with_session_spec(SessionSpec::inherit()),
     ));
+    plugins.push(mcp);
 }
 
 pub(crate) async fn async_main() -> AnyhowResult<()> {
@@ -107,10 +113,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         Arc::new(JsonlTraceSink::new(lashlang_execution_path.clone())) as Arc<dyn TraceSink>,
     ])) as Arc<dyn TraceSink>;
 
-    let tavily_api_key = std::env::var("TAVILY_API_KEY").unwrap_or_default();
-    if tavily_api_key.trim().is_empty() {
-        eprintln!("warning: TAVILY_API_KEY is empty; web tools will return configuration errors");
-    }
     let model = dev_provider_scenario
         .map(|scenario| scenario.initial_model().to_string())
         .unwrap_or_else(|| {
@@ -326,18 +328,46 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     };
     let shutdown_marker =
         shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
-    let plugin_tavily_api_key = tavily_api_key.clone();
+    // Web search/fetch ride the free Parallel Search MCP server, attached with
+    // no API key and no auth headers. Construction never fails on an
+    // unreachable server: the pool keeps reconnecting in the background and
+    // the model-facing tools appear once it is up, so an offline boot degrades
+    // to "no web tools" rather than refusing to start. `web_configured`
+    // reports the observed connection state, not whether a key was supplied.
+    let mcp_search = Arc::new(
+        lash_plugin_mcp::McpPluginFactory::builder(BTreeMap::from([(
+            WORKBENCH_SEARCH_MCP_SERVER.to_string(),
+            lash_plugin_mcp::McpServerConfig::streamable_http(WORKBENCH_SEARCH_MCP_URL),
+        )]))
+        .build()
+        .await
+        .context("connect agent-workbench MCP servers")?,
+    );
+    for status in mcp_search.server_statuses() {
+        eprintln!(
+            "agent-workbench MCP server {}: connected={}, tools={}, last_error={}",
+            status.server_name,
+            status.connected,
+            status.tool_count,
+            status.last_error.as_deref().unwrap_or("none")
+        );
+    }
+    let web_configured = mcp_search
+        .server_statuses()
+        .iter()
+        .any(|status| status.server_name == WORKBENCH_SEARCH_MCP_SERVER && status.connected);
+    let plugin_mcp: Arc<dyn PluginFactory> = mcp_search;
     let plugin_mail_world = mail_world.clone();
     let plugin_approvals = approvals.clone();
     let core = builder
         .configure_plugins(move |plugins| {
             configure_workbench_plugins(
                 plugins,
-                plugin_tavily_api_key,
                 plugin_mail_world,
                 subagent_registry,
                 deferred_tools.clone(),
                 plugin_approvals,
+                plugin_mcp,
             );
             if let Some(marker) = shutdown_marker {
                 plugins.push(marker);
@@ -381,7 +411,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 model,
                 model_variant: Some(model_variant),
             })),
-            web_configured: !tavily_api_key.trim().is_empty(),
+            web_configured,
             trace_sink: Some(Arc::clone(&trace_sink)),
             lashlang_execution,
             event_tx,

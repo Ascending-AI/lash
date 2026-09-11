@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # Clock-rule scope exemptions outside lash-core (inventory re-derived at 2fe260e7e):
-# - No lash-core dependency: lash-llm-transport, lash-http-transport, lash-plugin-mcp,
-#   lash-tools.
+# - No lash-core dependency: lash-llm-transport, lash-http-transport, lash-plugin-mcp.
 # - Clock implementation: lash-sim/src/clock.rs:64.
 # - Benchmark harness (24 sites):
 #   lash-perf/src/runtime_perf/measurement/store_hardening.rs:229;

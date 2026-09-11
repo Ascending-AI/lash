@@ -5,7 +5,7 @@
 > boot/teardown ownership. This runbook only adds the scenario-specific parts.
 
 **Purpose.** Drive `examples/agent-workbench` end-to-end through its browser UI with a
-real model: a plain chat turn, a `web.search` turn (Tavily), a live mocked-inbox world
+real model: a plain chat turn, a web-search turn (Parallel Search MCP), a live mocked-inbox world
 (two accounts), the agent operating an inbox through its typed `inbox.<slug>` authority,
 and finally a **trigger-driven durable forwarding process** — register a concierge on
 `mail.received` for one account, deliver a message into it from the UI, and watch a copy
@@ -18,9 +18,9 @@ inside a Restate execution scope → trigger registration match → durable Lash
 `inbox.personal.send` back through the same authority the chat uses. If any link drops,
 the message never arrives — a single structural gate covers the chain.
 
-**Real tokens.** OpenRouter for turns, Tavily for `web.search` — both keys from the
-environment / repo `.env`. The model's prose and its exact Lashlang are its own; gate on
-structural outcomes only.
+**Real tokens.** OpenRouter for turns; web search rides the keyless Parallel Search MCP
+server, so only the OpenRouter key comes from the environment / repo `.env`. The model's
+prose and its exact Lashlang are its own; gate on structural outcomes only.
 
 ## Scenario-specific golden rules
 
@@ -79,12 +79,13 @@ marker). Gates: the transcript gains your user row and an assistant reply;
 
 ## Phase 2 — Web search turn
 
-Ask a question that requires current web knowledge (so the model must call `web.search`).
-Gates: the turn completes with a non-empty answer; `trace.jsonl` (or the rendered tool
-activity) shows a `web.search` call for this turn (that is the Lashlang authority name —
-the underlying raw tool id is `search_web`, so grep for the former). The answer's correctness is judged,
-lightly — the gate is the tool call happening and a grounded reply arriving. Screenshot
-`02-web-search.png`.
+Ask a question that requires current web knowledge (so the model must call the Parallel
+web-search tool). Gates: the turn completes with a non-empty answer; `trace.jsonl` (or the
+rendered tool activity) shows a web-search call for this turn — the model-facing tool name
+starts with `mcp__parallel__web_search_`, and its Lashlang authority is
+`parallel.web_search_<digest>`, so grep for `mcp__parallel__web_search_`. The answer's
+correctness is judged, lightly — the gate is the tool call happening and a grounded reply
+arriving. Screenshot `02-web-search.png`.
 
 ## Phase 3 — Build the inbox world
 
@@ -176,7 +177,7 @@ gone. Then fill:
 |------|----------------|---------|----------|
 | Boot | `/healthz` 200, chat pane renders | | `00-fresh.png` |
 | Chat turn | user+assistant rows in UI and `/api/state` | | `01-chat.png` |
-| Web search | `web.search` call in trace; grounded reply | | `02-web-search.png` |
+| Web search | Parallel web-search call in trace; grounded reply | | `02-web-search.png` |
 | Accounts world | `/api/accounts` lists `work`, `personal` | | `03-accounts.png` |
 | Agent-sent mail | chosen title in `/api/accounts/work/inbox` | | `04-agent-mail.png` |
 | Trigger registration | assistant confirms; fires in Phase 6 | | `05-registered.png` |

@@ -12,7 +12,7 @@ proves that the friendly editor, the graph/code lens, and execution all describe
 workflow.
 
 **No real tokens.** `examples/workflow-graph-roundtrip` uses deterministic host-owned
-mock operations. Do not configure OpenRouter, Tavily, or a Restate stack for this run.
+mock operations. Do not configure OpenRouter or a Restate stack for this run.
 
 ## Scenario-specific golden rules
 

@@ -648,8 +648,6 @@ pub(super) fn contract_execution_fixture_events(start_sequence: usize) -> Vec<De
         "agent.foreground_tool_call_round_trip",
         "agent.started_process_tool_call_graph",
         "agent.durable_input_suspension_resolution",
-        "agent.shell_results_are_data",
-        "agent.shell_output_print_projection_survives",
         "agent.started_process_subagent_spawn",
         "agent.nested_process_start_await",
         "agent.session_turn_process_child",

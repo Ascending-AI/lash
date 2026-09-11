@@ -143,7 +143,7 @@ the inbox and work responses; screenshot `07-reenabled-fired.png`.
 ## Phase 5 — Fire during a foreground turn
 
 Record the process-id set. Submit a foreground prompt containing
-`FIG425-LIFE-MIDTURN-CHAT-<run-id>` that requires `web.search`, making the overlap
+`FIG425-LIFE-MIDTURN-CHAT-<run-id>` that requires the Parallel web-search MCP tool, making the overlap
 observable. Poll until `/api/state.active_turns` contains exactly one address and save it
 as `08-active-before-trigger.json`. The busy pill should remain running because trigger
 dispatch no longer emits a session `Done` while a foreground turn is active, but it is

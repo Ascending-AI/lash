@@ -46,7 +46,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .provider(provider)
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(Arc::clone(&process_registry))
         .trigger_store(trigger_store.clone())
         .without_queued_work()

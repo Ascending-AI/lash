@@ -4037,8 +4037,8 @@
     }
 
     function displayToolName(name) {
-      if (name === "search_web") return "web.search";
-      if (name === "fetch_url") return "web.fetch";
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_search_")) return "web.search";
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_fetch_")) return "web.fetch";
       if (name === "spawn_agent") return "agents.spawn";
       return name || "tool";
     }
@@ -4107,11 +4107,11 @@
     }
 
     function summarizeToolResult(name, result) {
-      if (name === "search_web") {
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_search_")) {
         const count = Array.isArray(result?.results) ? result.results.length : 0;
         return `Search completed · ${count} result${count === 1 ? "" : "s"}`;
       }
-      if (name === "fetch_url") {
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_fetch_")) {
         const chars = typeof result?.content === "string" ? result.content.length : 0;
         return `Fetched ${result?.url || "URL"} · ${chars} chars`;
       }

@@ -1,6 +1,3 @@
-use lash_plugin_rolling_history::RollingHistoryConfig;
-use lash_standard_plugins::StandardContextApproach;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ExecutionMode {
     Standard,
@@ -786,14 +783,8 @@ impl RuntimePerfScenario {
             .expect("runtime perf scenario metadata missing")
     }
 
-    pub(crate) fn standard_context_approach(self) -> Option<StandardContextApproach> {
-        if self.execution_mode().is_standard() {
-            Some(StandardContextApproach::RollingHistory(
-                RollingHistoryConfig,
-            ))
-        } else {
-            None
-        }
+    pub(crate) fn uses_rolling_history(self) -> bool {
+        self.execution_mode().is_standard()
     }
 }
 

@@ -136,7 +136,7 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
                     .expect("tool control model"),
             )
             .tools(workbench_control_tools())
-            .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+            .plugin(Arc::new(WorkbenchPluginFactory::new()))
             .store_factory(store_factory)
             .process_registry(Arc::clone(&process_registry))
             .without_queued_work()

@@ -1139,7 +1139,6 @@ pub(super) fn fig1293_migrated_tool_factories()
     let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
     vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
-        Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
         Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
             lash_subagents::CapabilityRegistry::new().with(Arc::new(
@@ -1154,31 +1153,6 @@ pub(super) fn fig1293_migrated_tool_factories()
             lash_core::facade_support::PluginSpec::new().with_tool_provider(echo),
         )),
     ]
-}
-
-pub(super) async fn fig1293_seed_control_target(
-    registry: &Arc<dyn ProcessRegistry>,
-    session_id: &SessionId,
-) {
-    registry
-        .register_process_with_observers(
-            ProcessRegistration::new(
-                "fig1293-control-target",
-                ProcessInput::External {
-                    metadata: serde_json::json!({"fixture": "fig1293"}),
-                },
-                lash_core::RecoveryContract::Rerunnable,
-                lash_core::ProcessProvenance::host(),
-            )
-            .with_extra_event_types([lash_core::ProcessEventType {
-                name: "signal.stdin".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
-            }]),
-            &[SessionId::from(session_id.to_string())],
-        )
-        .await
-        .expect("register FIG-1293 control target");
 }
 
 pub(super) struct RestateParentEndIntentProvider {

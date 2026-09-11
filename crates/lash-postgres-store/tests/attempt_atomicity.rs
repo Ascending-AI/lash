@@ -705,7 +705,6 @@ fn fig1293_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>>
     let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(Fig1293EchoTools);
     vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
-        Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
         Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
             lash_subagents::CapabilityRegistry::new().with(Arc::new(
@@ -756,40 +755,6 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                     Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
                         0 => lash_core::LlmResponse {
                             parts: vec![
-                                lash_core::LlmOutputPart::ToolCall {
-                                    call_id: "fig1293-shell-start".to_string(),
-                                    tool_name: "start_command".to_string(),
-                                    input_json: serde_json::json!({"cmd": "printf tracked"})
-                                        .to_string(),
-                                    replay: None,
-                                },
-                                lash_core::LlmOutputPart::ToolCall {
-                                    call_id: "fig1293-shell-detach".to_string(),
-                                    tool_name: "start_command".to_string(),
-                                    input_json: serde_json::json!({"cmd": "true", "detach": true})
-                                        .to_string(),
-                                    replay: None,
-                                },
-                                lash_core::LlmOutputPart::ToolCall {
-                                    call_id: "fig1293-shell-write".to_string(),
-                                    tool_name: "write_stdin".to_string(),
-                                    input_json: serde_json::json!({
-                                        "process_id": "fig1293-control-target",
-                                        "chars": "fig1293\n",
-                                        "close_stdin": false,
-                                    })
-                                    .to_string(),
-                                    replay: None,
-                                },
-                                lash_core::LlmOutputPart::ToolCall {
-                                    call_id: "fig1293-process-cancel".to_string(),
-                                    tool_name: "cancel_process".to_string(),
-                                    input_json: serde_json::json!({
-                                        "process_id": "fig1293-control-target",
-                                    })
-                                    .to_string(),
-                                    replay: None,
-                                },
                                 lash_core::LlmOutputPart::ToolCall {
                                     call_id: "fig1293-spawn-agent".to_string(),
                                     tool_name: "spawn_agent".to_string(),
@@ -880,32 +845,6 @@ fn fig1293_fault_batch_model() -> lash_core::facade_support::ProviderHandle {
         })
         .build()
         .into_handle()
-}
-
-async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegistry>) {
-    registry
-        .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
-                "fig1293-control-target",
-                lash_core::ProcessInput::External {
-                    metadata: serde_json::json!({"fixture": "fig1293"}),
-                },
-                // The control target is a fixture-owned external process. It
-                // must not enter the durable worker worklist, whose racing
-                // `first_started` events would make the signal sequence depend
-                // on scheduler timing instead of the law's literal journal.
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-            )
-            .with_extra_event_types([lash_core::ProcessEventType {
-                name: "signal.stdin".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
-            }]),
-            &[SessionId::from("fig1293-restate-migrated-tools")],
-        )
-        .await
-        .expect("register FIG-1293 control target");
 }
 
 async fn fig1293_runtime(
@@ -1029,61 +968,11 @@ fn fig1293_literal_outputs(
         .collect()
 }
 
-async fn assert_fig1293_literal_outputs(
-    turn: &lash_core::facade_support::AssembledTurn,
-    registry: &dyn lash_core::ProcessRegistry,
-    signal_sequence: u64,
-) {
-    let tracked_process = registry
-        .get_process(
-            &ProcessId::from("tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b"),
-        )
-        .await
-        .expect("read FIG-1293 tracked command process")
-        .expect("FIG-1293 tracked command process remains retained");
-    let minted_incarnation = tracked_process.incarnation.registration_sequence();
+async fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::AssembledTurn) {
     let outputs = fig1293_literal_outputs(turn);
     assert_eq!(
         outputs,
         vec![
-            (
-                "start_command".to_string(),
-                serde_json::json!({
-                    "__handle__": "process",
-                    "done": false,
-                    "id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
-                    "incarnation": minted_incarnation,
-                    "process_id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
-                    "running": true,
-                    "status": "running",
-                }),
-            ),
-            (
-                "start_command".to_string(),
-                serde_json::json!({
-                    "__handle__": "process",
-                    "done": true,
-                    "id": "tool-intent:v2:blake3:58c100661aca7a188965f9cc5f6ad14dc19f23a3f4f23a90fa426b5af449429e:detached",
-                    "process_id": "tool-intent:v2:blake3:58c100661aca7a188965f9cc5f6ad14dc19f23a3f4f23a90fa426b5af449429e:detached",
-                    "running": false,
-                    "status": "detached",
-                }),
-            ),
-            (
-                "write_stdin".to_string(),
-                serde_json::json!({
-                    "process_id": "fig1293-control-target",
-                    "sequence": signal_sequence,
-                    "status": "signalled",
-                }),
-            ),
-            (
-                "cancel_process".to_string(),
-                serde_json::json!({
-                    "process_id": "fig1293-control-target",
-                    "status": "cancelled",
-                }),
-            ),
             (
                 "spawn_agent".to_string(),
                 serde_json::json!("child literal"),
@@ -1215,7 +1104,6 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
 
     let inline_registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());
-    fig1293_seed_control_target(&inline_registry).await;
     let (inline_model, inline_model_calls) = fig1293_model();
     let native_effect_host: Arc<dyn EffectHost> =
         Arc::new(lash_core::facade_support::NativeEffectHost::default());
@@ -1235,12 +1123,11 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("native FIG-1293 substrate turn timed out");
-    assert_fig1293_literal_outputs(&inline_turn, inline_registry.as_ref(), 2).await;
+    assert_fig1293_literal_outputs(&inline_turn).await;
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 
     let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(storage.process_registry());
-    fig1293_seed_control_target(&postgres_registry).await;
     let (postgres_model, postgres_model_calls) = fig1293_model();
     let first_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let postgres_policy = fig1293_policy();
@@ -1279,7 +1166,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     )
     .await
     .expect("PostgreSQL FIG-1293 redrive timed out");
-    assert_fig1293_literal_outputs(&postgres_turn, postgres_registry.as_ref(), 2).await;
+    assert_fig1293_literal_outputs(&postgres_turn).await;
     assert_eq!(postgres_model_calls.load(Ordering::SeqCst), 3);
 
     let envelope_json: Vec<String> = sqlx::query_scalar(
@@ -1338,38 +1225,10 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let RuntimeEffectOutcome::ToolBatch { launches, .. } = outer_outcome else {
         panic!("outer FIG-1293 PostgreSQL outcome must be a tool batch")
     };
-    assert_eq!(launches.len(), 6);
+    assert_eq!(launches.len(), 2);
     assert!(
         !outer_outcome_json.contains(r#""status":"refused""#),
         "every migrated PostgreSQL public intent must execute: {outer_outcome_json}",
-    );
-    let executed_intent_kinds = [
-        (
-            "start_process",
-            outer_outcome_json
-                .matches(r#""kind":"start_process""#)
-                .count(),
-        ),
-        (
-            "signal_process",
-            outer_outcome_json
-                .matches(r#""kind":"signal_process""#)
-                .count(),
-        ),
-        (
-            "cancel_process",
-            outer_outcome_json
-                .matches(r#""kind":"cancel_process""#)
-                .count(),
-        ),
-    ];
-    assert_eq!(
-        executed_intent_kinds,
-        [
-            ("start_process", 2),
-            ("signal_process", 1),
-            ("cancel_process", 1),
-        ],
     );
     let direct_orchestration_children = envelopes
         .iter()
@@ -1410,15 +1269,8 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     attempt_names.sort();
     assert_eq!(
         attempt_names,
-        vec![
-            "cancel_process".to_string(),
-            "fig1293_echo".to_string(),
-            "fig1293_echo".to_string(),
-            "start_command".to_string(),
-            "start_command".to_string(),
-            "write_stdin".to_string(),
-        ],
-        "batch, spawn_agent, and the internal shell process body have no PostgreSQL ToolAttempt frame",
+        vec!["fig1293_echo".to_string(), "fig1293_echo".to_string(),],
+        "spawn_agent and the parent batch have no PostgreSQL ToolAttempt frame",
     );
 }
 
@@ -1457,7 +1309,6 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     }
 
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
-    fig1293_seed_control_target(&registry).await;
     let (model, model_calls) = fig1293_model();
     let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1511,7 +1362,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     )
     .await
     .expect("FIG-1293 child-boundary redrive timed out");
-    assert_fig1293_literal_outputs(&redriven, registry.as_ref(), 2).await;
+    assert_fig1293_literal_outputs(&redriven).await;
     assert_eq!(
         model_calls.load(Ordering::SeqCst),
         3,

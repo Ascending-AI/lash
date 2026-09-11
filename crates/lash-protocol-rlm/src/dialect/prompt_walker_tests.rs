@@ -32,8 +32,8 @@ use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
 ///
 /// Copied deliberately rather than read from a live catalog: this is the shape
 /// authors write, and the rewriter has to survive every one of them. Each is a
-/// real example from `lash-tools`, `lash-plugin-process-controls`,
-/// `lash-protocol-standard` or the workbench's deferred-tool registry.
+/// real example from `lash-plugin-process-controls`, `lash-protocol-standard`
+/// or the workbench's deferred-tool registry.
 fn authored_tool_examples() -> Vec<&'static str> {
     vec![
         r#"await web.search({ query: "latest Rust release notes", limit: 5 })?"#,
