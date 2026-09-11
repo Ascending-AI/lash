@@ -1950,6 +1950,7 @@ fn existing_execution_site_ids_are_unchanged() {
                 "resource_operation:73a040c30e9f9729b4ab1204",
                 "terminal:73a4071bf7a1c8d16ed98b55",
             ][..],
+            "9e286714722511639d33657596b77b6d0c09d2a074ffbe2e801cb29dd5448e37",
         ),
         (
             r#"
@@ -1972,14 +1973,19 @@ fn existing_execution_site_ids_are_unchanged() {
                 "resource_operation:0faaf5a4a3ad6c368956eb93",
                 "terminal:a082d25e7834a4336778c54c",
             ],
+            "e228cedab83aeeb459fe65926fefdbe25f168a372cdb549522ed4e9394092929",
         ),
     ];
 
-    for (source, expected) in fixtures {
+    for (source, expected, historical_module_hash) in fixtures {
+        let (current, historical) =
+            compile_labeled_source_with_historical_context(source, historical_module_hash);
         assert_eq!(
-            execution_site_ids(&compile_labeled_source(source)),
-            expected
+            compiled_site_descriptors(&current),
+            compiled_site_descriptors(&historical),
+            "only the recorded execution context may differ"
         );
+        assert_eq!(execution_site_ids(&historical), expected);
     }
 
     let process_source = r#"
@@ -1990,11 +1996,20 @@ fn existing_execution_site_ids_are_unchanged() {
           finish result
         }
         "#;
+    let (current, historical) = compile_labeled_process_with_historical_context(
+        process_source,
+        "search_test",
+        "bb95c621902678eb6d160bf6962abc1d69076209a9f9b057b04c591e492415eb",
+        "076195cb8c008534063267197f05271d61cca00df9a0fb08dc208881f3047181",
+        0,
+    );
     assert_eq!(
-        execution_site_ids(&compile_labeled_process_source(
-            process_source,
-            "search_test"
-        )),
+        compiled_site_descriptors(&current),
+        compiled_site_descriptors(&historical),
+        "only the recorded execution context may differ"
+    );
+    assert_eq!(
+        execution_site_ids(&historical),
         [
             "resource_operation:a27f5176d6e2e5669b60ff3b",
             "process_event:1ec2b872e0ce7bec713fb2b4",
@@ -2261,4 +2276,82 @@ fn graph_site_descriptors(program: &Program) -> Vec<(String, String, Vec<u32>)> 
         .collect::<Vec<_>>();
     sites.sort_by(|left, right| left.2.cmp(&right.2));
     sites
+}
+
+fn compile_labeled_source_with_historical_context(
+    source: &str,
+    historical_module_hash: &str,
+) -> (CompiledProgram, CompiledProgram) {
+    let program = crate::parse(source).expect("program should parse");
+    let surface = runtime_test_environment().with_language_features(
+        crate::LashlangLanguageFeatures::default().with_label_annotations(),
+    );
+    let linked = crate::LinkedModule::link(program, surface).expect("program should link");
+    let current = crate::compile_linked(&linked);
+    let dialect = linked.artifact.compilation_dialect;
+    let (chunk, compile_stats) = Compiler::compile_linked_program_with_dialect(
+        linked.program(),
+        (&linked.artifact).into(),
+        crate::tracking::LashlangExecutionContext::main(historical_module_ref(
+            historical_module_hash,
+        )),
+        dialect,
+    );
+    let historical = CompiledProgram {
+        chunk,
+        compile_stats,
+        dialect,
+    };
+    (current, historical)
+}
+
+fn compile_labeled_process_with_historical_context(
+    source: &str,
+    process_name: &str,
+    historical_module_hash: &str,
+    historical_process_component: &str,
+    historical_process_position: u32,
+) -> (CompiledProgram, CompiledProgram) {
+    let program = crate::parse(source).expect("program should parse");
+    let surface = runtime_test_environment().with_language_features(
+        crate::LashlangLanguageFeatures::default().with_label_annotations(),
+    );
+    let linked = crate::LinkedModule::link(program, surface).expect("program should link");
+    let current = crate::compile_linked_process(&linked, process_name)
+        .expect("current process should compile");
+    let process = linked
+        .program()
+        .process(process_name)
+        .expect("historical process should exist");
+    let process_program = Program {
+        declarations: linked.program().declarations.clone(),
+        main: process.body.clone(),
+        declaration_spans: linked.program().declaration_spans.clone(),
+        expression_spans: Vec::new(),
+        expression_source_spans: Vec::new(),
+    };
+    let dialect = linked.artifact.compilation_dialect;
+    let (chunk, compile_stats) = Compiler::compile_linked_process_program(
+        &process_program,
+        (&linked.artifact).into(),
+        crate::tracking::LashlangExecutionContext::process(
+            historical_module_ref(historical_module_hash),
+            crate::ProcessRef::new(
+                crate::ContentHash::new(historical_process_component),
+                historical_process_position,
+            ),
+            process_name,
+        ),
+        dialect,
+    );
+    let historical = CompiledProgram {
+        chunk,
+        compile_stats,
+        dialect,
+    };
+    (current, historical)
+}
+
+fn historical_module_ref(hash: &str) -> crate::ModuleRef {
+    crate::ModuleRef::new(&crate::ContentHash::new(hash))
 }
