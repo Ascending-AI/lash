@@ -1199,6 +1199,12 @@ pub enum LlmStreamEvent {
 
 #[derive(Clone, Debug, Default)]
 pub struct LlmStreamEvidence {
+    /// The provider transport has established a response for this attempt.
+    ///
+    /// This is attempt-local protocol state, independent of optional request
+    /// diagnostics and response metadata. Once observed, merging later
+    /// evidence cannot clear it.
+    pub response_started: bool,
     pub provider_usage: Option<serde_json::Value>,
     pub request_body: Option<String>,
     pub http_summary: Option<String>,
@@ -1212,14 +1218,13 @@ pub struct LlmStreamEvidence {
 
 impl LlmStreamEvidence {
     pub fn merge(&mut self, next: Self) -> Result<(), ExecutionEvidenceMergeError> {
-        if next.execution_evidence.is_some()
-            && self.http_summary.is_none()
-            && next.http_summary.is_none()
-        {
+        let response_started = self.response_started || next.response_started;
+        if next.execution_evidence.is_some() && !response_started {
             return Err(ExecutionEvidenceMergeError::BeforeResponseStart);
         }
         let mut execution_evidence = self.execution_evidence.clone();
         ExecutionEvidence::merge_optional(&mut execution_evidence, next.execution_evidence)?;
+        self.response_started = response_started;
         if next.provider_usage.is_some() {
             self.provider_usage = next.provider_usage;
         }

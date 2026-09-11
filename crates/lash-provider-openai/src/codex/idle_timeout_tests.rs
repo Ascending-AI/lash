@@ -1,6 +1,35 @@
 use super::*;
 
 #[tokio::test]
+async fn codex_websocket_first_response_frame_emits_establishment_marker_first() {
+    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::Complete {
+        response_id: "response",
+        message_id: "message",
+        text: "done",
+    }])
+    .await;
+    let mut provider = websocket_test_provider(
+        CodexTransport::Websocket,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+    );
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let event_sink = Arc::clone(&events);
+    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(move |event| {
+        event_sink.lock_recover().push(event);
+    }));
+
+    provider.complete(req).await.expect("websocket response");
+
+    assert!(matches!(
+        events.lock_recover().first(),
+        Some(lash_core::llm::types::LlmStreamEvent::Evidence(evidence))
+            if evidence.response_started
+    ));
+}
+
+#[tokio::test]
 async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
     let idle_ready = Arc::new(Notify::new());
     let idle = ScriptedWsAction::IdleBeforeStart {

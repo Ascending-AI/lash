@@ -59,6 +59,7 @@ fn abort_retains_provider_usage_delivered_before_preemption() {
         "output_tokens": 7
     });
     let mut evidence = crate::LlmStreamEvidence {
+        response_started: true,
         generation_disposition: Some(request_disposition()),
         ..Default::default()
     };
