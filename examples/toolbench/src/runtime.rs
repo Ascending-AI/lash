@@ -38,6 +38,8 @@ pub(crate) async fn run_task(
         provider_retries,
         dump_dir,
         None,
+        #[cfg(test)]
+        None,
     )
     .await
 }
@@ -55,6 +57,7 @@ async fn run_task_with_shutdown_witness(
     provider_retries: u32,
     dump_dir: Option<&std::path::Path>,
     shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
+    #[cfg(test)] recorder_origin: Option<String>,
 ) -> (World, RunEvidence) {
     let started = std::time::Instant::now();
     // Every run owns its world, telemetry, provider and in-memory stores. No
@@ -86,9 +89,18 @@ async fn run_task_with_shutdown_witness(
     }));
     let world = SharedWorld::new(task.seed.clone());
     let prepared = async {
+        #[cfg(not(test))]
         let recorder = crate::wire_log::Recorder::start(telemetry.capture.clone())
             .await
             .context("start request recorder")?;
+        #[cfg(test)]
+        let recorder = match recorder_origin {
+            Some(origin) => {
+                crate::wire_log::Recorder::start_for_test(telemetry.capture.clone(), origin).await
+            }
+            None => crate::wire_log::Recorder::start(telemetry.capture.clone()).await,
+        }
+        .context("start request recorder")?;
         let core = build_turn_core(
             task,
             dialect,
@@ -520,7 +532,7 @@ fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     struct ShutdownWitness {
         called: Arc<AtomicBool>,
@@ -567,6 +579,23 @@ mod tests {
         let witness = Arc::new(ShutdownWitness {
             called: Arc::clone(&shutdown_called),
         });
+        let local_requests = Arc::new(AtomicUsize::new(0));
+        let local_requests_for_handler = Arc::clone(&local_requests);
+        let upstream = axum::Router::new().fallback(move || {
+            let local_requests = Arc::clone(&local_requests_for_handler);
+            async move {
+                local_requests.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local provider stub");
+        let recorder_origin = format!("http://{}", listener.local_addr().unwrap());
+        let upstream_task = tokio::spawn(async move {
+            axum::serve(listener, upstream).await.unwrap();
+        });
         let task = crate::tasks::easy_pack()
             .into_iter()
             .next()
@@ -579,18 +608,20 @@ mod tests {
             0,
             crate::ChannelSelection::Standard,
             crate::ReasoningEffort::None,
-            0,
+            1,
             0,
             None,
             Some(witness),
+            Some(recorder_origin),
         )
         .await;
+        upstream_task.abort();
+        let _ = upstream_task.await;
 
         assert_eq!(evidence.completion_error.as_deref(), Some("wall_limit"));
         assert!(!evidence.completed);
-        // The provider endpoint is the task-local recorder. Even if the zero
-        // duration permits one initial poll, no request can leave this process.
-        assert!(evidence.rounds <= 1);
+        assert_eq!(evidence.rounds, 1);
+        assert_eq!(local_requests.load(Ordering::SeqCst), 1);
         assert!(shutdown_called.load(Ordering::SeqCst));
     }
 

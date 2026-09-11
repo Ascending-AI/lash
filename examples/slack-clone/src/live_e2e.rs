@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::bot::slack_api::{ChatPostMessageRequest, HistoryQuery, SlackApi};
-use crate::log_out;
+use crate::{log_err, log_out};
 
 mod core_builders;
 #[cfg(test)]
@@ -613,7 +613,7 @@ async fn shutdown_live_core(
     let flush = core.flush_trace_sink().map_err(FailureReason::harness);
     match (shutdown, flush) {
         (Err(primary), Err(flush_error)) => {
-            eprintln!(
+            log_err!(
                 "slack-clone-live-e2e: {owner} trace flush also failed after core shutdown error: {flush_error:?}"
             );
             Err(primary)
@@ -631,7 +631,7 @@ async fn finish_live_core<T>(
     let cleanup = shutdown_live_core(core, owner).await;
     match (operation, cleanup) {
         (Err(primary), Err(cleanup_error)) => {
-            eprintln!(
+            log_err!(
                 "slack-clone-live-e2e: {owner} cleanup failed after primary error {primary:?}: {cleanup_error:?}"
             );
             Err(primary)
@@ -667,13 +667,13 @@ async fn finish_smoke_stream_with_timeout(
             ));
             while let Some(activity) = live_stream.next().await {
                 if let Err(drain_error) = activity {
-                    eprintln!(
+                    log_err!(
                         "slack-clone-live-e2e: smoke-stream drain also failed after activity error {primary:?}: {drain_error}"
                     );
                 }
             }
             if let Err(join_error) = live_stream.finish().await {
-                eprintln!(
+                log_err!(
                     "slack-clone-live-e2e: smoke-stream completion failed after activity error {primary:?}: {join_error}"
                 );
             }
@@ -691,13 +691,13 @@ async fn finish_smoke_stream_with_timeout(
             // completion JoinHandle before factory shutdown.
             while let Some(activity) = live_stream.next().await {
                 if let Err(drain_error) = activity {
-                    eprintln!(
+                    log_err!(
                         "slack-clone-live-e2e: smoke-stream drain failed after timeout: {drain_error}"
                     );
                 }
             }
             if let Err(join_error) = live_stream.finish().await {
-                eprintln!(
+                log_err!(
                     "slack-clone-live-e2e: smoke-stream completion failed after timeout: {join_error}"
                 );
             }
@@ -1119,7 +1119,7 @@ async fn run_attempt(
         Err(error) => {
             if let Err(cleanup_error) = shutdown_live_core(&rlm, "attempt-rlm-partial-build").await
             {
-                eprintln!(
+                log_err!(
                     "slack-clone-live-e2e: RLM cleanup failed after Standard core build error `{error:#}`: {cleanup_error:?}"
                 );
             }
@@ -1132,7 +1132,7 @@ async fn run_attempt(
             let primary = error.to_string();
             for (core, owner) in [(&standard, "attempt-standard"), (&rlm, "attempt-rlm")] {
                 if let Err(cleanup_error) = shutdown_live_core(core, owner).await {
-                    eprintln!(
+                    log_err!(
                         "slack-clone-live-e2e: {owner} cleanup failed after session-open error `{primary}`: {cleanup_error:?}"
                     );
                 }
@@ -1146,7 +1146,7 @@ async fn run_attempt(
             let primary = error.to_string();
             for (core, owner) in [(&standard, "attempt-standard"), (&rlm, "attempt-rlm")] {
                 if let Err(cleanup_error) = shutdown_live_core(core, owner).await {
-                    eprintln!(
+                    log_err!(
                         "slack-clone-live-e2e: {owner} cleanup failed after session-open error `{primary}`: {cleanup_error:?}"
                     );
                 }
@@ -1246,7 +1246,7 @@ async fn run_attempt(
     for (core, owner) in [(&standard, "attempt-standard"), (&rlm, "attempt-rlm")] {
         if let Err(cleanup_error) = shutdown_live_core(core, owner).await {
             if let Some(primary) = &failure {
-                eprintln!(
+                log_err!(
                     "slack-clone-live-e2e: {owner} cleanup failed after primary attempt failure {primary:?}: {cleanup_error:?}"
                 );
             } else {
