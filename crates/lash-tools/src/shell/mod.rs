@@ -77,6 +77,7 @@ fn tool_callable_from_authority(access: &SessionToolAccess, name: &str) -> bool 
     access.tools.is_empty() || access.tools.iter().any(|tool| tool.name() == name)
 }
 
+#[derive(Clone)]
 pub struct StandardShell {
     runtime: ShellRuntime,
 }
@@ -91,6 +92,49 @@ impl StandardShell {
     pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.runtime = self.runtime.with_cwd(cwd);
         self
+    }
+
+    /// Runs one `exec_command` call from wholly owned inputs.
+    ///
+    /// This is the host-owned counterpart to the `exec_command` tool. It uses
+    /// the same argument parser, process runner, timeout handling, output
+    /// capture, truncation, spill behavior, and [`ToolOutcome`] mapping as
+    /// [`StaticToolExecute::execute`], without borrowing a [`ToolCall`] or its
+    /// sealed attempt context.
+    ///
+    /// The returned future owns this shell clone, `args`, and
+    /// `cancellation_token`, so it is `Send + 'static` and may be moved into a
+    /// host-owned task. The host owns task admission and must retain and join
+    /// that task. Cancelling the token cooperatively stops a launched command
+    /// and returns a terminal cancellation outcome. Dropping the future after
+    /// launch signals Lash's retained child wait owner, which terminates the
+    /// owned process group and reaps the direct child.
+    ///
+    /// ```no_run
+    /// # async fn example() {
+    /// use lash_tools::shell::StandardShell;
+    /// use serde_json::json;
+    /// use tokio_util::sync::CancellationToken;
+    ///
+    /// let shell = StandardShell::new().with_cwd("/workspace/project");
+    /// let cancellation = CancellationToken::new();
+    /// let task = tokio::spawn(shell.clone().exec_command_owned(
+    ///     json!({ "cmd": "cargo check", "timeout_ms": 600_000 }),
+    ///     cancellation.clone(),
+    /// ));
+    ///
+    /// cancellation.cancel();
+    /// let outcome = task.await.expect("owned shell task panicked");
+    /// # let _ = outcome;
+    /// # }
+    /// ```
+    pub async fn exec_command_owned(
+        self,
+        args: serde_json::Value,
+        cancellation_token: CancellationToken,
+    ) -> ToolOutcome {
+        self.exec_command_args(&args, Some(cancellation_token))
+            .await
     }
 
     #[cfg(test)]
@@ -219,6 +263,18 @@ impl StandardShell {
             Ok(PollOutcome::Cancelled) => ToolOutcome::cancelled("tool call cancelled"),
             Err(failure) => ToolOutcome::failure(*failure),
         }
+    }
+
+    async fn exec_command_args(
+        &self,
+        args: &serde_json::Value,
+        cancel: Option<CancellationToken>,
+    ) -> ToolOutcome {
+        let params = match self.parse_exec_command_params(args) {
+            Ok(params) => params,
+            Err(err) => return err,
+        };
+        self.exec_command(&params, cancel).await
     }
 
     async fn start_command_process(
@@ -812,13 +868,7 @@ finish probe.exit_code == 0"#.into(),
         cancel: Option<CancellationToken>,
     ) -> ToolOutcome {
         match name {
-            "exec_command" => {
-                let params = match self.parse_exec_command_params(args) {
-                    Ok(params) => params,
-                    Err(err) => return err,
-                };
-                self.exec_command(&params, cancel).await
-            }
+            "exec_command" => self.exec_command_args(args, cancel).await,
             "start_command" => {
                 let _ = (context, cancel);
                 execution_failure(
