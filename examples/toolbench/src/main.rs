@@ -3,6 +3,8 @@ mod grading;
 mod provider_log;
 mod reconcile;
 mod runtime;
+#[path = "../../shared/shutdown_marker.rs"]
+mod shutdown_marker;
 mod summary;
 mod tasks;
 mod telemetry;

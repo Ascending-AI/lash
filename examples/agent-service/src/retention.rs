@@ -121,12 +121,22 @@ pub(crate) fn spawn_retention(
     state: AppStateData,
     targets: StoreRetentionTargets,
     processes: Processes,
-) {
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(MAINTENANCE_INTERVAL);
         ticker.tick().await;
         loop {
-            ticker.tick().await;
+            tokio::select! {
+                biased;
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        break;
+                    }
+                    continue;
+                }
+                _ = ticker.tick() => {}
+            }
             let session_ids = match state
                 .with_db(|db| {
                     Ok(db
@@ -152,7 +162,7 @@ pub(crate) fn spawn_retention(
             log_store_report(&store_report);
             prune_terminal_processes(&processes).await;
         }
-    });
+    })
 }
 
 pub(crate) fn scheduled_attachment_policy() -> AttachmentReclamationPolicy {

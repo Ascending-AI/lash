@@ -31,6 +31,8 @@ use crate::bot::slack_api::{ChatPostMessageRequest, HistoryQuery, SlackApi};
 use crate::log_out;
 
 mod core_builders;
+#[path = "../../shared/shutdown_marker.rs"]
+mod shutdown_marker;
 
 use core_builders::{model_spec, provider, rlm_core, standard_core};
 
@@ -601,6 +603,43 @@ struct SmokeProbe {
     evidence: String,
 }
 
+async fn shutdown_live_core(
+    core: &lash::LashCore,
+    owner: &str,
+) -> std::result::Result<(), FailureReason> {
+    let shutdown = core.shutdown().await.map_err(FailureReason::harness);
+    let flush = core.flush_trace_sink().map_err(FailureReason::harness);
+    match (shutdown, flush) {
+        (Err(primary), Err(flush_error)) => {
+            eprintln!(
+                "slack-clone-live-e2e: {owner} trace flush also failed after core shutdown error: {flush_error:?}"
+            );
+            Err(primary)
+        }
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+async fn finish_live_core<T>(
+    core: &lash::LashCore,
+    owner: &str,
+    operation: std::result::Result<T, FailureReason>,
+) -> std::result::Result<T, FailureReason> {
+    let cleanup = shutdown_live_core(core, owner).await;
+    match (operation, cleanup) {
+        (Err(primary), Err(cleanup_error)) => {
+            eprintln!(
+                "slack-clone-live-e2e: {owner} cleanup failed after primary error {primary:?}: {cleanup_error:?}"
+            );
+            Err(primary)
+        }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
 async fn run_smoke_probes(
     config: &Config,
     ledger: &SpendLedger,
@@ -617,28 +656,33 @@ async fn run_smoke_probes(
         smoke_dir.join("stream.trace.jsonl"),
     )
     .map_err(FailureReason::harness)?;
-    let stream_session = stream_core
-        .session("live-smoke-stream")
-        .open()
+    let stream_result = async {
+        let stream_session = stream_core
+            .session("live-smoke-stream")
+            .open()
+            .await
+            .map_err(FailureReason::harness)?;
+        let mut live_stream = stream_session
+            .turn(TurnInput::text("Reply now."))
+            .stream()
+            .map_err(FailureReason::harness)?;
+        tokio::time::timeout(TURN_TIMEOUT, async move {
+            let mut activity_count = 0;
+            while let Some(activity) = live_stream.next().await {
+                activity.map_err(FailureReason::harness)?;
+                activity_count += 1;
+            }
+            let result = live_stream.finish().await.map_err(FailureReason::harness)?;
+            Ok::<_, FailureReason>((result, activity_count))
+        })
         .await
-        .map_err(FailureReason::harness)?;
-    let mut live_stream = stream_session
-        .turn(TurnInput::text("Reply now."))
-        .stream()
-        .map_err(FailureReason::harness)?;
-    let (stream, stream_activity_count) = tokio::time::timeout(TURN_TIMEOUT, async move {
-        let mut activity_count = 0;
-        while let Some(activity) = live_stream.next().await {
-            activity.map_err(FailureReason::harness)?;
-            activity_count += 1;
-        }
-        let result = live_stream.finish().await.map_err(FailureReason::harness)?;
-        Ok::<_, FailureReason>((result, activity_count))
-    })
-    .await
-    .map_err(|_| FailureReason::TurnTimedOut {
-        agent: "smoke-stream".to_string(),
-    })??;
+        .map_err(|_| FailureReason::TurnTimedOut {
+            agent: "smoke-stream".to_string(),
+        })?
+    }
+    .await;
+    let (stream, stream_activity_count) =
+        finish_live_core(&stream_core, "smoke-stream", stream_result).await?;
     let stream_passed =
         stream.is_success() && !stream.llm_calls.is_empty() && stream_activity_count > 0;
 
@@ -653,22 +697,26 @@ async fn run_smoke_probes(
         smoke_dir.join("tool.trace.jsonl"),
     )
     .map_err(FailureReason::harness)?;
-    let tool_session = tool_core
-        .session("live-smoke-tool")
-        .open()
+    let tool_result = async {
+        let tool_session = tool_core
+            .session("live-smoke-tool")
+            .open()
+            .await
+            .map_err(FailureReason::harness)?;
+        tokio::time::timeout(
+            TURN_TIMEOUT,
+            tool_session
+                .turn(TurnInput::text("Perform the required probe."))
+                .run(),
+        )
         .await
-        .map_err(FailureReason::harness)?;
-    let tool = tokio::time::timeout(
-        TURN_TIMEOUT,
-        tool_session
-            .turn(TurnInput::text("Perform the required probe."))
-            .run(),
-    )
-    .await
-    .map_err(|_| FailureReason::TurnTimedOut {
-        agent: "smoke-tool".to_string(),
-    })?
-    .map_err(FailureReason::harness)?;
+        .map_err(|_| FailureReason::TurnTimedOut {
+            agent: "smoke-tool".to_string(),
+        })?
+        .map_err(FailureReason::harness)
+    }
+    .await;
+    let tool = finish_live_core(&tool_core, "smoke-tool", tool_result).await?;
     let tool_passed = tool.is_success()
         && tool
             .result
@@ -977,23 +1025,28 @@ async fn run_attempt(
         Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
     };
     let state = Arc::new(Mutex::new(SwapState::default()));
-    let rlm = rlm_core(
+    let rlm_model = match model_spec(&config.rlm_model, config.output_token_cap) {
+        Ok(model) => model,
+        Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
+    };
+    let standard_model = match model_spec(&config.standard_model, config.output_token_cap) {
+        Ok(model) => model,
+        Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
+    };
+    let rlm = match rlm_core(
         provider(config, ledger),
-        match model_spec(&config.rlm_model, config.output_token_cap) {
-            Ok(model) => model,
-            Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
-        },
+        rlm_model,
         config.output_token_cap,
         SWAP_INSTRUCTIONS,
         swap_tools("Agent A", &channel, Arc::clone(&api), Arc::clone(&state)),
         attempt_dir.join("rlm.trace.jsonl"),
-    );
-    let standard = standard_core(
+    ) {
+        Ok(core) => core,
+        Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
+    };
+    let standard = match standard_core(
         provider(config, ledger),
-        match model_spec(&config.standard_model, config.output_token_cap) {
-            Ok(model) => model,
-            Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
-        },
+        standard_model,
         config.output_token_cap,
         MAX_MODEL_TURNS_PER_SESSION_TURN,
         SWAP_INSTRUCTIONS,
@@ -1004,20 +1057,45 @@ async fn run_attempt(
             Arc::clone(&state),
         )),
         attempt_dir.join("standard.trace.jsonl"),
-    );
-    let (rlm, standard) = match (rlm, standard) {
-        (Ok(rlm), Ok(standard)) => (rlm, standard),
-        (Err(error), _) | (_, Err(error)) => {
+    ) {
+        Ok(core) => core,
+        Err(error) => {
+            if let Err(cleanup_error) = shutdown_live_core(&rlm, "attempt-rlm-partial-build").await
+            {
+                eprintln!(
+                    "slack-clone-live-e2e: RLM cleanup failed after Standard core build error `{error:#}`: {cleanup_error:?}"
+                );
+            }
             return failed_attempt(attempt, nonce_a, nonce_b, ledger, error);
         }
     };
     let session_a = match rlm.session(format!("swap-{attempt}-a")).open().await {
         Ok(session) => session,
-        Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
+        Err(error) => {
+            let primary = error.to_string();
+            for (core, owner) in [(&standard, "attempt-standard"), (&rlm, "attempt-rlm")] {
+                if let Err(cleanup_error) = shutdown_live_core(core, owner).await {
+                    eprintln!(
+                        "slack-clone-live-e2e: {owner} cleanup failed after session-open error `{primary}`: {cleanup_error:?}"
+                    );
+                }
+            }
+            return failed_attempt(attempt, nonce_a, nonce_b, ledger, primary);
+        }
     };
     let session_b = match standard.session(format!("swap-{attempt}-b")).open().await {
         Ok(session) => session,
-        Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
+        Err(error) => {
+            let primary = error.to_string();
+            for (core, owner) in [(&standard, "attempt-standard"), (&rlm, "attempt-rlm")] {
+                if let Err(cleanup_error) = shutdown_live_core(core, owner).await {
+                    eprintln!(
+                        "slack-clone-live-e2e: {owner} cleanup failed after session-open error `{primary}`: {cleanup_error:?}"
+                    );
+                }
+            }
+            return failed_attempt(attempt, nonce_a, nonce_b, ledger, primary);
+        }
     };
     let prompt_a = format!(
         "You are Agent A. Your private nonce is {nonce_a}. Begin the exchange now and keep using the channel tools until you have submitted Agent B's nonce."
@@ -1107,6 +1185,17 @@ async fn run_attempt(
         && let Err(detail) = ui_result
     {
         failure = Some(FailureReason::UiAssertionFailed { detail });
+    }
+    for (core, owner) in [(&standard, "attempt-standard"), (&rlm, "attempt-rlm")] {
+        if let Err(cleanup_error) = shutdown_live_core(core, owner).await {
+            if let Some(primary) = &failure {
+                eprintln!(
+                    "slack-clone-live-e2e: {owner} cleanup failed after primary attempt failure {primary:?}: {cleanup_error:?}"
+                );
+            } else {
+                failure = Some(cleanup_error);
+            }
+        }
     }
     let report = AttemptReport {
         attempt,

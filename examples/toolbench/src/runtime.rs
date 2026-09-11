@@ -55,9 +55,11 @@ pub(crate) async fn run_task(
         ))
     }));
     let world = SharedWorld::new(task.seed.clone());
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(turn_wall_limit_secs),
-        run_turn(
+    let prepared = async {
+        let recorder = crate::wire_log::Recorder::start(telemetry.capture.clone())
+            .await
+            .context("start request recorder")?;
+        let core = build_turn_core(
             task,
             dialect,
             model,
@@ -68,9 +70,34 @@ pub(crate) async fn run_task(
             &world,
             &telemetry,
             provider_retries,
-        ),
-    )
+            &recorder.base_url,
+        )?;
+        Ok::<_, anyhow::Error>((core, recorder))
+    }
     .await;
+    let result = match prepared {
+        Ok((core, recorder)) => {
+            let mut result = tokio::time::timeout(
+                std::time::Duration::from_secs(turn_wall_limit_secs),
+                run_turn(&core, task, dialect, run, channel, &telemetry),
+            )
+            .await;
+            if let Err(shutdown_error) = core.shutdown().await.context("shut down toolbench core") {
+                match &result {
+                    Ok(Ok(_)) => result = Ok(Err(shutdown_error)),
+                    Ok(Err(primary)) => eprintln!(
+                        "toolbench: core shutdown failed after turn error `{primary:#}`: {shutdown_error:#}"
+                    ),
+                    Err(_) => eprintln!(
+                        "toolbench: core shutdown failed after wall limit: {shutdown_error:#}"
+                    ),
+                }
+            }
+            drop(recorder);
+            result
+        }
+        Err(error) => Ok(Err(error)),
+    };
     let (completed, completion_error, finish_value, decisions, turn_outcome) = match result {
         Ok(Ok((output, decisions))) => (
             output.is_success(),
@@ -164,97 +191,13 @@ pub(crate) async fn run_task(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_turn(
+    core: &LashCore,
     task: &Task,
     dialect: lash::rlm::RlmDialect,
-    model: &str,
-    api_key: &str,
     run: usize,
     channel: crate::ChannelSelection,
-    effort: crate::ReasoningEffort,
-    world: &SharedWorld,
     telemetry: &Arc<crate::telemetry::Telemetry>,
-    provider_retries: u32,
 ) -> Result<(lash::TurnOutput, Vec<String>)> {
-    let recorder = crate::wire_log::Recorder::start(telemetry.capture.clone())
-        .await
-        .context("start request recorder")?;
-    let provider = ProviderHandle::new(
-        telemetry.capture.wrap(
-            OpenAiCompatibleProvider::new(api_key.to_string(), &recorder.base_url)
-                .with_compat(OpenAiCompat::openrouter())
-                .with_options(ProviderOptions {
-                    expose_thinking: true,
-                    reliability: lash::provider::ProviderReliability {
-                        retry: crate::provider_log::retry_policy(provider_retries),
-                        ..Default::default()
-                    },
-                    ..ProviderOptions::default()
-                })
-                .into_components(),
-            api_key,
-        ),
-    );
-    let budget = if task.id.starts_with("__") {
-        lash::TurnBudget::bounded(1)
-    } else {
-        lash::TurnBudget::Unbounded
-    };
-    let builder = match channel {
-        crate::ChannelSelection::Standard => LashCore::standard_builder(budget),
-        crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
-            let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(if channel == crate::ChannelSelection::Cell {
-                    lash::rlm::RlmChannel::Cell
-                } else {
-                    lash::rlm::RlmChannel::NativeTool
-                })
-                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-                .wall_clock(lash::rlm::WallClockBound::secs(30))
-                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                .build();
-            config.prompt_features.images = false;
-            config.prompt_features.type_literals = false;
-            config.prompt_features.decomposition = false;
-            config.lashlang_language_features.label_annotations = false;
-            config.lashlang_abilities.processes = false;
-            config.lashlang_abilities.sleep = false;
-            config.lashlang_abilities.process_signals = false;
-            config.lashlang_abilities.triggers = false;
-            config.continue_as_soft_warn_tokens = None;
-            let factory = lash::rlm::RlmProtocolPluginFactory::new(
-                config,
-                Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
-            );
-            LashCore::rlm_builder(budget, factory)
-        }
-    };
-    let core = builder
-        .trace_sink(Arc::new(telemetry.capture.clone()))
-        .trace_level(lash::tracing::TraceLevel::Extended)
-        .no_progress_budget(lash::NoProgressBudget::Unbounded)
-        .without_queued_work()
-        .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
-            stack.push(telemetry.plugin());
-        }))
-        .provider(provider)
-        .model(model_spec(model, effort)?)
-        .tools(if channel == crate::ChannelSelection::Standard {
-            world.standard_provider()
-        } else {
-            world.provider()
-        })
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "toolbench",
-            format!("run-{run}-{}-{}", dialect.language_id(), task.id),
-        ))
-        .context("build Lash core")?;
     let session_id = SessionId::from(format!(
         "toolbench-{run}-{}-{}",
         dialect.language_id(),
@@ -314,6 +257,105 @@ async fn run_turn(
         },
         decisions,
     ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_turn_core(
+    task: &Task,
+    dialect: lash::rlm::RlmDialect,
+    model: &str,
+    api_key: &str,
+    run: usize,
+    channel: crate::ChannelSelection,
+    effort: crate::ReasoningEffort,
+    world: &SharedWorld,
+    telemetry: &Arc<crate::telemetry::Telemetry>,
+    provider_retries: u32,
+    recorder_base_url: &str,
+) -> Result<LashCore> {
+    let provider = ProviderHandle::new(
+        telemetry.capture.wrap(
+            OpenAiCompatibleProvider::new(api_key.to_string(), recorder_base_url)
+                .with_compat(OpenAiCompat::openrouter())
+                .with_options(ProviderOptions {
+                    expose_thinking: true,
+                    reliability: lash::provider::ProviderReliability {
+                        retry: crate::provider_log::retry_policy(provider_retries),
+                        ..Default::default()
+                    },
+                    ..ProviderOptions::default()
+                })
+                .into_components(),
+            api_key,
+        ),
+    );
+    let budget = if task.id.starts_with("__") {
+        lash::TurnBudget::bounded(1)
+    } else {
+        lash::TurnBudget::Unbounded
+    };
+    let builder = match channel {
+        crate::ChannelSelection::Standard => LashCore::standard_builder(budget),
+        crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
+            let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(if channel == crate::ChannelSelection::Cell {
+                    lash::rlm::RlmChannel::Cell
+                } else {
+                    lash::rlm::RlmChannel::NativeTool
+                })
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash::rlm::WallClockBound::secs(30))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                .build();
+            config.prompt_features.images = false;
+            config.prompt_features.type_literals = false;
+            config.prompt_features.decomposition = false;
+            config.lashlang_language_features.label_annotations = false;
+            config.lashlang_abilities.processes = false;
+            config.lashlang_abilities.sleep = false;
+            config.lashlang_abilities.process_signals = false;
+            config.lashlang_abilities.triggers = false;
+            config.continue_as_soft_warn_tokens = None;
+            let factory = lash::rlm::RlmProtocolPluginFactory::new(
+                config,
+                Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+            );
+            LashCore::rlm_builder(budget, factory)
+        }
+    };
+    let shutdown_marker =
+        crate::shutdown_marker::factory_from_env("toolbench").map_err(anyhow::Error::msg)?;
+    let core = builder
+        .trace_sink(Arc::new(telemetry.capture.clone()))
+        .trace_level(lash::tracing::TraceLevel::Extended)
+        .no_progress_budget(lash::NoProgressBudget::Unbounded)
+        .without_queued_work()
+        .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
+            stack.push(telemetry.plugin());
+            if let Some(marker) = shutdown_marker {
+                stack.push(marker);
+            }
+        }))
+        .provider(provider)
+        .model(model_spec(model, effort)?)
+        .tools(if channel == crate::ChannelSelection::Standard {
+            world.standard_provider()
+        } else {
+            world.provider()
+        })
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "toolbench",
+            format!("run-{run}-{}-{}", dialect.language_id(), task.id),
+        ))
+        .context("build Lash core")?;
+    Ok(core)
 }
 
 /// Native capability probes are sampled model behaviour, so one stochastic

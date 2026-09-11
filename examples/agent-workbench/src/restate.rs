@@ -424,7 +424,7 @@ impl WorkbenchProcessCancelWorkflow for WorkbenchProcessCancelWorkflowImpl {
 }
 
 #[restate_sdk::object]
-trait WorkbenchCronJob {
+pub(crate) trait WorkbenchCronJob {
     async fn upsert(request: Json<WorkbenchCronRequest>) -> HandlerResult<Json<WorkbenchCronInfo>>;
     async fn run() -> HandlerResult<Json<()>>;
     async fn cancel() -> HandlerResult<Json<()>>;
@@ -580,6 +580,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn spawn_restate_endpoint(
     addr: SocketAddr,
     state: AppState,

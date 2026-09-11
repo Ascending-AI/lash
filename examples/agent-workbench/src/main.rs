@@ -7,7 +7,10 @@ mod execution_graphs;
 mod failure_provider;
 mod mail;
 mod restate;
+mod restate_host;
 mod restate_ingress;
+#[path = "../../shared/shutdown_marker.rs"]
+mod shutdown_marker;
 mod ui;
 #[cfg(feature = "provider-wire-fixtures")]
 mod valid_empty_completion;

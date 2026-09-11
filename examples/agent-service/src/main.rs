@@ -30,6 +30,8 @@ mod retention;
 #[cfg(test)]
 mod retention_tests;
 mod routes;
+#[path = "../../shared/shutdown_marker.rs"]
+mod shutdown_marker;
 mod state;
 mod ui;
 
@@ -285,7 +287,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     ));
-    let core_builder =
+    let mut core_builder =
         lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
             .provider(provider)
@@ -305,6 +307,9 @@ async fn async_main() -> anyhow_like::Result<()> {
             ])))
             .trace_level(TraceLevel::Extended)
             .trigger_store(trigger_store);
+    if let Some(marker) = shutdown_marker::factory_from_env("agent-service")? {
+        core_builder = core_builder.plugin(marker);
+    }
     let process_registry_store = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, session_store_root)
             .await
@@ -363,120 +368,113 @@ async fn async_main() -> anyhow_like::Result<()> {
             unreachable!("restate mode is rejected before core construction");
         }
     };
-    #[cfg(feature = "restate")]
-    let turn_work_driver = match durability {
-        AgentServiceDurability::Local => core.turn_work_driver().map_err(|err| err.to_string())?,
-        AgentServiceDurability::Restate => turn_deployment
-            .as_ref()
-            .expect("turn deployment configured for Restate")
-            .turn_work_driver(
-                Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>
-            ),
-    };
-    #[cfg(not(feature = "restate"))]
-    let turn_work_driver = core.turn_work_driver().map_err(|err| err.to_string())?;
+    let shutdown_core = core.clone();
+    let operation = async {
+        #[cfg(feature = "restate")]
+        let turn_work_driver = match durability {
+            AgentServiceDurability::Local => {
+                core.turn_work_driver().map_err(|err| err.to_string())?
+            }
+            AgentServiceDurability::Restate => turn_deployment
+                .as_ref()
+                .expect("turn deployment configured for Restate")
+                .turn_work_driver(
+                    Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>
+                ),
+        };
+        #[cfg(not(feature = "restate"))]
+        let turn_work_driver = core.turn_work_driver().map_err(|err| err.to_string())?;
 
-    #[cfg(feature = "restate")]
-    let process_worker = if durability == AgentServiceDurability::Restate {
-        let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
-            db: Arc::clone(&shared_db),
-        });
-        Some(
-            DurableProcessWorker::new(
-                core.durable_process_worker_config_with_plugins([demo_factory])
-                    .map_err(|err| err.to_string())?,
+        #[cfg(feature = "restate")]
+        let process_worker = if durability == AgentServiceDurability::Restate {
+            let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
+                db: Arc::clone(&shared_db),
+            });
+            Some(
+                DurableProcessWorker::new(
+                    core.durable_process_worker_config_with_plugins([demo_factory])
+                        .map_err(|err| err.to_string())?,
+                )
+                .map_err(|err| err.to_string())?,
             )
-            .map_err(|err| err.to_string())?,
-        )
-    } else {
-        None
-    };
-    // Capture a process facade handle before `core` is moved into the app
-    // state, so host-scheduled retention runs through the same
-    // `Processes::prune` lever every embedder uses.
-    let retention_processes = core.processes();
-    #[cfg(feature = "restate")]
-    let restate_ingress_url =
-        (durability == AgentServiceDurability::Restate).then_some(restate_ingress_url);
-    #[cfg(feature = "restate")]
-    let state = AppStateData::from_shared_db(
-        core,
-        turn_work_driver,
-        Arc::clone(&shared_db),
-        model,
-        Some(model_variant),
-        durability,
-        // The Restate deployment is the one the judged parity battery drives,
-        // so it reads the ambient dialect exactly like the in-process path. A
-        // literal here would serve Lashlang under a TypeScript label.
-        crate::state::rlm_dialect_from_env()?,
-        restate_ingress_url,
-    );
-    #[cfg(not(feature = "restate"))]
-    let state = AppStateData::new(
-        core,
-        turn_work_driver,
-        app_db,
-        model,
-        Some(model_variant),
-        durability,
-        crate::state::rlm_dialect_from_env()?,
-    );
-    state
-        .recover_pending_chat_forks()
-        .await
-        .map_err(|err| format!("recover pending chat forks: {err}"))?;
-
-    #[cfg(feature = "restate")]
-    if durability == AgentServiceDurability::Restate {
-        let process_deployment = process_deployment.expect("process deployment configured");
-        let effect_groups = crate::effect_groups::effect_group_services(
-            state
-                .restate_ingress_url()
-                .expect("Restate durability configures ingress"),
+        } else {
+            None
+        };
+        // Capture a process facade handle before `core` is moved into the app
+        // state, so host-scheduled retention runs through the same
+        // `Processes::prune` lever every embedder uses.
+        let retention_processes = core.processes();
+        #[cfg(feature = "restate")]
+        let restate_ingress_url =
+            (durability == AgentServiceDurability::Restate).then_some(restate_ingress_url);
+        #[cfg(feature = "restate")]
+        let state = AppStateData::from_shared_db(
+            core,
+            turn_work_driver,
+            Arc::clone(&shared_db),
+            model,
+            Some(model_variant),
+            durability,
+            // The Restate deployment is the one the judged parity battery drives,
+            // so it reads the ambient dialect exactly like the in-process path. A
+            // literal here would serve Lashlang under a TypeScript label.
+            crate::state::rlm_dialect_from_env()?,
+            restate_ingress_url,
         );
-        let endpoint = restate_sdk::endpoint::Endpoint::builder()
-            .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
-            .bind(AgentServiceEffectGroupWorkflowImpl.serve())
-            .bind(
-                process_deployment
-                    .workflow(process_worker.expect("process worker configured for Restate"))
-                    .serve(),
-            )
-            .bind(effect_groups.index)
-            .bind(effect_groups.payload)
-            .bind(effect_groups.dispatch)
-            .bind(effect_groups.wait.workflow.serve())
-            .bind(effect_groups.wait.index.serve())
-            .build();
-        tokio::spawn(async move {
-            restate_sdk::http_server::HttpServer::new(endpoint)
-                .listen_and_serve(restate_endpoint_addr)
-                .await;
-        });
-        let _ = process_deployment
-            .process_work()
-            .admit_pending_processes("agent_service_startup")
+        #[cfg(not(feature = "restate"))]
+        let state = AppStateData::new(
+            core,
+            turn_work_driver,
+            app_db,
+            model,
+            Some(model_variant),
+            durability,
+            crate::state::rlm_dialect_from_env()?,
+        );
+        state
+            .recover_pending_chat_forks()
             .await
-            .map_err(|err| err.to_string())?;
-        println!("agent-service Restate endpoint listening on http://{restate_endpoint_addr}");
-    }
+            .map_err(|err| format!("recover pending chat forks: {err}"))?;
 
-    // Host-scheduled store and process retention runs in both durability modes:
-    // whichever durable stores back the deployment are the ones that grow.
-    crate::retention::spawn_retention(
-        state.clone(),
-        crate::retention::StoreRetentionTargets {
-            factory: store_factory,
-            gc_store: maintenance_store as Arc<dyn lash::persistence::StoreMaintenance>,
-            attachment_store,
-        },
-        retention_processes,
-    );
+        #[cfg(feature = "restate")]
+        let restate_endpoint = if durability == AgentServiceDurability::Restate {
+            let process_deployment = process_deployment.expect("process deployment configured");
+            let effect_groups = crate::effect_groups::effect_group_services(
+                state
+                    .restate_ingress_url()
+                    .expect("Restate durability configures ingress"),
+            );
+            let endpoint = restate_sdk::endpoint::Endpoint::builder()
+                .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
+                .bind(AgentServiceEffectGroupWorkflowImpl.serve())
+                .bind(
+                    process_deployment
+                        .workflow(process_worker.expect("process worker configured for Restate"))
+                        .serve(),
+                )
+                .bind(effect_groups.index)
+                .bind(effect_groups.payload)
+                .bind(effect_groups.dispatch)
+                .bind(effect_groups.wait.workflow.serve())
+                .bind(effect_groups.wait.index.serve())
+                .build();
+            let _ = process_deployment
+                .process_work()
+                .admit_pending_processes("agent_service_startup")
+                .await
+                .map_err(|err| err.to_string())?;
+            let listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
+                .await
+                .map_err(|err| format!("bind agent-service Restate endpoint: {err}"))?;
+            println!("agent-service Restate endpoint listening on http://{restate_endpoint_addr}");
+            Some((endpoint, listener))
+        } else {
+            None
+        };
 
-    // Keep a state clone for the drain; the router consumes the original.
-    let drain_state = state.clone();
-    let app = Router::new()
+        // Keep a state clone for the drain; the router consumes the original.
+        let drain_state = state.clone();
+        let app = Router::new()
         .route("/", get(index))
         .route("/api/settings", get(settings))
         .route("/api/chats", get(list_chats).post(create_chat))
@@ -511,35 +509,90 @@ async fn async_main() -> anyhow_like::Result<()> {
             "/api/chats/{chat_id}/turns/{turn_id}/cancel",
             axum::routing::post(cancel_turn),
         );
-    #[cfg(feature = "restate")]
-    let app = app
-        .route(
-            "/api/effect-groups",
-            axum::routing::post(crate::effect_groups::run_effect_group),
-        )
-        .route(
-            "/api/effect-groups/{run_id}",
-            get(crate::effect_groups::get_effect_group),
-        );
-    let app = app.with_state(state);
+        #[cfg(feature = "restate")]
+        let app = app
+            .route(
+                "/api/effect-groups",
+                axum::routing::post(crate::effect_groups::run_effect_group),
+            )
+            .route(
+                "/api/effect-groups/{run_id}",
+                get(crate::effect_groups::get_effect_group),
+            );
+        let app = app.with_state(state);
 
-    println!(
-        "agent-service listening on http://{addr} (durability: {})",
-        durability.as_str()
-    );
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|err| err.to_string())?;
-    // This example's first drain step is to stop admitting. Axum's graceful
-    // shutdown stops accepting connections and lets in-flight requests finish
-    // once a signal arrives.
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|err| err.to_string())?;
-    // Admission has stopped; run the teardown levers this process owns.
-    drain(&drain_state, &drain_provider).await;
-    Ok(())
+        println!(
+            "agent-service listening on http://{addr} (durability: {})",
+            durability.as_str()
+        );
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(|err| err.to_string())?;
+        let (host_shutdown, _) = tokio::sync::watch::channel(false);
+        // Host-scheduled store and process retention runs in both durability modes:
+        // whichever durable stores back the deployment are the ones that grow.
+        let retention_task = crate::retention::spawn_retention(
+            drain_state.clone(),
+            crate::retention::StoreRetentionTargets {
+                factory: store_factory,
+                gc_store: maintenance_store as Arc<dyn lash::persistence::StoreMaintenance>,
+                attachment_store,
+            },
+            retention_processes,
+            host_shutdown.subscribe(),
+        );
+        #[cfg(feature = "restate")]
+        let restate_task = restate_endpoint.map(|(endpoint, listener)| {
+            let mut shutdown = host_shutdown.subscribe();
+            tokio::spawn(async move {
+                restate_sdk::http_server::HttpServer::new(endpoint)
+                    .serve_with_cancel(listener, async move {
+                        while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
+                    })
+                    .await;
+            })
+        });
+        // This example's first drain step is to stop admitting. Axum's graceful
+        // shutdown stops accepting connections and lets in-flight requests finish
+        // once a signal arrives.
+        let signal_shutdown = host_shutdown.clone();
+        let serve_result = axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_signal().await;
+                let _ = signal_shutdown.send(true);
+            })
+            .await
+            .map_err(|err| err.to_string());
+        let _ = host_shutdown.send(true);
+        if let Err(error) = retention_task.await {
+            eprintln!("agent-service: retention task join failed: {error}");
+        }
+        #[cfg(feature = "restate")]
+        if let Some(task) = restate_task
+            && let Err(error) = task.await
+        {
+            eprintln!("agent-service: Restate endpoint task join failed: {error}");
+        }
+        serve_result
+    }
+    .await;
+    // Admission and owned maintenance/endpoints have stopped. Release the core
+    // factories before provider and trace finalization.
+    let cleanup = drain(&shutdown_core, &drain_provider).await;
+    match (operation, cleanup) {
+        (Err(primary), Err(cleanup_error)) => {
+            eprintln!(
+                "agent-service: cleanup failed after primary error `{primary}`: {cleanup_error}"
+            );
+            Err(primary)
+        }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+        (Ok(()), Ok(())) => {
+            println!("agent-service shutdown complete");
+            Ok(())
+        }
+    }
 }
 
 /// Resolve when the process receives Ctrl-C or SIGTERM — the host-owned signal
@@ -577,17 +630,24 @@ async fn shutdown_signal() {
 /// and `abandon_queued_work_claim` / `revoke_durable_waits` for any driver it
 /// stopped mid-claim. The host also closes provider transports and flushes its
 /// trace sink, as this example does below.
-async fn drain(state: &AppStateData, provider: &ProviderHandle) {
+async fn drain(core: &lash::LashCore, provider: &ProviderHandle) -> anyhow_like::Result<()> {
+    let mut first_error = None;
+    if let Err(err) = core.shutdown().await {
+        first_error = Some(format!("core shutdown failed: {err}"));
+    }
     // Release provider transports (the Codex provider sends WebSocket Close
     // frames; the default provider close is a no-op).
     if let Err(err) = provider.close().await {
         eprintln!("agent-service: provider close failed: {err}");
+        first_error.get_or_insert_with(|| format!("provider close failed: {err}"));
     }
     // Flush the trace sink (fsync the JSONL). An OTel host would also flush its
     // own TracerProvider here, which lash cannot do for it.
-    if let Err(err) = state.core().flush_trace_sink() {
+    if let Err(err) = core.flush_trace_sink() {
         eprintln!("agent-service: trace flush failed: {err}");
+        first_error.get_or_insert_with(|| format!("trace flush failed: {err}"));
     }
+    first_error.map_or(Ok(()), Err)
 }
 
 fn service_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnapshot {
