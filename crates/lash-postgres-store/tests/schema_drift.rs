@@ -29,7 +29,7 @@ use harness::{
     ScratchSchema, assert_mutation_is_rejected, pool_with_search_path, postgres_server_version_num,
 };
 
-const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 83;
+const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 84;
 
 /// Append-request replay depends on one durable receipt per session and turn.
 /// Dropping the receipt table's primary key would silently admit conflicting

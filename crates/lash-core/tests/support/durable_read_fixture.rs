@@ -319,14 +319,31 @@ fn assert_fixture_schema_version(found: u32) {
 
 #[test]
 fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
-    const PREDECESSOR: u32 = 59;
+    let predecessor_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(crate::PREDECESSOR_EXPECTED_RELATIVE_PATH);
+    let predecessor: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&predecessor_path).unwrap_or_else(|error| {
+            panic!(
+                "read recorded durable-read predecessor {}: {error}",
+                predecessor_path.display()
+            )
+        }))
+        .expect("decode recorded durable-read predecessor");
+    let predecessor = predecessor["fixture_schema_version"]
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
+        .expect("recorded durable-read predecessor carries a u32 schema version");
     assert_eq!(
-        PREDECESSOR + 1,
+        predecessor, 60,
+        "the frozen e7584a69 artifact is the identity lane's actual pre-integration fixture"
+    );
+    assert_eq!(
+        predecessor + 1,
         DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         "durable-read fixture adjacency pin"
     );
     assert!(
-        std::panic::catch_unwind(|| assert_fixture_schema_version(PREDECESSOR)).is_err(),
+        std::panic::catch_unwind(|| assert_fixture_schema_version(predecessor)).is_err(),
         "the immediate predecessor fixture schema must be refused"
     );
 }

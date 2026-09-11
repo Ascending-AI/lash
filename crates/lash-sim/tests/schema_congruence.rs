@@ -949,7 +949,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         causal_kinds,
         [
             "turn",
-            "effect",
+            "effect_address",
             "tool_call",
             "process",
             "process_event",

@@ -18,6 +18,7 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const PREDECESSOR_EXPECTED_RELATIVE_PATH: &str = "../lash-core/tests/fixtures/durable-read-predecessors/schema-60-e7584a69/postgres-expected.json";
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct PostgresVersion {
