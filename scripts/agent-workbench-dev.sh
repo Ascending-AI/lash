@@ -1304,6 +1304,7 @@ finalize_teardown_transaction() {
   local process_expected="$3" restate_marker_expected="$4" postgres_marker_expected="$5"
   local restate_lease_expected="$6" postgres_lease_expected="$7"
   local restate_receipt_expected="$8" postgres_receipt_expected="$9"
+  local retain_transaction="${10:-0}"
   local transaction=""
   transaction="$(read_teardown_transaction "$transaction_file" 2>/dev/null || true)"
   [[ "$transaction" = "$transaction_expected" ]] || return 1
@@ -1333,12 +1334,15 @@ finalize_teardown_transaction() {
   remove_exact_private_record "$stack_process_receipt" \
     "2 retired $ownership_token $workbench_pid $workbench_start_time" \
     read_process_retirement_receipt "workbench retirement receipt" || return 1
-  remove_exact_private_record "$transaction_file" "$transaction_expected" \
-    read_teardown_transaction "teardown transaction"
+  if (( ! retain_transaction )); then
+    remove_exact_private_record "$transaction_file" "$transaction_expected" \
+      read_teardown_transaction "teardown transaction"
+  fi
 }
 
 stop_stack_from_meta() (
   local stack_meta_file="$1"
+  local retain_transaction="${2:-0}"
   if ! regular_private_file "$stack_meta_file"; then
     log "refusing teardown: missing or unsafe stack metadata at $stack_meta_file"
     return 1
@@ -1433,7 +1437,7 @@ stop_stack_from_meta() (
     finalize_teardown_transaction "$stack_transaction" "$transaction_retired" \
       "$workbench_pid $workbench_start_time" "$expected_restate_marker" \
       "$expected_postgres_marker" "$expected_restate_lease" "$expected_postgres_lease" \
-      "$expected_restate_receipt" "$expected_postgres_receipt"
+      "$expected_restate_receipt" "$expected_postgres_receipt" "$retain_transaction"
     return
   fi
 
@@ -1529,7 +1533,7 @@ stop_stack_from_meta() (
   finalize_teardown_transaction "$stack_transaction" "$transaction_retired" \
     "$workbench_pid $workbench_start_time" "$expected_restate_marker" \
     "$expected_postgres_marker" "$expected_restate_lease" "$expected_postgres_lease" \
-    "$expected_restate_receipt" "$expected_postgres_receipt"
+    "$expected_restate_receipt" "$expected_postgres_receipt" "$retain_transaction"
 )
 
 stop_target() {
@@ -1603,7 +1607,7 @@ cleanup_start_attempt() {
       && ( "$started_postgres_this_attempt" = 0 \
         || "$(read_container_marker "$postgres_marker_file" 2>/dev/null || true)" \
           = "$started_postgres_name $started_postgres_id $ownership_token postgres" ) ]]; then
-    if ! stop_stack_from_meta "$meta_file"; then
+    if ! stop_stack_from_meta "$meta_file" 1; then
       log "startup cleanup could not complete its persisted teardown transaction"
       return 1
     fi
@@ -1684,6 +1688,12 @@ cleanup_start_attempt() {
   if ! remove_attempt_reset_ownership; then
     log "startup cleanup could not verify its disposable-stack ownership metadata"
     return 1
+  fi
+  if [[ -e "$teardown_transaction_file" || -L "$teardown_transaction_file" ]]; then
+    if ! stop_stack_from_meta "$meta_file"; then
+      log "startup cleanup could not finalize its completed teardown transaction"
+      return 1
+    fi
   fi
   if ! remove_attempt_meta; then
     log "startup cleanup could not verify its run metadata; retaining it"
@@ -2399,7 +2409,7 @@ run_reset_dev_state() {
   start_attempt_active=1
   log "resetting wholly launcher-owned disposable stack at $workbench_addr"
 
-  stop_stack_from_meta "$meta_file" \
+  stop_stack_from_meta "$meta_file" 1 \
     || die "reset stopped before data deletion: resource retirement is incomplete and retryable"
   [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$owned_run_owner" ]] \
     || die "reset stopped before data deletion: run-footprint ownership changed"
@@ -2414,10 +2424,20 @@ run_reset_dev_state() {
     && die "reset stopped before data deletion: application data path became a symlink"
   [[ "$(realpath -m -- "$configured_data_dir")" = "$owned_data_dir" ]] \
     || die "reset stopped before data deletion: application data path changed"
+  reset_committed=1
   rm -rf -- "$owned_data_dir"
+  local reset_pid reset_start reset_restate_id reset_postgres_id="-"
+  read -r reset_pid reset_start <<<"$owned_pid_record"
+  read -r _ reset_restate_id _ _ <<<"$owned_restate_record"
+  if [[ "$owned_store_backend" = postgres ]]; then
+    read -r _ reset_postgres_id _ _ <<<"$owned_postgres_record"
+  fi
+  remove_exact_private_record "$teardown_transaction_file" \
+    "1 retired $owned_token $reset_pid $reset_start $reset_restate_id $reset_postgres_id" \
+    read_teardown_transaction "reset teardown transaction" \
+    || die "reset completed data deletion but could not clear its teardown transaction"
   rm -f "$pid_file" "$meta_file" "$log_file" "$reset_file" \
     "$restate_marker_file" "$postgres_marker_file"
-  reset_committed=1
 
   ownership_token="$(new_ownership_token)"
   data_dir_existed_before_invocation=0
@@ -2512,7 +2532,7 @@ run_foreground() {
         foreground_cleanup_status=1
         return 1
       fi
-      if ! stop_stack_from_meta "$meta_file"; then
+      if ! stop_stack_from_meta "$meta_file" 1; then
         log "foreground cleanup could not complete its persisted teardown transaction"
         return 1
       fi
@@ -2574,6 +2594,13 @@ run_foreground() {
       if ! release_data_creation_receipt; then
         log "foreground cleanup could not retire application data creation metadata"
         foreground_cleanup_status=1
+        return 1
+      fi
+    fi
+    if (( persisted_stack_retired )) \
+      && [[ -e "$teardown_transaction_file" || -L "$teardown_transaction_file" ]]; then
+      if ! stop_stack_from_meta "$meta_file"; then
+        log "foreground cleanup could not finalize its completed teardown transaction"
         return 1
       fi
     fi
