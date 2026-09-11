@@ -2550,7 +2550,6 @@ dependencies = [
 name = "lash-internal-standard-plugins"
 version = "0.0.0-dev"
 dependencies = [
- "async-trait",
  "lash-internal-core",
  "lash-internal-plugin-process-controls",
  "lash-internal-plugin-rolling-history",
@@ -2558,8 +2557,6 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-tools",
  "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
