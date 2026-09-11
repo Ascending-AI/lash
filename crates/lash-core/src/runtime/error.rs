@@ -312,6 +312,9 @@ pub(crate) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
                 "{err}; reload the durable head and re-establish lease and claim authority before retrying"
             ),
         ),
+        err @ crate::store::StoreError::TurnCancelIntentChanged { .. } => {
+            RuntimeError::new(RuntimeErrorCode::StoreCommitSuperseded, err.to_string())
+        }
         ref err @ crate::store::StoreError::SessionDeleted { ref session_id } => {
             RuntimeError::new(RuntimeErrorCode::SessionDeleted, err.to_string()).with_cause(
                 RuntimeErrorCause::SessionDeleted {

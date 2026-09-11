@@ -56,6 +56,7 @@ pub async fn session_store_factory<F>(
     turn_cancel::turn_cancel_disposition_crash_matrix(make()).await;
     turn_cancel::turn_cancel_request_escalation_upgrades_the_durable_record(make()).await;
     turn_cancel::turn_cancel_repair_orders_intent_and_ordinary_redefer(make()).await;
+    turn_cancel::turn_cancel_final_commit_intent_cas_is_atomic(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
     config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;

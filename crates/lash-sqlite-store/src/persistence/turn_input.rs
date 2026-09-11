@@ -58,14 +58,39 @@ impl TurnInputStore for Store {
                         load_turn_cancel_request_conn(tx, &session_id, &turn_id)?
                     {
                         if request.mode.is_stronger_than(existing.request.mode) {
+                            let revision = match load_turn_cancel_intent_snapshot_conn(
+                                tx,
+                                &session_id,
+                                &turn_id,
+                            )? {
+                                lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
+                                    StoreError::checked_monotonic_increment(
+                                        "turn_cancel_intent_revision",
+                                        revision,
+                                    )?
+                                }
+                                lash_core::TurnCancelIntentSnapshot::Absent => {
+                                    return Err(StoreError::Backend(
+                                        "turn cancel request disappeared during escalation"
+                                            .to_string(),
+                                    ));
+                                }
+                            };
+                            let revision = i64::try_from(revision).map_err(|_| {
+                                StoreError::Backend(
+                                    "turn cancel intent revision exceeds SQLite range".to_string(),
+                                )
+                            })?;
                             existing.request = request;
                             tx.execute(
-                                "UPDATE turn_cancel_requests SET record_json = ?3
+                                "UPDATE turn_cancel_requests SET record_json = ?3,
+                                     intent_revision = ?4
                                  WHERE session_id = ?1 AND turn_id = ?2",
                                 params![
                                     session_id.as_str(),
                                     turn_id.as_str(),
-                                    encode_json(&existing)?
+                                    encode_json(&existing)?,
+                                    revision,
                                 ],
                             )
                             .map_err(sqlite_error)?;
@@ -78,7 +103,7 @@ impl TurnInputStore for Store {
                     };
                     tx.execute(
                         "INSERT OR IGNORE INTO turn_cancel_requests
-                         (session_id, turn_id, record_json) VALUES (?1, ?2, ?3)",
+                         (session_id, turn_id, record_json, intent_revision) VALUES (?1, ?2, ?3, 1)",
                         params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
                     )
                     .map_err(sqlite_error)?;
@@ -110,29 +135,45 @@ impl TurnInputStore for Store {
     async fn turn_cancel_request_intent(
         &self,
         address: &lash_core::facade_support::TurnAddress,
-    ) -> Result<Option<lash_core::facade_support::TurnCancelRequest>, StoreError> {
-        Ok(self
-            .turn_cancel_request(address)
-            .await?
-            .map(|record| record.request))
+    ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+        let session_id = address.session_id.clone();
+        let turn_id = address.turn_id.clone();
+        self.conn
+            .call(move |conn| {
+                Ok(load_turn_cancel_intent_snapshot_conn(
+                    conn,
+                    &session_id,
+                    &turn_id,
+                ))
+            })
+            .await
+            .map_err(sqlite_error)?
     }
 
     async fn reconcile_turn_cancel_winner(
         &self,
         address: &lash_core::facade_support::TurnAddress,
+        observed: &lash_core::TurnCancelIntentSnapshot,
         evidence: &lash_core::facade_support::TurnCancellationEvidence,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         let session_id = address.session_id.clone();
         let turn_id = address.turn_id.clone();
         let evidence = evidence.clone();
+        let observed = observed.clone();
         self.conn
             .write_flow(move |tx| {
                 let outcome = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
-                    reconcile_turn_cancel_winner_conn(tx, &session_id, &turn_id, &evidence)
+                    reconcile_turn_cancel_winner_conn(
+                        tx,
+                        &session_id,
+                        &turn_id,
+                        &observed,
+                        &evidence,
+                    )
                 })();
                 Ok(match outcome {
-                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Ok(applied) => TxOutcome::Commit(Ok(applied)),
                     Err(err) => TxOutcome::Rollback(Err(err)),
                 })
             })
@@ -540,11 +581,13 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         turn_id: &lash_core::TurnId,
+        observed: &lash_core::TurnCancelIntentSnapshot,
         decision: lash_core::TurnCancelRepairDecision,
-    ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
+    ) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
         let session_id = session_id.clone();
         let session_execution_lease = session_execution_lease.clone();
         let turn_id = turn_id.clone();
+        let observed = observed.clone();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -560,6 +603,7 @@ impl TurnInputStore for Store {
                         &session_id,
                         session_execution_lease.fencing_token,
                         &turn_id,
+                        &observed,
                         &decision,
                     )
                 })();

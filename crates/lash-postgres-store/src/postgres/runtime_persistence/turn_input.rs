@@ -54,10 +54,32 @@ impl TurnInputStore for PostgresSessionStore {
         // attached because the affected-input arrays are untouched.
         match load_turn_cancel_request_tx(&mut tx, session_id, turn_id).await? {
             Some(existing) if request.mode.is_stronger_than(existing.request.mode) => {
+                let revision = match load_turn_cancel_intent_snapshot_tx(
+                    &mut tx, session_id, turn_id,
+                )
+                .await?
+                {
+                    lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
+                        StoreError::checked_monotonic_increment(
+                            "turn_cancel_intent_revision",
+                            revision,
+                        )?
+                    }
+                    lash_core::TurnCancelIntentSnapshot::Absent => {
+                        return Err(StoreError::Backend(
+                            "turn cancel request disappeared during escalation".to_string(),
+                        ));
+                    }
+                };
+                let revision = i64::try_from(revision).map_err(|_| {
+                    StoreError::Backend(
+                        "turn cancel intent revision exceeds PostgreSQL BIGINT".to_string(),
+                    )
+                })?;
                 sqlx::query(
                     "UPDATE lash_turn_cancel_requests
                      SET request_id = $3, origin = $4, reason = $5, disposition = $6,
-                         mode = $7
+                         mode = $7, intent_revision = $8
                      WHERE session_id = $1 AND turn_id = $2",
                 )
                 .bind(session_id.as_str())
@@ -67,6 +89,7 @@ impl TurnInputStore for PostgresSessionStore {
                 .bind(&request.reason)
                 .bind(turn_cancel_disposition_wire(request.undelivered))
                 .bind(turn_cancel_mode_wire(request.mode))
+                .bind(revision)
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -78,8 +101,8 @@ impl TurnInputStore for PostgresSessionStore {
             None => {
                 sqlx::query(
                     "INSERT INTO lash_turn_cancel_requests (
-                         session_id, turn_id, request_id, origin, reason, disposition, mode
-                     ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                         session_id, turn_id, request_id, origin, reason, disposition, mode, intent_revision
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1)",
                 )
                 .bind(session_id.as_str())
                 .bind(turn_id.as_str())
@@ -112,21 +135,29 @@ impl TurnInputStore for PostgresSessionStore {
     async fn turn_cancel_request_intent(
         &self,
         address: &lash_core::facade_support::TurnAddress,
-    ) -> Result<Option<lash_core::facade_support::TurnCancelRequest>, StoreError> {
-        load_turn_cancel_request_intent_pg(&self.pool, &address.session_id, &address.turn_id).await
+    ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+        load_turn_cancel_intent_snapshot_pg(&self.pool, &address.session_id, &address.turn_id).await
     }
 
     async fn reconcile_turn_cancel_winner(
         &self,
         address: &lash_core::facade_support::TurnAddress,
+        observed: &lash_core::TurnCancelIntentSnapshot,
         evidence: &lash_core::facade_support::TurnCancellationEvidence,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &address.session_id).await?;
-        reconcile_turn_cancel_winner_tx(&mut tx, &address.session_id, &address.turn_id, evidence)
-            .await?;
-        tx.commit().await.map_err(store_sqlx_error)
+        let applied = reconcile_turn_cancel_winner_tx(
+            &mut tx,
+            &address.session_id,
+            &address.turn_id,
+            observed,
+            evidence,
+        )
+        .await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(applied)
     }
 
     async fn enqueue_pending_turn_input(
@@ -562,8 +593,9 @@ impl TurnInputStore for PostgresSessionStore {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         turn_id: &lash_core::TurnId,
+        observed: &lash_core::TurnCancelIntentSnapshot,
         decision: lash_core::TurnCancelRepairDecision,
-    ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
+    ) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -576,6 +608,7 @@ impl TurnInputStore for PostgresSessionStore {
             session_id,
             session_execution_lease.fencing_token,
             turn_id,
+            observed,
             &decision,
         )
         .await?;

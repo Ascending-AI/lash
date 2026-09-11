@@ -191,6 +191,27 @@ pub struct TurnCancelInputOutcome {
     pub affected_inputs: Vec<TurnCancelAffectedInput>,
 }
 
+/// A durable cancellation request header together with its monotonic intent
+/// revision. The revision changes only when the request header changes, so it
+/// fences delayed projections without coupling them to outcome retention.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnCancelIntentSnapshot {
+    Absent,
+    Present {
+        request: TurnCancelRequest,
+        revision: u64,
+    },
+}
+
+impl TurnCancelIntentSnapshot {
+    pub fn request(&self) -> Option<&TurnCancelRequest> {
+        match self {
+            Self::Absent => None,
+            Self::Present { request, .. } => Some(request),
+        }
+    }
+}
+
 impl TurnCancelInputOutcome {
     /// Reports whether cancellation repair affected no active-turn input, so hosts can skip
     /// restore, re-enqueue, or audit work without inspecting the payload list.
@@ -496,6 +517,18 @@ impl TurnWorkDriver {
             .map_err(|err| {
                 RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
             })?;
+        // The projection predicate must be observed after this caller's
+        // provisional intent write and before it consults either gate. A
+        // concurrent write in between is harmless: the snapshot then names
+        // the newer row that the later gate observation is allowed to
+        // reconcile, while any write after this read advances the revision
+        // and makes the store CAS refuse.
+        let mut observed = store
+            .turn_cancel_request_intent(&request.address)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?;
         // The record write and the final commit serialize on the store's
         // session transaction authority. Recheck after it so a commit that won
         // before this intent was eligible produces a typed no-op, including
@@ -543,18 +576,39 @@ impl TurnWorkDriver {
             },
             ResolveOutcome::UnknownOrRevoked => Ok(TurnCancelOutcome::UnknownOrRevoked),
         }?;
-        if let Some(winner) = match &outcome {
+        let mut winner = match &outcome {
             TurnCancelOutcome::Requested(evidence)
             | TurnCancelOutcome::AlreadyRequested(evidence)
-            | TurnCancelOutcome::Escalated(evidence) => Some(evidence),
+            | TurnCancelOutcome::Escalated(evidence) => Some(evidence.clone()),
             TurnCancelOutcome::CompletionWonRace | TurnCancelOutcome::UnknownOrRevoked => None,
-        } {
-            store
-                .reconcile_turn_cancel_winner(&request.address, winner)
+        };
+        while let Some(evidence) = winner.as_ref() {
+            if store
+                .reconcile_turn_cancel_winner(&request.address, &observed, evidence)
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                })?
+            {
+                break;
+            }
+            observed = store
+                .turn_cancel_request_intent(&request.address)
                 .await
                 .map_err(|err| {
                     RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
                 })?;
+            winner = match ActiveTurnControl::peek_effective_cancel_decision(
+                self.effect_host.as_ref(),
+                &request.address,
+            )
+            .await?
+            {
+                Some(crate::TurnCancelRepairDecision::CancellationWon(evidence)) => Some(evidence),
+                Some(crate::TurnCancelRepairDecision::CancellationDidNotWin)
+                | Some(crate::TurnCancelRepairDecision::NoCancellationIntent)
+                | None => None,
+            };
         }
         let record = store
             .turn_cancel_request(&request.address)
@@ -818,6 +872,41 @@ async fn effective_cancel_evidence(
     }
 }
 
+/// Close escalation admission for a turn-ending decision and return the
+/// winner that was accepted before that closure.
+///
+/// The base gate remains the cancellation/completion authority. Its
+/// `AfterStep` winner deliberately leaves a second first-writer promise open
+/// while the turn is live so an `Immediate` request can escalate it. An
+/// irreversible final commit must close that promise: otherwise a same-header
+/// escalation can be accepted after the caller's row snapshot without
+/// advancing the row revision, and a weaker disposition can publish after the
+/// stronger request was acknowledged. Orphan repair cannot use this helper
+/// until promise closure can be fenced by its session-execution lease.
+async fn close_cancel_escalation(
+    resolver: &dyn AwaitEventResolver,
+    escalation_key: &AwaitEventKey,
+    base: TurnCancellationEvidence,
+) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+    if base.mode.is_immediate() {
+        return Ok(Some(base));
+    }
+    let outcome = resolver
+        .resolve_await_event(
+            escalation_key,
+            gate_resolution(TurnGateTerminal::CompletionSealed)?,
+        )
+        .await?;
+    match outcome {
+        ResolveOutcome::Accepted => Ok(Some(base)),
+        ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+            TurnGateTerminal::CancelRequested(escalated) => Ok(Some(escalated)),
+            TurnGateTerminal::CompletionSealed => Ok(Some(base)),
+        },
+        ResolveOutcome::UnknownOrRevoked => Ok(None),
+    }
+}
+
 /// Per-execution bridge between the durable gate and the turn's internal
 /// cancellation token.
 ///
@@ -859,13 +948,11 @@ impl ActiveTurnControl {
         self
     }
 
-    /// Observe an already-settled cancellation gate for teardown repair.
-    ///
-    /// A pending gate proves there is no accepted cancellation yet. The store
-    /// still rechecks durable intent atomically before applying the returned
-    /// ordinary repair, so a concurrent request vetoes it. Unknown or revoked
-    /// gates remain `None` and never authorize repair.
-    pub(crate) async fn peek_orphan_repair_decision(
+    /// Observe the current effective gate winner without closing escalation.
+    /// Ordinary request projection uses this after a row-CAS refusal while the
+    /// turn is still live and future `AfterStep` to `Immediate` escalation
+    /// remains valid.
+    async fn peek_effective_cancel_decision(
         resolver: &dyn AwaitEventResolver,
         address: &TurnAddress,
     ) -> Result<Option<crate::TurnCancelRepairDecision>, RuntimeError> {
@@ -896,6 +983,17 @@ impl ActiveTurnControl {
                 crate::TurnCancelRepairDecision::CancellationDidNotWin
             }
         }))
+    }
+
+    /// Observe the current gate pair for orphan-input repair without changing
+    /// either promise. The caller's store transaction supplies the lease and
+    /// intent fences; an expired repair owner must not close shared escalation
+    /// authority before that transaction can reject it.
+    pub(crate) async fn peek_orphan_repair_decision(
+        resolver: &dyn AwaitEventResolver,
+        address: &TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRepairDecision>, RuntimeError> {
+        Self::peek_effective_cancel_decision(resolver, address).await
     }
 
     /// Reconcile durable request intent through the existing keyed gate.
@@ -1099,27 +1197,30 @@ impl ActiveTurnControl {
         resolution.map(decode_gate).transpose()
     }
 
-    /// Settle the durable cancellation gate before the turn commits.
+    /// Settle the durable cancellation gate and close escalation before the
+    /// turn commits.
     ///
     /// `assembled` is the evidence the executed turn already carries, when it
     /// stopped cancelled. Sealing that value rather than minting a fresh one
     /// is what keeps a single cancellation to a single request id: the
     /// evidence a host saw on the streamed `TurnOutcome` is the evidence the
-    /// committed report carries.
+    /// committed report carries. Closing the escalation promise is the
+    /// authority boundary after which no later request can change the accepted
+    /// winner or its undelivered-input disposition.
     pub async fn settle_before_commit(
         &self,
         resolver: &dyn AwaitEventResolver,
         locally_cancelled: bool,
         assembled: Option<TurnCancellationEvidence>,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
-        if let Some(evidence) = self.evidence() {
-            return Ok(Some(evidence));
-        }
+        let remembered = self.evidence();
         // A process-local after-step stop that found no further step boundary
         // lands at the final commit: the last step ran to completion and the
         // turn stops here without dropping anything it produced.
         let after_step_locally = self.local_cancel_origin.after_step_requested();
-        let proposed = if locally_cancelled || after_step_locally {
+        let proposed = if let Some(evidence) = remembered.clone() {
+            TurnGateTerminal::CancelRequested(evidence)
+        } else if locally_cancelled || after_step_locally {
             TurnGateTerminal::CancelRequested(match assembled {
                 // A lash-originated stop already names itself. The
                 // process-local origin hint, when a host entry point supplied
@@ -1157,8 +1258,29 @@ impl ActiveTurnControl {
         };
         match terminal {
             TurnGateTerminal::CancelRequested(evidence) => {
-                self.remember(evidence.clone());
-                Ok(Some(evidence))
+                let Some(mut effective) =
+                    close_cancel_escalation(resolver, &self.escalation_key, evidence).await?
+                else {
+                    return Err(RuntimeError::new(
+                        crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                        format!(
+                            "turn `{}` in session `{}` was revoked while closing cancellation escalation before final commit",
+                            self.address.turn_id, self.address.session_id
+                        ),
+                    ));
+                };
+                // A journaled step-boundary observation enriches the base
+                // gate evidence with the honoured iteration. Preserve that
+                // transient execution fact when the closed winner is the same
+                // request; the gate's canonical request evidence has `None`.
+                if let Some(mut cached) = remembered {
+                    let honoured_after_step = cached.honoured_after_step.take();
+                    if cached == effective {
+                        effective.honoured_after_step = honoured_after_step;
+                    }
+                }
+                self.remember(effective.clone());
+                Ok(Some(effective))
             }
             TurnGateTerminal::CompletionSealed => Ok(None),
         }

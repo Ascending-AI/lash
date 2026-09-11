@@ -388,6 +388,20 @@ impl SessionCommitStore for Store {
                             }
                         }
                     }
+                    if let (Some(turn_id), Some(observed)) = (
+                        commit.interrupted_turn_input_turn_id.as_ref(),
+                        commit.interrupted_turn_cancel_intent.as_ref(),
+                    ) && load_turn_cancel_intent_snapshot_conn(
+                        tx,
+                        &commit.session_id,
+                        turn_id,
+                    )? != *observed
+                    {
+                        return Err(StoreError::TurnCancelIntentChanged {
+                            session_id: commit.session_id.clone(),
+                            turn_id: turn_id.clone(),
+                        });
+                    }
                     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
                     let old_leaf_node_id = existing
                         .as_ref()
@@ -815,12 +829,21 @@ impl SessionCommitStore for Store {
                             |evidence| evidence.undelivered,
                         );
                         if let Some(evidence) = cancellation {
-                            reconcile_turn_cancel_winner_conn(
+                            let observed = commit.interrupted_turn_cancel_intent.as_ref().ok_or_else(|| {
+                                StoreError::Backend("interrupted turn commit omitted cancellation intent predicate".to_string())
+                            })?;
+                            if !reconcile_turn_cancel_winner_conn(
                                 tx,
                                 &commit.session_id,
                                 turn_id,
+                                observed,
                                 evidence,
-                            )?;
+                            )? {
+                                return Err(StoreError::TurnCancelIntentChanged {
+                                    session_id: commit.session_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                });
+                            }
                         }
                         let input_ids = {
                             let mut stmt = tx

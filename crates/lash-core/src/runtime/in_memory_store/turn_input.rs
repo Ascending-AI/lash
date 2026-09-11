@@ -9,6 +9,52 @@ use super::{InMemoryPendingTurnInput, InMemorySessionStore};
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
+pub(super) fn settlement_mismatch<'a, R>(
+    rows: &'a [R],
+    row_ids: &'a [String],
+    session_id: &SessionId,
+    identity: impl Fn(&R) -> (&str, &str),
+    matches: impl Fn(&R) -> bool,
+) -> Option<(Option<&'a String>, Option<&'a R>)> {
+    if rows.iter().filter(|row| matches(row)).count() == row_ids.len() {
+        return None;
+    }
+    let row_id = row_ids.iter().find(|id| {
+        !rows
+            .iter()
+            .any(|row| identity(row).1 == id.as_str() && matches(row))
+    });
+    let current = row_id.and_then(|id| {
+        rows.iter()
+            .find(|row| identity(row) == (session_id, id.as_str()))
+    });
+    Some((row_id, current))
+}
+
+/// The in-memory store's turn-input settlement predicate.
+///
+/// One predicate, two regimes: the claim fields only strengthen it. A claimed
+/// settlement requires the row to still carry that claim; an unclaimed
+/// settlement requires it to still be unclaimed and unsettled
+/// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md) §5).
+pub(super) fn settlement_matches(
+    entry: &InMemoryPendingTurnInput,
+    completed: &crate::TurnInputCompletion,
+) -> bool {
+    entry.input.session_id == completed.session_id
+        && completed.input_ids.contains(&entry.input.input_id)
+        && match completed.claim.as_ref() {
+            Some(claim) => entry.claim.owned_by(&claim.claim_id, &claim.lease_token),
+            None => {
+                entry.claim.id().is_none()
+                    && !matches!(
+                        entry.input.state,
+                        crate::TurnInputState::Completed | crate::TurnInputState::Cancelled
+                    )
+            }
+        }
+}
+
 impl InMemoryPendingTurnInput {
     fn claim_diagnostics(&self) -> Option<crate::PendingTurnInputClaimDiagnostics> {
         (self.claim.id().is_some() || matches!(self.input.state, crate::TurnInputState::Accepted))
@@ -111,18 +157,25 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 outcome: None,
             });
         }
-        let record = requests
+        let stored = requests
             .entry(request.address.turn_id.clone())
-            .or_insert_with(|| crate::TurnCancelRequestRecord {
-                request: request.clone(),
-                outcome: None,
+            .or_insert_with(|| super::InMemoryTurnCancelRequest {
+                record: crate::TurnCancelRequestRecord {
+                    request: request.clone(),
+                    outcome: None,
+                },
+                intent_revision: 1,
             });
         // First writer wins, except that a stronger mode escalates the durable
         // request; the repair outcome accumulated so far stays attached.
-        if request.mode.is_stronger_than(record.request.mode) {
-            record.request = request;
+        if request.mode.is_stronger_than(stored.record.request.mode) {
+            stored.intent_revision = crate::store::StoreError::checked_monotonic_increment(
+                "turn_cancel_intent_revision",
+                stored.intent_revision,
+            )?;
+            stored.record.request = request;
         }
-        Ok(record.clone())
+        Ok(stored.record.clone())
     }
 
     async fn turn_cancel_request(
@@ -134,56 +187,58 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             .turn_cancel_requests
             .lock_recover()
             .get(&address.turn_id)
-            .cloned())
+            .map(|stored| stored.record.clone()))
     }
 
     async fn turn_cancel_request_intent(
         &self,
         address: &crate::TurnAddress,
-    ) -> Result<Option<crate::TurnCancelRequest>, crate::store::StoreError> {
+    ) -> Result<crate::TurnCancelIntentSnapshot, crate::store::StoreError> {
         self.ensure_session_not_deleted(&address.session_id)?;
         Ok(self
             .turn_cancel_requests
             .lock_recover()
             .get(&address.turn_id)
-            .map(|record| record.request.clone()))
+            .map_or(crate::TurnCancelIntentSnapshot::Absent, |stored| {
+                crate::TurnCancelIntentSnapshot::Present {
+                    request: stored.record.request.clone(),
+                    revision: stored.intent_revision,
+                }
+            }))
     }
 
     async fn reconcile_turn_cancel_winner(
         &self,
         address: &crate::TurnAddress,
+        observed: &crate::TurnCancelIntentSnapshot,
         evidence: &crate::TurnCancellationEvidence,
-    ) -> Result<(), crate::store::StoreError> {
+    ) -> Result<bool, crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&address.session_id)?;
         let mut requests = self.turn_cancel_requests.lock_recover();
-        if requests
-            .get(&address.turn_id)
-            .is_some_and(|record| record.request.mode.is_stronger_than(evidence.mode))
-        {
-            // Both candidates were already derived from the gate pair. A
-            // delayed base-gate projection must not overwrite an accepted
-            // escalation that another caller projected first.
-            return Ok(());
+        if snapshot(&requests, &address.turn_id) != *observed {
+            return Ok(false);
         }
         let outcome = requests
             .get(&address.turn_id)
-            .and_then(|record| record.outcome.clone());
+            .and_then(|stored| stored.record.outcome.clone());
+        let request = request_from_evidence(address, evidence);
+        let revision = match requests.get(&address.turn_id) {
+            Some(stored) if stored.record.request == request => stored.intent_revision,
+            Some(stored) => crate::store::StoreError::checked_monotonic_increment(
+                "turn_cancel_intent_revision",
+                stored.intent_revision,
+            )?,
+            None => 1,
+        };
         requests.insert(
             address.turn_id.clone(),
-            crate::TurnCancelRequestRecord {
-                request: crate::TurnCancelRequest {
-                    address: address.clone(),
-                    request_id: evidence.request_id.clone(),
-                    origin: evidence.origin.clone(),
-                    reason: evidence.reason.clone(),
-                    undelivered: evidence.undelivered,
-                    mode: evidence.mode,
-                },
-                outcome,
+            super::InMemoryTurnCancelRequest {
+                record: crate::TurnCancelRequestRecord { request, outcome },
+                intent_revision: revision,
             },
         );
-        Ok(())
+        Ok(true)
     }
 
     async fn enqueue_pending_turn_input(
@@ -453,38 +508,41 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         turn_id: &crate::TurnId,
+        observed: &crate::TurnCancelIntentSnapshot,
         decision: crate::TurnCancelRepairDecision,
-    ) -> Result<crate::TurnCancelInputOutcome, crate::store::StoreError> {
+    ) -> Result<crate::store::TurnCancelRepairResult, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         let mut pending = self.pending_turn_inputs.lock_recover();
         let mut requests = self.turn_cancel_requests.lock_recover();
-        if matches!(
-            &decision,
-            crate::TurnCancelRepairDecision::NoCancellationIntent
-        ) && requests.contains_key(turn_id)
-        {
-            return Ok(Default::default());
+        if snapshot(&requests, turn_id) != *observed {
+            return Ok(crate::store::TurnCancelRepairResult::IntentChanged);
         }
         let disposition = decision.disposition();
         if let crate::TurnCancelRepairDecision::CancellationWon(evidence) = &decision {
             let prior_outcome = requests
                 .get(turn_id)
-                .and_then(|record| record.outcome.clone());
+                .and_then(|stored| stored.record.outcome.clone());
+            let request =
+                request_from_evidence(&crate::TurnAddress::new(session_id, turn_id), evidence);
+            let revision = match requests.get(turn_id) {
+                Some(stored) if stored.record.request == request => stored.intent_revision,
+                Some(stored) => crate::store::StoreError::checked_monotonic_increment(
+                    "turn_cancel_intent_revision",
+                    stored.intent_revision,
+                )?,
+                None => 1,
+            };
             requests.insert(
                 turn_id.clone(),
-                crate::TurnCancelRequestRecord {
-                    request: crate::TurnCancelRequest {
-                        address: crate::TurnAddress::new(session_id, turn_id),
-                        request_id: evidence.request_id.clone(),
-                        origin: evidence.origin.clone(),
-                        reason: evidence.reason.clone(),
-                        undelivered: evidence.undelivered,
-                        mode: evidence.mode,
+                super::InMemoryTurnCancelRequest {
+                    record: crate::TurnCancelRequestRecord {
+                        request,
+                        outcome: prior_outcome,
                     },
-                    outcome: prior_outcome,
+                    intent_revision: revision,
                 },
             );
         }
@@ -523,6 +581,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             ) && let Some(record) = requests.get_mut(turn_id)
             {
                 record
+                    .record
                     .outcome
                     .get_or_insert_with(crate::TurnCancelInputOutcome::default)
                     .affected_inputs
@@ -530,6 +589,34 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             }
             outcome.affected_inputs.push(affected);
         }
-        Ok(outcome)
+        Ok(crate::store::TurnCancelRepairResult::Applied(outcome))
+    }
+}
+
+pub(super) fn snapshot(
+    requests: &std::collections::HashMap<crate::TurnId, super::InMemoryTurnCancelRequest>,
+    turn_id: &crate::TurnId,
+) -> crate::TurnCancelIntentSnapshot {
+    requests
+        .get(turn_id)
+        .map_or(crate::TurnCancelIntentSnapshot::Absent, |stored| {
+            crate::TurnCancelIntentSnapshot::Present {
+                request: stored.record.request.clone(),
+                revision: stored.intent_revision,
+            }
+        })
+}
+
+pub(super) fn request_from_evidence(
+    address: &crate::TurnAddress,
+    evidence: &crate::TurnCancellationEvidence,
+) -> crate::TurnCancelRequest {
+    crate::TurnCancelRequest {
+        address: address.clone(),
+        request_id: evidence.request_id.clone(),
+        origin: evidence.origin.clone(),
+        reason: evidence.reason.clone(),
+        undelivered: evidence.undelivered,
+        mode: evidence.mode,
     }
 }

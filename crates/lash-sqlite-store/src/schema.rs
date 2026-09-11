@@ -253,6 +253,7 @@ CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id    TEXT NOT NULL,
     record_json TEXT NOT NULL,
+    intent_revision INTEGER NOT NULL CHECK (intent_revision >= 1),
     PRIMARY KEY (session_id, turn_id)
 );
 
@@ -544,7 +545,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// existing catalogs are rejected rather than migrated with a defaulted column.
 /// Version 54 preserves successful attachment deletion as the terminal
 /// `reclaimed` phase so adoption can refuse roots whose bytes are absent.
-pub(crate) const SCHEMA_VERSION: i32 = 54;
+/// Version 55 adds the monotonic turn-cancel intent revision used by the
+/// cancellation publication CAS. This remains a reject-and-recreate cutover.
+pub(crate) const SCHEMA_VERSION: i32 = 55;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

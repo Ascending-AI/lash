@@ -3,6 +3,7 @@ use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
 use crate::store::SessionExecutionLeaseStore;
+use crate::store::TurnInputStore;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,
     shared_parts,
@@ -156,6 +157,103 @@ fn frame_key(material: &str) -> FrameKey {
 }
 fn frame_request(frame_key: FrameKey, reason: AgentFrameReason) -> OpenAgentFrameRequest {
     OpenAgentFrameRequest::new(frame_key, reason)
+}
+
+#[tokio::test]
+async fn final_commit_refreshes_stale_intent_without_rematerializing() {
+    let store = RecordingStore::default();
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+    state.session_id = SessionId::from("final-cancel-cas");
+    state.ensure_agent_frame_initialized();
+    let turn_id = crate::TurnId::from("final-cancel-cas:turn");
+    let address = crate::TurnAddress::new(&state.session_id, &turn_id);
+    let pending = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &state.session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("completion keeps this input"),
+        ))
+        .await
+        .expect("enqueue active-turn input");
+    let losing_request =
+        crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:losing-request", None)
+            .undelivered(crate::TurnCancelDisposition::Drop);
+    store.inject_turn_cancel_before_next_runtime_commit(losing_request.clone());
+
+    let host = crate::NativeEffectHost::default();
+    let control = crate::runtime::turn_control::ActiveTurnControl::new(&host, address.clone())
+        .await
+        .expect("create turn gate");
+    assert!(
+        control
+            .settle_before_commit(&host, false, None)
+            .await
+            .expect("seal completion gate")
+            .is_none()
+    );
+
+    let (mut pipeline, _lease) = leased_boundary(&store, state).await;
+    pipeline
+        .prepared_checkpoint(
+            SessionPolicy::new(UNBOUNDED),
+            0,
+            &MessageSequence::default(),
+            None,
+        )
+        .await
+        .expect("prepare stable final state");
+    let returned_state = pipeline.export_state_for_assembly();
+    pipeline
+        .final_commit_with_snapshots(FinalCommitInput {
+            returned_state: &returned_state,
+            tool_calls: &[],
+            omitted: None,
+            plugins: None,
+            execution_state_update: ExecutionStateUpdate::Clean,
+            agent_frame_switch_materializes: false,
+            store: Some(&store),
+            usage_deltas: &[],
+            failure_evidence: &[],
+            outcome: &TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
+                text: "completed".to_string(),
+            }),
+            claim_settlement: TurnClaimSettlement::for_test(
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+            ),
+            current_session_lease_generation: None,
+            enqueued_queue_batches: Vec::new(),
+            interrupted_turn_input_turn_id: Some(turn_id.clone()),
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: Some(crate::TurnCancelIntentSnapshot::Absent),
+            turn_control_resolver: Some(&host),
+            recorded_attachment_intent_ids: Default::default(),
+            session_execution_lease_completion: None,
+        })
+        .await
+        .expect("refresh stale predicate and commit completion once");
+    assert_eq!(store.commit_write_transaction_count(), 2);
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
+    let row = store
+        .list_pending_turn_inputs(&address.session_id)
+        .await
+        .expect("read ordinarily deferred input");
+    assert_eq!(row[0].input_id, pending.input_id);
+    assert_eq!(row[0].state, crate::TurnInputState::DeferredNextTurn);
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read losing request")
+        .expect("losing request remains retained");
+    assert_eq!(durable.request, losing_request);
+    assert!(durable.outcome.is_none());
 }
 async fn leased_boundary(
     store: &RecordingStore,
@@ -472,6 +570,8 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -542,6 +642,8 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -651,6 +753,8 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -766,6 +870,8 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -854,6 +960,8 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -961,6 +1069,8 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1085,6 +1195,8 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: Some(recovery_lease.completion()),
         })
@@ -1155,6 +1267,8 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1196,6 +1310,8 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1250,6 +1366,8 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })

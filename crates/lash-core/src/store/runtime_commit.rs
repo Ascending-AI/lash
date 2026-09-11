@@ -135,6 +135,10 @@ pub struct RuntimeCommit {
     /// implementations must never infer this decision from a request row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
+    /// Transient predicate observed before the turn gate was settled. Backends
+    /// compare it atomically before cancellation-dependent publication.
+    #[serde(skip)]
+    pub interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins.

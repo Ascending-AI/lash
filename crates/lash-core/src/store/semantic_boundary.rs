@@ -104,6 +104,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         enqueued_queue_batches: _,      // refused non-empty by validation
         interrupted_turn_input_turn_id: _, // refused present by validation
         interrupted_turn_input_cancellation: _, // refused present by validation
+        interrupted_turn_cancel_intent: _, // transient CAS predicate
         adopted_intent_rows: _,         // refused non-zero by validation
         committed_attachment_ids: _,    // refused non-empty by validation
     } = commit;

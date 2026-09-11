@@ -61,6 +61,8 @@ struct TurnCommitRequest<'commit> {
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
+    interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
+    turn_control_resolver: &'commit dyn crate::AwaitEventResolver,
 }
 
 /// The local commit-admission handles: only the head-advancing attempt uses
@@ -137,6 +139,8 @@ impl PreparedTurn {
             trace_turn_id,
             recorded_attachment_intent_ids,
             interrupted_turn_input_cancellation,
+            interrupted_turn_cancel_intent,
+            turn_control_resolver,
         } = request;
         let accepted = self
             .turn_pipeline
@@ -151,6 +155,8 @@ impl PreparedTurn {
                 // checkpoint must become the next ordinary user turn.
                 Some(trace_turn_id.clone()),
                 interrupted_turn_input_cancellation,
+                interrupted_turn_cancel_intent,
+                Some(turn_control_resolver),
                 recorded_attachment_intent_ids,
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
@@ -356,6 +362,19 @@ impl LashRuntime {
                 "session execution lease was lost while the turn was active",
             ));
         }
+        let interrupted_turn_cancel_intent =
+            match self.session.as_ref().and_then(Session::history_store) {
+                Some(store) => Some(
+                    store
+                        .turn_cancel_request_intent(&crate::TurnAddress::new(
+                            &self.state.session_id,
+                            &trace_turn_id,
+                        ))
+                        .await
+                        .map_err(runtime_error_from_store_commit)?,
+                ),
+                None => None,
+            };
         let cancellation = turn_control
             .settle_before_commit(
                 turn_control_resolver,
@@ -363,23 +382,6 @@ impl LashRuntime {
                 assembled_cancellation,
             )
             .await?;
-        if let Some(evidence) = cancellation.as_ref()
-            && let Some(store) = self.session.as_ref().and_then(Session::history_store)
-        {
-            store
-                .record_turn_cancel_request(crate::TurnCancelRequest {
-                    address: crate::TurnAddress::new(&self.state.session_id, &trace_turn_id),
-                    request_id: evidence.request_id.clone(),
-                    origin: evidence.origin.clone(),
-                    reason: evidence.reason.clone(),
-                    undelivered: evidence.undelivered,
-                    mode: evidence.mode,
-                })
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
-                })?;
-        }
         if cancellation.is_some() {
             cancel_state.cancel();
         }
@@ -535,6 +537,8 @@ impl LashRuntime {
                         .attachment_store
                         .recorded_turn_intent_ids(&trace_turn_id),
                     interrupted_turn_input_cancellation: cancellation.clone(),
+                    interrupted_turn_cancel_intent,
+                    turn_control_resolver,
                 },
                 TurnCommitAdmission {
                     cancellation: cancel_state.clone(),

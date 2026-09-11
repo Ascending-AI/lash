@@ -110,6 +110,12 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                 .expect("stamp exact turn final operation");
             commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
             commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&cancel));
+            commit.interrupted_turn_cancel_intent = Some(
+                store
+                    .turn_cancel_request_intent(&cancel.address)
+                    .await
+                    .expect("snapshot cancellation intent before final commit"),
+            );
             let receipt = store
                 .commit_runtime_state(commit)
                 .await
@@ -152,6 +158,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             .expect("claim successor lane")
             .acquired()
             .expect("successor lane is free");
+        let observed = reopened
+            .turn_cancel_request_intent(&cancel.address)
+            .await
+            .expect("snapshot cancellation intent before repair");
         let outcome = if matches!(path, RepairPath::Commit) {
             reopened
                 .turn_cancel_request(&cancel.address)
@@ -166,10 +176,13 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     &request.session_id,
                     &lease.fence(),
                     &turn_id,
+                    &observed,
                     crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
                 )
                 .await
                 .expect("repair the dead turn")
+                .into_applied()
+                .expect("intent remains unchanged")
         };
         assert_eq!(outcome.affected_inputs.len(), 1);
         let affected = &outcome.affected_inputs[0];
@@ -242,18 +255,20 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             let intent = reopened
                 .turn_cancel_request_intent(&cancel.address)
                 .await
-                .expect("read intent without historical payload reconstruction")
-                .expect("winner intent remains retained");
-            assert_eq!(intent, cancel);
+                .expect("read intent without historical payload reconstruction");
+            assert_eq!(intent.request(), Some(&cancel));
             let repaired = reopened
                 .repair_orphaned_active_turn_inputs(
                     &request.session_id,
                     &lease.fence(),
                     &turn_id,
-                    crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&intent)),
+                    &intent,
+                    crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
                 )
                 .await
-                .expect("repair later input from retained winner intent");
+                .expect("repair later input from retained winner intent")
+                .into_applied()
+                .expect("retained intent remains unchanged");
             assert_eq!(repaired.affected_inputs[0].input_id, later.input_id);
             assert_eq!(repaired.affected_inputs[0].disposition, disposition);
         }
@@ -276,6 +291,52 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         .create_store(&request)
         .await
         .expect("create escalation store");
+    let weaker_winner_address = crate::TurnAddress::new(
+        &request.session_id,
+        TurnId::from("turn-cancel-unaccepted-stronger"),
+    );
+    let unaccepted_immediate = crate::TurnCancelRequest::new(
+        weaker_winner_address.clone(),
+        "turn-cancel-unaccepted-stronger:A",
+        None,
+    )
+    .undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(unaccepted_immediate)
+        .await
+        .expect("persist unaccepted immediate intent");
+    let observed_unaccepted = store
+        .turn_cancel_request_intent(&weaker_winner_address)
+        .await
+        .expect("snapshot unaccepted immediate intent");
+    let accepted_after_step = crate::TurnCancellationEvidence {
+        request_id: "turn-cancel-unaccepted-stronger:B".to_string(),
+        origin: None,
+        reason: None,
+        undelivered: crate::TurnCancelDisposition::Defer,
+        mode: crate::TurnCancelMode::AfterStep,
+        honoured_after_step: None,
+    };
+    assert!(
+        store
+            .reconcile_turn_cancel_winner(
+                &weaker_winner_address,
+                &observed_unaccepted,
+                &accepted_after_step,
+            )
+            .await
+            .expect("project accepted after-step winner over unaccepted immediate intent")
+    );
+    assert_eq!(
+        store
+            .turn_cancel_request(&weaker_winner_address)
+            .await
+            .expect("read projected weaker winner")
+            .expect("projected winner exists")
+            .request
+            .request_id,
+        accepted_after_step.request_id,
+    );
     let address = crate::TurnAddress::new(&request.session_id, turn_id);
     let stop = crate::TurnCancelRequest::new(
         address.clone(),
@@ -316,6 +377,10 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         durable.request, stop,
         "a same-strength request never replaces the first writer"
     );
+    let stale_observed = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot the delayed base projection");
 
     let abort = crate::TurnCancelRequest::new(
         address.clone(),
@@ -347,10 +412,12 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         mode: crate::TurnCancelMode::AfterStep,
         honoured_after_step: None,
     };
-    store
-        .reconcile_turn_cancel_winner(&address, &stale_base)
-        .await
-        .expect("reconcile a delayed base-gate projection");
+    assert!(
+        !store
+            .reconcile_turn_cancel_winner(&address, &stale_observed, &stale_base)
+            .await
+            .expect("reject a delayed base-gate projection")
+    );
     let durable = store
         .turn_cancel_request(&address)
         .await
@@ -359,6 +426,37 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
     assert_eq!(
         durable.request, abort,
         "a delayed base-gate projection cannot downgrade an accepted escalation"
+    );
+
+    // Exact header equality is not a sufficient CAS: project B, return to the
+    // byte-identical A through a stronger ingress write, then prove that the
+    // original A snapshot is still stale because its revision did not return.
+    let original_a = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot A before the ABA schedule");
+    assert!(
+        store
+            .reconcile_turn_cancel_winner(&address, &original_a, &stale_base)
+            .await
+            .expect("project B with current authority")
+    );
+    store
+        .record_turn_cancel_request(abort.clone())
+        .await
+        .expect("return the request header from B to A");
+    let current_a = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("read A after ABA");
+    assert_eq!(current_a.request(), original_a.request());
+    assert_ne!(current_a, original_a, "ABA must advance intent freshness");
+    assert!(
+        !store
+            .reconcile_turn_cancel_winner(&address, &original_a, &stale_base)
+            .await
+            .expect("reject stale A after ABA"),
+        "a stale projection must not pass merely because request bytes returned to A"
     );
 
     let downgrade = crate::TurnCancelRequest::new(
@@ -446,23 +544,26 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-intent-first:request",
         None,
     )
-    .undelivered(crate::TurnCancelDisposition::Drop);
+    .undelivered(crate::TurnCancelDisposition::Drop)
+    .mode(crate::TurnCancelMode::AfterStep);
     store
         .record_turn_cancel_request(cancel.clone())
         .await
         .expect("persist request before repair");
     let fence = lease(&store, &request.session_id, "intent-first-owner").await;
-    assert!(
+    let stale_absent = crate::TurnCancelIntentSnapshot::Absent;
+    assert_eq!(
         store
             .repair_orphaned_active_turn_inputs(
                 &request.session_id,
                 &fence,
                 &turn_id,
+                &stale_absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
             )
             .await
-            .expect("no-intent repair observes concurrent intent")
-            .is_empty(),
+            .expect("no-intent repair observes concurrent intent"),
+        crate::TurnCancelRepairResult::IntentChanged,
         "durable intent must veto ordinary repair"
     );
     let pending = store
@@ -470,15 +571,54 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         .await
         .expect("read input after veto");
     assert_eq!(pending[0].state, crate::TurnInputState::PendingActive);
+    let stale_after_step = store
+        .turn_cancel_request_intent(&cancel.address)
+        .await
+        .expect("snapshot after-step intent before escalation");
+    let stronger_cancel = crate::TurnCancelRequest::new(
+        cancel.address.clone(),
+        "turn-cancel-intent-first:immediate",
+        Some("conformance-operator".to_string()),
+    )
+    .undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(stronger_cancel.clone())
+        .await
+        .expect("escalate intent before stale repair");
+    assert_eq!(
+        store
+            .repair_orphaned_active_turn_inputs(
+                &request.session_id,
+                &fence,
+                &turn_id,
+                &stale_after_step,
+                crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+            )
+            .await
+            .expect("stale after-step repair observes immediate escalation"),
+        crate::TurnCancelRepairResult::IntentChanged
+    );
+    let still_pending = store
+        .list_pending_turn_inputs(&request.session_id)
+        .await
+        .expect("stale repair publishes no input effects");
+    assert_eq!(still_pending[0].state, crate::TurnInputState::PendingActive);
+    let observed = store
+        .turn_cancel_request_intent(&cancel.address)
+        .await
+        .expect("refresh immediate intent after stale repair refusal");
     let cancelled = store
         .repair_orphaned_active_turn_inputs(
             &request.session_id,
             &fence,
             &turn_id,
-            crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+            &observed,
+            crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&stronger_cancel)),
         )
         .await
-        .expect("apply authoritative gate winner");
+        .expect("apply authoritative gate winner")
+        .into_applied()
+        .expect("refreshed intent remains unchanged");
     assert_eq!(cancelled.affected_inputs[0].input_id, row.input_id);
     assert_eq!(
         cancelled.affected_inputs[0].disposition,
@@ -509,10 +649,13 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             &request.session_id,
             &fence,
             &turn_id,
+            &crate::TurnCancelIntentSnapshot::Absent,
             crate::TurnCancelRepairDecision::NoCancellationIntent,
         )
         .await
-        .expect("ordinary repair before request");
+        .expect("ordinary repair before request")
+        .into_applied()
+        .expect("absent intent remains absent");
     assert_eq!(repaired.affected_inputs[0].input_id, row.input_id);
     assert_eq!(
         repaired.affected_inputs[0].disposition,
@@ -534,10 +677,16 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
                 &request.session_id,
                 &fence,
                 &turn_id,
+                &store
+                    .turn_cancel_request_intent(&cancel.address)
+                    .await
+                    .expect("snapshot late cancellation intent"),
                 crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
             )
             .await
             .expect("late winner sees no targeted input")
+            .into_applied()
+            .expect("late intent remains unchanged")
             .is_empty()
     );
     let durable = store
@@ -581,10 +730,16 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             &request.session_id,
             &fence,
             &turn_id,
+            &store
+                .turn_cancel_request_intent(&stale_drop.address)
+                .await
+                .expect("snapshot losing cancellation intent"),
             crate::TurnCancelRepairDecision::CancellationDidNotWin,
         )
         .await
-        .expect("apply completion gate decision");
+        .expect("apply completion gate decision")
+        .into_applied()
+        .expect("losing intent remains unchanged");
     assert_eq!(repaired.affected_inputs[0].input_id, row.input_id);
     assert_eq!(
         repaired.affected_inputs[0].disposition,
@@ -601,4 +756,125 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             .is_none(),
         "a losing intent must not acquire a cancellation outcome"
     );
+}
+
+/// A stale cancellation predicate refuses the entire final commit, including
+/// head publication and active-input settlement. Refreshing only the predicate
+/// and gate evidence then commits the already-materialized payload once.
+pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-final-cas"),
+        "turn-cancel-final-cas-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory
+        .create_store(&request)
+        .await
+        .expect("create CAS store");
+    let turn_id = TurnId::from("turn-cancel-final-cas:turn");
+    let address = crate::TurnAddress::new(&request.session_id, &turn_id);
+    let pending = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("must settle exactly once"),
+        ))
+        .await
+        .expect("enqueue active-turn input");
+    let after_step =
+        crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:after-step", None)
+            .mode(crate::TurnCancelMode::AfterStep);
+    store
+        .record_turn_cancel_request(after_step.clone())
+        .await
+        .expect("persist after-step intent");
+    let stale = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot after-step intent");
+
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..crate::RuntimeSessionState::new(request.policy.clone())
+    };
+    state.ensure_agent_frame_initialized();
+    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(crate::OperationId::turn(
+            &request.session_id,
+            &turn_id,
+            "final",
+        ))
+        .expect("stamp final operation");
+    commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
+    commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&after_step));
+    commit.interrupted_turn_cancel_intent = Some(stale);
+
+    let immediate =
+        crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:immediate", None)
+            .undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(immediate.clone())
+        .await
+        .expect("change intent before final commit");
+    let before_head = store
+        .load_session_head_meta()
+        .await
+        .expect("read head before stale commit")
+        .map(|head| (head.head_revision, head.leaf_node_id));
+    assert!(matches!(
+        store.commit_runtime_state(commit.clone()).await,
+        Err(crate::StoreError::TurnCancelIntentChanged { .. })
+    ));
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("read head after stale commit")
+            .map(|head| (head.head_revision, head.leaf_node_id)),
+        before_head,
+        "a stale cancellation predicate publishes no head effect"
+    );
+    let rows = store
+        .list_pending_turn_inputs(&request.session_id)
+        .await
+        .expect("read active input after stale commit");
+    assert_eq!(rows[0].input_id, pending.input_id);
+    assert_eq!(rows[0].state, crate::TurnInputState::PendingActive);
+    assert!(
+        !store
+            .turn_is_committed(&address)
+            .await
+            .expect("read receipt")
+    );
+
+    commit.interrupted_turn_cancel_intent = Some(
+        store
+            .turn_cancel_request_intent(&address)
+            .await
+            .expect("refresh cancellation predicate"),
+    );
+    commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&immediate));
+    let receipt = store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect("commit with refreshed cancellation authority");
+    assert_eq!(receipt.turn_cancel_input_outcome.len(), 1);
+    assert_eq!(
+        receipt.turn_cancel_input_outcome.affected_inputs[0].input_id,
+        pending.input_id
+    );
+    assert_eq!(
+        receipt.turn_cancel_input_outcome.affected_inputs[0].disposition,
+        crate::TurnCancelDisposition::Drop
+    );
+    let replay = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("replay refreshed final commit");
+    assert_eq!(replay.turn_cancel_input_outcome.len(), 1);
 }

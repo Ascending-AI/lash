@@ -748,6 +748,38 @@ pub(super) fn load_turn_cancel_request_conn(
         .transpose()
 }
 
+pub(super) fn load_turn_cancel_intent_snapshot_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+    let row = conn
+        .query_row(
+            "SELECT record_json, intent_revision FROM turn_cancel_requests
+             WHERE session_id = ?1 AND turn_id = ?2",
+            params![session_id.as_str(), turn_id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some((json, revision)) = row else {
+        return Ok(lash_core::TurnCancelIntentSnapshot::Absent);
+    };
+    let record: lash_core::TurnCancelRequestRecord =
+        decode_stored_json(&json, "turn cancel request")?;
+    let revision = u64::try_from(revision)
+        .map_err(|_| StoreError::Backend("turn cancel intent revision is negative".to_string()))?;
+    if revision == 0 {
+        return Err(StoreError::Backend(
+            "turn cancel intent revision is zero".to_string(),
+        ));
+    }
+    Ok(lash_core::TurnCancelIntentSnapshot::Present {
+        request: record.request,
+        revision,
+    })
+}
+
 pub(super) fn append_turn_cancel_outcome_conn(
     conn: &Connection,
     session_id: &SessionId,
@@ -775,8 +807,13 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
     conn: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
+    observed: &lash_core::TurnCancelIntentSnapshot,
     evidence: &lash_core::facade_support::TurnCancellationEvidence,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
+    let actual = load_turn_cancel_intent_snapshot_conn(conn, session_id, turn_id)?;
+    if actual != *observed {
+        return Ok(false);
+    }
     let mut record = load_turn_cancel_request_conn(conn, session_id, turn_id)?.unwrap_or(
         lash_core::TurnCancelRequestRecord {
             request: lash_core::facade_support::TurnCancelRequest {
@@ -790,12 +827,7 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
             outcome: None,
         },
     );
-    if record.request.mode.is_stronger_than(evidence.mode) {
-        // Reconciliation candidates come from the gate pair. Preserve a
-        // stronger escalation when a delayed base-gate projection arrives.
-        return Ok(());
-    }
-    record.request = lash_core::facade_support::TurnCancelRequest {
+    let request = lash_core::facade_support::TurnCancelRequest {
         address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
         request_id: evidence.request_id.clone(),
         origin: evidence.origin.clone(),
@@ -803,14 +835,35 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
         undelivered: evidence.undelivered,
         mode: evidence.mode,
     };
+    let revision = match actual {
+        lash_core::TurnCancelIntentSnapshot::Absent => 1,
+        lash_core::TurnCancelIntentSnapshot::Present {
+            request: ref prior,
+            revision,
+        } if prior == &request => revision,
+        lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
+            StoreError::checked_monotonic_increment("turn_cancel_intent_revision", revision)?
+        }
+    };
+    record.request = request;
+    let revision = i64::try_from(revision).map_err(|_| {
+        StoreError::Backend("turn cancel intent revision exceeds SQLite range".to_string())
+    })?;
     conn.execute(
-        "INSERT INTO turn_cancel_requests (session_id, turn_id, record_json)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(session_id, turn_id) DO UPDATE SET record_json = excluded.record_json",
-        params![session_id.as_str(), turn_id.as_str(), encode_json(&record)?],
+        "INSERT INTO turn_cancel_requests (session_id, turn_id, record_json, intent_revision)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(session_id, turn_id) DO UPDATE SET
+             record_json = excluded.record_json,
+             intent_revision = excluded.intent_revision",
+        params![
+            session_id.as_str(),
+            turn_id.as_str(),
+            encode_json(&record)?,
+            revision
+        ],
     )
     .map_err(sqlite_error)?;
-    Ok(())
+    Ok(true)
 }
 
 pub(super) fn orphaned_active_turn_ids_conn(
@@ -878,17 +931,16 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
     session_id: &SessionId,
     live_generation: u64,
     turn_id: &TurnId,
+    observed: &lash_core::TurnCancelIntentSnapshot,
     decision: &lash_core::TurnCancelRepairDecision,
-) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
-    if matches!(
-        decision,
-        lash_core::TurnCancelRepairDecision::NoCancellationIntent
-    ) && load_turn_cancel_request_conn(conn, session_id, turn_id)?.is_some()
-    {
-        return Ok(Default::default());
+) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
+    if load_turn_cancel_intent_snapshot_conn(conn, session_id, turn_id)? != *observed {
+        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
     }
     if let lash_core::TurnCancelRepairDecision::CancellationWon(evidence) = decision {
-        reconcile_turn_cancel_winner_conn(conn, session_id, turn_id, evidence)?;
+        if !reconcile_turn_cancel_winner_conn(conn, session_id, turn_id, observed, evidence)? {
+            return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
+        }
     }
     let candidates = {
         let mut stmt = conn
@@ -943,7 +995,9 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
         }
     }
     if repairable.is_empty() {
-        return Ok(Default::default());
+        return Ok(lash_core::TurnCancelRepairResult::Applied(
+            Default::default(),
+        ));
     }
     let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn)?;
     let mut stmt = conn
@@ -989,7 +1043,7 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
         }
         outcome.affected_inputs.push(affected);
     }
-    Ok(outcome)
+    Ok(lash_core::TurnCancelRepairResult::Applied(outcome))
 }
 
 pub(super) fn release_session_execution_lease_conn(

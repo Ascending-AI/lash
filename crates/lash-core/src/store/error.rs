@@ -121,6 +121,15 @@ pub enum StoreError {
     UnsupportedStoreOperation { operation: &'static str },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]
     HeadRevisionConflict { expected: u64, actual: u64 },
+    /// Cancellation intent changed after the runtime observed it and before
+    /// the same transaction could publish cancellation-dependent effects.
+    #[error(
+        "turn cancellation intent changed for session `{session_id}` turn `{turn_id}`; refresh cancellation authority and retry"
+    )]
+    TurnCancelIntentChanged {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
     /// Stored-reference adoption found the durable byte-absence fact left by a
     /// completed attachment GC delete. The boundary commit publishes nothing;
     /// the caller may re-put the digest and retry.
@@ -549,6 +558,7 @@ impl StoreError {
             Self::SessionDeleted { .. } => "SessionDeleted",
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
+            Self::TurnCancelIntentChanged { .. } => "TurnCancelIntentChanged",
             Self::AttachmentBytesReclaimed { .. } => "AttachmentBytesReclaimed",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
             Self::RuntimeCommitLeaseAuthorityConflict { .. } => {

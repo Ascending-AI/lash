@@ -171,8 +171,9 @@ async fn incoming_request_proposes_its_own_evidence_to_an_empty_gate() {
         .record_turn_cancel_request(earlier.clone())
         .await
         .expect("persist earlier intent without resolving the gate");
-    let incoming =
-        request(address.clone(), "incoming-gate").undelivered(crate::TurnCancelDisposition::Defer);
+    let incoming = request(address.clone(), "incoming-gate")
+        .undelivered(crate::TurnCancelDisposition::Defer)
+        .mode(TurnCancelMode::AfterStep);
     let outcome = TurnWorkDriver::for_session(host, address.session_id.clone(), store.clone())
         .request_cancel(incoming.clone())
         .await
@@ -250,6 +251,12 @@ async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() 
         .expect("stamp exact turn final operation");
     commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(winner);
+    commit.interrupted_turn_cancel_intent = Some(
+        store
+            .turn_cancel_request_intent(&address)
+            .await
+            .expect("snapshot cancellation intent before commit"),
+    );
     let committed = store
         .commit_runtime_state(commit)
         .await
@@ -1060,6 +1067,178 @@ async fn weaker_repeat_and_recovery_preserve_the_accepted_escalation() {
 }
 
 #[tokio::test]
+async fn final_settlement_refreshes_cached_base_to_an_already_projected_escalation() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("settlement-refreshes-cached-base");
+    let store = Arc::new(InMemorySessionStore::default());
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("active control");
+
+    let base = request(address.clone(), "after-step-base").mode(TurnCancelMode::AfterStep);
+    driver
+        .request_cancel(base.clone())
+        .await
+        .expect("accept base request");
+    let honoured_base = active
+        .observe_pending_cancel(
+            host.as_ref(),
+            TurnCancelPeekIdentity::AfterStep {
+                protocol_iteration: 3,
+            },
+        )
+        .await
+        .expect("observe base at step boundary")
+        .expect("after-step base is honoured");
+    assert_eq!(honoured_base.request_id, base.request_id);
+    assert_eq!(honoured_base.honoured_after_step, Some(3));
+
+    let escalation = request(address.clone(), "immediate-escalation");
+    assert!(matches!(
+        driver
+            .request_cancel(escalation.clone())
+            .await
+            .expect("accept and project escalation")
+            .outcome,
+        TurnCancelOutcome::Escalated(ref evidence)
+            if evidence.request_id == escalation.request_id
+    ));
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .expect("read projected escalation")
+            .expect("escalation row")
+            .request,
+        escalation
+    );
+
+    let settled = active
+        .settle_before_commit(host.as_ref(), false, None)
+        .await
+        .expect("settle from actual gate pair")
+        .expect("cancellation won");
+    assert_eq!(settled.request_id, "immediate-escalation");
+    assert_eq!(settled.mode, TurnCancelMode::Immediate);
+    assert_eq!(settled.honoured_after_step, None);
+}
+
+#[tokio::test]
+async fn final_settlement_observes_same_header_escalation_accepted_after_snapshot() {
+    use crate::SessionCommitStore as _;
+
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("same-header-delayed-escalation");
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("bind cancellation store");
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("active control");
+
+    let base = request(address.clone(), "after-step-base").mode(TurnCancelMode::AfterStep);
+    driver
+        .request_cancel(base)
+        .await
+        .expect("accept base request");
+    let immediate = request(address.clone(), "same-immediate-header")
+        .undelivered(crate::TurnCancelDisposition::Drop);
+    store
+        .record_turn_cancel_request(immediate.clone())
+        .await
+        .expect("persist unaccepted immediate header");
+    let before_gate_acceptance = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot immediate header before gate acceptance");
+    assert_eq!(
+        active
+            .observe_pending_cancel(
+                host.as_ref(),
+                TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: 0,
+                },
+            )
+            .await
+            .expect("observe base before escalation"),
+        None
+    );
+
+    assert!(matches!(
+        driver
+            .request_cancel(immediate.clone())
+            .await
+            .expect("accept delayed same-header escalation")
+            .outcome,
+        TurnCancelOutcome::Escalated(ref evidence)
+            if evidence.request_id == immediate.request_id
+    ));
+    assert_eq!(
+        store
+            .turn_cancel_request_intent(&address)
+            .await
+            .expect("snapshot after same-header gate acceptance"),
+        before_gate_acceptance,
+        "gate acceptance alone does not mutate the identical durable header"
+    );
+
+    let settled = active
+        .settle_before_commit(host.as_ref(), false, None)
+        .await
+        .expect("close and observe escalation before final commit")
+        .expect("accepted escalation wins");
+    assert_eq!(settled.request_id, immediate.request_id);
+    assert_eq!(settled.mode, TurnCancelMode::Immediate);
+
+    let pending = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &address.session_id,
+            crate::TurnInputIngress::active_turn(
+                &address.turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("same-header winner decides this input"),
+        ))
+        .await
+        .expect("enqueue interrupted input");
+    let mut state = crate::RuntimeSessionState {
+        session_id: address.session_id.clone(),
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.ensure_agent_frame_initialized();
+    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(crate::OperationId::turn(
+            &address.session_id,
+            &address.turn_id,
+            "final",
+        ))
+        .expect("stamp exact final operation");
+    commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
+    commit.interrupted_turn_input_cancellation = Some(settled);
+    commit.interrupted_turn_cancel_intent = Some(before_gate_acceptance);
+    let receipt = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("same-header snapshot commits the gate winner");
+    assert_eq!(receipt.turn_cancel_input_outcome.len(), 1);
+    assert_eq!(
+        receipt.turn_cancel_input_outcome.affected_inputs[0].input_id,
+        pending.input_id
+    );
+    assert_eq!(
+        receipt.turn_cancel_input_outcome.affected_inputs[0].disposition,
+        crate::TurnCancelDisposition::Drop,
+        "the accepted escalation's disposition, not the stale base, is applied"
+    );
+}
+
+#[tokio::test]
 async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("boundary");
@@ -1102,14 +1281,19 @@ async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration(
         .await
         .expect("settle");
     assert_eq!(settled, Some(honoured));
-    // Once the gate holds after-step evidence, a later Immediate request
-    // still escalates the record; the owner is what decides whether it
-    // is already past its boundary.
+    // Final settlement closes escalation admission. An Immediate request that
+    // arrives afterward observes the already-honoured base request and cannot
+    // retroactively replace the turn-ending decision.
     let late = driver
         .request_cancel(request(address.clone(), "abort-late"))
         .await
         .expect("late escalation");
-    assert!(matches!(late.outcome, TurnCancelOutcome::Escalated(_)));
+    assert!(matches!(
+        late.outcome,
+        TurnCancelOutcome::AlreadyRequested(ref evidence)
+            if evidence.request_id == "stop-1"
+                && evidence.mode == TurnCancelMode::AfterStep
+    ));
 }
 
 #[tokio::test]

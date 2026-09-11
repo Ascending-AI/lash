@@ -145,17 +145,18 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
     async fn turn_cancel_request_intent(
         &self,
         address: &crate::TurnAddress,
-    ) -> Result<Option<crate::TurnCancelRequest>, StoreError> {
+    ) -> Result<crate::TurnCancelIntentSnapshot, StoreError> {
         self.inner().turn_cancel_request_intent(address).await
     }
 
     async fn reconcile_turn_cancel_winner(
         &self,
         address: &crate::TurnAddress,
+        observed: &crate::TurnCancelIntentSnapshot,
         evidence: &crate::TurnCancellationEvidence,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         self.inner()
-            .reconcile_turn_cancel_winner(address, evidence)
+            .reconcile_turn_cancel_winner(address, observed, evidence)
             .await
     }
 
@@ -266,13 +267,15 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         turn_id: &crate::TurnId,
+        observed: &crate::TurnCancelIntentSnapshot,
         decision: TurnCancelRepairDecision,
-    ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
+    ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
         self.inner()
             .repair_orphaned_active_turn_inputs(
                 session_id,
                 session_execution_lease,
                 turn_id,
+                observed,
                 decision,
             )
             .await
@@ -619,9 +622,11 @@ where
     async fn reconcile_turn_cancel_winner(
         &self,
         address: &crate::TurnAddress,
+        observed: &crate::TurnCancelIntentSnapshot,
         evidence: &crate::TurnCancellationEvidence,
-    ) -> Result<(), StoreError> {
-        RuntimePersistenceDecorator::reconcile_turn_cancel_winner(self, address, evidence).await
+    ) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::reconcile_turn_cancel_winner(self, address, observed, evidence)
+            .await
     }
 
     async fn record_turn_cancel_request(
@@ -641,7 +646,7 @@ where
     async fn turn_cancel_request_intent(
         &self,
         address: &crate::TurnAddress,
-    ) -> Result<Option<crate::TurnCancelRequest>, StoreError> {
+    ) -> Result<crate::TurnCancelIntentSnapshot, StoreError> {
         RuntimePersistenceDecorator::turn_cancel_request_intent(self, address).await
     }
 
@@ -763,13 +768,15 @@ where
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         turn_id: &crate::TurnId,
+        observed: &crate::TurnCancelIntentSnapshot,
         decision: TurnCancelRepairDecision,
-    ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
+    ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
         RuntimePersistenceDecorator::repair_orphaned_active_turn_inputs(
             self,
             session_id,
             session_execution_lease,
             turn_id,
+            observed,
             decision,
         )
         .await

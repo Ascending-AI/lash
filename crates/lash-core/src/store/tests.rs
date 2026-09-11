@@ -281,6 +281,7 @@ fn cancellation_evidence_changes_intent_hash_without_changing_absent_legacy_hash
 
     let mut baseline = legacy;
     baseline.interrupted_turn_input_turn_id = Some(TurnId::from("turn-42"));
+    baseline.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
     let baseline_hash = baseline
         .turn_commit_hash()
         .expect("interrupted intent without cancellation evidence");

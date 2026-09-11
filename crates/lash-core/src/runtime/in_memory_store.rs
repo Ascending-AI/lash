@@ -54,52 +54,6 @@ struct InMemoryPendingTurnInput {
     claim: ClaimHold,
 }
 
-fn settlement_mismatch<'a, R>(
-    rows: &'a [R],
-    row_ids: &'a [String],
-    session_id: &SessionId,
-    identity: impl Fn(&R) -> (&str, &str),
-    matches: impl Fn(&R) -> bool,
-) -> Option<(Option<&'a String>, Option<&'a R>)> {
-    if rows.iter().filter(|row| matches(row)).count() == row_ids.len() {
-        return None;
-    }
-    let row_id = row_ids.iter().find(|id| {
-        !rows
-            .iter()
-            .any(|row| identity(row).1 == id.as_str() && matches(row))
-    });
-    let current = row_id.and_then(|id| {
-        rows.iter()
-            .find(|row| identity(row) == (session_id, id.as_str()))
-    });
-    Some((row_id, current))
-}
-
-/// The in-memory store's turn-input settlement predicate.
-///
-/// One predicate, two regimes: the claim fields only strengthen it. A claimed
-/// settlement requires the row to still carry that claim; an unclaimed
-/// settlement requires it to still be unclaimed and unsettled
-/// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md) §5).
-fn turn_input_settlement_matches(
-    entry: &InMemoryPendingTurnInput,
-    completed: &crate::TurnInputCompletion,
-) -> bool {
-    entry.input.session_id == completed.session_id
-        && completed.input_ids.contains(&entry.input.input_id)
-        && match completed.claim.as_ref() {
-            Some(claim) => entry.claim.owned_by(&claim.claim_id, &claim.lease_token),
-            None => {
-                entry.claim.id().is_none()
-                    && !matches!(
-                        entry.input.state,
-                        crate::TurnInputState::Completed | crate::TurnInputState::Cancelled
-                    )
-            }
-        }
-}
-
 #[derive(Clone)]
 enum InMemoryQueuedWorkClaimKind {
     LeadingSessionCommand,
@@ -199,7 +153,7 @@ pub struct InMemorySessionStore {
     wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
-    turn_cancel_requests: Mutex<HashMap<TurnId, crate::TurnCancelRequestRecord>>,
+    turn_cancel_requests: Mutex<HashMap<TurnId, InMemoryTurnCancelRequest>>,
     attachment_manifest: SharedAttachmentManifest,
     /// Per-digest attachment GC condemnation state, shared with every store the
     /// same factory owns because the digest is factory-global: the writer's
@@ -232,6 +186,8 @@ pub struct InMemorySessionStore {
     #[cfg(any(test, feature = "testing"))]
     fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
     #[cfg(any(test, feature = "testing"))]
+    inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
+    #[cfg(any(test, feature = "testing"))]
     fail_next_runtime_commit_after_first_mutation: Mutex<Option<crate::StoreError>>,
     #[cfg(any(test, feature = "testing"))]
     fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
@@ -254,6 +210,12 @@ pub struct InMemorySessionStore {
     abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
     pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
+}
+
+#[derive(Clone)]
+struct InMemoryTurnCancelRequest {
+    record: crate::TurnCancelRequestRecord,
+    intent_revision: u64,
 }
 
 fn warn_process_owner_death_degraded(path: &'static str) {
@@ -374,6 +336,8 @@ impl InMemorySessionStore {
             commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(any(test, feature = "testing"))]
             fail_next_runtime_commit: Mutex::new(None),
+            #[cfg(any(test, feature = "testing"))]
+            inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             #[cfg(any(test, feature = "testing"))]
             fail_next_runtime_commit_after_first_mutation: Mutex::new(None),
             #[cfg(any(test, feature = "testing"))]
@@ -1065,16 +1029,38 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         if let Some(error) = self.fail_next_runtime_commit.lock_recover().take() {
             return Err(error);
         }
-        let session_meta_before_commit = self.session_meta.lock_recover().clone();
-        // The binding adjudication takes the head-row lock itself, so it runs
-        // before this transaction pins that lock for the rest of the commit.
-        self.ensure_session_metadata_for_commit(commit)?;
-        let mut meta = self.session_head_meta.lock_recover();
-        let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
         #[cfg(any(test, feature = "testing"))]
-        self.fail_after_first_runtime_commit_mutation_if_requested(
-            session_meta_before_commit.clone(),
-        )?;
+        if let Some(request) = self
+            .inject_turn_cancel_before_next_runtime_commit
+            .lock_recover()
+            .take()
+        {
+            debug_assert_eq!(request.address.session_id, commit.session_id);
+            let mut requests = self.turn_cancel_requests.lock_recover();
+            match requests.get_mut(&request.address.turn_id) {
+                Some(stored) if request.mode.is_stronger_than(stored.record.request.mode) => {
+                    stored.intent_revision = crate::StoreError::checked_monotonic_increment(
+                        "turn_cancel_intent_revision",
+                        stored.intent_revision,
+                    )?;
+                    stored.record.request = request;
+                }
+                Some(_) => {}
+                None => {
+                    requests.insert(
+                        request.address.turn_id.clone(),
+                        InMemoryTurnCancelRequest {
+                            record: crate::TurnCancelRequestRecord {
+                                request,
+                                outcome: None,
+                            },
+                            intent_revision: 1,
+                        },
+                    );
+                }
+            }
+        }
+        let session_meta_before_commit = self.session_meta.lock_recover().clone();
         planner.validate_node_derivation()?;
         let key = (session_id.clone(), planner.operation_key().to_string());
         if let Some(stored) = self.runtime_turn_commits.lock_recover().get(&key).cloned() {
@@ -1093,6 +1079,27 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
             return Ok(replay.into_result());
         }
+        if let (Some(turn_id), Some(observed)) = (
+            commit.interrupted_turn_input_turn_id.as_ref(),
+            commit.interrupted_turn_cancel_intent.as_ref(),
+        ) {
+            let requests = self.turn_cancel_requests.lock_recover();
+            if turn_input::snapshot(&requests, turn_id) != *observed {
+                return Err(crate::StoreError::TurnCancelIntentChanged {
+                    session_id: commit.session_id.clone(),
+                    turn_id: turn_id.clone(),
+                });
+            }
+        }
+        // Receipt replay and the cancellation predicate are adjudicated before
+        // even session binding metadata can be materialized by a fresh commit.
+        self.ensure_session_metadata_for_commit(commit)?;
+        let mut meta = self.session_head_meta.lock_recover();
+        let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
+        #[cfg(any(test, feature = "testing"))]
+        self.fail_after_first_runtime_commit_mutation_if_requested(
+            session_meta_before_commit.clone(),
+        )?;
         let hydrated_checkpoint =
             checkpoints::resolve_components(&self.checkpoint_component_blobs, &commit.checkpoint)?;
         let incoming_nodes = commit.graph.nodes.as_slice();
@@ -1215,7 +1222,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             let queued = self.queued_work.lock_recover();
             for completed in &commit.completed_queue_claims {
-                if let Some((row_id, current)) = settlement_mismatch(
+                if let Some((row_id, current)) = turn_input::settlement_mismatch(
                     &queued,
                     &completed.batch_ids,
                     &completed.session_id,
@@ -1244,12 +1251,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             let pending = self.pending_turn_inputs.lock_recover();
             for completed in &commit.completed_turn_input_claims {
-                if let Some((row_id, current)) = settlement_mismatch(
+                if let Some((row_id, current)) = turn_input::settlement_mismatch(
                     &pending,
                     &completed.input_ids,
                     &completed.session_id,
                     |entry| (&entry.input.session_id, &entry.input.input_id),
-                    |entry| turn_input_settlement_matches(entry, completed),
+                    |entry| turn_input::settlement_matches(entry, completed),
                 ) {
                     return Err(match completed.claim.as_ref() {
                         Some(claim) => crate::store::StoreError::TurnInputClaimSuperseded {
@@ -1358,7 +1365,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let mut outcome = crate::TurnCancelInputOutcome::default();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
-                    if turn_input_settlement_matches(entry, completed) {
+                    if turn_input::settlement_matches(entry, completed) {
                         entry.input.state = crate::TurnInputState::Completed;
                         entry.clear_claim();
                     }
@@ -1373,19 +1380,27 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 if let Some(evidence) = cancellation {
                     let existing_outcome = requests
                         .get(turn_id)
-                        .and_then(|record| record.outcome.clone());
+                        .and_then(|stored| stored.record.outcome.clone());
+                    let request = turn_input::request_from_evidence(
+                        &crate::TurnAddress::new(&commit.session_id, turn_id),
+                        evidence,
+                    );
+                    let revision = match requests.get(turn_id) {
+                        Some(stored) if stored.record.request == request => stored.intent_revision,
+                        Some(stored) => crate::StoreError::checked_monotonic_increment(
+                            "turn_cancel_intent_revision",
+                            stored.intent_revision,
+                        )?,
+                        None => 1,
+                    };
                     requests.insert(
                         TurnId::from(turn_id),
-                        crate::TurnCancelRequestRecord {
-                            request: crate::TurnCancelRequest {
-                                address: crate::TurnAddress::new(&commit.session_id, turn_id),
-                                request_id: evidence.request_id.clone(),
-                                origin: evidence.origin.clone(),
-                                reason: evidence.reason.clone(),
-                                undelivered: evidence.undelivered,
-                                mode: evidence.mode,
+                        InMemoryTurnCancelRequest {
+                            record: crate::TurnCancelRequestRecord {
+                                request,
+                                outcome: existing_outcome,
                             },
-                            outcome: existing_outcome,
+                            intent_revision: revision,
                         },
                     );
                 }
@@ -1417,6 +1432,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                             && let Some(record) = requests.get_mut(turn_id)
                         {
                             record
+                                .record
                                 .outcome
                                 .get_or_insert_with(crate::TurnCancelInputOutcome::default)
                                 .affected_inputs

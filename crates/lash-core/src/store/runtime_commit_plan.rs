@@ -590,6 +590,14 @@ fn validate_session_execution_lease_plan(commit: &RuntimeCommit) -> Result<(), S
             "runtime commit cancellation evidence requires an interrupted turn id".to_string(),
         ));
     }
+    if commit.interrupted_turn_cancel_intent.is_some()
+        != commit.interrupted_turn_input_turn_id.is_some()
+    {
+        return Err(StoreError::Backend(
+            "runtime commit cancellation intent predicate and interrupted turn id must be present together"
+                .to_string(),
+        ));
+    }
     Ok(())
 }
 

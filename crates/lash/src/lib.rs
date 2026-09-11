@@ -62,8 +62,8 @@ pub use crate::turn::{
     TurnStream, message_role, message_text,
 };
 pub use lash_core::facade_support::{
-    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelMode,
-    TurnCancelRequestRecord,
+    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,
+    TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
@@ -76,19 +76,19 @@ pub use lash_core::{
     QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, QueuedWorkClaimRefusal,
     Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionId, SessionListFilter,
     SessionRelationKind, SessionStartPoint, SessionSummary, TurnActivity, TurnActivityId,
-    TurnBudget, TurnCancelOriginHint, TurnCancelRepairDecision, TurnCause, TurnEvent,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput,
-    TurnInputApplication, facade_support::GenerationOverlay, facade_support::PluginStack,
-    facade_support::SessionCommand, facade_support::SessionCommandReceipt,
-    facade_support::SessionConfigPatch, facade_support::SessionSpec,
-    facade_support::TurnActivitySink, facade_support::TurnAddress, facade_support::TurnAttach,
-    facade_support::TurnCancelOutcome, facade_support::TurnCancelReceipt,
-    facade_support::TurnCancelRequest, facade_support::TurnCancellationEvidence,
-    facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
-    facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
-    facade_support::WorkerSlotKind, facade_support::WorkerSlotPermit,
-    facade_support::WorkerSlotSupplier,
+    TurnBudget, TurnCancelOriginHint, TurnCancelRepairDecision, TurnCancelRepairResult, TurnCause,
+    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId,
+    TurnInput, TurnInputApplication, facade_support::GenerationOverlay,
+    facade_support::PluginStack, facade_support::SessionCommand,
+    facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
+    facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
+    facade_support::TurnAttach, facade_support::TurnCancelOutcome,
+    facade_support::TurnCancelReceipt, facade_support::TurnCancelRequest,
+    facade_support::TurnCancellationEvidence, facade_support::TurnExecutionMetrics,
+    facade_support::TurnFinish, facade_support::TurnInputAcceptanceReceipt,
+    facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
+    facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
+    facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by

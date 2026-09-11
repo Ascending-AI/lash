@@ -315,9 +315,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // generation.
 // Version 83 adds the terminal attachment-condemnation `reclaimed` phase
 // (FIG-2512); component-82 stores must be recreated so successful physical
-// deletion remains durable byte-absence evidence. There is no migration into this
-// generation.
-const SCHEMA_VERSION: i32 = 83;
+// deletion remains durable byte-absence evidence. There is no migration into
+// this generation.
+// Version 84 adds the monotonic turn-cancel intent revision used by the
+// cancellation publication CAS. This is a reject-and-recreate cutover.
+const SCHEMA_VERSION: i32 = 84;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

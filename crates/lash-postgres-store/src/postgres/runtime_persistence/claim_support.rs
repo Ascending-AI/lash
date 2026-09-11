@@ -287,16 +287,64 @@ pub(super) async fn load_turn_cancel_request_pg(
     Ok(record)
 }
 
-/// Load only cancellation intent. Unlike the full receipt reader, this does
-/// not depend on retained payload tombstones from earlier repairs.
-pub(super) async fn load_turn_cancel_request_intent_pg(
+pub(super) async fn load_turn_cancel_intent_snapshot_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+    let row: Option<(String, Option<String>, Option<String>, String, String, i64)> =
+        sqlx::query_as(
+            "SELECT request_id, origin, reason, disposition, mode, intent_revision
+         FROM lash_turn_cancel_requests
+         WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+        )
+        .bind(session_id.as_str())
+        .bind(turn_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    turn_cancel_snapshot_from_row(session_id, turn_id, row)
+}
+
+fn turn_cancel_snapshot_from_row(
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    row: Option<(String, Option<String>, Option<String>, String, String, i64)>,
+) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+    let Some((request_id, origin, reason, disposition, mode, revision)) = row else {
+        return Ok(lash_core::TurnCancelIntentSnapshot::Absent);
+    };
+    let revision = u64::try_from(revision).map_err(|_| StoreError::StoredDataCorrupt {
+        record_kind: "TurnCancelRequest",
+        message: "intent revision is negative".to_string(),
+    })?;
+    if revision == 0 {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "TurnCancelRequest",
+            message: "intent revision is zero".to_string(),
+        });
+    }
+    Ok(lash_core::TurnCancelIntentSnapshot::Present {
+        request: lash_core::facade_support::TurnCancelRequest {
+            address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+            request_id,
+            origin,
+            reason,
+            undelivered: turn_cancel_disposition_from_wire(&disposition)?,
+            mode: turn_cancel_mode_from_wire(&mode)?,
+        },
+        revision,
+    })
+}
+
+pub(super) async fn load_turn_cancel_intent_snapshot_pg(
     pool: &sqlx::PgPool,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<Option<lash_core::facade_support::TurnCancelRequest>, StoreError> {
+) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
-    let row: Option<(String, Option<String>, Option<String>, String, String)> = sqlx::query_as(
-        "SELECT request_id, origin, reason, disposition, mode
+    let row = sqlx::query_as(
+        "SELECT request_id, origin, reason, disposition, mode, intent_revision
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2",
     )
@@ -305,17 +353,7 @@ pub(super) async fn load_turn_cancel_request_intent_pg(
     .fetch_optional(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
-    row.map(|(request_id, origin, reason, disposition, mode)| {
-        Ok(lash_core::facade_support::TurnCancelRequest {
-            address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
-            request_id,
-            origin,
-            reason,
-            undelivered: turn_cancel_disposition_from_wire(&disposition)?,
-            mode: turn_cancel_mode_from_wire(&mode)?,
-        })
-    })
-    .transpose()
+    turn_cancel_snapshot_from_row(session_id, turn_id, row)
 }
 
 #[derive(Default)]
@@ -595,22 +633,45 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &TurnId,
+    observed: &lash_core::TurnCancelIntentSnapshot,
     evidence: &lash_core::facade_support::TurnCancellationEvidence,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
+    let actual = load_turn_cancel_intent_snapshot_tx(tx, session_id, turn_id).await?;
+    if actual != *observed {
+        return Ok(false);
+    }
+    let request = lash_core::facade_support::TurnCancelRequest {
+        address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+        request_id: evidence.request_id.clone(),
+        origin: evidence.origin.clone(),
+        reason: evidence.reason.clone(),
+        undelivered: evidence.undelivered,
+        mode: evidence.mode,
+    };
+    let revision = match actual {
+        lash_core::TurnCancelIntentSnapshot::Absent => 1,
+        lash_core::TurnCancelIntentSnapshot::Present {
+            request: ref prior,
+            revision,
+        } if prior == &request => revision,
+        lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
+            StoreError::checked_monotonic_increment("turn_cancel_intent_revision", revision)?
+        }
+    };
+    let revision = i64::try_from(revision).map_err(|_| {
+        StoreError::Backend("turn cancel intent revision exceeds PostgreSQL BIGINT".to_string())
+    })?;
     sqlx::query(
         "INSERT INTO lash_turn_cancel_requests (
-             session_id, turn_id, request_id, origin, reason, disposition, mode
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+             session_id, turn_id, request_id, origin, reason, disposition, mode, intent_revision
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (session_id, turn_id) DO UPDATE
          SET request_id = EXCLUDED.request_id,
              origin = EXCLUDED.origin,
              reason = EXCLUDED.reason,
              disposition = EXCLUDED.disposition,
-             mode = EXCLUDED.mode
-         WHERE NOT (
-             lash_turn_cancel_requests.mode = 'immediate'
-             AND EXCLUDED.mode = 'after_step'
-         )",
+             mode = EXCLUDED.mode,
+             intent_revision = EXCLUDED.intent_revision",
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -619,10 +680,11 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
     .bind(&evidence.reason)
     .bind(turn_cancel_disposition_wire(evidence.undelivered))
     .bind(turn_cancel_mode_wire(evidence.mode))
+    .bind(revision)
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    Ok(())
+    Ok(true)
 }
 
 pub(super) async fn orphaned_active_turn_ids_tx(
@@ -681,29 +743,16 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     session_id: &SessionId,
     live_generation: u64,
     turn_id: &TurnId,
+    observed: &lash_core::TurnCancelIntentSnapshot,
     decision: &lash_core::TurnCancelRepairDecision,
-) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
-    if matches!(
-        decision,
-        lash_core::TurnCancelRepairDecision::NoCancellationIntent
-    ) {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(
-                 SELECT 1 FROM lash_turn_cancel_requests
-                 WHERE session_id = $1 AND turn_id = $2
-             )",
-        )
-        .bind(session_id.as_str())
-        .bind(turn_id.as_str())
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if exists {
-            return Ok(Default::default());
-        }
+) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
+    if load_turn_cancel_intent_snapshot_tx(tx, session_id, turn_id).await? != *observed {
+        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
     }
     if let lash_core::TurnCancelRepairDecision::CancellationWon(evidence) = decision {
-        reconcile_turn_cancel_winner_tx(tx, session_id, turn_id, evidence).await?;
+        if !reconcile_turn_cancel_winner_tx(tx, session_id, turn_id, observed, evidence).await? {
+            return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
+        }
     }
     let rows: Vec<(String, String, String, String, Option<String>, i64)> = sqlx::query_as(
         "SELECT input_id, state, ingress_json, input_json, claim_token, claim_session_lease_generation
@@ -747,7 +796,9 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         }
     }
     if repairable.is_empty() {
-        return Ok(Default::default());
+        return Ok(lash_core::TurnCancelRepairResult::Applied(
+            Default::default(),
+        ));
     }
     let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn)?;
     let mut outcome = lash_core::TurnCancelInputOutcome::default();
@@ -791,7 +842,7 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         }
         outcome.affected_inputs.push(affected);
     }
-    Ok(outcome)
+    Ok(lash_core::TurnCancelRepairResult::Applied(outcome))
 }
 
 #[allow(clippy::too_many_arguments)]

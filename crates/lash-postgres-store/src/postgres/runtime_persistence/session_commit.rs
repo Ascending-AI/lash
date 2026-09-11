@@ -341,6 +341,17 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
             }
         }
+        if let (Some(turn_id), Some(observed)) = (
+            commit.interrupted_turn_input_turn_id.as_ref(),
+            commit.interrupted_turn_cancel_intent.as_ref(),
+        ) && load_turn_cancel_intent_snapshot_tx(&mut tx, &commit.session_id, turn_id).await?
+            != *observed
+        {
+            return Err(StoreError::TurnCancelIntentChanged {
+                session_id: commit.session_id.clone(),
+                turn_id: turn_id.clone(),
+            });
+        }
         // Publication owns the complete sorted blob-row set before this fresh
         // commit locks or writes any checkpoint owner edge, graph row, or head.
         let (checkpoint_ref, manifest) = put_checkpoint_tx(&mut tx, &commit.checkpoint).await?;
@@ -641,8 +652,29 @@ impl SessionCommitStore for PostgresSessionStore {
                     evidence.undelivered
                 });
             if let Some(evidence) = cancellation {
-                reconcile_turn_cancel_winner_tx(&mut tx, &commit.session_id, turn_id, evidence)
-                    .await?;
+                let observed = commit
+                    .interrupted_turn_cancel_intent
+                    .as_ref()
+                    .ok_or_else(|| {
+                        StoreError::Backend(
+                            "interrupted turn commit omitted cancellation intent predicate"
+                                .to_string(),
+                        )
+                    })?;
+                if !reconcile_turn_cancel_winner_tx(
+                    &mut tx,
+                    &commit.session_id,
+                    turn_id,
+                    observed,
+                    evidence,
+                )
+                .await?
+                {
+                    return Err(StoreError::TurnCancelIntentChanged {
+                        session_id: commit.session_id.clone(),
+                        turn_id: turn_id.clone(),
+                    });
+                }
             }
             let rows = sqlx::query(&format!(
                 "SELECT {PENDING_TURN_INPUT_COLUMNS}

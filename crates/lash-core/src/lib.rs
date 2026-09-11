@@ -460,6 +460,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelAffectedInput;
     pub use crate::runtime::TurnCancelDisposition;
     pub use crate::runtime::TurnCancelInputOutcome;
+    pub use crate::runtime::TurnCancelIntentSnapshot;
     pub use crate::runtime::TurnCancelMode;
     pub use crate::runtime::TurnCancelOutcome;
     pub use crate::runtime::TurnCancelReceipt;
@@ -1174,16 +1175,16 @@ pub use runtime::{
     StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
     TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,
-    TurnCancelMode, TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnControlBinding,
-    TurnControlParticipation, TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, ensure_process_lease_schema_version,
+    TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint, TurnCancelRequestRecord,
+    TurnContext, TurnControlBinding, TurnControlParticipation, TurnEvent, TurnFailureEvidence,
+    TurnFailurePartialOutput, TurnFailureSettlement, TurnInput, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
+    TurnInputState, UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy, ensure_process_lease_schema_version,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
@@ -1234,8 +1235,8 @@ pub use store::{
     SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
     SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreError,
     StoreMaintenance, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, TurnCancelRepairDecision, TurnInputStore, VacuumReport, WorkClaim,
-    WorkCompletion,
+    StoreSchemaVerdict, TurnCancelRepairDecision, TurnCancelRepairResult, TurnInputStore,
+    VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

@@ -21,6 +21,8 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
     pub(super) interrupted_turn_input_turn_id: Option<TurnId>,
     pub(super) interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
+    pub(super) interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
+    pub(super) turn_control_resolver: Option<&'a dyn crate::AwaitEventResolver>,
     pub(super) recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     pub(super) session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
 }

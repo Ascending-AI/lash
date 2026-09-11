@@ -720,11 +720,11 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     }
 }
 
-// SnapshotStore serves the pending turn-input lifecycle only as far as one
-// session's own turns need it: every turn is admitted before it is driven
-// (ADR 0069), so acceptance, claim, cancel, and release have to work. Rows are
-// held in memory in enqueue order and are settled by the turn's commit, which
-// this double records without inspecting.
+/// SnapshotStore serves the pending turn-input lifecycle only as far as one
+/// session's own turns need it: every turn is admitted before it is driven
+/// (ADR 0069), so acceptance, claim, cancel, and release have to work. Rows are
+/// held in memory in enqueue order and are settled by the turn's commit, which
+/// this double records without inspecting.
 #[async_trait]
 impl lash_core::TurnInputStore for SnapshotStore {
     async fn enqueue_pending_turn_input(
@@ -902,9 +902,12 @@ impl lash_core::TurnInputStore for SnapshotStore {
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _turn_id: &lash_core::TurnId,
+        _observed: &lash_core::TurnCancelIntentSnapshot,
         _decision: lash_core::TurnCancelRepairDecision,
-    ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
-        Ok(Default::default())
+    ) -> std::result::Result<lash_core::TurnCancelRepairResult, lash_core::store::StoreError> {
+        Ok(lash_core::TurnCancelRepairResult::Applied(
+            Default::default(),
+        ))
     }
 }
 
@@ -1185,9 +1188,12 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _turn_id: &lash_core::TurnId,
+        _observed: &lash_core::TurnCancelIntentSnapshot,
         _decision: lash_core::TurnCancelRepairDecision,
-    ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
-        Ok(Default::default())
+    ) -> std::result::Result<lash_core::TurnCancelRepairResult, lash_core::store::StoreError> {
+        Ok(lash_core::TurnCancelRepairResult::Applied(
+            Default::default(),
+        ))
     }
 }
 

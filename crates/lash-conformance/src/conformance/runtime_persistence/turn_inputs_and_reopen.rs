@@ -1058,10 +1058,13 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             &SessionId::from("root"),
             &lease.fence(),
             &TurnId::from(dead_turn_id),
+            &crate::TurnCancelIntentSnapshot::Absent,
             crate::TurnCancelRepairDecision::NoCancellationIntent,
         )
         .await
-        .expect("re-defer inputs pinned to the dead turn");
+        .expect("re-defer inputs pinned to the dead turn")
+        .into_applied()
+        .expect("unchanged absent intent");
     assert_eq!(
         repaired.len(),
         1,
@@ -1093,10 +1096,13 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &SessionId::from("root"),
                 &lease.fence(),
                 &TurnId::from(dead_turn_id),
+                &crate::TurnCancelIntentSnapshot::Absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
             )
             .await
             .expect("repeat the turn-scoped repair")
+            .into_applied()
+            .expect("unchanged absent intent")
             .len(),
         0,
         "the repair is idempotent: a repaired row is no longer pinned to any turn"
@@ -1184,6 +1190,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &SessionId::from("root"),
                 &lease.fence(),
                 &turn_id,
+                &crate::TurnCancelIntentSnapshot::Absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
             )
             .await
@@ -1254,6 +1261,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             &SessionId::from("root"),
             &stale_fence,
             &TurnId::from("fig1573-superseded-turn"),
+            &crate::TurnCancelIntentSnapshot::Absent,
             crate::TurnCancelRepairDecision::NoCancellationIntent,
         )
         .await
@@ -1283,10 +1291,13 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &SessionId::from("root"),
                 &successor.fence(),
                 &TurnId::from("fig1573-superseded-turn"),
+                &crate::TurnCancelIntentSnapshot::Absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
             )
             .await
             .expect("the live holder repairs the row the superseded caller could not")
+            .into_applied()
+            .expect("unchanged absent intent")
             .len(),
         1,
     );

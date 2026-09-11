@@ -1795,13 +1795,15 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         turn_id: &lash_core::TurnId,
+        observed: &lash_core::TurnCancelIntentSnapshot,
         decision: lash_core::TurnCancelRepairDecision,
-    ) -> Result<lash_core::TurnCancelInputOutcome, lash_core::StoreError> {
+    ) -> Result<lash_core::TurnCancelRepairResult, lash_core::StoreError> {
         self.inner
             .repair_orphaned_active_turn_inputs(
                 session_id,
                 session_execution_lease,
                 turn_id,
+                observed,
                 decision,
             )
             .await

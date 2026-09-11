@@ -513,6 +513,7 @@ impl RuntimeCommit {
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
+            interrupted_turn_cancel_intent,
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
@@ -522,6 +523,7 @@ impl RuntimeCommit {
                 && enqueued_queue_batches.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
+                && interrupted_turn_cancel_intent.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && committed_attachment_ids.is_empty(),
@@ -694,6 +696,7 @@ impl RuntimeCommit {
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         })
@@ -785,6 +788,7 @@ impl RuntimeCommit {
     ) -> Self {
         self.interrupted_turn_input_turn_id = Some(turn_id.into());
         self.interrupted_turn_input_cancellation = cancellation;
+        self.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
         self
     }
 
@@ -1065,7 +1069,7 @@ pub trait TurnInputStore: Send + Sync {
     async fn turn_cancel_request_intent(
         &self,
         _address: &crate::TurnAddress,
-    ) -> Result<Option<crate::TurnCancelRequest>, StoreError> {
+    ) -> Result<crate::TurnCancelIntentSnapshot, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "turn_cancel_request_intent",
         })
@@ -1076,8 +1080,9 @@ pub trait TurnInputStore: Send + Sync {
     async fn reconcile_turn_cancel_winner(
         &self,
         _address: &crate::TurnAddress,
+        _observed: &crate::TurnCancelIntentSnapshot,
         _evidence: &crate::TurnCancellationEvidence,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "reconcile_turn_cancel_winner",
         })
@@ -1226,11 +1231,27 @@ pub trait TurnInputStore: Send + Sync {
         _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _turn_id: &crate::TurnId,
+        _observed: &crate::TurnCancelIntentSnapshot,
         _decision: TurnCancelRepairDecision,
-    ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
+    ) -> Result<TurnCancelRepairResult, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "repair_orphaned_active_turn_inputs",
         })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnCancelRepairResult {
+    Applied(crate::TurnCancelInputOutcome),
+    IntentChanged,
+}
+
+impl TurnCancelRepairResult {
+    pub fn into_applied(self) -> Option<crate::TurnCancelInputOutcome> {
+        match self {
+            Self::Applied(outcome) => Some(outcome),
+            Self::IntentChanged => None,
+        }
     }
 }
 
