@@ -149,7 +149,7 @@ impl<'module> Linker<'module> {
             Expr::Function(function) => self.lower_function(function, scope),
             Expr::Call { function, args } => self.lower_call(function, args, scope),
             Expr::Map { items, function } => self.lower_map(items, function, scope),
-            Expr::Try(exception) => self.lower_try_expr(exception, scope, expected),
+            Expr::Try(exception) => self.lower_try_expr(exception, scope),
             Expr::Throw(value) => self.lower_throw_expr(value, scope),
             Expr::Return(value) => self.lower_return_expr(value, scope),
             Expr::Field { target, field } => self.lower_field(target, field, scope),
@@ -409,24 +409,32 @@ impl<'module> Linker<'module> {
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         self.reject_function_name_binding(target.root.as_str(), scope.span)?;
+        let mut lowered_steps = Vec::with_capacity(target.steps.len());
         for step in &target.steps {
-            if let AssignPathStep::Index(index) = step {
-                self.lower_expr(index, scope)?;
-            }
+            lowered_steps.push(match step {
+                AssignPathStep::Field(field) => AssignPathStep::Field(field.clone()),
+                AssignPathStep::Index(index) => {
+                    AssignPathStep::Index(self.lower_expr(index, scope)?.0)
+                }
+            });
         }
-        let target_expected = self.assignment_target_type(target, scope)?;
+        let lowered_target = crate::ast::AssignTarget {
+            root: target.root.clone(),
+            steps: lowered_steps,
+        };
+        let target_expected = self.assignment_target_type(&lowered_target, scope)?;
         let (lowered, binding) = self.lower_expr_expected(expr, scope, target_expected.as_ref())?;
         let static_trigger_binding = self.static_trigger_binding_for(&lowered, scope);
-        if target.steps.is_empty() {
+        if lowered_target.steps.is_empty() {
             scope.bind(target.root.as_str(), binding.clone());
             scope.set_static_trigger_binding(target.root.as_str(), static_trigger_binding);
         } else {
             let value_ty = binding_type(&binding);
-            scope.update_path(target, &value_ty)?;
+            scope.update_path(&lowered_target, &value_ty)?;
         }
         Ok((
             Expr::Assign {
-                target: target.clone(),
+                target: lowered_target,
                 expr: Box::new(lowered),
             },
             binding,
@@ -444,11 +452,20 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Binding), LinkError> {
         let then_key = then_block as *const Expr as usize;
         let else_key = else_block as *const Expr as usize;
-        let condition = self.lower_expr(condition, scope)?.0;
-        let mut then_scope = scope.clone();
+        let entry_scope = scope.clone();
+        let mut condition_scope = entry_scope.clone();
+        let (condition, recovered_header) = match self.lower_expr(condition, &mut condition_scope) {
+            Ok((condition, _)) => (condition, false),
+            Err(error) if self.recover_workflow_errors.get() => {
+                self.record_workflow_error(original, error);
+                (condition.clone(), true)
+            }
+            Err(error) => return Err(error),
+        };
+        let mut then_scope = condition_scope.clone();
         let (then_block, then_binding) =
             self.lower_expr_expected(then_block, &mut then_scope, expected)?;
-        let mut else_scope = scope.clone();
+        let mut else_scope = condition_scope;
         let (else_block, else_binding) =
             self.lower_expr_expected(else_block, &mut else_scope, expected)?;
         if self.collect_completion.get() {
@@ -475,7 +492,11 @@ impl<'module> Linker<'module> {
                 },
             );
         }
-        scope.join_branches(then_scope, else_scope);
+        if recovered_header {
+            *scope = entry_scope;
+        } else {
+            scope.join_branches(then_scope, else_scope);
+        }
         Ok((
             Expr::If {
                 condition: Box::new(condition),
@@ -498,10 +519,28 @@ impl<'module> Linker<'module> {
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         self.reject_function_name_binding(binding.as_str(), scope.span)?;
-        let (iterable, iterable_binding) = self.lower_expr(iterable, scope)?;
-        let item_ty = self.iterable_item_type(&binding_type(&iterable_binding), scope.span)?;
-        let before = scope.clone();
-        let mut body_scope = scope.clone();
+        let entry_scope = scope.clone();
+        let mut iterable_scope = entry_scope.clone();
+        let (iterable, item_ty, recovered_header) =
+            match self.lower_expr(iterable, &mut iterable_scope) {
+                Ok((iterable, iterable_binding)) => match self
+                    .iterable_item_type(&binding_type(&iterable_binding), iterable_scope.span)
+                {
+                    Ok(item_ty) => (iterable, item_ty, false),
+                    Err(error) if self.recover_workflow_errors.get() => {
+                        self.record_workflow_error(original, error);
+                        (iterable, TypeExpr::Any, true)
+                    }
+                    Err(error) => return Err(error),
+                },
+                Err(error) if self.recover_workflow_errors.get() => {
+                    self.record_workflow_error(original, error);
+                    (iterable.clone(), TypeExpr::Any, true)
+                }
+                Err(error) => return Err(error),
+            };
+        let before_loop = iterable_scope.clone();
+        let mut body_scope = iterable_scope;
         let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
         let body_key = body as *const Expr as usize;
         let body = self.lower_expr(body, &mut body_scope)?.0;
@@ -518,7 +557,11 @@ impl<'module> Linker<'module> {
                 .insert(original as *const Expr as usize, completion);
         }
         body_scope.restore(binding.as_str(), previous);
-        scope.widen_loop(before, body_scope);
+        if recovered_header {
+            *scope = entry_scope;
+        } else {
+            scope.widen_loop(before_loop, body_scope);
+        }
         Ok((
             Expr::For {
                 binding: binding.clone(),
@@ -536,9 +579,18 @@ impl<'module> Linker<'module> {
         body: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        let condition = self.lower_expr(condition, scope)?.0;
-        let before = scope.clone();
-        let mut body_scope = scope.clone();
+        let entry_scope = scope.clone();
+        let mut condition_scope = entry_scope.clone();
+        let (condition, recovered_header) = match self.lower_expr(condition, &mut condition_scope) {
+            Ok((condition, _)) => (condition, false),
+            Err(error) if self.recover_workflow_errors.get() => {
+                self.record_workflow_error(original, error);
+                (condition.clone(), true)
+            }
+            Err(error) => return Err(error),
+        };
+        let before_loop = condition_scope.clone();
+        let mut body_scope = condition_scope;
         let body_key = body as *const Expr as usize;
         let body = self.lower_expr(body, &mut body_scope)?.0;
         if self.collect_completion.get() {
@@ -553,7 +605,11 @@ impl<'module> Linker<'module> {
                 .borrow_mut()
                 .insert(original as *const Expr as usize, completion);
         }
-        scope.widen_loop(before, body_scope);
+        if recovered_header {
+            *scope = entry_scope;
+        } else {
+            scope.widen_loop(before_loop, body_scope);
+        }
         Ok((
             Expr::While {
                 condition: Box::new(condition),
@@ -791,14 +847,19 @@ impl<'module> Linker<'module> {
         });
         if let Some(trigger_operation) = trigger_operation {
             let trigger_scope = scope.clone();
-            let (lowered_args, output_ty) =
+            let (mut lowered_args, output_ty) =
                 self.lower_trigger_operation_args(trigger_operation, args, scope)?;
-            self.collect_default_trigger_key(
+            if let Some(key) = self.derive_default_trigger_key(
                 &lowered_receiver,
                 operation,
                 &lowered_args,
                 &trigger_scope,
-            )?;
+            )? {
+                let [Expr::Record(entries)] = lowered_args.as_mut_slice() else {
+                    return Err(LinkError::InvalidTriggerRegistration { span: scope.span });
+                };
+                entries.push(("subscription_key".into(), Expr::String(key.into())));
+            }
             return Ok((
                 Expr::ReceiverCall {
                     receiver: Box::new(lowered_receiver),
@@ -1270,32 +1331,23 @@ impl<'module> Linker<'module> {
         &self,
         exception: &crate::ast::TryExpr,
         scope: &mut Scope,
-        expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
         let before = scope.clone();
         let mut try_scope = before.clone();
-        let (body, body_binding) =
-            self.lower_expr_expected(&exception.body, &mut try_scope, expected)?;
-        let (catch, result_binding) = if let Some(catch) = &exception.catch {
+        let body = self.lower_expr(&exception.body, &mut try_scope)?.0;
+        let catch = if let Some(catch) = &exception.catch {
             let mut catch_scope = before.clone();
             let previous = catch_scope.bind(&catch.binding, any_binding());
-            let (body, catch_binding) =
-                self.lower_expr_expected(&catch.body, &mut catch_scope, expected)?;
+            let body = self.lower_expr(&catch.body, &mut catch_scope)?.0;
             catch_scope.restore(&catch.binding, previous);
             scope.join_branches(try_scope, catch_scope);
-            (
-                Some(crate::ast::CatchClause {
-                    binding: catch.binding.clone(),
-                    body: Box::new(body),
-                }),
-                Binding::Value(union_type(vec![
-                    binding_type(&body_binding),
-                    binding_type(&catch_binding),
-                ])),
-            )
+            Some(crate::ast::CatchClause {
+                binding: catch.binding.clone(),
+                body: Box::new(body),
+            })
         } else {
             *scope = try_scope;
-            (None, body_binding)
+            None
         };
         let finally = exception
             .finally
@@ -1311,7 +1363,7 @@ impl<'module> Linker<'module> {
                 catch,
                 finally,
             })),
-            result_binding,
+            any_binding(),
         ))
     }
 

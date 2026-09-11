@@ -37,16 +37,19 @@ or restoring a name changes both facts together. Branch joins retain a static
 fact only when it is identical on every reachable path. Comprehension binders
 hide and later restore an outer fact. A `try` body and catch each start from the
 pre-`try` scope, their results join before `finally`, and the body cannot leak a
-source into the catch. Default-trigger analysis consumes these lowering facts;
-a separate non-scoping postorder pass only writes already-derived keys into the
-lowered tree. If lowering cannot prove one static source and target at the
-registration site, compilation refuses the derived key rather than selecting
-another path's value.
+source into the catch. Default-trigger analysis consumes these lowering facts
+and writes the derived key into its lowered registration at that site. If
+lowering cannot prove one static source and target there, compilation refuses
+the derived key rather than selecting another path's value. A key is not
+carried in a positional queue for a later tree walk: assignment indexes and
+other nested expression positions must retain both their lowered AST and their
+own identity.
 
 The shared result rules are `bool` for JavaScript comparisons, `bool`, `str`,
 or `float` for the supported JavaScript unary operators, and `any` for maps and
-other JavaScript binary operators. Index and unary expressions always lower
-their operands.
+other JavaScript binary operators. A `try` retains its prior `any` result while
+its body and catch are still lowered for validation, scope effects, and
+completion facts. Index and unary expressions always lower their operands.
 
 The corrected `try` scope is an accepted canonical-output change: the same
 accepted program AST now generates its catch-path subscription key from the

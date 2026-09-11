@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -31,8 +31,7 @@ use pass_setup::{Binding, Linker, function_signature};
 mod lower_expr;
 mod pass_validation;
 use pass_validation::{
-    StaticTriggerBinding, TriggerKeyCollector, materialize_default_trigger_keys,
-    semantic_trigger_source_key, validate_trigger_operation_subscription_key,
+    StaticTriggerBinding, semantic_trigger_source_key, validate_trigger_operation_subscription_key,
 };
 mod type_helpers;
 use type_helpers::{

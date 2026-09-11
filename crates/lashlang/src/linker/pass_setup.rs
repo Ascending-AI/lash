@@ -52,7 +52,7 @@ pub(super) struct Linker<'module> {
     pub(super) workflow_analysis: Option<RefCell<WorkflowLinkAnalysis>>,
     pub(super) recover_workflow_errors: Cell<bool>,
     pub(super) collect_trigger_keys: Cell<bool>,
-    pub(super) trigger_key_collector: RefCell<TriggerKeyCollector>,
+    pub(super) derived_trigger_registrations: RefCell<BTreeSet<(String, String, String)>>,
     /// The surface dialect the linked source was written in.
     ///
     /// Linking is dialect-independent — TypeScript is lowered to the same AST —
@@ -80,7 +80,7 @@ impl<'module> Linker<'module> {
             workflow_analysis: None,
             recover_workflow_errors: Cell::new(false),
             collect_trigger_keys: Cell::new(false),
-            trigger_key_collector: RefCell::new(TriggerKeyCollector::default()),
+            derived_trigger_registrations: RefCell::new(BTreeSet::new()),
         }
     }
 
@@ -129,16 +129,13 @@ impl<'module> Linker<'module> {
             scope.bind(name, any_binding());
         }
         let main = self.lower_expr(&self.program.main, &mut scope)?.0;
-        let program = Program {
+        Ok(Program {
             declarations,
             main,
             declaration_spans: self.program.declaration_spans.clone(),
             expression_spans: self.program.expression_spans.clone(),
             expression_source_spans: self.program.expression_source_spans.clone(),
-        };
-        let derived_keys =
-            std::mem::take(&mut *self.trigger_key_collector.borrow_mut()).derived_keys;
-        materialize_default_trigger_keys(program, derived_keys)
+        })
     }
 
     pub(super) fn collect_declarations(&mut self) -> Result<(), LinkError> {

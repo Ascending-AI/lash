@@ -1,13 +1,13 @@
 use super::*;
 
 impl<'module> Linker<'module> {
-    pub(super) fn collect_default_trigger_key(
+    pub(super) fn derive_default_trigger_key(
         &self,
         receiver: &Expr,
         operation: &AstString,
         args: &[Expr],
         scope: &Scope,
-    ) -> Result<(), LinkError> {
+    ) -> Result<Option<String>, LinkError> {
         if !self.collect_trigger_keys.get()
             || operation.as_str() != crate::TriggerHostOperation::Register.receiver_method()
             || !matches!(
@@ -16,13 +16,13 @@ impl<'module> Linker<'module> {
                     if crate::is_trigger_resource_type(resource.resource_type.as_str())
             )
         {
-            return Ok(());
+            return Ok(None);
         }
         let Ok(call) = crate::register_call_args(args) else {
-            return Ok(());
+            return Ok(None);
         };
         if call.subscription_key.is_some() {
-            return Ok(());
+            return Ok(None);
         }
         let Some((source_type, source_key)) =
             static_trigger_source(call.source, &scope.static_trigger_bindings)
@@ -33,25 +33,22 @@ impl<'module> Linker<'module> {
         else {
             return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: scope.span });
         };
-        let mut collector = self.trigger_key_collector.borrow_mut();
-        if !collector
-            .seen
-            .insert((process.clone(), source_type.clone(), source_key.clone()))
-        {
+        if !self.derived_trigger_registrations.borrow_mut().insert((
+            process.clone(),
+            source_type.clone(),
+            source_key.clone(),
+        )) {
             return Err(LinkError::DuplicateDerivedTriggerSubscriptionKey {
                 process,
                 source_type,
                 span: scope.span,
             });
         }
-        collector
-            .derived_keys
-            .push_back(semantic_trigger_subscription_key(
-                &process,
-                &source_type,
-                &source_key,
-            ));
-        Ok(())
+        Ok(Some(semantic_trigger_subscription_key(
+            &process,
+            &source_type,
+            &source_key,
+        )))
     }
 
     pub(super) fn static_trigger_binding_for(
@@ -432,77 +429,6 @@ pub(super) enum StaticTriggerBinding {
     },
     Target(String),
     Json(serde_json::Value),
-}
-
-#[derive(Default)]
-pub(super) struct TriggerKeyCollector {
-    pub(super) seen: BTreeSet<(String, String, String)>,
-    pub(super) derived_keys: VecDeque<String>,
-}
-
-pub(super) fn materialize_default_trigger_keys(
-    mut program: Program,
-    mut derived_keys: VecDeque<String>,
-) -> Result<Program, LinkError> {
-    struct Materializer<'keys> {
-        derived_keys: &'keys mut VecDeque<String>,
-    }
-
-    impl crate::ExprFolder for Materializer<'_> {
-        fn fold_expr(&mut self, expr: Expr) -> Expr {
-            // Lowering observes a call after its children have been lowered, so
-            // consume collected keys in that same post-order.
-            let expr = crate::fold_expr_children(self, expr);
-            match expr {
-                Expr::ReceiverCall {
-                    receiver,
-                    operation,
-                    mut args,
-                } if operation.as_str()
-                    == crate::TriggerHostOperation::Register.receiver_method()
-                    && matches!(
-                        receiver.as_ref(),
-                        Expr::ResourceRef(resource)
-                            if crate::is_trigger_resource_type(resource.resource_type.as_str())
-                    )
-                    && crate::register_call_args(&args)
-                        .is_ok_and(|call| call.subscription_key.is_none()) =>
-                {
-                    let key = self
-                        .derived_keys
-                        .pop_front()
-                        .expect("every keyless registration was collected");
-                    if let [Expr::Record(entries)] = args.as_mut_slice() {
-                        entries.push(("subscription_key".into(), Expr::String(key.into())));
-                    }
-                    Expr::ReceiverCall {
-                        receiver,
-                        operation,
-                        args,
-                    }
-                }
-                expr => expr,
-            }
-        }
-    }
-
-    let mut materializer = Materializer {
-        derived_keys: &mut derived_keys,
-    };
-    for declaration in &mut program.declarations {
-        if let Declaration::Process(process) = declaration {
-            process.body = crate::ExprFolder::fold_expr(
-                &mut materializer,
-                std::mem::replace(&mut process.body, Expr::Null),
-            );
-        }
-    }
-    program.main = crate::ExprFolder::fold_expr(
-        &mut materializer,
-        std::mem::replace(&mut program.main, Expr::Null),
-    );
-    debug_assert!(derived_keys.is_empty());
-    Ok(program)
 }
 
 fn static_trigger_binding(
