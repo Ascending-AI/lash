@@ -27,7 +27,6 @@ pub mod sansio_transcript;
 
 pub(crate) use execution_context_builder::*;
 
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};

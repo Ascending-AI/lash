@@ -7,9 +7,7 @@ use super::turn_control::ActiveTurnControl;
 use super::*;
 use crate::SessionId;
 use crate::TurnId;
-use crate::facade_support::{
-    ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
-};
+use crate::facade_support::{ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps};
 use lash_sansio::core_support::*;
 use std::pin::Pin;
 

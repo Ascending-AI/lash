@@ -1,4 +1,3 @@
-use lash_sansio::{SessionId, TurnId};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
@@ -118,12 +117,12 @@ fn serialized_dependency_schemas() -> Vec<(&'static str, Vec<String>)> {
         .with_execution_binding(json!({"route": "primary"}));
     let resolution = Resolution::Resolved(Box::new(grant));
     let link_key = DeferredResolutionLinkKey {
-        session_id: SessionId::from("session"),
-        turn_id: Some(TurnId::from("turn")),
-        turn_index: Some(7),
-        protocol_iteration: Some(2),
+        address: lash_sansio::EffectAddress::new(
+            lash_sansio::ExecutionScope::turn("session", "turn"),
+            "replay",
+        )
+        .expect("valid generated snapshot address"),
         effect_id: "effect".to_string(),
-        replay_key: Some("replay".to_string()),
     };
     let deferred_resolutions = DeferredResolutionRecord {
         link_key: Some(link_key.clone()),

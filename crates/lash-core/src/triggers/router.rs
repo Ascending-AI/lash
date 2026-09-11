@@ -1466,11 +1466,16 @@ mod tests {
             crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
         );
         let controller = crate::NativeRuntimeEffectController::default();
+        let scoped_controller = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::ExecutionScope::runtime_operation("trigger-blue-report"),
+        )
+        .expect("bind trigger report scope");
 
         let report = router
             .emit(
                 button_occurrence(source_key.clone(), "button-blue-report"),
-                &controller,
+                &scoped_controller,
             )
             .await
             .expect("emit trigger");
@@ -1497,7 +1502,7 @@ mod tests {
         let replay = router
             .emit(
                 button_occurrence(source_key, "button-blue-report"),
-                &controller,
+                &scoped_controller,
             )
             .await
             .expect("replay trigger");
@@ -1527,11 +1532,17 @@ mod tests {
                 Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>
             ),
         );
+        let controller = crate::NativeRuntimeEffectController::default();
+        let scoped_controller = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::ExecutionScope::runtime_operation("session-trigger-blue"),
+        )
+        .expect("bind session trigger scope");
 
         let report = router
             .emit(
                 button_occurrence(source_key, "session-button-blue"),
-                &crate::NativeRuntimeEffectController::default(),
+                &scoped_controller,
             )
             .await
             .expect("emit session trigger");

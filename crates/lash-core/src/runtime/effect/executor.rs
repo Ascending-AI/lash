@@ -1464,10 +1464,13 @@ mod task_boundary_tests {
             let outcome = executor
                 .execute(RuntimeEffectEnvelope::new(
                     RuntimeInvocation::effect(
-                        crate::RuntimeScope::new("task-boundary"),
+                        crate::EffectAddress::new(
+                            crate::ExecutionScope::runtime_operation("task-boundary"),
+                            "task-boundary:exec",
+                        )
+                        .expect("valid task-boundary address"),
+                        crate::RuntimeAttribution::none(),
                         "exec",
-                        RuntimeEffectKind::ExecCode,
-                        "task-boundary:exec",
                     ),
                     RuntimeEffectCommand::ExecCode {
                         language: "text".to_string(),
@@ -1542,17 +1545,16 @@ mod task_boundary_tests {
             Ok(RuntimeEffectOutcome::Sleep)
         });
         let controller = NativeRuntimeEffectController::default();
-        let (proxy, mut requests) = EffectTaskController::scoped(
-            &controller,
-            ExecutionScope::runtime_operation("replay-skips-local"),
-        )
-        .expect("task controller");
+        let execution_scope = ExecutionScope::runtime_operation("replay-skips-local");
+        let (proxy, mut requests) =
+            EffectTaskController::scoped(&controller, execution_scope.clone())
+                .expect("task controller");
         let envelope = RuntimeEffectEnvelope::new(
             RuntimeInvocation::effect(
-                crate::RuntimeScope::new("replay-skips-local"),
+                crate::EffectAddress::new(execution_scope, "replay-skips-local:sleep")
+                    .expect("valid task proxy address"),
+                crate::RuntimeAttribution::none(),
                 "sleep",
-                RuntimeEffectKind::Sleep,
-                "replay-skips-local:sleep",
             ),
             RuntimeEffectCommand::Sleep { duration_ms: 0 },
         );

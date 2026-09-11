@@ -1,5 +1,4 @@
 use crate::ProcessId;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use crate::{
     PreparedToolCall, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeInvocation,
     ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,

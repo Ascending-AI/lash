@@ -185,7 +185,7 @@ impl EffectAddress {
 
     pub fn validate(&self) -> Result<(), EffectIdentityError> {
         self.execution_scope.validate()?;
-        if self.replay_key.is_empty() {
+        if self.replay_key.trim().is_empty() {
             return Err(EffectIdentityError::MissingReplayKey);
         }
         Ok(())
@@ -194,10 +194,7 @@ impl EffectAddress {
     /// Collision-free, human-inspectable graph identity shared by all trace
     /// projections and causal references.
     pub fn graph_key(&self) -> String {
-        let scope = self
-            .execution_scope
-            .journal_identity()
-            .expect("validated effect address contains a valid execution scope");
+        let scope = EffectJournalIdentity::from_scope(&self.execution_scope);
         let replay_key = serde_json::to_string(&self.replay_key)
             .expect("effect replay key is an infallible JSON string");
         format!("effect:{}:{replay_key}", scope.key())

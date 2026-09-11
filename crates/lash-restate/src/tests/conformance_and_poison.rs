@@ -14,6 +14,7 @@ pub(super) fn replayable_conformance_invocation(
         Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
     lash_conformance::ConformanceInvocation::new(
         controller,
+        ExecutionScope::runtime_operation("restate-replay-conformance"),
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
@@ -32,6 +33,7 @@ pub(super) fn crash_redrive_conformance_invocation(
         Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
     lash_conformance::ConformanceInvocation::new(
         controller,
+        ExecutionScope::runtime_operation("restate-crash-redrive-conformance"),
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {

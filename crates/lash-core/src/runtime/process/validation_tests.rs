@@ -89,9 +89,8 @@ fn process_registration_identity_golden_corpus() {
             turn_id: TurnId::from("t"),
         },
         crate::CausalRef::Effect {
-            session_id: SessionId::from("s"),
-            turn_id: None,
-            effect_id: "e".to_string(),
+            address: crate::EffectAddress::new(crate::ExecutionScope::runtime_operation("s"), "e")
+                .expect("valid effect cause"),
         },
         crate::CausalRef::ToolCall {
             session_id: SessionId::from("s"),

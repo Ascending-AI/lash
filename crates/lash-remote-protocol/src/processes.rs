@@ -148,7 +148,11 @@ pub struct RemoteProcessProvenance {
 
 impl RemoteProcessProvenance {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        self.originator.validate(type_name)
+        self.originator.validate(type_name)?;
+        if let Some(caused_by) = &self.caused_by {
+            caused_by.validate(type_name)?;
+        }
+        Ok(())
     }
 }
 #[cfg(all(test, feature = "core-conversions"))]
@@ -1116,6 +1120,9 @@ impl RemoteRuntimeInvocation {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         self.attribution.validate(type_name)?;
         self.subject.validate(type_name)?;
+        if let Some(caused_by) = &self.caused_by {
+            caused_by.validate(type_name)?;
+        }
         if let Some(replay) = &self.replay {
             require_non_empty(type_name, "replay.key", &replay.key)?;
         }
@@ -1142,6 +1149,20 @@ impl RemoteRuntimeAttribution {
         }
         if let Some(turn_id) = &self.turn_id {
             require_non_empty(type_name, "runtime_attribution.turn_id", turn_id)?;
+        }
+        if self.turn_id.is_some() && self.session_id.is_none() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: "runtime turn attribution requires session attribution".to_string(),
+            });
+        }
+        if (self.turn_index.is_some() || self.protocol_iteration.is_some())
+            && self.turn_id.is_none()
+        {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: "runtime progress attribution requires turn attribution".to_string(),
+            });
         }
         Ok(())
     }

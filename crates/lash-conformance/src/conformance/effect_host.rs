@@ -1,7 +1,6 @@
 //! [`EffectHost`] scope-factory and effect-controller replay conformance.
 
 use super::*;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
@@ -11,7 +10,7 @@ use pretty_assertions::assert_eq;
 /// through the scoped controller.
 #[derive(Clone, Debug)]
 pub struct RecordingEffectHostRecord {
-    pub runtime_scope: RuntimeScope,
+    pub runtime_attribution: RuntimeAttribution,
     pub execution_scope: ExecutionScope,
     pub effect_id: String,
     pub effect_kind: RuntimeEffectKind,
@@ -36,7 +35,7 @@ impl RuntimeEffectController for RecordingEffectHostController {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let envelope_hash = envelope.stable_hash()?;
         self.records.lock_recover().push(RecordingEffectHostRecord {
-            runtime_scope: envelope.invocation.scope.clone(),
+            runtime_attribution: envelope.invocation.attribution.clone(),
             execution_scope: self.execution_scope.clone(),
             effect_id: envelope
                 .invocation
@@ -221,7 +220,10 @@ where
 /// and one logical successor and terminal in the scripted lineage. Store and
 /// engine suites extend this vector with crash/restart and durable-await
 /// assertions.
-pub async fn effect_controller_segmentation_vector(controller: &dyn RuntimeEffectController) {
+pub async fn effect_controller_segmentation_vector(
+    controller: &dyn RuntimeEffectController,
+    execution_scope: &ExecutionScope,
+) {
     static VECTOR_RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     struct FixedCadenceController<'a> {
         inner: &'a dyn RuntimeEffectController,
@@ -255,6 +257,7 @@ pub async fn effect_controller_segmentation_vector(controller: &dyn RuntimeEffec
 
     async fn run_script(
         controller: &dyn RuntimeEffectController,
+        execution_scope: &ExecutionScope,
         id_prefix: &str,
         honor_boundaries: bool,
     ) -> (Vec<serde_json::Value>, Vec<u64>, usize) {
@@ -268,6 +271,7 @@ pub async fn effect_controller_segmentation_vector(controller: &dyn RuntimeEffec
             let outcome = controller
                 .execute_effect(
                     exec_code_conformance_envelope(
+                        execution_scope,
                         &format!("{id_prefix}-{ordinal}"),
                         &input.to_string(),
                     ),
@@ -308,10 +312,20 @@ pub async fn effect_controller_segmentation_vector(controller: &dyn RuntimeEffec
         cadence: 2,
     };
     let run = VECTOR_RUN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let (baseline_effects, baseline_successors, baseline_calls) =
-        run_script(controller, &format!("segment-vector-baseline-{run}"), false).await;
-    let (segmented_effects, segmented_successors, segmented_calls) =
-        run_script(&cadence, &format!("segment-vector-segmented-{run}"), true).await;
+    let (baseline_effects, baseline_successors, baseline_calls) = run_script(
+        controller,
+        execution_scope,
+        &format!("segment-vector-baseline-{run}"),
+        false,
+    )
+    .await;
+    let (segmented_effects, segmented_successors, segmented_calls) = run_script(
+        &cadence,
+        execution_scope,
+        &format!("segment-vector-segmented-{run}"),
+        true,
+    )
+    .await;
 
     assert_eq!(segmented_effects, baseline_effects, "segment invariance");
     assert!(baseline_successors.is_empty());
@@ -345,6 +359,7 @@ pub enum ConformanceEffectRedrive {
 /// state that can still expose a controller.
 pub struct ConformanceInvocation {
     controller: Arc<dyn RuntimeEffectController>,
+    execution_scope: ExecutionScope,
     effect_redrive: ConformanceEffectRedrive,
     end: Arc<dyn Fn() + Send + Sync>,
     redrive: Arc<dyn Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync>,
@@ -354,12 +369,14 @@ impl ConformanceInvocation {
     /// Build an invocation from its scoped controller and lifecycle controls.
     pub fn new(
         controller: Arc<dyn RuntimeEffectController>,
+        execution_scope: ExecutionScope,
         effect_redrive: ConformanceEffectRedrive,
         end: impl Fn() + Send + Sync + 'static,
         redrive: impl Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync + 'static,
     ) -> Self {
         Self {
             controller,
+            execution_scope,
             effect_redrive,
             end: Arc::new(end),
             redrive: Arc::new(redrive),
@@ -376,6 +393,11 @@ impl ConformanceInvocation {
         Arc::clone(&self.controller)
     }
 
+    /// The scope the fixture's controller has admitted for this invocation.
+    pub fn execution_scope(&self) -> &ExecutionScope {
+        &self.execution_scope
+    }
+
     /// Describe what a successor does with a completed pre-crash effect.
     pub fn effect_redrive(&self) -> ConformanceEffectRedrive {
         self.effect_redrive
@@ -385,6 +407,7 @@ impl ConformanceInvocation {
     pub fn native() -> Self {
         Self::new(
             Arc::new(crate::NativeRuntimeEffectController::default()),
+            ExecutionScope::runtime_operation("native-conformance"),
             ConformanceEffectRedrive::ReexecutesUncommitted,
             || {},
             || Arc::new(crate::NativeRuntimeEffectController::default()),
@@ -398,6 +421,7 @@ impl ConformanceInvocation {
         let controller = (self.redrive)();
         Self {
             controller,
+            execution_scope: self.execution_scope,
             effect_redrive: self.effect_redrive,
             end: self.end,
             redrive: self.redrive,
@@ -416,23 +440,26 @@ where
     F: FnOnce() -> ConformanceInvocation,
 {
     let invocation = make();
+    let execution_scope = invocation.execution_scope().clone();
     let controller = invocation.controller();
-    effect_controller_segmentation_vector(controller).await;
+    effect_controller_segmentation_vector(controller, &execution_scope).await;
     let success = replay_conformance_tool_attempt_envelope(
+        &execution_scope,
         "replay-success",
         "call-replay-success",
         "replay_success_tool",
     );
     let error = replay_conformance_tool_attempt_envelope(
+        &execution_scope,
         "replay-error",
         "call-replay-error",
         "replay_error_tool",
     );
     let trigger = RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::new("replay-session"),
-            "replay-trigger-list",
-            RuntimeEffectKind::Trigger,
+            EffectAddress::new(execution_scope.clone(), "replay-trigger-list")
+                .expect("valid replay trigger address"),
+            RuntimeAttribution::for_session("replay-session"),
             "replay-trigger-list",
         ),
         RuntimeEffectCommand::Trigger {
@@ -508,10 +535,10 @@ where
             operation,
             RuntimeEffectEnvelope::new(
                 RuntimeInvocation::effect(
-                    RuntimeScope::new("replay-session"),
+                    EffectAddress::new(execution_scope.clone(), effect_id.clone())
+                        .expect("valid replay trigger mutation address"),
+                    RuntimeAttribution::for_session("replay-session"),
                     effect_id.clone(),
-                    RuntimeEffectKind::Trigger,
-                    effect_id,
                 ),
                 RuntimeEffectCommand::Trigger {
                     command: Box::new(command),
@@ -661,8 +688,9 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
     ];
 
     for (ordinal, scope) in scopes.into_iter().enumerate() {
-        let controller = host.scoped(scope).expect("retired journal scope");
+        let controller = host.scoped(scope.clone()).expect("retired journal scope");
         let envelope = exec_code_conformance_envelope(
+            &scope,
             &format!("retired-journal-{ordinal}"),
             "retired-journal-envelope",
         );
@@ -694,13 +722,16 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
 /// without parsing or prefix-matching its canonical key.
 pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
     let process_id = "retired-journal-process";
-    let controller = host
-        .scoped(ExecutionScope::process(process_id))
-        .expect("retired process scope");
+    let scope = ExecutionScope::process(process_id);
+    let controller = host.scoped(scope.clone()).expect("retired process scope");
     controller
         .controller()
         .execute_effect(
-            exec_code_conformance_envelope("retired-process-journal", "retired-process-envelope"),
+            exec_code_conformance_envelope(
+                &scope,
+                "retired-process-journal",
+                "retired-process-envelope",
+            ),
             RuntimeEffectLocalExecutor::testing(|_| async {
                 Ok(replay_conformance_exec_outcome(
                     "recorded-before-retirement",
@@ -732,11 +763,12 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
         (&retired_id, "retired-op-journal"),
         (&in_flight_id, "in-flight-op-journal"),
     ] {
-        host.scoped(ExecutionScope::runtime_operation(operation_id.clone()))
+        let scope = ExecutionScope::runtime_operation(operation_id.clone());
+        host.scoped(scope.clone())
             .expect("runtime-operation scope")
             .controller()
             .execute_effect(
-                exec_code_conformance_envelope(effect_id, "op-envelope"),
+                exec_code_conformance_envelope(&scope, effect_id, "op-envelope"),
                 RuntimeEffectLocalExecutor::testing(|_| async {
                     Ok(replay_conformance_exec_outcome(
                         "recorded-before-retirement",
@@ -758,12 +790,13 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
         "runtime-operation retirement must delete the exact canonical operation scope"
     );
 
+    let retired_scope = ExecutionScope::runtime_operation(retired_id);
     let admission = host
-        .scoped(ExecutionScope::runtime_operation(retired_id))
+        .scoped(retired_scope.clone())
         .expect("retired scope still binds a controller")
         .controller()
         .execute_effect(
-            exec_code_conformance_envelope("retired-op-journal", "op-envelope"),
+            exec_code_conformance_envelope(&retired_scope, "retired-op-journal", "op-envelope"),
             RuntimeEffectLocalExecutor::testing(|_| async {
                 Ok(replay_conformance_exec_outcome("never-admitted"))
             }),
@@ -772,12 +805,13 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
         .expect_err("a retired runtime-operation scope admits nothing");
     assert_eq!(admission.code, crate::RuntimeErrorCode::EffectScopeRetired);
 
+    let in_flight_scope = ExecutionScope::runtime_operation(in_flight_id);
     let replayed = host
-        .scoped(ExecutionScope::runtime_operation(in_flight_id))
+        .scoped(in_flight_scope.clone())
         .expect("in-flight scope")
         .controller()
         .execute_effect(
-            exec_code_conformance_envelope("in-flight-op-journal", "op-envelope"),
+            exec_code_conformance_envelope(&in_flight_scope, "in-flight-op-journal", "op-envelope"),
             RuntimeEffectLocalExecutor::testing(|_| async {
                 Ok(replay_conformance_exec_outcome("executed-again"))
             }),
@@ -801,9 +835,11 @@ where
     F: FnOnce() -> ConformanceInvocation,
 {
     let invocation = make();
+    let execution_scope = invocation.execution_scope().clone();
     let controller = invocation.controller();
     let envelope = |tool_name| {
         replay_conformance_tool_attempt_envelope(
+            &execution_scope,
             "replay-mismatch-tool-attempt",
             "replay-mismatch-call",
             tool_name,
@@ -1332,10 +1368,10 @@ pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
     });
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::new("executing-effect"),
+            EffectAddress::new(scope.clone(), format!("executing-effect-{suffix}"))
+                .expect("valid executing-effect address"),
+            RuntimeAttribution::none(),
             "work",
-            RuntimeEffectKind::LanguageRuntimeValue,
-            format!("executing-effect-{suffix}"),
         ),
         RuntimeEffectCommand::LanguageRuntimeValue {
             operation: "executing-effect".to_string(),
@@ -1622,9 +1658,20 @@ where
     F: FnOnce() -> ConformanceInvocation,
 {
     let invocation = make();
+    let execution_scope = invocation.execution_scope().clone();
     let controller = invocation.controller();
-    let slow = replay_conformance_tool_attempt_envelope("effect-slow", "call-slow", "slow_tool");
-    let fast = replay_conformance_tool_attempt_envelope("effect-fast", "call-fast", "fast_tool");
+    let slow = replay_conformance_tool_attempt_envelope(
+        &execution_scope,
+        "effect-slow",
+        "call-slow",
+        "slow_tool",
+    );
+    let fast = replay_conformance_tool_attempt_envelope(
+        &execution_scope,
+        "effect-fast",
+        "call-fast",
+        "fast_tool",
+    );
     let first_pass = replay_conformance_concurrent_first_pass(
         controller,
         slow.clone(),
@@ -1679,11 +1726,20 @@ where
     F: FnOnce() -> ConformanceInvocation,
 {
     let invocation = make();
+    let execution_scope = invocation.execution_scope().clone();
     let controller = invocation.controller();
-    let slow =
-        replay_conformance_tool_attempt_envelope("tool-attempt-slow", "call-slow", "slow_tool");
-    let fast =
-        replay_conformance_tool_attempt_envelope("tool-attempt-fast", "call-fast", "fast_tool");
+    let slow = replay_conformance_tool_attempt_envelope(
+        &execution_scope,
+        "tool-attempt-slow",
+        "call-slow",
+        "slow_tool",
+    );
+    let fast = replay_conformance_tool_attempt_envelope(
+        &execution_scope,
+        "tool-attempt-fast",
+        "call-fast",
+        "fast_tool",
+    );
 
     let first_pass = if controller.supports_concurrent_effects() {
         replay_conformance_concurrent_first_pass(
@@ -1773,13 +1829,18 @@ where
     invocation.end();
 }
 
-pub(super) fn exec_code_conformance_envelope(effect_id: &str, code: &str) -> RuntimeEffectEnvelope {
+pub(super) fn exec_code_conformance_envelope(
+    execution_scope: &ExecutionScope,
+    effect_id: &str,
+    code: &str,
+) -> RuntimeEffectEnvelope {
+    let replay_key = format!("exec-code-replay:{effect_id}");
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::for_turn("journaled-session", "journaled-turn", 7, 0),
+            EffectAddress::new(execution_scope.clone(), replay_key)
+                .expect("valid exec-code conformance address"),
+            RuntimeAttribution::for_turn("journaled-session", "journaled-turn", 7, 0),
             format!("exec-code:{effect_id}"),
-            RuntimeEffectKind::ExecCode,
-            format!("exec-code-replay:{effect_id}"),
         ),
         RuntimeEffectCommand::ExecCode {
             language: "conformance".to_string(),
@@ -1917,9 +1978,9 @@ fn lease_fencing_system_clock() -> Arc<dyn crate::Clock> {
 fn lease_fencing_envelope(replay_key: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::for_turn("effect-lease-session", "effect-lease-turn", 1, 0),
-            replay_key,
-            RuntimeEffectKind::ExecCode,
+            EffectAddress::new(ExecutionScope::turn("session", "turn"), replay_key)
+                .expect("valid lease-fencing address"),
+            RuntimeAttribution::for_turn("effect-lease-session", "effect-lease-turn", 1, 0),
             replay_key,
         ),
         RuntimeEffectCommand::ExecCode {
@@ -2182,21 +2243,25 @@ async fn lease_fencing_reclaims_explicitly_expired_lease(
 }
 
 fn replay_conformance_tool_attempt_envelope(
+    execution_scope: &ExecutionScope,
     effect_id: &'static str,
     call_id: &'static str,
     tool_name: &'static str,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::for_turn(
+            EffectAddress::new(
+                execution_scope.clone(),
+                format!("tool-attempt-conformance:tool-attempt-conformance-turn:{effect_id}"),
+            )
+            .expect("valid tool-attempt conformance address"),
+            RuntimeAttribution::for_turn(
                 "tool-attempt-conformance-session",
                 "tool-attempt-conformance-turn",
                 7,
                 0,
             ),
             effect_id,
-            RuntimeEffectKind::ToolAttempt,
-            format!("tool-attempt-conformance:tool-attempt-conformance-turn:{effect_id}"),
         ),
         RuntimeEffectCommand::ToolAttempt {
             call: crate::PreparedToolCall::from_parts(

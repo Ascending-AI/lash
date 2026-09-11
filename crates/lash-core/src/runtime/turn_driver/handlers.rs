@@ -743,15 +743,17 @@ mod tests {
     #[test]
     fn foreground_exec_graph_key_uses_runtime_invocation_identity() {
         let invocation = RuntimeInvocation::effect(
-            RuntimeScope::for_turn("session-1", "turn-1", 2, 3),
+            EffectAddress::new(ExecutionScope::turn("session-1", "turn-1"), "replay-key")
+                .expect("valid foreground exec address"),
+            RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
             "effect-7",
-            RuntimeEffectKind::ExecCode,
-            "replay-key",
         );
 
         assert_eq!(
             foreground_exec_graph_key(&invocation).as_deref(),
-            Some("effect:session-1:turn-1:effect-7")
+            Some(
+                "effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"session-1\",\"execution_id\":\"turn-1\"}:\"replay-key\""
+            )
         );
     }
 }

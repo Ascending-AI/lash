@@ -4,7 +4,6 @@
 //! no types live here and no public API is changed.
 
 use crate::SessionId;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::sync::Arc;
 
 use crate::{PluginOperationInvokeError, SessionError};

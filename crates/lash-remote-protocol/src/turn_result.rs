@@ -162,6 +162,65 @@ pub enum RemoteCausalRef {
     },
 }
 
+impl RemoteCausalRef {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        use crate::registry_errors::require_non_empty;
+        match self {
+            Self::Turn {
+                session_id,
+                turn_id,
+            } => {
+                require_non_empty(type_name, "caused_by.session_id", session_id)?;
+                require_non_empty(type_name, "caused_by.turn_id", turn_id)
+            }
+            Self::Effect { address } => {
+                address
+                    .validate()
+                    .map_err(|error| RemoteProtocolError::InvalidEnvelope {
+                        type_name,
+                        message: format!("caused_by.address: {error}"),
+                    })
+            }
+            Self::ToolCall {
+                session_id,
+                call_id,
+            } => {
+                require_non_empty(type_name, "caused_by.session_id", session_id)?;
+                require_non_empty(type_name, "caused_by.call_id", call_id)
+            }
+            Self::Process { process_id } | Self::ProcessEvent { process_id, .. } => {
+                require_non_empty(type_name, "caused_by.process_id", process_id)
+            }
+            Self::TriggerOccurrence {
+                occurrence_id,
+                subscription_id,
+                subscription_incarnation,
+                ..
+            } => {
+                require_non_empty(type_name, "caused_by.occurrence_id", occurrence_id)?;
+                if let Some(subscription_id) = subscription_id {
+                    require_non_empty(type_name, "caused_by.subscription_id", subscription_id)?;
+                }
+                if let Some(incarnation) = subscription_incarnation {
+                    require_non_empty(
+                        type_name,
+                        "caused_by.subscription_incarnation",
+                        incarnation,
+                    )?;
+                }
+                Ok(())
+            }
+            Self::SessionNode {
+                session_id,
+                node_id,
+            } => {
+                require_non_empty(type_name, "caused_by.session_id", session_id)?;
+                require_non_empty(type_name, "caused_by.node_id", node_id)
+            }
+        }
+    }
+}
+
 /// Terminal status derived from [`RemoteTurnOutcome`] by [`RemoteTurnReport::status`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

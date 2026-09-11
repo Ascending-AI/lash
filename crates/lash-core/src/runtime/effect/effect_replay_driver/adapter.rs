@@ -265,6 +265,7 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let driver = self.replay_driver();
         let scope = self.execution_scope();
+        envelope.invocation.validate_execution_scope(scope)?;
         let is_tool_batch = matches!(envelope.command, RuntimeEffectCommand::ToolBatch { .. });
         if is_tool_batch && capabilities(self).tool_batch_redrive == ToolBatchRedrive::ChildrenFirst
         {

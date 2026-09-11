@@ -273,6 +273,20 @@ pub enum RemoteTriggerOwnerScope {
     Platform,
 }
 
+impl RemoteTriggerOwnerScope {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Session { session_id } => {
+                require_non_empty(type_name, "owner_scope.session_id", session_id)
+            }
+            Self::Host { binding_id } => {
+                require_non_empty(type_name, "owner_scope.binding_id", binding_id)
+            }
+            Self::Platform => Ok(()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerSubscriptionDraft {
     pub subscription_key: String,
@@ -439,6 +453,7 @@ pub struct RemoteTriggerSubscriptionRecord {
 impl RemoteTriggerSubscriptionRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "subscription_id", &self.subscription_id)?;
+        self.owner_scope.validate(type_name)?;
         require_non_empty(type_name, "subscription_key", &self.subscription_key)?;
         require_non_empty(type_name, "incarnation", &self.incarnation)?;
         require_non_empty(

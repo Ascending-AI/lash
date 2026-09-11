@@ -6,6 +6,7 @@ pub(crate) mod executor;
 mod group;
 pub mod group_drain;
 mod group_journal;
+mod identity_types;
 mod native_host;
 mod outcome;
 pub mod promise_semantics;
@@ -15,8 +16,7 @@ pub use envelope::{
     AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
     ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
     RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectKind, RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome,
-    RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject, ToolAttemptEffectOutcome,
+    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, ToolAttemptEffectOutcome,
     ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
@@ -38,6 +38,9 @@ pub use group::{
 };
 pub use group_drain::{
     ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
+};
+pub use identity_types::{
+    RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
 };
 pub use lash_sansio::{CausalRef, EffectAddress};
 pub use native_host::NativeEffectHost;
@@ -215,6 +218,7 @@ mod tests {
         assert!(live.provider_trace.is_none());
 
         let invocation = crate::runtime::causal::direct_effect_invocation(
+            &ExecutionScope::turn("session", "turn"),
             &SessionId::from("session"),
             "test",
             "request:direct".to_string(),
@@ -349,10 +353,13 @@ mod tests {
             crate::ProcessProvenance::host(),
         );
         let invocation = RuntimeInvocation::effect(
-            RuntimeScope::for_turn("session", "turn", 0, 0),
+            EffectAddress::new(
+                ExecutionScope::turn("session", "turn"),
+                "session:turn:process:start:call-123",
+            )
+            .expect("valid process envelope address"),
+            RuntimeAttribution::for_turn("session", "turn", 0, 0),
             "process:start:call-123",
-            RuntimeEffectKind::Process,
-            "session:turn:process:start:call-123",
         );
         let envelope = RuntimeEffectEnvelope::new(
             invocation,
@@ -418,10 +425,13 @@ mod tests {
             ],
         );
         let invocation = RuntimeInvocation::effect(
-            RuntimeScope::for_turn("session", "turn", 0, 0),
+            EffectAddress::new(
+                ExecutionScope::turn("session", "turn"),
+                "session:turn:tool-batch:batch-123",
+            )
+            .expect("valid tool batch address"),
+            RuntimeAttribution::for_turn("session", "turn", 0, 0),
             "tool-batch:batch-123",
-            RuntimeEffectKind::ToolBatch,
-            "session:turn:tool-batch:batch-123",
         );
         let envelope = RuntimeEffectEnvelope::new(
             invocation,

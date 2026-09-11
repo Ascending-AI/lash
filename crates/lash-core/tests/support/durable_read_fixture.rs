@@ -246,14 +246,13 @@ use lash_core::{
     ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark, ProtocolTurnOptions,
     RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimePersistence, RuntimeScope, RuntimeSessionState, SegmentHandover,
-    SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TextProjectionMetadata,
-    TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
-    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
-    WaitState,
+    RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SegmentHandover, SessionAppendNode,
+    SessionNodePayload, SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest,
+    SessionStoreFactory, StoreError, TextProjectionMetadata, TokenLedgerEntry, TokenUsage,
+    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservationOutcome, TriggerInputBinding,
+    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
+    WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1663,10 +1662,13 @@ fn fixture_plugin_state() -> PluginState {
 fn fixture_effect_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::for_turn(SESSION_ID, "durable-read-effect-turn", 7, 0),
+            lash_core::EffectAddress::new(
+                ExecutionScope::turn(SESSION_ID, "durable-read-effect-turn"),
+                "durable-read-exec-replay",
+            )
+            .expect("valid durable read fixture address"),
+            lash_core::RuntimeAttribution::for_turn(SESSION_ID, "durable-read-effect-turn", 7, 0),
             "durable-read-exec-effect",
-            RuntimeEffectKind::ExecCode,
-            "durable-read-exec-replay",
         ),
         RuntimeEffectCommand::ExecCode {
             language: "fixture".to_string(),

@@ -63,17 +63,6 @@ impl<'run> DirectCompletionClient<'run> {
         }
     }
 
-    /// Binds this client to the effect that owns it, so every entry point —
-    /// not just the tool-attributed one — classifies its journal position the
-    /// same way. Applied where an attempt-scoped dispatch is derived.
-    pub(crate) fn with_parent_invocation(
-        mut self,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-    ) -> Self {
-        self.parent_invocation = parent_invocation.map(Box::new);
-        self
-    }
-
     pub(crate) fn to_static(&self) -> Option<DirectCompletionClient<'static>> {
         let source = match &self.source {
             DirectCompletionSource::Runtime(source) => {

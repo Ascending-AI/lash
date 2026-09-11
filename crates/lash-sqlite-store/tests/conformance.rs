@@ -61,10 +61,12 @@ mod wake_delivery;
 
 fn sqlite_conformance_invocation(
     controller: SqliteRuntimeEffectController,
+    execution_scope: ExecutionScope,
 ) -> lash_conformance::ConformanceInvocation {
     let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
     lash_conformance::ConformanceInvocation::new(
         live,
+        execution_scope,
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
@@ -2144,34 +2146,30 @@ async fn sqlite_real_turn_satisfies_cold_process_crash_matrix() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_satisfies_replay_conformance() {
-    let (_controller_dir, controller) = open_ephemeral_effect_controller(durable_turn_scope(
-        "effect-conformance-session",
-        "effect-conformance-turn",
-    ))
-    .await;
+    let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
+    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
 
     lash_conformance::effect_controller_concurrent_replay_deterministic(|| {
-        sqlite_conformance_invocation(controller.clone())
+        sqlite_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 
+    let tool_scope = durable_turn_scope(
+        "tool-attempt-conformance-session",
+        "tool-attempt-conformance-turn",
+    );
     let (_tool_controller_dir, tool_controller) =
-        open_ephemeral_effect_controller(durable_turn_scope(
-            "tool-attempt-conformance-session",
-            "tool-attempt-conformance-turn",
-        ))
-        .await;
+        open_ephemeral_effect_controller(tool_scope.clone()).await;
     lash_conformance::effect_controller_tool_attempt_fanout_replay_deterministic(|| {
-        sqlite_conformance_invocation(tool_controller.clone())
+        sqlite_conformance_invocation(tool_controller.clone(), tool_scope.clone())
     })
     .await;
 
-    let (_durable_controller_dir, durable_controller) = open_ephemeral_effect_controller(
-        durable_turn_scope("durable-step-session", "durable-step-turn"),
-    )
-    .await;
+    let durable_scope = durable_turn_scope("durable-step-session", "durable-step-turn");
+    let (_durable_controller_dir, durable_controller) =
+        open_ephemeral_effect_controller(durable_scope.clone()).await;
     lash_conformance::effect_controller_journaled_effect_replay(|| {
-        sqlite_conformance_invocation(durable_controller.clone())
+        sqlite_conformance_invocation(durable_controller.clone(), durable_scope.clone())
     })
     .await;
 }
@@ -2328,10 +2326,10 @@ async fn sqlite_effect_host_retires_session_journal_rows() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_reports_envelope_divergent_paths() {
-    let (_controller_dir, controller) =
-        open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
+    let scope = durable_turn_scope("session", "turn");
+    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
     lash_conformance::effect_controller_replay_mismatch_diagnostics(
-        || sqlite_conformance_invocation(controller.clone()),
+        || sqlite_conformance_invocation(controller.clone(), scope.clone()),
         "sqlite_effect_replay_hash_conflict",
     )
     .await;

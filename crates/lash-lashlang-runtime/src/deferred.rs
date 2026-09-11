@@ -109,30 +109,15 @@ pub type SharedDeferredToolResolver = Arc<dyn DeferredToolResolver>;
 /// individual code effects and their durable re-drives.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeferredResolutionLinkKey {
-    pub session_id: SessionId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<TurnId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_index: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_iteration: Option<usize>,
+    pub address: lash_core::EffectAddress,
     pub effect_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replay_key: Option<String>,
 }
 
 impl DeferredResolutionLinkKey {
     pub fn from_exec_code_invocation(invocation: &lash_core::RuntimeInvocation) -> Option<Self> {
-        if invocation.effect_kind() != Some(lash_core::RuntimeEffectKind::ExecCode) {
-            return None;
-        }
         Some(Self {
-            session_id: invocation.scope.session_id.clone(),
-            turn_id: invocation.scope.turn_id.clone(),
-            turn_index: invocation.scope.turn_index,
-            protocol_iteration: invocation.scope.protocol_iteration,
+            address: invocation.effect_address()?.clone(),
             effect_id: invocation.effect_id()?.to_string(),
-            replay_key: invocation.replay_key().map(str::to_string),
         })
     }
 }

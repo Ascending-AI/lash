@@ -137,7 +137,7 @@ pub use usage_activity::*;
 // and token-ledger rows (unreported holes with their attempt identities,
 // reconciled corrections) plus the report's unreported/reconciled attempt
 // counts. Peers must adopt 57.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 58;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 59;
 
 /// One versioned remote-protocol message.
 ///

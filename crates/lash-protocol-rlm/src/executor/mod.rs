@@ -818,15 +818,13 @@ fn emit_step_trace(
     let Some(invocation) = ctx.parent_invocation() else {
         return;
     };
-    let Some(step_index) = invocation.scope.protocol_iteration else {
+    let mut context = lash_core::facade_support::trace_context_for_runtime_invocation(
+        config.trace_context.clone(),
+        invocation,
+    );
+    let Some(step_index) = context.protocol_iteration else {
         return;
     };
-    let mut context = config.trace_context.clone();
-    context.session_id = Some(invocation.scope.session_id.clone());
-    context.turn_id = invocation.scope.turn_id.clone();
-    context.turn_index = invocation.scope.turn_index;
-    context.protocol_iteration = Some(step_index);
-    context.effect_id = invocation.effect_id().map(str::to_owned);
     let outcome = match result {
         Ok(()) => lash_trace::TraceRlmStepOutcome::Ok,
         Err(diagnostic) => lash_trace::TraceRlmStepOutcome::Failure {
@@ -850,25 +848,22 @@ fn foreground_lashlang_execution_trace(
 ) -> Option<LashlangExecutionTrace> {
     let sink = config.sink.as_ref()?.clone();
     let invocation = ctx.parent_invocation()?;
-    if invocation.effect_kind() != Some(RuntimeEffectKind::ExecCode) {
-        return None;
-    }
     let effect_id = invocation.effect_id()?;
-    let kind = invocation.effect_kind()?;
+    let address = invocation.effect_address()?.clone();
     Some(LashlangExecutionTrace::new(
         sink,
         language,
         config.trace_context.clone(),
         TraceLanguageExecutionIdentity {
             scope: TraceRuntimeScope {
-                session_id: invocation.scope.session_id.clone(),
-                turn_id: invocation.scope.turn_id.clone(),
-                turn_index: invocation.scope.turn_index,
-                protocol_iteration: invocation.scope.protocol_iteration,
+                session_id: invocation.attribution.session_id.clone(),
+                turn_id: invocation.attribution.turn_id.clone(),
+                turn_index: invocation.attribution.turn_index,
+                protocol_iteration: invocation.attribution.protocol_iteration,
             },
             subject: TraceRuntimeSubject::Effect {
+                address,
                 effect_id: effect_id.to_string(),
-                kind: kind.as_str().to_string(),
             },
             module_ref: artifact.module_ref.to_string(),
             entry_kind: "main".to_string(),

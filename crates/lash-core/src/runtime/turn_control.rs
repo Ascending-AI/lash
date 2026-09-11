@@ -12,8 +12,8 @@ use crate::{ErrorEnvelope, TurnOutcome};
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeError, RuntimeInvocation,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    RuntimeInvocation,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

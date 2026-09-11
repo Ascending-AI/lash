@@ -242,9 +242,12 @@ fn prepared_tool_call() -> crate::PreparedToolCall {
 
 fn attempt_invocation() -> crate::RuntimeInvocation {
     crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
-        ATTEMPT_EFFECT_ID,
-        crate::RuntimeEffectKind::ToolAttempt,
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn(SESSION, TURN),
+            ATTEMPT_EFFECT_ID,
+        )
+        .expect("valid attempt address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         ATTEMPT_EFFECT_ID,
     )
 }
@@ -569,10 +572,13 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
         &sentinel,
         crate::RuntimeEffectEnvelope::new(
             crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::new(SESSION),
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn(SESSION, TURN),
+                    effect_id.clone(),
+                )
+                .expect("valid process effect address"),
+                crate::RuntimeAttribution::for_session(SESSION),
                 effect_id.clone(),
-                crate::RuntimeEffectKind::Process,
-                effect_id,
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
@@ -622,10 +628,13 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                 nested_sentinel,
                 crate::RuntimeEffectEnvelope::new(
                     crate::RuntimeInvocation::effect(
-                        crate::RuntimeScope::new(SESSION),
+                        crate::EffectAddress::new(
+                            crate::ExecutionScope::turn(SESSION, TURN),
+                            effect_id.clone(),
+                        )
+                        .expect("valid nested process effect address"),
+                        crate::RuntimeAttribution::for_session(SESSION),
                         effect_id.clone(),
-                        crate::RuntimeEffectKind::Process,
-                        effect_id,
                     ),
                     crate::RuntimeEffectCommand::process(command),
                 ),
@@ -679,9 +688,9 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
     dispatch.parent_invocation = Some(crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
-        "intent-drain",
-        crate::RuntimeEffectKind::ToolBatch,
+        crate::EffectAddress::new(crate::ExecutionScope::turn(SESSION, TURN), "intent-drain")
+            .expect("valid intent-drain address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "intent-drain",
     ));
 
@@ -851,10 +860,13 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         .with_replay_key("structural-attribution-event"),
     };
     let mut attributed = crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn(SESSION, TURN),
+            "plain-unprefixed-key",
+        )
+        .expect("valid structurally attributed address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "structurally-attributed-command",
-        crate::RuntimeEffectKind::Process,
-        "plain-unprefixed-key",
     );
     attributed.replay = Some(crate::RuntimeReplay {
         key: "plain-unprefixed-key".to_string(),
@@ -884,10 +896,13 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         &sentinel,
         crate::RuntimeEffectEnvelope::new(
             crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn(SESSION, TURN),
+                    "another-plain-key",
+                )
+                .expect("valid missing-attribution test address"),
+                crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
                 "missing-attribution-command",
-                crate::RuntimeEffectKind::Process,
-                "another-plain-key",
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
@@ -1025,11 +1040,7 @@ impl OrdinalJournaledTier {
     }
 
     fn identity(envelope: &crate::RuntimeEffectEnvelope) -> String {
-        let kind = envelope
-            .invocation
-            .effect_kind()
-            .map(crate::RuntimeEffectKind::as_str)
-            .unwrap_or("no_effect_kind");
+        let kind = envelope.command.kind().as_str();
         let effect_id = envelope.invocation.effect_id().unwrap_or("no_effect_id");
         format!("{kind}:{effect_id}")
     }
@@ -1119,9 +1130,12 @@ impl crate::RuntimeEffectController for OrdinalJournaledTier {
 
 fn follow_on_invocation() -> crate::RuntimeInvocation {
     crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
-        FOLLOW_ON_EFFECT_ID,
-        crate::RuntimeEffectKind::Sleep,
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn(SESSION, TURN),
+            FOLLOW_ON_EFFECT_ID,
+        )
+        .expect("valid follow-on address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         FOLLOW_ON_EFFECT_ID,
     )
 }
@@ -1439,7 +1453,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
                     None,
                     1,
                     1,
-                    envelope.invocation,
+                    envelope.invocation.into_runtime_invocation(),
                     None,
                     None,
                 )

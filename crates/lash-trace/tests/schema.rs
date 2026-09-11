@@ -32,7 +32,7 @@ fn trace_schema_version_is_pinned_at_19() {
     // deliberate, documented schema bump — see the crate-level rustdoc and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 19);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 20);
 }
 
 #[test]
@@ -1449,7 +1449,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
     assert!(json["attempts"][1].get("delay_ms").is_none());
     assert!(json["attempts"][1].get("generation_disposition").is_none());
     assert!(json["attempts"][1].get("usage").is_none());
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 19);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 20);
 }
 
 #[test]
@@ -1757,7 +1757,7 @@ fn durable_step_events_round_trip_at_schema_version_six() {
         let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 19);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 20);
         assert_eq!(json["type"], expected_kind);
         let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
         assert_eq!(decoded.event.kind(), expected_kind);

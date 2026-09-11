@@ -1,4 +1,3 @@
-use self::facade_ops::ScopedEffectControllerFacadeOps;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
@@ -387,17 +386,7 @@ impl<'run> ScopedEffectController<'run> {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Result<(), RuntimeEffectControllerError> {
-        if envelope.invocation.execution_scope() == &self.scope {
-            return Ok(());
-        }
-        Err(RuntimeEffectControllerError::new(
-            RuntimeErrorCode::RuntimeEffectScopeMismatch,
-            format!(
-                "effect address scope {:?} does not match admitted controller scope {:?}",
-                envelope.invocation.execution_scope(),
-                self.scope
-            ),
-        ))
+        envelope.invocation.validate_execution_scope(&self.scope)
     }
 
     /// Executes an effect only after proving that its address belongs to this

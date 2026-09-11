@@ -386,13 +386,13 @@ fn direct_trace_context(
 
 #[cfg(test)]
 mod tests {
-    use crate::RuntimeEffectKind;
     use crate::SessionId;
     use crate::TurnId;
 
     #[test]
     fn direct_effect_invocation_preserves_runtime_scope() {
         let invocation = crate::runtime::causal::direct_effect_invocation(
+            &crate::ExecutionScope::runtime_operation("direct-test"),
             &SessionId::from("s"),
             "tool",
             "request:k".to_string(),
@@ -400,8 +400,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(invocation.scope.session_id, "s");
-        assert_eq!(invocation.effect_kind(), Some(RuntimeEffectKind::Direct));
+        assert_eq!(invocation.attribution.session_id.as_deref(), Some("s"));
         assert!(
             invocation
                 .replay_key()
@@ -413,6 +412,7 @@ mod tests {
     #[test]
     fn tool_retry_sleep_invocation_preserves_parent_replay_identity() {
         let parent = crate::runtime::causal::direct_effect_invocation(
+            &crate::ExecutionScope::turn("s", "turn"),
             &SessionId::from("s"),
             "tool",
             "request:k".to_string(),
@@ -420,9 +420,13 @@ mod tests {
             None,
         );
 
-        let sleep = crate::runtime::causal::tool_retry_sleep_invocation(&parent, "probe", 2);
+        let sleep = crate::runtime::causal::tool_retry_sleep_invocation(
+            &crate::ExecutionScope::turn("s", "turn"),
+            &parent,
+            "probe",
+            2,
+        );
 
-        assert_eq!(sleep.effect_kind(), Some(RuntimeEffectKind::Sleep));
         assert!(
             sleep
                 .replay_key()

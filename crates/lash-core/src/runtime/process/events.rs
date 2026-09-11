@@ -720,7 +720,7 @@ fn cancellation_replay_key(process_id: &ProcessId, reason: Option<&str>) -> Stri
     )
 }
 
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 2;
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessWakeDelivery {

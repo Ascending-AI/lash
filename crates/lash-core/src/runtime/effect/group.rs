@@ -673,22 +673,31 @@ mod effect_group_contract_tests {
     use super::*;
     use crate::SessionId;
     use crate::TurnId;
-    use crate::runtime::effect::envelope::{RuntimeEffectCommand, RuntimeEffectKind, RuntimeScope};
+    use crate::runtime::effect::envelope::{RuntimeEffectCommand, RuntimeEffectKind};
 
     fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
-        RuntimeInvocation::effect(RuntimeScope::new("session"), "effect", kind, "replay")
+        let _ = kind;
+        RuntimeInvocation::effect(
+            crate::EffectAddress::new(crate::ExecutionScope::turn("session", "turn"), "replay")
+                .expect("valid group contract address"),
+            crate::RuntimeAttribution::for_session("session"),
+            "effect",
+        )
     }
 
     /// A child's invocation, keyed by its position.
     ///
     /// Siblings need distinct replay keys — one replay key is one journaled
     /// child — so a group's children cannot share the flat [`invocation`] key.
-    fn child_invocation(kind: RuntimeEffectKind, position: usize) -> RuntimeInvocation {
+    fn child_invocation(_kind: RuntimeEffectKind, position: usize) -> RuntimeInvocation {
         RuntimeInvocation::effect(
-            RuntimeScope::new("session"),
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("session", "turn"),
+                format!("replay-{position}"),
+            )
+            .expect("valid child address"),
+            crate::RuntimeAttribution::for_session("session"),
             "effect",
-            kind,
-            format!("replay-{position}"),
         )
     }
 

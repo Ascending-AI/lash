@@ -1,6 +1,5 @@
 use crate::ProcessId;
 use crate::SessionId;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::collections::BTreeMap;
 
 use super::ToolDispatchContext;

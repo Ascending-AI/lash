@@ -263,10 +263,13 @@ fn tool_attempt_envelope(
 ) -> crate::RuntimeEffectEnvelope {
     crate::RuntimeEffectEnvelope::new(
         crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::for_turn("attachment-owner-cold-replay", turn_id, 1, 0),
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("attachment-owner-cold-replay", turn_id),
+                format!("attachment-owner:{turn_id}:{effect_id}"),
+            )
+            .expect("valid attachment-owner test address"),
+            crate::RuntimeAttribution::for_turn("attachment-owner-cold-replay", turn_id, 1, 0),
             effect_id,
-            crate::RuntimeEffectKind::ToolAttempt,
-            format!("attachment-owner:{turn_id}:{effect_id}"),
         ),
         crate::RuntimeEffectCommand::ToolAttempt {
             call: crate::PreparedToolCall::from_parts(

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::SessionAppendNode;
-use crate::facade_support::{ScopedEffectControllerFacadeOps, ToolStateFacadeOps};
+use crate::facade_support::ToolStateFacadeOps;
 
 #[async_trait::async_trait]
 pub trait SessionStateService: Send + Sync {

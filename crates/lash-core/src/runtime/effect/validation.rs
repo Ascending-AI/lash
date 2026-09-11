@@ -37,7 +37,7 @@ impl CanonicalRuntimeEffectEnvelope {
             )
         })?;
         let hash =
-            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v2", json.as_bytes());
+            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", json.as_bytes());
         Ok(Self { json, hash })
     }
 
@@ -62,7 +62,7 @@ impl CanonicalRuntimeEffectEnvelope {
 
     fn verify(&self, side: &str) -> Result<(), RuntimeEffectControllerError> {
         let actual =
-            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v2", self.json.as_bytes());
+            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", self.json.as_bytes());
         if actual == self.hash {
             return Ok(());
         }
@@ -321,7 +321,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{RuntimeEffectCommand, RuntimeEffectKind, RuntimeInvocation, RuntimeScope};
+    use crate::{RuntimeEffectCommand, RuntimeInvocation};
 
     #[derive(Default)]
     struct RecordingSink {
@@ -338,9 +338,12 @@ mod tests {
     fn envelope(input: Value) -> RuntimeEffectEnvelope {
         RuntimeEffectEnvelope::new(
             RuntimeInvocation::effect(
-                RuntimeScope::for_turn("session", "turn", 0, 0),
-                "tool-attempt:test",
-                RuntimeEffectKind::ToolAttempt,
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn("session", "turn"),
+                    "tool-attempt:test",
+                )
+                .expect("valid validation address"),
+                crate::RuntimeAttribution::for_turn("session", "turn", 0, 0),
                 "tool-attempt:test",
             ),
             RuntimeEffectCommand::ToolAttempt {

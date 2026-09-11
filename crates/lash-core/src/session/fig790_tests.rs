@@ -174,10 +174,13 @@ impl EffectBackedProcessService {
         let effect_id = command.effect_id();
         let envelope = crate::RuntimeEffectEnvelope::new(
             crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::new("fig790-test"),
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::runtime_operation("fig790-test"),
+                    effect_id.clone(),
+                )
+                .expect("valid fig790 address"),
+                crate::RuntimeAttribution::none(),
                 effect_id.clone(),
-                crate::RuntimeEffectKind::Process,
-                effect_id,
             ),
             crate::RuntimeEffectCommand::process(command),
         );

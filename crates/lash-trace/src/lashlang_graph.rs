@@ -483,14 +483,18 @@ mod tests {
     fn identity() -> LanguageIdentity {
         LanguageIdentity {
             scope: TraceRuntimeScope {
-                session_id: SessionId::from("session-1".to_string()),
+                session_id: Some(SessionId::from("session-1".to_string())),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
             },
             subject: TraceRuntimeSubject::Effect {
+                address: lash_sansio::EffectAddress::new(
+                    lash_sansio::ExecutionScope::turn("session-1", "turn-1"),
+                    "exec-replay-1",
+                )
+                .expect("valid trace test effect address"),
                 effect_id: "exec-1".to_string(),
-                kind: "exec_code".to_string(),
             },
             module_ref: "module-1".to_string(),
             entry_kind: "main".to_string(),

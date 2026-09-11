@@ -526,9 +526,8 @@ mod tests {
             ),
             (
                 CausalRef::Effect {
-                    session_id: SessionId::from("s"),
-                    turn_id: None,
-                    effect_id: "e".to_string(),
+                    address: EffectAddress::new(ExecutionScope::runtime_operation("s"), "e")
+                        .expect("valid effect cause"),
                 },
                 "direct-discriminator:v2:blake3:3f43a9b312aa3b7f98045904632bd4daf3aada4430019b4427616f600b6f0857",
             ),
@@ -633,11 +632,12 @@ mod tests {
         );
         assert_eq!(
             direct_effect_invocation(
+                &ExecutionScope::turn("s", "t"),
                 &SessionId::from("s"),
                 "u",
                 discriminator,
                 Some(&TurnId::from("t")),
-                None
+                None,
             )
             .replay_key(),
             Some(
@@ -664,6 +664,7 @@ mod tests {
             "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a38356537333765643465663038366634653336616436386263396330333632393264363665623430613831646130383031356436363163653530373435303263"
         );
         let first = direct_effect_invocation(
+            &ExecutionScope::turn("s", "t"),
             &SessionId::from("s"),
             "u",
             first_discriminator,
@@ -688,6 +689,7 @@ mod tests {
             "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
         );
         let second = direct_effect_invocation(
+            &ExecutionScope::turn("s", "t"),
             &SessionId::from("s"),
             "u:direct:v2:caller:21:x",
             second_discriminator,

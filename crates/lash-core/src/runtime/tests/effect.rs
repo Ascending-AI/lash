@@ -224,11 +224,15 @@ impl RecordingEffectController {
             .count()
     }
 
-    fn record(&self, invocation: &RuntimeInvocation) {
+    fn record(&self, envelope: &RuntimeEffectEnvelope) {
         self.records.lock_recover().push(EffectControllerRecord {
-            kind: invocation.effect_kind().expect("effect kind"),
-            turn_id: invocation.scope.turn_id.clone(),
-            replay_key: invocation.replay_key().expect("replay key").to_string(),
+            kind: envelope.command.kind(),
+            turn_id: envelope.invocation.attribution.turn_id.clone(),
+            replay_key: envelope
+                .invocation
+                .replay_key()
+                .expect("replay key")
+                .to_string(),
         });
     }
 }
@@ -408,7 +412,7 @@ impl RuntimeEffectController for RecordingEffectController {
         self.envelopes
             .lock_recover()
             .push(serde_json::to_string(&envelope).expect("serialize effect envelope"));
-        self.record(&envelope.invocation);
+        self.record(&envelope);
         if matches!(
             envelope.command,
             RuntimeEffectCommand::AssistantResponseHooks { .. }
@@ -2056,6 +2060,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     let discriminator =
         crate::runtime::causal::direct_request_discriminator(None, Some(&caused_by), 1);
     let expected_replay_key = crate::runtime::causal::direct_effect_invocation(
+        &ExecutionScope::turn("root", "turn-1"),
         &SessionId::from("root"),
         "direct-test",
         discriminator,
