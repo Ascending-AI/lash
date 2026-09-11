@@ -617,6 +617,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
         decision: crate::TurnCancelRepairDecision,
+        closure: Option<&crate::TurnCancelClosureAuthorization>,
     ) -> Result<crate::TurnCancelRepairResult, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs);
         self.control
@@ -628,6 +629,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
                     turn_id,
                     observed,
                     decision,
+                    closure,
                 ),
             )
             .await

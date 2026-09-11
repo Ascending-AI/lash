@@ -1698,6 +1698,38 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::TurnInputStore for CommitRetryStore {
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner
+            .validate_turn_cancellation_binding(session_id, session_execution_lease, binding_id)
+            .await
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        authorization: &lash_core::TurnCancelClosureAuthorization,
+    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
+        self.inner
+            .authorize_turn_cancel_closure(session_execution_lease, authorization)
+            .await
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
+        self.inner
+            .pending_turn_cancel_closures(session_id, session_execution_lease, binding_id)
+            .await
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         input: lash_core::PendingTurnInputDraft,
@@ -1797,6 +1829,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         turn_id: &lash_core::TurnId,
         observed: &lash_core::TurnCancelIntentSnapshot,
         decision: lash_core::TurnCancelRepairDecision,
+        closure: Option<&lash_core::TurnCancelClosureAuthorization>,
     ) -> Result<lash_core::TurnCancelRepairResult, lash_core::StoreError> {
         self.inner
             .repair_orphaned_active_turn_inputs(
@@ -1805,6 +1838,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
                 turn_id,
                 observed,
                 decision,
+                closure,
             )
             .await
     }

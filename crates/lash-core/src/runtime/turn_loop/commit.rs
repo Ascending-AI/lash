@@ -62,6 +62,7 @@ struct TurnCommitRequest<'commit> {
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
     interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
+    turn_cancel_closure_authorization: Option<crate::TurnCancelClosureAuthorization>,
     turn_control_resolver: &'commit dyn crate::AwaitEventResolver,
 }
 
@@ -140,6 +141,7 @@ impl PreparedTurn {
             recorded_attachment_intent_ids,
             interrupted_turn_input_cancellation,
             interrupted_turn_cancel_intent,
+            turn_cancel_closure_authorization,
             turn_control_resolver,
         } = request;
         let accepted = self
@@ -156,6 +158,7 @@ impl PreparedTurn {
                 Some(trace_turn_id.clone()),
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
+                turn_cancel_closure_authorization,
                 Some(turn_control_resolver),
                 recorded_attachment_intent_ids,
                 release_session_execution_lease
@@ -296,13 +299,8 @@ impl LashRuntime {
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), scoped_effect_controller).await?;
-        let turn_control_resolver = match &turn_control_binding {
-            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
-            | crate::TurnControlBinding::RunScoped {
-                resolver,
-                durable_cancel_after_llm: _,
-            } => *resolver,
-        };
+        let turn_control_resolver = turn_control_binding.resolver();
+        let turn_control_binding_id = turn_control_binding.binding_id().to_string();
         let TurnFinishInput {
             mut turn_pipeline,
             assembler,
@@ -362,7 +360,7 @@ impl LashRuntime {
                 "session execution lease was lost while the turn was active",
             ));
         }
-        let interrupted_turn_cancel_intent =
+        let mut interrupted_turn_cancel_intent =
             match self.session.as_ref().and_then(Session::history_store) {
                 Some(store) => Some(
                     store
@@ -375,13 +373,62 @@ impl LashRuntime {
                 ),
                 None => None,
             };
-        let cancellation = turn_control
-            .settle_before_commit(
-                turn_control_resolver,
-                assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
-                assembled_cancellation,
-            )
-            .await?;
+        let turn_cancel_closure_authorization = match (
+            self.session.as_ref().and_then(Session::history_store),
+            session_execution_lease,
+            interrupted_turn_cancel_intent.clone(),
+        ) {
+            (Some(store), Some(lease), Some(observed)) => {
+                let mut observed = observed;
+                loop {
+                    let authorization = turn_control.closure_authorization(
+                        &turn_control_binding_id,
+                        scoped_effect_controller.execution_scope().clone(),
+                        &lease.fence(),
+                        observed.clone(),
+                        assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
+                        assembled_cancellation.clone(),
+                    )?;
+                    match store
+                        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+                        .await
+                    {
+                        Ok(_) => {
+                            interrupted_turn_cancel_intent =
+                                Some(authorization.observed_intent().clone());
+                            break Some(authorization);
+                        }
+                        Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
+                            observed = store
+                                .turn_cancel_request_intent(&crate::TurnAddress::new(
+                                    &self.state.session_id,
+                                    &trace_turn_id,
+                                ))
+                                .await
+                                .map_err(runtime_error_from_store_commit)?;
+                        }
+                        Err(error) => return Err(runtime_error_from_store_commit(error)),
+                    }
+                }
+            }
+            _ => None,
+        };
+        let cancellation = match turn_cancel_closure_authorization.as_ref() {
+            Some(authorization) => {
+                turn_control
+                    .settle_authorized(turn_control_resolver, authorization)
+                    .await?
+            }
+            None => {
+                turn_control
+                    .settle_before_commit(
+                        turn_control_resolver,
+                        assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
+                        assembled_cancellation,
+                    )
+                    .await?
+            }
+        };
         if cancellation.is_some() {
             cancel_state.cancel();
         }
@@ -538,6 +585,7 @@ impl LashRuntime {
                         .recorded_turn_intent_ids(&trace_turn_id),
                     interrupted_turn_input_cancellation: cancellation.clone(),
                     interrupted_turn_cancel_intent,
+                    turn_cancel_closure_authorization,
                     turn_control_resolver,
                 },
                 TurnCommitAdmission {
@@ -800,10 +848,13 @@ impl LashRuntime {
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
         let turn_control_resolver = match &turn_control_binding {
-            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            crate::TurnControlBinding::HostOwned {
+                resolver, peek: _, ..
+            }
             | crate::TurnControlBinding::RunScoped {
                 resolver,
                 durable_cancel_after_llm: _,
+                ..
             } => *resolver,
         };
         let turn_control = Arc::new(

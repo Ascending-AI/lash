@@ -3,12 +3,22 @@ use crate::SessionId;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::sync::MutexExt;
 
+fn turn_cancellation_authority() -> crate::TurnCancellationAuthority {
+    let resolver: Arc<dyn crate::AwaitEventResolver> =
+        Arc::new(crate::NativeRuntimeEffectController::default());
+    crate::TurnCancellationAuthority::new(
+        format!("in-memory-session-store:{}", uuid::Uuid::new_v4()),
+        resolver,
+    )
+}
+
 /// Session-id-keyed factory: the same in-memory store is returned for a given
 /// session across opens (so a worker rebuild sees the session's state), and a
 /// fresh store is created on first use.
 #[derive(Clone)]
 pub struct InMemorySessionStoreFactory {
     pub(super) clock: Arc<dyn crate::Clock>,
+    pub(super) turn_cancellation_authority: crate::TurnCancellationAuthority,
     pub(super) stores: Arc<Mutex<HashMap<SessionId, Arc<InMemorySessionStore>>>>,
     pub(super) retired_stores: Arc<Mutex<HashMap<SessionId, Arc<InMemorySessionStore>>>>,
     pub(super) write_transaction: Arc<Mutex<()>>,
@@ -35,14 +45,15 @@ pub struct InMemorySessionStoreFactory {
 
 impl InMemorySessionStoreFactory {
     pub fn new() -> Self {
-        super::warn_process_owner_death_degraded("InMemorySessionStoreFactory::new");
+        super::warnings::process_owner_death_degraded("InMemorySessionStoreFactory::new");
         Self::with_clock(Arc::new(crate::SystemClock))
     }
 
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
-        super::warn_process_owner_death_degraded("InMemorySessionStoreFactory::with_clock");
+        super::warnings::process_owner_death_degraded("InMemorySessionStoreFactory::with_clock");
         Self {
             clock,
+            turn_cancellation_authority: turn_cancellation_authority(),
             stores: Arc::new(Mutex::new(HashMap::new())),
             retired_stores: Arc::new(Mutex::new(HashMap::new())),
             write_transaction: Arc::new(Mutex::new(())),
@@ -110,7 +121,7 @@ fn retained_fork_config(
 
 impl Default for InMemorySessionStoreFactory {
     fn default() -> Self {
-        super::warn_process_owner_death_degraded("InMemorySessionStoreFactory::default");
+        super::warnings::process_owner_death_degraded("InMemorySessionStoreFactory::default");
         Self::new()
     }
 }
@@ -141,6 +152,7 @@ impl InMemorySessionStoreFactory {
             .or_insert_with(|| {
                 let store = Arc::new(InMemorySessionStore::with_shared_history(
                     Arc::clone(&self.clock),
+                    Some(self.turn_cancellation_authority.clone()),
                     Arc::clone(&self.write_transaction),
                     Arc::clone(&self.global_session_graph),
                     Arc::clone(&self.global_node_owners),
@@ -266,6 +278,19 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::StoreError> {
+        let store = self.stores.lock_recover().get(session_id).cloned();
+        match store {
+            Some(store) => {
+                crate::store::TurnInputStore::pending_turn_cancel_closure_pins(store.as_ref()).await
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
@@ -308,6 +333,18 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         let _transaction = self.write_transaction.lock_recover();
         let store = self.stores.lock_recover().get(session_id).cloned();
         if let Some(store) = store {
+            let pending_count = store
+                .turn_cancel_closure_authorizations
+                .lock_recover()
+                .len();
+            if pending_count != 0 {
+                return Err(crate::MaintenanceFailure::failed_before_any_work(
+                    crate::StoreError::TurnCancelClosureLifecyclePinned {
+                        session_id: session_id.clone(),
+                        pending_count,
+                    },
+                ));
+            }
             let candidates = self
                 .checkpoint_blob_roots
                 .lock_recover()
@@ -642,6 +679,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         );
         let store = Arc::new(InMemorySessionStore::with_shared_history(
             Arc::clone(&self.clock),
+            Some(self.turn_cancellation_authority.clone()),
             Arc::clone(&self.write_transaction),
             Arc::clone(&self.global_session_graph),
             Arc::clone(&self.global_node_owners),

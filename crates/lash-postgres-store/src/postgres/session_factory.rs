@@ -145,6 +145,15 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         }
     }
 
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+        self.store_for(session_id.clone())
+            .pending_turn_cancel_closure_pins()
+            .await
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
@@ -769,6 +778,7 @@ pub(crate) async fn delete_session_tx(
     report: &mut lash_core::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
+    crate::turn_cancel_closure::ensure_session_not_pinned_tx(tx, session_id).await?;
     let materialized = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(
              SELECT 1 FROM lash_session_meta WHERE session_id = $1
@@ -894,6 +904,10 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_wake_allocation_floors WHERE target_session_id = $1",
         "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
         "DELETE FROM lash_turn_cancel_requests WHERE session_id = $1",
+        // Administration revokes the session's effect authority before store
+        // deletion, after which the pinned closure obligation may be retired.
+        "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1",
+        "DELETE FROM lash_turn_cancellation_bindings WHERE session_id = $1",
         "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
         "DELETE FROM lash_fork_lineage WHERE session_id = $1",
         "DELETE FROM lash_session_meta WHERE session_id = $1",
@@ -1106,6 +1120,16 @@ pub(crate) async fn delete_process_sessions_tx(
              WHERE session_id = ANY($1)
              RETURNING session_id
          ),
+         deleted_turn_cancel_closures AS (
+             DELETE FROM lash_turn_cancel_closure_authorizations
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_turn_cancellation_bindings AS (
+             DELETE FROM lash_turn_cancellation_bindings
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
          deleted_session_execution_leases AS (
              DELETE FROM lash_session_execution_leases
              WHERE session_id = ANY($1)
@@ -1126,6 +1150,8 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_wake_redelivery_fences)
               + (SELECT count(*) FROM deleted_wake_allocation_floors)
               + (SELECT count(*) FROM deleted_pending_turn_inputs)
+              + (SELECT count(*) FROM deleted_turn_cancel_closures)
+              + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
               + (SELECT count(*) FROM deleted_session_execution_leases)
               + (SELECT count(*) FROM deleted_fork_lineage)
               + (SELECT count(*) FROM deleted_session_meta)",

@@ -727,6 +727,34 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 /// this double records without inspecting.
 #[async_trait]
 impl lash_core::TurnInputStore for SnapshotStore {
+    async fn validate_turn_cancellation_binding(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _authorization: &lash_core::TurnCancelClosureAuthorization,
+    ) -> std::result::Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError>
+    {
+        Ok(lash_core::TurnCancelClosureAuthorizationOutcome::Authorized)
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         input: lash_core::PendingTurnInputDraft,
@@ -904,6 +932,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
         _turn_id: &lash_core::TurnId,
         _observed: &lash_core::TurnCancelIntentSnapshot,
         _decision: lash_core::TurnCancelRepairDecision,
+        _closure: Option<&lash_core::TurnCancelClosureAuthorization>,
     ) -> std::result::Result<lash_core::TurnCancelRepairResult, lash_core::store::StoreError> {
         Ok(lash_core::TurnCancelRepairResult::Applied(
             Default::default(),
@@ -1107,6 +1136,34 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 // pending turn input nor queued work.
 #[async_trait]
 impl lash_core::TurnInputStore for BoundSessionStore {
+    async fn validate_turn_cancellation_binding(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+    ) -> std::result::Result<(), lash_core::StoreError> {
+        Ok(())
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _authorization: &lash_core::TurnCancelClosureAuthorization,
+    ) -> std::result::Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError>
+    {
+        unreachable!("BoundSessionStore never authorizes turn cancellation")
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         _input: lash_core::PendingTurnInputDraft,
@@ -1190,6 +1247,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _turn_id: &lash_core::TurnId,
         _observed: &lash_core::TurnCancelIntentSnapshot,
         _decision: lash_core::TurnCancelRepairDecision,
+        _closure: Option<&lash_core::TurnCancelClosureAuthorization>,
     ) -> std::result::Result<lash_core::TurnCancelRepairResult, lash_core::store::StoreError> {
         Ok(lash_core::TurnCancelRepairResult::Applied(
             Default::default(),
@@ -2399,6 +2457,7 @@ fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message 
 
 mod control_admin;
 mod core_session_builder;
+mod deployment_and_testing_facade;
 mod harness;
 use harness::{
     core_without_session_store, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
@@ -2435,86 +2494,4 @@ async fn snapshot_store_reports_the_holder_a_claim_displaces() {
         &SessionId::from("snapshot-lease-displacement"),
     )
     .await;
-}
-
-#[tokio::test]
-async fn deployment_drain_status_keeps_waiting_process_non_drained() {
-    let registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::memory()
-            .await
-            .expect("open in-memory process registry"),
-    );
-    let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(crate::TurnBudget::Unbounded)
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                crate::persistence::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(registry.clone()),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build core with a process registry");
-    let process_id = "deployment-drain-status-waiting";
-    registry
-        .register_process(lash_core::ProcessRegistration::new(
-            process_id,
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::host(),
-        ))
-        .await
-        .expect("register waiting process");
-    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id,
-        "deployment-drain-status-waiting-run",
-    )
-    .bind_attempt(1);
-    let started = authority
-        .invocation_started()
-        .expect("attempt-bound invocation has a start fact");
-    registry
-        .record_first_started_with_authority(&ProcessId::from(process_id), started, &authority)
-        .await
-        .expect("record process start");
-    registry
-        .set_process_wait_with_authority(
-            &ProcessId::from(process_id),
-            lash_core::WaitState {
-                since_ms: 1,
-                kind: lash_core::WaitKind::Signal {
-                    name: "deployment-drain-status".to_string(),
-                    event_type: "deployment.drain_status".to_string(),
-                    key: "deployment-drain-status-waiting:signal".to_string(),
-                    ordinal: 1,
-                },
-            },
-            &authority,
-        )
-        .await
-        .expect("set process waiting");
-
-    let status = core
-        .drain_status(false)
-        .await
-        .expect("read deployment drain status");
-    assert_eq!(status.remaining_invocations, 1);
-    assert!(!status.drained);
-}
-
-#[tokio::test]
-async fn testing_facade_run_tool_executes_provider() {
-    let outcome = crate::testing::run_tool(
-        &AppTools,
-        "app_lookup",
-        &serde_json::json!({ "query": "weather" }),
-    )
-    .await;
-
-    assert!(outcome.is_success());
-    assert_eq!(
-        outcome.value_for_projection(),
-        serde_json::json!({ "ok": true })
-    );
 }

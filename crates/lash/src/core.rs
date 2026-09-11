@@ -650,6 +650,18 @@ impl LashCore {
                 .into());
             }
         }
+        let pins = administration
+            .store_factory()
+            .pending_turn_cancel_closure_pins(&session_id)
+            .await
+            .map_err(EmbedError::from)?;
+        if !pins.is_empty() {
+            return Err(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
+                session_id: session_id.clone(),
+                pending_count: pins.len(),
+            }
+            .into());
+        }
         let process = if let Some(process) = administration.process() {
             let invocation = RuntimeInvocation::effect(
                 RuntimeScope::new(session_id.clone()),

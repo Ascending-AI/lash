@@ -39,6 +39,9 @@ pub trait StoreReplayAdapter: Send + Sync {
 /// controllers. Gets [`EffectHost`] for free.
 #[doc(hidden)]
 pub trait StoreReplayHost: StoreReplayAdapter {
+    /// Stable identity of the await-event deployment backing this host.
+    fn turn_control_binding_id(&self) -> String;
+
     /// See [`EffectHost::effect_scope_fence_database`]: the journal file a
     /// session-store factory attaches for the retention sweep, when the
     /// journal lives in a file of its own.
@@ -173,6 +176,10 @@ impl<T: StoreReplayAdapter> AwaitEventResolver for T {
 
 #[async_trait]
 impl<T: StoreReplayHost> EffectHost for T {
+    fn turn_control_binding_id(&self) -> String {
+        StoreReplayHost::turn_control_binding_id(self)
+    }
+
     fn await_event_resolver(&self) -> &dyn AwaitEventResolver {
         self
     }

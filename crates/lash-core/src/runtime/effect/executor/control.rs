@@ -16,7 +16,7 @@ use crate::{RuntimeError, RuntimeErrorCode};
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{EffectGroupHandle, GroupSettlement, LoserPolicy, RuntimeEffectGroup};
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
-use super::{TurnControlAuthorityOwner, TurnControlParticipation};
+use super::{TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation};
 
 // =============================================================================
 // Effect host + controller trait + scope + error
@@ -819,19 +819,6 @@ pub enum RuntimeEffectFailureDisposition {
     RecordTurnFailure,
 }
 
-/// How turn-control promises are addressed for one turn. Exhaustive: there is
-/// no third arrangement, and no field is optional.
-pub enum TurnControlBinding<'a> {
-    HostOwned {
-        resolver: &'a dyn AwaitEventResolver,
-        peek: ScopedEffectController<'a>,
-    },
-    RunScoped {
-        resolver: &'a dyn AwaitEventResolver,
-        durable_cancel_after_llm: bool,
-    },
-}
-
 /// Result of preparing an externally routable tool completion key.
 pub enum CompletionKeyPreparation {
     NotNeeded,
@@ -1607,6 +1594,10 @@ pub fn await_event_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
 /// Deployment-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
+    /// Stable identity of the physical authority that owns this host's reserved
+    /// turn-control promises. Implementors must preserve it across client or
+    /// handler recreation for as long as issued keys remain recoverable.
+    fn turn_control_binding_id(&self) -> String;
     /// Declares the owner of reserved turn-control promises for this host.
     fn turn_control_authority_owner(&self) -> TurnControlAuthorityOwner {
         TurnControlAuthorityOwner::EffectHost
@@ -1638,14 +1629,24 @@ pub trait EffectHost: AwaitEventResolver {
         // Local turn gates must share the host registry used by the live watcher
         // and external cancellation requests. Durable observations remain journaled.
         match scoped.controller().turn_control_participation().await? {
-            TurnControlParticipation::Local => Ok(TurnControlBinding::HostOwned {
-                resolver: self.await_event_resolver(),
-                peek: self.scoped(scoped.execution_scope().clone())?,
-            }),
-            TurnControlParticipation::DurableJournaled => Ok(TurnControlBinding::RunScoped {
-                resolver: scoped.controller(),
-                durable_cancel_after_llm: true,
-            }),
+            TurnControlParticipation::Local => {
+                let resolver = self.await_event_resolver();
+                Ok(TurnControlBinding::host_owned(
+                    self.turn_control_binding_id(),
+                    resolver,
+                    self.scoped(scoped.execution_scope().clone())?,
+                    self.turn_attach(),
+                ))
+            }
+            TurnControlParticipation::DurableJournaled => {
+                let resolver = scoped.controller();
+                Ok(TurnControlBinding::run_scoped(
+                    self.turn_control_binding_id(),
+                    resolver,
+                    true,
+                    self.turn_attach(),
+                ))
+            }
         }
     }
 

@@ -279,7 +279,8 @@ impl SessionBuilder {
             ports.process.clone(),
             ports.queued_port(),
             resolved.catalog,
-        ));
+        )?);
+        env = binding.apply_owner(env);
         let mut runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
             policy,

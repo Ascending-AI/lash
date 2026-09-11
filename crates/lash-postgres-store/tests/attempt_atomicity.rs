@@ -124,6 +124,10 @@ impl lash_core::AwaitEventResolver for CrashingEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for CrashingEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        "crashing-effect-host".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

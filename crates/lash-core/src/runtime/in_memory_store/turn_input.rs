@@ -121,6 +121,120 @@ fn find_pending_turn_input_index(
 
 #[async_trait::async_trait]
 impl crate::store::TurnInputStore for InMemorySessionStore {
+    fn turn_cancellation_authority(&self) -> Option<crate::TurnCancellationAuthority> {
+        self.turn_cancellation_authority.clone()
+    }
+
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<(), crate::store::StoreError> {
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(session_id)?;
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
+        let mut selected = self.turn_cancellation_binding_id.lock_recover();
+        match selected.as_deref() {
+            None => *selected = Some(binding_id.to_string()),
+            Some(expected) if expected == binding_id => {}
+            Some(expected) => {
+                return Err(crate::StoreError::TurnCancelBindingMismatch {
+                    session_id: session_id.clone(),
+                    expected: expected.to_string(),
+                    presented: binding_id.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, crate::store::StoreError> {
+        authorization
+            .validate()
+            .map_err(|error| crate::StoreError::StoredDataCorrupt {
+                record_kind: "TurnCancelClosureAuthorization",
+                message: error.to_string(),
+            })?;
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(authorization.session_id())?;
+        self.verify_session_execution_lease(
+            authorization.session_id(),
+            session_execution_lease,
+            now,
+        )?;
+        if authorization.authorizing_fencing_token() != session_execution_lease.fencing_token {
+            return Err(crate::StoreError::SessionExecutionLeaseExpired {
+                session_id: authorization.session_id().clone(),
+            });
+        }
+        let selected = self.turn_cancellation_binding_id.lock_recover();
+        if selected.as_deref() != Some(authorization.binding_id()) {
+            return Err(crate::StoreError::TurnCancelBindingMismatch {
+                session_id: authorization.session_id().clone(),
+                expected: selected.clone().unwrap_or_default(),
+                presented: authorization.binding_id().to_string(),
+            });
+        }
+        let mut pending = self.turn_cancel_closure_authorizations.lock_recover();
+        match pending.get(authorization.turn_id()) {
+            Some(existing) if existing == authorization => {
+                Ok(crate::TurnCancelClosureAuthorizationOutcome::AdoptedExact)
+            }
+            Some(_) => Err(crate::StoreError::TurnCancelClosureConflict {
+                session_id: authorization.session_id().clone(),
+                turn_id: authorization.turn_id().clone(),
+            }),
+            None => {
+                let requests = self.turn_cancel_requests.lock_recover();
+                if snapshot(&requests, authorization.turn_id()) != *authorization.observed_intent()
+                {
+                    return Err(crate::StoreError::TurnCancelIntentChanged {
+                        session_id: authorization.session_id().clone(),
+                        turn_id: authorization.turn_id().clone(),
+                    });
+                }
+                drop(requests);
+                pending.insert(authorization.turn_id().clone(), authorization.clone());
+                Ok(crate::TurnCancelClosureAuthorizationOutcome::Authorized)
+            }
+        }
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::store::StoreError> {
+        self.validate_turn_cancellation_binding(session_id, session_execution_lease, binding_id)
+            .await?;
+        Ok(self
+            .turn_cancel_closure_authorizations
+            .lock_recover()
+            .values()
+            .filter(|authorization| authorization.session_id() == session_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::store::StoreError> {
+        Ok(self
+            .turn_cancel_closure_authorizations
+            .lock_recover()
+            .values()
+            .cloned()
+            .collect())
+    }
+
     async fn turn_is_committed(
         &self,
         address: &crate::TurnAddress,
@@ -510,11 +624,36 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
         decision: crate::TurnCancelRepairDecision,
+        closure: Option<&crate::TurnCancelClosureAuthorization>,
     ) -> Result<crate::store::TurnCancelRepairResult, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
+        let closure_required = !matches!(observed, crate::TurnCancelIntentSnapshot::Absent)
+            || !matches!(
+                decision,
+                crate::TurnCancelRepairDecision::NoCancellationIntent
+            );
+        if closure_required != closure.is_some()
+            || closure.is_some_and(|authorization| {
+                authorization.session_id() != session_id || authorization.turn_id() != turn_id
+            })
+        {
+            return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            });
+        }
+        if let Some(closure) = closure {
+            let pending = self.turn_cancel_closure_authorizations.lock_recover();
+            if pending.get(turn_id) != Some(closure) {
+                return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                });
+            }
+        }
         let mut pending = self.pending_turn_inputs.lock_recover();
         let mut requests = self.turn_cancel_requests.lock_recover();
         if snapshot(&requests, turn_id) != *observed {
@@ -588,6 +727,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                     .push(affected.clone());
             }
             outcome.affected_inputs.push(affected);
+        }
+        if closure.is_some() {
+            self.turn_cancel_closure_authorizations
+                .lock_recover()
+                .remove(turn_id);
         }
         Ok(crate::store::TurnCancelRepairResult::Applied(outcome))
     }

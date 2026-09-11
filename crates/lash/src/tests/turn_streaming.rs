@@ -610,6 +610,10 @@ impl lash_core::AwaitEventResolver for DurableNoopEffectHost {
 
 #[async_trait]
 impl lash_core::EffectHost for DurableNoopEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        "durable-noop-effect-host".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

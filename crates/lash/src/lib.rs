@@ -62,7 +62,8 @@ pub use crate::turn::{
     TurnStream, message_role, message_text,
 };
 pub use lash_core::facade_support::{
-    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,
+    TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureProposal, TurnCancelDisposition, TurnCancelInputOutcome,
     TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
 };
 pub use lash_core::runtime::ExternalCompletionError;

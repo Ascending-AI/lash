@@ -139,6 +139,11 @@ pub struct RuntimeCommit {
     /// compare it atomically before cancellation-dependent publication.
     #[serde(skip)]
     pub interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
+    /// Exact pending closure authorization consumed atomically with a fresh
+    /// cancellation-dependent commit. Receipt replay is adjudicated first and
+    /// may consume only the same exact still-pending authorization.
+    #[serde(skip)]
+    pub turn_cancel_closure_authorization: Option<crate::TurnCancelClosureAuthorization>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins.

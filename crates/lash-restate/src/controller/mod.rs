@@ -578,6 +578,10 @@ impl<'ctx, C> EffectHost for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx> + Sync,
 {
+    fn turn_control_binding_id(&self) -> String {
+        "restate-await-events-v1".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

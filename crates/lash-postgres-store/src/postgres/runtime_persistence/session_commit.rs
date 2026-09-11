@@ -271,7 +271,9 @@ impl SessionCommitStore for PostgresSessionStore {
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
         ensure_session_not_deleted_tx(&mut tx, &commit.session_id).await?;
-        if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+        if commit.turn_cancel_closure_authorization.is_none()
+            && let Some(fence) = commit.session_execution_lease_fence.as_ref()
+        {
             ensure_session_execution_lease_tx(&mut tx, &commit.session_id, fence).await?;
         }
         // Read without a lock for early validation and receipt replay. Before
@@ -339,6 +341,56 @@ impl SessionCommitStore for PostgresSessionStore {
                     tx.commit().await.map_err(store_sqlx_error)?;
                     return Ok(replay.into_result());
                 }
+            }
+        }
+        if commit.interrupted_turn_cancel_intent.is_some()
+            && commit.turn_cancel_closure_authorization.is_none()
+        {
+            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                session_id: commit.session_id.clone(),
+                turn_id: commit
+                    .interrupted_turn_input_turn_id
+                    .clone()
+                    .unwrap_or_else(|| TurnId::from("missing-turn-id")),
+            });
+        }
+        if let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() {
+            let current_fence = commit
+                .session_execution_lease_fence
+                .as_ref()
+                .or(commit.release_session_execution_lease.as_ref())
+                .ok_or_else(|| StoreError::TurnCancelClosureAuthorizationMismatch {
+                    session_id: commit.session_id.clone(),
+                    turn_id: closure.turn_id().clone(),
+                })?;
+            ensure_session_execution_lease_tx(&mut tx, &commit.session_id, current_fence).await?;
+            if closure.session_id() != &commit.session_id
+                || commit.interrupted_turn_input_turn_id.as_ref() != Some(closure.turn_id())
+            {
+                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                    session_id: commit.session_id.clone(),
+                    turn_id: closure.turn_id().clone(),
+                });
+            }
+            let stored: Option<String> = sqlx::query_scalar(
+                "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+            )
+            .bind(closure.session_id().as_str())
+            .bind(closure.turn_id().as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            let expected = serde_json::to_string(closure).map_err(|error| {
+                StoreError::RecordEncodingFailed {
+                    record_kind: "TurnCancelClosureAuthorization".to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            if stored.as_deref() != Some(expected.as_str()) {
+                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                    session_id: closure.session_id().clone(),
+                    turn_id: closure.turn_id().clone(),
+                });
             }
         }
         if let (Some(turn_id), Some(observed)) = (
@@ -826,6 +878,16 @@ impl SessionCommitStore for PostgresSessionStore {
                     .map_err(store_sqlx_error)?;
                 }
             }
+        }
+        if let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() {
+            sqlx::query(
+                "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2",
+            )
+            .bind(closure.session_id().as_str())
+            .bind(closure.turn_id().as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         }
         // A plain-commit receipt writes three NULL append-identity columns.
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {

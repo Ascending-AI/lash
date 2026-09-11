@@ -18,6 +18,205 @@ impl TurnInputStore for PostgresSessionStore {
         ))
     }
 
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<(), StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        #[cfg(any(test, feature = "testing"))]
+        self.set_transaction_lease_clock_for_testing(&mut tx)
+            .await?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT binding_id FROM lash_turn_cancellation_bindings WHERE session_id = $1 FOR UPDATE",
+        )
+        .bind(session_id.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        match existing {
+            Some(expected) if expected != binding_id => {
+                return Err(StoreError::TurnCancelBindingMismatch {
+                    session_id: session_id.clone(),
+                    expected,
+                    presented: binding_id.to_string(),
+                });
+            }
+            Some(_) => {}
+            None => {
+                sqlx::query(
+                    "INSERT INTO lash_turn_cancellation_bindings (session_id, binding_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                )
+                .bind(session_id.as_str())
+                .bind(binding_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+                let selected: String = sqlx::query_scalar(
+                    "SELECT binding_id FROM lash_turn_cancellation_bindings WHERE session_id = $1",
+                )
+                .bind(session_id.as_str())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+                if selected != binding_id {
+                    return Err(StoreError::TurnCancelBindingMismatch {
+                        session_id: session_id.clone(),
+                        expected: selected,
+                        presented: binding_id.to_string(),
+                    });
+                }
+            }
+        }
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        authorization: &lash_core::TurnCancelClosureAuthorization,
+    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        authorization
+            .validate()
+            .map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "TurnCancelClosureAuthorization",
+                message: error.to_string(),
+            })?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        #[cfg(any(test, feature = "testing"))]
+        self.set_transaction_lease_clock_for_testing(&mut tx)
+            .await?;
+        ensure_session_not_deleted_tx(&mut tx, authorization.session_id()).await?;
+        ensure_session_execution_lease_tx(
+            &mut tx,
+            authorization.session_id(),
+            session_execution_lease,
+        )
+        .await?;
+        if authorization.authorizing_fencing_token() != session_execution_lease.fencing_token {
+            return Err(StoreError::SessionExecutionLeaseExpired {
+                session_id: authorization.session_id().clone(),
+            });
+        }
+        let selected: Option<String> = sqlx::query_scalar(
+            "SELECT binding_id FROM lash_turn_cancellation_bindings WHERE session_id = $1",
+        )
+        .bind(authorization.session_id().as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        if selected.as_deref() != Some(authorization.binding_id()) {
+            return Err(StoreError::TurnCancelBindingMismatch {
+                session_id: authorization.session_id().clone(),
+                expected: selected.unwrap_or_default(),
+                presented: authorization.binding_id().to_string(),
+            });
+        }
+        let encoded = serde_json::to_string(authorization).map_err(|error| {
+            StoreError::RecordEncodingFailed {
+                record_kind: "TurnCancelClosureAuthorization".to_string(),
+                message: error.to_string(),
+            }
+        })?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+        )
+        .bind(authorization.session_id().as_str())
+        .bind(authorization.turn_id().as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let outcome = match existing {
+            Some(existing) if existing == encoded => {
+                lash_core::TurnCancelClosureAuthorizationOutcome::AdoptedExact
+            }
+            Some(_) => {
+                return Err(StoreError::TurnCancelClosureConflict {
+                    session_id: authorization.session_id().clone(),
+                    turn_id: authorization.turn_id().clone(),
+                });
+            }
+            None => {
+                if load_turn_cancel_intent_snapshot_tx(
+                    &mut tx,
+                    authorization.session_id(),
+                    authorization.turn_id(),
+                )
+                .await?
+                    != *authorization.observed_intent()
+                {
+                    return Err(StoreError::TurnCancelIntentChanged {
+                        session_id: authorization.session_id().clone(),
+                        turn_id: authorization.turn_id().clone(),
+                    });
+                }
+                sqlx::query(
+                    "INSERT INTO lash_turn_cancel_closure_authorizations (session_id, turn_id, authorization_json) VALUES ($1, $2, $3)",
+                )
+                .bind(authorization.session_id().as_str())
+                .bind(authorization.turn_id().as_str())
+                .bind(encoded)
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+                lash_core::TurnCancelClosureAuthorizationOutcome::Authorized
+            }
+        };
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(outcome)
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+        self.validate_turn_cancellation_binding(session_id, session_execution_lease, binding_id)
+            .await?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 ORDER BY turn_id",
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        rows.into_iter()
+            .map(|encoded| {
+                serde_json::from_str(&encoded).map_err(|error| StoreError::StoredDataCorrupt {
+                    record_kind: "TurnCancelClosureAuthorization",
+                    message: error.to_string(),
+                })
+            })
+            .collect()
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 ORDER BY turn_id",
+        )
+        .bind(self.session_id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        rows.into_iter()
+            .map(|encoded| {
+                serde_json::from_str(&encoded).map_err(|error| StoreError::StoredDataCorrupt {
+                    record_kind: "TurnCancelClosureAuthorization",
+                    message: error.to_string(),
+                })
+            })
+            .collect()
+    }
+
     async fn turn_is_committed(
         &self,
         address: &lash_core::facade_support::TurnAddress,
@@ -611,6 +810,7 @@ impl TurnInputStore for PostgresSessionStore {
         turn_id: &lash_core::TurnId,
         observed: &lash_core::TurnCancelIntentSnapshot,
         decision: lash_core::TurnCancelRepairDecision,
+        closure: Option<&lash_core::TurnCancelClosureAuthorization>,
     ) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -619,6 +819,43 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        let closure_required = !matches!(observed, lash_core::TurnCancelIntentSnapshot::Absent)
+            || !matches!(
+                decision,
+                lash_core::TurnCancelRepairDecision::NoCancellationIntent
+            );
+        if closure_required != closure.is_some()
+            || closure.is_some_and(|authorization| {
+                authorization.session_id() != session_id || authorization.turn_id() != turn_id
+            })
+        {
+            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            });
+        }
+        if let Some(closure) = closure {
+            let stored: Option<String> = sqlx::query_scalar(
+                "SELECT authorization_json FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
+            )
+            .bind(session_id.as_str())
+            .bind(turn_id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+            let expected = serde_json::to_string(closure).map_err(|error| {
+                StoreError::RecordEncodingFailed {
+                    record_kind: "TurnCancelClosureAuthorization".to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            if stored.as_deref() != Some(expected.as_str()) {
+                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                });
+            }
+        }
         let repaired = repair_orphaned_active_turn_inputs_tx(
             &mut tx,
             session_id,
@@ -628,6 +865,16 @@ impl TurnInputStore for PostgresSessionStore {
             &decision,
         )
         .await?;
+        if closure.is_some() && matches!(repaired, lash_core::TurnCancelRepairResult::Applied(_)) {
+            sqlx::query(
+                "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2",
+            )
+            .bind(session_id.as_str())
+            .bind(turn_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(repaired)
     }

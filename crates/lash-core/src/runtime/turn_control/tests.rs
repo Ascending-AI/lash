@@ -1,6 +1,9 @@
 use super::*;
 use crate::runtime::InMemorySessionStore;
-use crate::{NativeEffectHost, TurnFinish, TurnInputStore, TurnStop};
+use crate::{
+    EffectHost, NativeEffectHost, SessionCommitStore, SessionExecutionLeaseStore, TurnFinish,
+    TurnInputStore, TurnStop,
+};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -309,8 +312,42 @@ async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() 
         .await
         .expect("request before commit");
     assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &crate::LeaseOwnerIdentity::opaque("turn-control-test", "turn-control-test:1"),
+            "turn-control-test-executor",
+            60_000,
+        )
+        .await
+        .expect("claim final-commit lane")
+        .acquired()
+        .expect("test lane is free");
+    let observed = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot cancellation intent before authorization");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(&address.session_id, &lease.fence(), &binding_id)
+        .await
+        .expect("bind turn cancellation authority");
+    let authorization = active
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            observed.clone(),
+            false,
+            None,
+        )
+        .expect("materialize closure authorization");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize closure");
     let winner = active
-        .settle_before_commit(host.as_ref(), false, None)
+        .settle_authorized(host.as_ref(), &authorization)
         .await
         .expect("settle cancellation gate")
         .expect("request won the gate");
@@ -329,12 +366,9 @@ async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() 
         .expect("stamp exact turn final operation");
     commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(winner);
-    commit.interrupted_turn_cancel_intent = Some(
-        store
-            .turn_cancel_request_intent(&address)
-            .await
-            .expect("snapshot cancellation intent before commit"),
-    );
+    commit.interrupted_turn_cancel_intent = Some(observed);
+    commit.turn_cancel_closure_authorization = Some(authorization);
+    commit.session_execution_lease_fence = Some(lease.fence());
     let committed = store
         .commit_runtime_state(commit)
         .await
@@ -616,6 +650,86 @@ async fn concurrent_completion_seal_vs_cancel_is_first_writer_wins() {
         }
         other => panic!("inconsistent gate race result: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn authorized_completion_adopts_a_legitimate_different_cancel_winner() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("authorized-different-winner");
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("admit session");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "authorized-different-winner",
+                "authorized-different-winner:incarnation",
+            ),
+            "authorized-different-winner:executor",
+            60_000,
+        )
+        .await
+        .expect("claim closure lane")
+        .acquired()
+        .expect("closure lane is free");
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("active control");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(&address.session_id, &lease.fence(), &binding_id)
+        .await
+        .expect("bind authority");
+    let authorization = active
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            TurnCancelIntentSnapshot::Absent,
+            false,
+            None,
+        )
+        .expect("assemble completion authorization");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize before promise resolution");
+
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let cancel = request(address.clone(), "different-winner");
+    let accepted = driver
+        .request_cancel(cancel.clone())
+        .await
+        .expect("cancel wins after completion was proposed");
+    assert!(matches!(accepted.outcome, TurnCancelOutcome::Requested(_)));
+
+    let settled = active
+        .settle_authorized(host.as_ref(), &authorization)
+        .await
+        .expect("adopt the promise's actual winner")
+        .expect("cancel is the actual winner");
+    assert_eq!(settled.request_id, cancel.request_id);
+    assert_eq!(
+        store
+            .repair_orphaned_active_turn_inputs(
+                &address.session_id,
+                &lease.fence(),
+                &address.turn_id,
+                &store
+                    .turn_cancel_request_intent(&address)
+                    .await
+                    .expect("refresh intent after the differing winner"),
+                crate::TurnCancelRepairDecision::CancellationWon(settled),
+                Some(&authorization),
+            )
+            .await
+            .expect("consume exact authorization under current fence"),
+        crate::TurnCancelRepairResult::Applied(crate::TurnCancelInputOutcome::default())
+    );
 }
 
 #[tokio::test]
@@ -1263,8 +1377,38 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
         ) if request.request_id == "after-step-base" && after > before
     ));
 
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &crate::LeaseOwnerIdentity::opaque("same-header-test", "same-header-test:1"),
+            "same-header-test-executor",
+            60_000,
+        )
+        .await
+        .expect("claim final-commit lane")
+        .acquired()
+        .expect("test lane is free");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(&address.session_id, &lease.fence(), &binding_id)
+        .await
+        .expect("bind turn cancellation authority");
+    let authorization = active
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            after_gate_acceptance.clone(),
+            false,
+            None,
+        )
+        .expect("materialize closure authorization");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize closure");
     let settled = active
-        .settle_before_commit(host.as_ref(), false, None)
+        .settle_authorized(host.as_ref(), &authorization)
         .await
         .expect("close and observe escalation before final commit")
         .expect("accepted escalation wins");
@@ -1297,6 +1441,8 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
     commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(settled);
     commit.interrupted_turn_cancel_intent = Some(before_gate_acceptance);
+    commit.turn_cancel_closure_authorization = Some(authorization);
+    commit.session_execution_lease_fence = Some(lease.fence());
     assert!(matches!(
         store.commit_runtime_state(commit.clone()).await,
         Err(crate::StoreError::TurnCancelIntentChanged { .. })

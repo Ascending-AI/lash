@@ -553,10 +553,13 @@ impl LashRuntime {
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
         let turn_control_resolver = match &turn_control_binding {
-            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            crate::TurnControlBinding::HostOwned {
+                resolver, peek: _, ..
+            }
             | crate::TurnControlBinding::RunScoped {
                 resolver,
                 durable_cancel_after_llm: _,
+                ..
             } => *resolver,
         };
         let turn_control = Arc::new(
@@ -694,12 +697,13 @@ impl LashRuntime {
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
         let (turn_cancel_peek_controller, observes_durable_cancel_after_llm) =
             match &turn_control_binding {
-                crate::TurnControlBinding::HostOwned { resolver: _, peek } => {
-                    (peek.controller(), false)
-                }
+                crate::TurnControlBinding::HostOwned {
+                    resolver: _, peek, ..
+                } => (peek.controller(), false),
                 crate::TurnControlBinding::RunScoped {
                     resolver: _,
                     durable_cancel_after_llm,
+                    ..
                 } => (
                     finish_scoped_effect_controller.controller(),
                     *durable_cancel_after_llm,

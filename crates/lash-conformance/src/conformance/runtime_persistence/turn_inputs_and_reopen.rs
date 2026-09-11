@@ -1060,6 +1060,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             &TurnId::from(dead_turn_id),
             &crate::TurnCancelIntentSnapshot::Absent,
             crate::TurnCancelRepairDecision::NoCancellationIntent,
+            None,
         )
         .await
         .expect("re-defer inputs pinned to the dead turn")
@@ -1098,6 +1099,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &TurnId::from(dead_turn_id),
                 &crate::TurnCancelIntentSnapshot::Absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
+                None,
             )
             .await
             .expect("repeat the turn-scoped repair")
@@ -1192,6 +1194,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &turn_id,
                 &crate::TurnCancelIntentSnapshot::Absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
+                None,
             )
             .await
             .expect("repair one discovered orphan");
@@ -1263,6 +1266,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             &TurnId::from("fig1573-superseded-turn"),
             &crate::TurnCancelIntentSnapshot::Absent,
             crate::TurnCancelRepairDecision::NoCancellationIntent,
+            None,
         )
         .await
         .expect_err("a superseded fence must be refused inside the repair");
@@ -1293,6 +1297,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &TurnId::from("fig1573-superseded-turn"),
                 &crate::TurnCancelIntentSnapshot::Absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
+                None,
             )
             .await
             .expect("the live holder repairs the row the superseded caller could not")

@@ -302,7 +302,9 @@ impl SessionCommitStore for Store {
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
-                    if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+                    if commit.turn_cancel_closure_authorization.is_none()
+                        && let Some(fence) = commit.session_execution_lease_fence.as_ref()
+                    {
                         ensure_session_execution_lease_conn(tx, &commit.session_id, fence, now)?;
                     }
                     let existing =
@@ -386,6 +388,59 @@ impl SessionCommitStore for Store {
                                 }
                                 return Ok(replay.into_result());
                             }
+                        }
+                    }
+                    if commit.interrupted_turn_cancel_intent.is_some()
+                        && commit.turn_cancel_closure_authorization.is_none()
+                    {
+                        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                            session_id: commit.session_id.clone(),
+                            turn_id: commit
+                                .interrupted_turn_input_turn_id
+                                .clone()
+                                .unwrap_or_else(|| lash_core::TurnId::from("missing-turn-id")),
+                        });
+                    }
+                    if let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() {
+                        let current_fence = commit
+                            .session_execution_lease_fence
+                            .as_ref()
+                            .or(commit.release_session_execution_lease.as_ref())
+                            .ok_or_else(|| {
+                                StoreError::TurnCancelClosureAuthorizationMismatch {
+                                    session_id: commit.session_id.clone(),
+                                    turn_id: closure.turn_id().clone(),
+                                }
+                            })?;
+                        ensure_session_execution_lease_conn(
+                            tx,
+                            &commit.session_id,
+                            current_fence,
+                            now,
+                        )?;
+                        if closure.session_id() != &commit.session_id
+                            || commit.interrupted_turn_input_turn_id.as_ref()
+                                != Some(closure.turn_id())
+                        {
+                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                                session_id: commit.session_id.clone(),
+                                turn_id: closure.turn_id().clone(),
+                            });
+                        }
+                        let stored = tx
+                            .query_row(
+                                "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                                params![closure.session_id().as_str(), closure.turn_id().as_str()],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        let expected = encode_json(closure)?;
+                        if stored.as_deref() != Some(expected.as_str()) {
+                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                                session_id: closure.session_id().clone(),
+                                turn_id: closure.turn_id().clone(),
+                            });
                         }
                     }
                     if let (Some(turn_id), Some(observed)) = (
@@ -1003,6 +1058,13 @@ impl SessionCommitStore for Store {
                                 .map_err(sqlite_error)?;
                             }
                         }
+                    }
+                    if let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() {
+                        tx.execute(
+                            "DELETE FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                            params![closure.session_id().as_str(), closure.turn_id().as_str()],
+                        )
+                        .map_err(sqlite_error)?;
                     }
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                         let _release_was_current =

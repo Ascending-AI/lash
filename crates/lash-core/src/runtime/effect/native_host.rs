@@ -18,6 +18,7 @@ use crate::RuntimeError;
 /// In-process deployment effect host.
 #[derive(Clone)]
 pub struct NativeEffectHost {
+    turn_control_binding_id: Arc<str>,
     controller: Arc<dyn RuntimeEffectController>,
     allow_process_lifetime_completion_keys: Arc<std::sync::atomic::AtomicBool>,
     /// Effects executing and groups open under each non-session scope, by
@@ -96,6 +97,7 @@ impl Drop for LiveScopeGuard {
 impl NativeEffectHost {
     pub fn new(controller: Arc<dyn RuntimeEffectController>) -> Self {
         Self {
+            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller,
             allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
@@ -229,6 +231,9 @@ impl AwaitEventResolver for NativeEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for NativeEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.turn_control_binding_id.to_string()
+    }
     fn turn_control_authority_owner(&self) -> super::TurnControlAuthorityOwner {
         super::TurnControlAuthorityOwner::SessionStore
     }

@@ -257,6 +257,18 @@ CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     PRIMARY KEY (session_id, turn_id)
 );
 
+CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (
+    session_id TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL CHECK (length(binding_id) > 0)
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancel_closure_authorizations (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    authorization_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id)
+);
+
 CREATE TABLE IF NOT EXISTS session_execution_leases (
     session_id               TEXT PRIMARY KEY,
     lease_owner_id           TEXT,
@@ -584,7 +596,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 /// rejected rather than admitting either half of the composed schema.
 /// Version 57 adds the cancellation-only await-event authority used by Native
 /// sessions without importing the unrelated effect journal.
-pub(crate) const SCHEMA_VERSION: i32 = 57;
+/// Version 58 persists the selected authority binding and exact pending closure
+/// authorization so lease takeover cannot forget or replace promise work.
+pub(crate) const SCHEMA_VERSION: i32 = 58;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

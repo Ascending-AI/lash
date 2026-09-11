@@ -33,6 +33,7 @@
 use lash_sansio::SessionId;
 mod namespace;
 mod process_key;
+mod turn_cancel_closure;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -325,7 +326,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 85 composes that contract with the monotonic turn-cancel intent revision
 // used by cancellation publication CAS. Component-84 stores are rejected rather
 // than admitting either half of the composed schema.
-const SCHEMA_VERSION: i32 = 85;
+// Version 86 adds the selected turn-control binding and non-overwritable exact
+// closure authorization. Component-85 stores cannot recover these obligations
+// across owner failure and are rejected rather than silently adopting them.
+const SCHEMA_VERSION: i32 = 86;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

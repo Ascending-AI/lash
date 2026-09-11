@@ -665,6 +665,10 @@ impl lash_core::AwaitEventResolver for RetirementFailsHost {
 
 #[async_trait::async_trait]
 impl EffectHost for RetirementFailsHost {
+    fn turn_control_binding_id(&self) -> String {
+        "retirement-fails-host".to_string()
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,

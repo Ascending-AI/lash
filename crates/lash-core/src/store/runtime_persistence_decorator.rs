@@ -165,6 +165,44 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().turn_cancel_request_intent(address).await
     }
 
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<(), StoreError> {
+        self.inner()
+            .validate_turn_cancellation_binding(session_id, session_execution_lease, binding_id)
+            .await
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        self.inner()
+            .authorize_turn_cancel_closure(session_execution_lease, authorization)
+            .await
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        self.inner()
+            .pending_turn_cancel_closures(session_id, session_execution_lease, binding_id)
+            .await
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        self.inner().pending_turn_cancel_closure_pins().await
+    }
+
     async fn reconcile_turn_cancel_winner(
         &self,
         address: &crate::TurnAddress,
@@ -285,6 +323,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
         decision: TurnCancelRepairDecision,
+        closure: Option<&crate::TurnCancelClosureAuthorization>,
     ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
         self.inner()
             .repair_orphaned_active_turn_inputs(
@@ -293,6 +332,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
                 turn_id,
                 observed,
                 decision,
+                closure,
             )
             .await
     }
@@ -682,6 +722,55 @@ where
         RuntimePersistenceDecorator::turn_cancel_request_intent(self, address).await
     }
 
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::validate_turn_cancellation_binding(
+            self,
+            session_id,
+            session_execution_lease,
+            binding_id,
+        )
+        .await
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        RuntimePersistenceDecorator::authorize_turn_cancel_closure(
+            self,
+            session_execution_lease,
+            authorization,
+        )
+        .await
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        RuntimePersistenceDecorator::pending_turn_cancel_closures(
+            self,
+            session_id,
+            session_execution_lease,
+            binding_id,
+        )
+        .await
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        RuntimePersistenceDecorator::pending_turn_cancel_closure_pins(self).await
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         input: crate::PendingTurnInputDraft,
@@ -802,6 +891,7 @@ where
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
         decision: TurnCancelRepairDecision,
+        closure: Option<&crate::TurnCancelClosureAuthorization>,
     ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
         RuntimePersistenceDecorator::repair_orphaned_active_turn_inputs(
             self,
@@ -810,6 +900,7 @@ where
             turn_id,
             observed,
             decision,
+            closure,
         )
         .await
     }

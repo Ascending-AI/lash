@@ -16,6 +16,335 @@ fn cancel_evidence(request: &crate::TurnCancelRequest) -> crate::TurnCancellatio
     }
 }
 
+const TURN_CANCEL_BINDING_ID: &str = "lash-conformance-turn-cancel-v1";
+
+fn closure_key(
+    address: &crate::TurnAddress,
+    wait: crate::AwaitEventWaitIdentity,
+    suffix: &str,
+) -> crate::AwaitEventKey {
+    crate::AwaitEventKey {
+        scope: address.execution_scope(),
+        wait,
+        key_id: format!("{}:{suffix}", address.turn_id),
+        signature: format!("conformance:{suffix}"),
+    }
+}
+
+async fn authorize_closure(
+    store: &Arc<dyn crate::RuntimePersistence>,
+    fence: &crate::SessionExecutionLeaseAuthority,
+    address: &crate::TurnAddress,
+    observed: crate::TurnCancelIntentSnapshot,
+    proposed: crate::TurnCancelClosureProposal,
+) -> crate::TurnCancelClosureAuthorization {
+    store
+        .validate_turn_cancellation_binding(&address.session_id, fence, TURN_CANCEL_BINDING_ID)
+        .await
+        .expect("bind cancellation authority under the current lease");
+    let authorization = closure_authorization(
+        address,
+        address.execution_scope(),
+        observed,
+        proposed,
+        fence,
+    );
+    store
+        .authorize_turn_cancel_closure(fence, &authorization)
+        .await
+        .expect("persist exact closure authorization");
+    authorization
+}
+
+fn closure_authorization(
+    address: &crate::TurnAddress,
+    admitted_scope: crate::ExecutionScope,
+    observed: crate::TurnCancelIntentSnapshot,
+    proposed: crate::TurnCancelClosureProposal,
+    fence: &crate::SessionExecutionLeaseAuthority,
+) -> crate::TurnCancelClosureAuthorization {
+    crate::TurnCancelClosureAuthorization::new(
+        address.clone(),
+        TURN_CANCEL_BINDING_ID,
+        admitted_scope,
+        closure_key(
+            address,
+            crate::AwaitEventWaitIdentity::TurnCancelGate,
+            "cancel",
+        ),
+        closure_key(
+            address,
+            crate::AwaitEventWaitIdentity::TurnCancelEscalation,
+            "escalation",
+        ),
+        closure_key(
+            address,
+            crate::AwaitEventWaitIdentity::TurnTerminal,
+            "terminal",
+        ),
+        proposed,
+        observed,
+        fence,
+    )
+    .expect("construct exact closure authorization")
+}
+
+/// The durable closure slot is non-overwritable, survives lease-generation
+/// changes, preserves its admitted physical scope, and can be consumed only by
+/// a current owner presenting the exact authorization.
+pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwritable(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-closure-authorization"),
+        "turn-cancel-closure-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let first = store
+        .try_claim_session_execution_lease(
+            &request.session_id,
+            &crate::LeaseOwnerIdentity::opaque("closure-first", "closure-first:incarnation"),
+            "closure-first:executor",
+            60_000,
+        )
+        .await
+        .expect("claim first closure lane")
+        .acquired()
+        .expect("first closure lane is free");
+    store
+        .validate_turn_cancellation_binding(
+            &request.session_id,
+            &first.fence(),
+            TURN_CANCEL_BINDING_ID,
+        )
+        .await
+        .expect("bind the first authority");
+    let turn = TurnId::from("turn-cancel-closure-authorization:first");
+    let address = crate::TurnAddress::new(&request.session_id, &turn);
+    let exact = closure_authorization(
+        &address,
+        crate::ExecutionScope::process("turn-cancel-shared-process"),
+        crate::TurnCancelIntentSnapshot::Absent,
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        &first.fence(),
+    );
+    assert_eq!(
+        store
+            .authorize_turn_cancel_closure(&first.fence(), &exact)
+            .await
+            .expect("authorize vacant slot"),
+        crate::TurnCancelClosureAuthorizationOutcome::Authorized
+    );
+    assert_eq!(
+        store
+            .authorize_turn_cancel_closure(&first.fence(), &exact)
+            .await
+            .expect("adopt exact retry"),
+        crate::TurnCancelClosureAuthorizationOutcome::AdoptedExact
+    );
+    let conflicting = closure_authorization(
+        &address,
+        address.execution_scope(),
+        crate::TurnCancelIntentSnapshot::Absent,
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        &first.fence(),
+    );
+    assert!(matches!(
+        store
+            .authorize_turn_cancel_closure(&first.fence(), &conflicting)
+            .await,
+        Err(crate::StoreError::TurnCancelClosureConflict { .. })
+    ));
+    assert_eq!(
+        store
+            .pending_turn_cancel_closures(
+                &request.session_id,
+                &first.fence(),
+                TURN_CANCEL_BINDING_ID,
+            )
+            .await
+            .expect("read exact pending authorization"),
+        vec![exact.clone()]
+    );
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("lifecycle sees the durable closure pin"),
+        vec![exact.clone()]
+    );
+    assert_eq!(
+        factory
+            .pending_turn_cancel_closure_pins(&request.session_id)
+            .await
+            .expect("factory lifecycle inspection sees the durable closure pin"),
+        vec![exact.clone()]
+    );
+    let delete_failure = factory
+        .delete_session(&request.session_id)
+        .await
+        .expect_err("session deletion must refuse a live closure pin");
+    assert!(matches!(
+        delete_failure.stop,
+        crate::MaintenanceStop::Failed(crate::StoreError::TurnCancelClosureLifecyclePinned {
+            ref session_id,
+            pending_count: 1,
+        }) if session_id == &request.session_id
+    ));
+    assert!(matches!(
+        store
+            .pending_turn_cancel_closures(
+                &request.session_id,
+                &first.fence(),
+                "different-turn-control-owner",
+            )
+            .await,
+        Err(crate::StoreError::TurnCancelBindingMismatch { .. })
+    ));
+
+    store
+        .release_session_execution_lease(&first.completion())
+        .await
+        .expect("release first owner");
+    let successor = store
+        .try_claim_session_execution_lease(
+            &request.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "closure-successor",
+                "closure-successor:incarnation",
+            ),
+            "closure-successor:executor",
+            60_000,
+        )
+        .await
+        .expect("claim successor closure lane")
+        .acquired()
+        .expect("successor closure lane is free");
+    assert_eq!(
+        store
+            .pending_turn_cancel_closures(
+                &request.session_id,
+                &successor.fence(),
+                TURN_CANCEL_BINDING_ID,
+            )
+            .await
+            .expect("successor adopts pending authorization"),
+        vec![exact.clone()]
+    );
+    let stale_state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..crate::RuntimeSessionState::new(request.policy.clone())
+    };
+    let (mut stale_commit, _) = crate::RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+        .with_operation(crate::OperationId::turn(
+            &request.session_id,
+            &turn,
+            "stale-closure-final",
+        ))
+        .expect("stamp stale closure commit operation");
+    stale_commit.interrupted_turn_input_turn_id = Some(turn.clone());
+    stale_commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
+    stale_commit.turn_cancel_closure_authorization = Some(exact.clone());
+    stale_commit.release_session_execution_lease = Some(first.completion());
+    assert!(matches!(
+        store.commit_runtime_state(stale_commit).await,
+        Err(crate::StoreError::SessionExecutionLeaseExpired { .. })
+            | Err(crate::StoreError::SessionExecutionLeaseRenewalRefused { .. })
+    ));
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("stale commit retains the exact closure pin"),
+        vec![exact.clone()]
+    );
+    store
+        .repair_orphaned_active_turn_inputs(
+            &request.session_id,
+            &successor.fence(),
+            &turn,
+            &crate::TurnCancelIntentSnapshot::Absent,
+            crate::TurnCancelRepairDecision::CancellationDidNotWin,
+            Some(&exact),
+        )
+        .await
+        .expect("current successor consumes exact authorization")
+        .into_applied()
+        .expect("absent intent remains stable");
+    assert!(
+        store
+            .pending_turn_cancel_closures(
+                &request.session_id,
+                &successor.fence(),
+                TURN_CANCEL_BINDING_ID,
+            )
+            .await
+            .expect("read drained closure slot")
+            .is_empty()
+    );
+    assert!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("lifecycle pin retires only with successful repair")
+            .is_empty()
+    );
+    assert!(
+        factory
+            .pending_turn_cancel_closure_pins(&request.session_id)
+            .await
+            .expect("factory lifecycle inspection sees the retired pin")
+            .is_empty()
+    );
+
+    let second_address = crate::TurnAddress::new(
+        &request.session_id,
+        TurnId::from("turn-cancel-closure-authorization:second"),
+    );
+    let stale = closure_authorization(
+        &second_address,
+        second_address.execution_scope(),
+        crate::TurnCancelIntentSnapshot::Absent,
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        &first.fence(),
+    );
+    assert!(matches!(
+        store
+            .authorize_turn_cancel_closure(&first.fence(), &stale)
+            .await,
+        Err(crate::StoreError::SessionExecutionLeaseExpired { .. })
+            | Err(crate::StoreError::SessionExecutionLeaseRenewalRefused { .. })
+    ));
+    let current = closure_authorization(
+        &second_address,
+        second_address.execution_scope(),
+        crate::TurnCancelIntentSnapshot::Absent,
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        &successor.fence(),
+    );
+    assert_eq!(
+        store
+            .authorize_turn_cancel_closure(&successor.fence(), &current)
+            .await
+            .expect("current successor authorizes after takeover"),
+        crate::TurnCancelClosureAuthorizationOutcome::Authorized
+    );
+    store
+        .repair_orphaned_active_turn_inputs(
+            &request.session_id,
+            &successor.fence(),
+            &second_address.turn_id,
+            &crate::TurnCancelIntentSnapshot::Absent,
+            crate::TurnCancelRepairDecision::CancellationDidNotWin,
+            Some(&current),
+        )
+        .await
+        .expect("consume successor authorization")
+        .into_applied()
+        .expect("successor intent remains absent");
+}
+
 /// Every persisted disposition survives the owner crash that separates cancel
 /// observation from repair. The reopened repair applies the requested policy
 /// only to the undelivered active-turn row, records its payload in the durable
@@ -95,6 +424,32 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
             .record_turn_cancel_request(cancel.clone())
             .await
             .expect("persist the disposition before the owner crashes");
+        let authorizing_lease = store
+            .try_claim_session_execution_lease(
+                &request.session_id,
+                &crate::LeaseOwnerIdentity::opaque(
+                    "turn-cancel-authorizer",
+                    format!("turn-cancel-authorizer:{suffix}"),
+                ),
+                "turn-cancel-authorizer-executor",
+                60_000,
+            )
+            .await
+            .expect("claim authorization lane")
+            .acquired()
+            .expect("authorization lane is free");
+        let observed_authorization = store
+            .turn_cancel_request_intent(&cancel.address)
+            .await
+            .expect("snapshot cancellation intent before authorization");
+        let closure_authorization = authorize_closure(
+            &store,
+            &authorizing_lease.fence(),
+            &cancel.address,
+            observed_authorization,
+            crate::TurnCancelClosureProposal::CancelRequested(cancel_evidence(&cancel)),
+        )
+        .await;
         if matches!(path, RepairPath::Commit) {
             let mut state = crate::RuntimeSessionState {
                 session_id: request.session_id.clone(),
@@ -116,11 +471,18 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     .await
                     .expect("snapshot cancellation intent before final commit"),
             );
+            commit.release_session_execution_lease = Some(authorizing_lease.completion());
+            commit.turn_cancel_closure_authorization = Some(closure_authorization.clone());
             let receipt = store
                 .commit_runtime_state(commit)
                 .await
                 .expect("cancel final commit");
             assert_eq!(receipt.turn_cancel_input_outcome.len(), 1);
+        } else {
+            store
+                .release_session_execution_lease(&authorizing_lease.completion())
+                .await
+                .expect("release authorizing owner before successor repair");
         }
         if matches!(path, RepairPath::CrashBeforeRepair) {
             drop(store);
@@ -178,6 +540,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     &turn_id,
                     &observed,
                     crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+                    Some(&closure_authorization),
                 )
                 .await
                 .expect("repair the dead turn")
@@ -257,6 +620,14 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                 .await
                 .expect("read intent without historical payload reconstruction");
             assert_eq!(intent.request(), Some(&cancel));
+            let later_authorization = authorize_closure(
+                &reopened,
+                &lease.fence(),
+                &cancel.address,
+                intent.clone(),
+                crate::TurnCancelClosureProposal::CancelRequested(cancel_evidence(&cancel)),
+            )
+            .await;
             let repaired = reopened
                 .repair_orphaned_active_turn_inputs(
                     &request.session_id,
@@ -264,6 +635,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     &turn_id,
                     &intent,
                     crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+                    Some(&later_authorization),
                 )
                 .await
                 .expect("repair later input from retained winner intent")
@@ -560,6 +932,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
                 &turn_id,
                 &stale_absent,
                 crate::TurnCancelRepairDecision::NoCancellationIntent,
+                None,
             )
             .await
             .expect("no-intent repair observes concurrent intent"),
@@ -575,6 +948,14 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         .turn_cancel_request_intent(&cancel.address)
         .await
         .expect("snapshot after-step intent before escalation");
+    let closure_authorization = authorize_closure(
+        &store,
+        &fence,
+        &cancel.address,
+        stale_after_step.clone(),
+        crate::TurnCancelClosureProposal::CancelRequested(cancel_evidence(&cancel)),
+    )
+    .await;
     let stronger_cancel = crate::TurnCancelRequest::new(
         cancel.address.clone(),
         "turn-cancel-intent-first:immediate",
@@ -593,6 +974,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
                 &turn_id,
                 &stale_after_step,
                 crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+                Some(&closure_authorization),
             )
             .await
             .expect("stale after-step repair observes immediate escalation"),
@@ -614,6 +996,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             &turn_id,
             &observed,
             crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&stronger_cancel)),
+            Some(&closure_authorization),
         )
         .await
         .expect("apply authoritative gate winner")
@@ -651,6 +1034,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             &turn_id,
             &crate::TurnCancelIntentSnapshot::Absent,
             crate::TurnCancelRepairDecision::NoCancellationIntent,
+            None,
         )
         .await
         .expect("ordinary repair before request")
@@ -671,17 +1055,27 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         .record_turn_cancel_request(cancel.clone())
         .await
         .expect("persist request after repair");
+    let late_observed = store
+        .turn_cancel_request_intent(&cancel.address)
+        .await
+        .expect("snapshot late cancellation intent");
+    let late_authorization = authorize_closure(
+        &store,
+        &fence,
+        &cancel.address,
+        late_observed.clone(),
+        crate::TurnCancelClosureProposal::CancelRequested(cancel_evidence(&cancel)),
+    )
+    .await;
     assert!(
         store
             .repair_orphaned_active_turn_inputs(
                 &request.session_id,
                 &fence,
                 &turn_id,
-                &store
-                    .turn_cancel_request_intent(&cancel.address)
-                    .await
-                    .expect("snapshot late cancellation intent"),
+                &late_observed,
                 crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
+                Some(&late_authorization),
             )
             .await
             .expect("late winner sees no targeted input")
@@ -725,16 +1119,26 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         .await
         .expect("persist losing drop intent");
     let fence = lease(&store, &request.session_id, "completion-owner").await;
+    let completion_observed = store
+        .turn_cancel_request_intent(&stale_drop.address)
+        .await
+        .expect("snapshot losing cancellation intent");
+    let completion_authorization = authorize_closure(
+        &store,
+        &fence,
+        &stale_drop.address,
+        completion_observed.clone(),
+        crate::TurnCancelClosureProposal::CompletionSealed,
+    )
+    .await;
     let repaired = store
         .repair_orphaned_active_turn_inputs(
             &request.session_id,
             &fence,
             &turn_id,
-            &store
-                .turn_cancel_request_intent(&stale_drop.address)
-                .await
-                .expect("snapshot losing cancellation intent"),
+            &completion_observed,
             crate::TurnCancelRepairDecision::CancellationDidNotWin,
+            Some(&completion_authorization),
         )
         .await
         .expect("apply completion gate decision")
@@ -797,6 +1201,28 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         .turn_cancel_request_intent(&address)
         .await
         .expect("snapshot after-step intent");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &request.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "turn-cancel-final-cas-owner",
+                "turn-cancel-final-cas-owner:incarnation",
+            ),
+            "turn-cancel-final-cas-executor",
+            60_000,
+        )
+        .await
+        .expect("claim final CAS lane")
+        .acquired()
+        .expect("final CAS lane is free");
+    let closure_authorization = authorize_closure(
+        &store,
+        &lease.fence(),
+        &address,
+        stale.clone(),
+        crate::TurnCancelClosureProposal::CancelRequested(cancel_evidence(&after_step)),
+    )
+    .await;
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
@@ -813,6 +1239,8 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&after_step));
     commit.interrupted_turn_cancel_intent = Some(stale);
+    commit.release_session_execution_lease = Some(lease.completion());
+    commit.turn_cancel_closure_authorization = Some(closure_authorization);
 
     let immediate =
         crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:immediate", None)

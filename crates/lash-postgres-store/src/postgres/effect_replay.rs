@@ -18,6 +18,7 @@
 
 use crate::*;
 use lash_sansio::SessionId;
+use sha2::{Digest, Sha256};
 
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
@@ -52,6 +53,7 @@ pub struct PostgresEffectReplayOptions {
 #[derive(Clone)]
 pub struct PostgresEffectHost {
     inner: Arc<PostgresEffectReplay>,
+    turn_control_binding_id: Arc<str>,
 }
 
 #[derive(Clone)]
@@ -71,7 +73,11 @@ impl effect_replay_driver::StoreReplayAdapter for PostgresEffectHost {
     }
 }
 
-impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {}
+impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.turn_control_binding_id.to_string()
+    }
+}
 
 impl effect_replay_driver::StoreReplayAdapter for PostgresRuntimeEffectController {
     type Persistence = PostgresEffectReplayRowStore;
@@ -108,6 +114,10 @@ impl PostgresEffectHost {
     ) -> Self {
         Self {
             inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
+            turn_control_binding_id: Arc::from(format!(
+                "postgres:{}",
+                hex_digest(&storage.await_event_signing_secret)
+            )),
         }
     }
 
@@ -138,6 +148,10 @@ impl PostgresEffectHost {
     pub fn group_drain(&self) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::clone(&self.inner).into_group_drain()
     }
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 impl PostgresRuntimeEffectController {

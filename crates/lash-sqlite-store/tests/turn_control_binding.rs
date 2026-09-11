@@ -86,6 +86,7 @@ async fn turn_control_durable_journaled_binding_remains_run_scoped() {
         TurnControlBinding::RunScoped {
             resolver,
             durable_cancel_after_llm,
+            ..
         } => {
             assert!(durable_cancel_after_llm);
             let key = resolver

@@ -27,6 +27,10 @@
     "verdict": "deliberately-excluded",
     "reason": "TurnInput includes host-facing content and attachments and has no bounded JsonSchema durability contract yet."
   },
+  "lash_turn_cancel_closure_authorizations.authorization_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "TurnCancelClosureAuthorization is an exact operation record covered by the reject-and-recreate component-86 boundary; it is validated structurally and against indexed session, turn, binding, fence, scope, keys, and intent before use."
+  },
   "lash_processes.record_json": {
     "verdict": "deliberately-excluded",
     "reason": "ProcessRecord spans the durable process model; enrolling its nested specs, waits, provenance, and status is a separate process-schema cutover."

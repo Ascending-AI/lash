@@ -904,6 +904,20 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         Ok(Some(store as Arc<dyn RuntimePersistence>))
     }
 
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+        let Some(store) = self
+            .open_existing_store_by_id(session_id)
+            .await
+            .map_err(StoreError::Backend)?
+        else {
+            return Ok(Vec::new());
+        };
+        store.pending_turn_cancel_closure_pins().await
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
@@ -1265,6 +1279,25 @@ async fn delete_session_from_catalog(
     conn.write_flow(move |tx| {
         let mut report = lash_core::SessionBlobReclaimReport::default();
         let outcome: Result<lash_core::SessionBlobReclaimReport, lash_core::StoreError> = (|| {
+            let pending_count = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM turn_cancel_closure_authorizations WHERE session_id = ?1",
+                    params![session_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(sqlite_error)?;
+            let pending_count = usize::try_from(pending_count).map_err(|_| {
+                lash_core::StoreError::StoredDataCorrupt {
+                    record_kind: "TurnCancelClosureAuthorization",
+                    message: "negative pending closure count".to_string(),
+                }
+            })?;
+            if pending_count != 0 {
+                return Err(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
+                    session_id: session_id.clone(),
+                    pending_count,
+                });
+            }
             let existed = tx
                 .query_row(
                     "SELECT 1 FROM session_meta WHERE session_id = ?1
@@ -1420,6 +1453,11 @@ async fn delete_session_from_catalog(
             for table in [
                 "pending_turn_inputs",
                 "turn_cancel_requests",
+                // Administration revokes the session's effect authority before
+                // entering store deletion. Only then may the pinned closure
+                // obligation and its selected-owner identity be retired.
+                "turn_cancel_closure_authorizations",
+                "turn_cancellation_bindings",
                 "session_execution_leases",
                 "session_meta",
             ] {

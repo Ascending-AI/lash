@@ -27,7 +27,7 @@ pub use control::{
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
     ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TurnControlBinding, await_event_scope_not_retirable,
+    ToolIntentSubmissionGuard, await_event_scope_not_retirable,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,
@@ -37,7 +37,8 @@ pub use controller_error::RuntimeEffectControllerError;
 pub use native_controller::NativeRuntimeEffectController;
 pub use trigger::TriggerLocalExecution;
 pub use turn_control_authority::{
-    TurnCancellationAuthority, TurnControlAuthorityOwner, TurnControlParticipation,
+    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
+    TurnControlBinding, TurnControlParticipation,
 };
 
 use crate::LlmRequest as CoreLlmRequest;

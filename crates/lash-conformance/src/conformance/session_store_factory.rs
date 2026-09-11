@@ -55,6 +55,7 @@ pub async fn session_store_factory<F>(
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
+    turn_cancel::turn_cancel_closure_authorization_is_fenced_and_non_overwritable(make()).await;
     turn_cancel::turn_cancel_disposition_crash_matrix(make()).await;
     turn_cancel::turn_cancel_request_escalation_upgrades_the_durable_record(make()).await;
     turn_cancel::turn_cancel_repair_orders_intent_and_ordinary_redefer(make()).await;

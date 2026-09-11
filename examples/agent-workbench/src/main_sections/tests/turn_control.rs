@@ -1058,10 +1058,9 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
         .await
         .expect("read durable request")
         .expect("durable request recorded");
-    assert_eq!(durable.request.mode, lash::TurnCancelMode::Immediate);
-    assert_eq!(
-        durable.request.reason.as_deref(),
-        Some("workbench Abort control")
-    );
+    assert_eq!(durable.request.mode, lash::TurnCancelMode::AfterStep);
+    assert_eq!(durable.request.request_id, "host-stop");
+    assert_eq!(durable.request.origin.as_deref(), Some("user"));
+    assert_eq!(durable.request.reason, None);
     let _ = std::fs::remove_dir_all(data_dir);
 }

@@ -156,6 +156,10 @@ impl RuntimeEffectController for YieldBeforeCancelWatchController {
 }
 
 impl EffectHost for YieldBeforeCancelWatchController {
+    fn turn_control_binding_id(&self) -> String {
+        "yield-before-cancel-watch-controller".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

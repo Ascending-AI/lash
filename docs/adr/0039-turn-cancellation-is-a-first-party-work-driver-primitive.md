@@ -25,6 +25,27 @@ SQLite catalog or PostgreSQL database therefore recovers the same cancellation k
 durable effect host such as Restate retains ownership of its own turn-control authority and its
 journaled observations.
 
+Closing those promises is a crash-completable protocol. Before resolving either gate, the current
+session-execution holder persists one exact, non-overwritable closure authorization for the turn.
+It records the chosen control binding, admitted physical execution scope, the three reserved keys,
+the proposed base terminal, the observed cancellation-intent revision, and the authorizing lease
+generation. A vacant slot accepts the operation, an identical retry adopts it, and a different
+operation conflicts. Lease renewal, release, and takeover preserve the slot. A successor may finish
+the same idempotent promise resolutions, including adopting a legitimate different first writer,
+but only a current lease fence may apply the resulting input disposition, commit the turn, publish
+terminal evidence, or consume the slot. Promise settlement and the store mutation are deliberately
+separate authority domains; the durable authorization bridges a crash between them without becoming
+a second winner record.
+
+Every store-backed activation validates the selected binding and drains pending closure operations
+before accepting input, draining commands, invoking a model, or doing follow-on work. The drain
+settles the exact reserved gates, derives disposition from their authenticated winner, and consumes
+the authorization atomically with input repair or final commit. An intent CAS refusal retains the
+authorization and retries only the refreshed predicate; it never reruns model calls, hooks, effect
+construction, or usage staging. Unknown or revoked promise evidence is a typed failure and leaves the
+authorization pinned. A missing cancellation intent does not justify sealing a future gate: repair
+rechecks absence transactionally and performs only the ordinary input deferral.
+
 Who cancelled is host-domain data: Lash records an opaque host-supplied origin and never interprets
 it, mirroring ADR 0026's treatment of host-supplied capability data. Process-local token entry
 points synthesize `internal:<turn_id>` request evidence because they do not traverse the addressed
@@ -61,6 +82,13 @@ engine-native keyed-promise observation; Restate implements that observation
 through `LashDurableWaitWorkflow` ingress with bounded retry, not its Admin API.
 The inline registry drains live gate/terminal entries after terminal publication
 and keeps only bounded recent completion and session-revocation caches.
+
+Vacuum does not remove pending closure authorizations. Session deletion and Process-scope retirement
+inspect the durable session-to-scope pins first and refuse destructive cleanup while any matching
+operation remains. First-party memory, SQLite, and PostgreSQL factories expose that inspection at the
+lifecycle boundary; custom factories must implement it and fail closed when they cannot. Normal
+activation owns the drain. Administrative cleanup cannot erase an authorization merely because its
+original lease owner disappeared.
 
 We rejected the store as a *coordination* mechanism for cancellation — a lease
 marker, or a row that a waiter polls — because that adds store coordination,

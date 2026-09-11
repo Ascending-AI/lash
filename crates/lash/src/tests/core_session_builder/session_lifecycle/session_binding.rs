@@ -28,6 +28,10 @@ impl lash_core::AwaitEventResolver for FailOnceRetirementHost {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for FailOnceRetirementHost {
+    fn turn_control_binding_id(&self) -> String {
+        "fail-once-retirement-host".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

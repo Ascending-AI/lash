@@ -266,6 +266,146 @@ fn in_memory_process_env_store() -> Arc<dyn lash_core::ProcessExecutionEnvStore>
 }
 
 #[tokio::test]
+async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<()> {
+    let registry: Arc<dyn lash_core::ProcessRegistry> =
+        Arc::new(TestLocalProcessRegistry::default());
+    let core = process_test_core(
+        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+        Arc::clone(&registry),
+        in_memory_process_env_store(),
+    )?;
+    let process_id = ProcessId::from("process-prune-turn-cancel-closure-pin");
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                process_id.clone(),
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_identity(lash_core::ProcessIdentity::new("test")),
+        )
+        .await?;
+    registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await?;
+
+    let session_id = lash_core::SessionId::from("process-prune-closure-session");
+    let factory = core
+        .store_factory
+        .as_ref()
+        .expect("process test core has a session-store factory");
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await?;
+    let lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &lash_core::LeaseOwnerIdentity::opaque(
+                "process-prune-closure-owner",
+                "process-prune-closure-owner:incarnation",
+            ),
+            "process-prune-closure-executor",
+            60_000,
+        )
+        .await?
+        .acquired()
+        .expect("fresh session lane is available");
+    let authority = store
+        .turn_cancellation_authority()
+        .expect("factory-created in-memory store exposes its cancellation authority");
+    store
+        .validate_turn_cancellation_binding(&session_id, &lease.fence(), authority.binding_id())
+        .await?;
+    let turn_id = lash_core::TurnId::from("process-prune-closure-turn");
+    let address = lash_core::facade_support::TurnAddress::new(&session_id, &turn_id);
+    let resolver = authority.resolver();
+    let cancel_key = resolver
+        .await_event_key(
+            &address.execution_scope(),
+            lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+        )
+        .await?;
+    let escalation_key = resolver
+        .await_event_key(
+            &address.execution_scope(),
+            lash_core::AwaitEventWaitIdentity::TurnCancelEscalation,
+        )
+        .await?;
+    let terminal_key = resolver
+        .await_event_key(
+            &address.execution_scope(),
+            lash_core::AwaitEventWaitIdentity::TurnTerminal,
+        )
+        .await?;
+    let authorization = lash_core::TurnCancelClosureAuthorization::new(
+        address,
+        authority.binding_id(),
+        lash_core::ExecutionScope::process(process_id.clone()),
+        cancel_key,
+        escalation_key,
+        terminal_key,
+        lash_core::TurnCancelClosureProposal::CompletionSealed,
+        lash_core::TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )?;
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await?;
+
+    let refusal = core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .expect_err("a Process-scoped closure pins its process journal");
+    assert!(matches!(
+        refusal,
+        crate::EmbedError::Store(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
+            ref session_id,
+            pending_count: 1,
+        }) if session_id == "process-prune-closure-session"
+    ));
+    assert!(
+        registry.get_process(&process_id).await?.is_some(),
+        "the refused prune retains the terminal process and its journal"
+    );
+
+    store
+        .repair_orphaned_active_turn_inputs(
+            &session_id,
+            &lease.fence(),
+            &turn_id,
+            &lash_core::TurnCancelIntentSnapshot::Absent,
+            lash_core::TurnCancelRepairDecision::CancellationDidNotWin,
+            Some(&authorization),
+        )
+        .await?
+        .into_applied()
+        .expect("the exact current owner consumes the closure authorization");
+    let report = core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
+    assert_eq!(report.pruned_processes, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()> {
     let dir = tempfile::tempdir().expect("sqlite facade prune tempdir");
     let trigger_store: Arc<dyn lash_core::TriggerStore> = Arc::new(

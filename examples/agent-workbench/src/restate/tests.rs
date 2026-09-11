@@ -594,6 +594,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
         lash::runtime::TurnControlBinding::HostOwned {
             resolver: _,
             peek: _,
+            ..
         }
     ));
     let durable_scoped = durable_host.scoped(scope).expect("durable scope");
@@ -605,6 +606,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
         lash::runtime::TurnControlBinding::RunScoped {
             resolver: _,
             durable_cancel_after_llm: true,
+            ..
         }
     ));
 

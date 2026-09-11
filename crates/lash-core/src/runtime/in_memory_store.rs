@@ -37,7 +37,9 @@ mod testing_access;
 #[cfg(any(test, feature = "testing"))]
 pub use testing_access::RawSessionExecutionLeaseRow;
 mod claim_hold;
+mod turn_cancel_closure;
 mod turn_input;
+mod warnings;
 use claim_hold::ClaimHold;
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
@@ -122,6 +124,10 @@ pub(crate) struct AttachmentWriteClaim {
 
 pub struct InMemorySessionStore {
     clock: Arc<dyn crate::Clock>,
+    /// Factory-lifetime authority for the reserved turn-cancellation promises.
+    /// Factory-created stores expose the same resolver and binding identity on
+    /// reopen. Standalone stores leave authority with their configured host.
+    turn_cancellation_authority: Option<crate::TurnCancellationAuthority>,
     /// Serializes every operation whose correctness depends on observing the
     /// session lease and mutating fenced runtime state atomically. Component
     /// mutexes still guard their data; this mutex supplies the transaction
@@ -161,6 +167,9 @@ pub struct InMemorySessionStore {
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
     session_execution_leases: Mutex<HashMap<SessionId, InMemorySessionExecutionLease>>,
+    turn_cancellation_binding_id: Mutex<Option<String>>,
+    turn_cancel_closure_authorizations:
+        Mutex<HashMap<TurnId, crate::TurnCancelClosureAuthorization>>,
     queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     queued_work_next_seq: Mutex<u64>,
     /// Receiver-side sender allocation floor. This is a redelivery fence, not
@@ -233,21 +242,9 @@ struct InMemoryTurnCancelRequest {
     intent_revision: u64,
 }
 
-fn warn_process_owner_death_degraded(path: &'static str) {
-    static WARN: std::sync::Once = std::sync::Once::new();
-    WARN.call_once(|| {
-        tracing::warn!(
-            store = "memory",
-            path,
-            consequence = "process-owned uncommitted intents are never reclaimed",
-            "in-memory attachment GC cannot prove process-owner death"
-        )
-    });
-}
-
 impl InMemorySessionStore {
     pub fn new() -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::new");
+        warnings::process_owner_death_degraded("InMemorySessionStore::new");
         Self::with_clock(Arc::new(crate::SystemClock))
     }
 
@@ -259,9 +256,10 @@ impl InMemorySessionStore {
     /// hide malformed durable rows.
     ///
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::with_clock");
+        warnings::process_owner_death_degraded("InMemorySessionStore::with_clock");
         Self::with_shared_history(
             clock,
+            None,
             Arc::new(Mutex::new(())),
             Arc::new(Mutex::new(crate::SessionGraph::default())),
             Arc::new(Mutex::new(HashMap::new())),
@@ -280,6 +278,7 @@ impl InMemorySessionStore {
     #[allow(clippy::too_many_arguments)]
     fn with_shared_history(
         clock: Arc<dyn crate::Clock>,
+        turn_cancellation_authority: Option<crate::TurnCancellationAuthority>,
         write_transaction: Arc<Mutex<()>>,
         global_session_graph: Arc<Mutex<crate::SessionGraph>>,
         global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
@@ -293,9 +292,10 @@ impl InMemorySessionStore {
         attachment_condemnations: SharedAttachmentCondemnations,
         attachment_manifest: SharedAttachmentManifest,
     ) -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::with_shared_history");
+        warnings::process_owner_death_degraded("InMemorySessionStore::with_shared_history");
         Self {
             clock,
+            turn_cancellation_authority,
             write_transaction,
             bound_session_id: Mutex::new(None),
             session_head_meta: Mutex::new(None),
@@ -317,6 +317,8 @@ impl InMemorySessionStore {
             runtime_commit_count: Mutex::new(0),
             runtime_turn_commits: Mutex::new(std::collections::HashMap::new()),
             session_execution_leases: Mutex::new(HashMap::new()),
+            turn_cancellation_binding_id: Mutex::new(None),
+            turn_cancel_closure_authorizations: Mutex::new(HashMap::new()),
             queued_work: Mutex::new(Vec::new()),
             queued_work_next_seq: Mutex::new(0),
             wake_redelivery_fences: Mutex::new(HashMap::new()),
@@ -866,7 +868,7 @@ impl InMemorySessionStore {
 
 impl Default for InMemorySessionStore {
     fn default() -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::default");
+        warnings::process_owner_death_degraded("InMemorySessionStore::default");
         Self::new()
     }
 }
@@ -1035,11 +1037,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.ensure_session_not_deleted(&session_id)?;
-        if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
-            // This check-then-act read is atomic under the coarse write lock;
-            // that serialization is intentional for the development backend.
-            self.verify_session_execution_lease(&session_id, fence, transaction_now)?;
-        }
+        turn_cancel_closure::verify_pre_replay_fence(self, commit, transaction_now)?;
         #[cfg(any(test, feature = "testing"))]
         if let Some(error) = self.fail_next_runtime_commit.lock_recover().take() {
             return Err(error);
@@ -1094,6 +1092,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
             return Ok(replay.into_result());
         }
+        turn_cancel_closure::validate_after_receipt_miss(self, commit, transaction_now)?;
         if let (Some(turn_id), Some(observed)) = (
             commit.interrupted_turn_input_turn_id.as_ref(),
             commit.interrupted_turn_cancel_intent.as_ref(),
@@ -1599,6 +1598,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
         }
         drop(runtime_turn_commits);
+        turn_cancel_closure::consume(self, commit);
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 self.release_session_execution_lease_in_memory(completion, false);

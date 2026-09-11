@@ -30,8 +30,8 @@ pub use executor::{
     RuntimeEffectControllerError, RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor,
     RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
-    TurnCancellationAuthority, TurnControlAuthorityOwner, TurnControlBinding,
-    TurnControlParticipation,
+    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
+    TurnControlBinding, TurnControlParticipation,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,
@@ -134,6 +134,7 @@ mod tests {
             crate::TurnControlBinding::RunScoped {
                 resolver: _,
                 durable_cancel_after_llm: true,
+                ..
             }
         ));
 
@@ -150,6 +151,7 @@ mod tests {
                 crate::TurnControlBinding::HostOwned {
                     resolver: _,
                     peek: _,
+                    ..
                 }
             ),
             "a local native host must construct HostOwned turn control"

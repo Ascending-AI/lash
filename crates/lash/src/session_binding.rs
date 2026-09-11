@@ -12,6 +12,36 @@ use std::time::Instant;
 struct StoreDelegatedTurnControlHost {
     owner: Arc<dyn EffectHost>,
     authority: lash_core::TurnCancellationAuthority,
+    peek_controller: Arc<StoreDelegatedTurnControlPeekController>,
+}
+
+struct StoreDelegatedTurnControlPeekController {
+    resolver: Arc<dyn lash_core::AwaitEventResolver>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for StoreDelegatedTurnControlPeekController {}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for StoreDelegatedTurnControlPeekController {
+    async fn execute_effect(
+        &self,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        let lash_core::RuntimeEffectCommand::PeekAwaitEvent { key } = envelope.command else {
+            return Err(lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::TurnControlPeekOutcome,
+                "the store-delegated turn-control peek controller received a non-peek effect",
+            ));
+        };
+        let resolution = self
+            .resolver
+            .peek_await_event(&key)
+            .await
+            .map_err(lash_core::RuntimeEffectControllerError::from)?;
+        Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent { resolution })
+    }
 }
 
 impl StoreDelegatedTurnControlHost {
@@ -112,6 +142,9 @@ impl lash_core::AwaitEventResolver for StoreDelegatedTurnControlHost {
 
 #[async_trait::async_trait]
 impl EffectHost for StoreDelegatedTurnControlHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.authority.binding_id().to_string()
+    }
     fn turn_attach(&self) -> Option<Arc<dyn lash_core::facade_support::TurnAttach>> {
         self.owner.turn_attach()
     }
@@ -139,8 +172,13 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         scoped: &'a lash_core::ScopedEffectController<'_>,
     ) -> Result<lash_core::TurnControlBinding<'a>, lash_core::RuntimeError> {
         Ok(lash_core::TurnControlBinding::HostOwned {
+            binding_id: self.authority.binding_id().to_string(),
             resolver: self,
-            peek: self.owner.scoped(scoped.execution_scope().clone())?,
+            peek: lash_core::ScopedEffectController::shared(
+                Arc::clone(&self.peek_controller) as Arc<dyn lash_core::RuntimeEffectController>,
+                scoped.execution_scope().clone(),
+            )?,
+            turn_attach: lash_core::TurnControlAttachment::Resolver(self),
         })
     }
 
@@ -196,24 +234,29 @@ impl BoundSession {
         process: Option<ProcessWorkWiring>,
         queued: Arc<dyn QueuedWorkSubstrate>,
         catalog: Option<Arc<dyn SessionStoreFactory>>,
-    ) -> Self {
+    ) -> Result<Self, lash_core::RuntimeError> {
         let configured_effect_host = Arc::clone(&env.core.control.effect_host);
         let effect_host = if configured_effect_host.turn_control_authority_owner()
             == lash_core::TurnControlAuthorityOwner::SessionStore
         {
-            store
-                .turn_cancellation_authority()
-                .map(|authority| {
-                    Arc::new(StoreDelegatedTurnControlHost {
-                        owner: Arc::clone(&configured_effect_host),
-                        authority,
-                    }) as Arc<dyn EffectHost>
-                })
-                .unwrap_or(configured_effect_host)
+            let authority = store.turn_cancellation_authority().ok_or_else(|| {
+                lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::InvalidTurnCancelRequest,
+                    "the configured effect host delegates turn cancellation to a session store that exposes no recoverable authority",
+                )
+            })?;
+            let peek_controller = Arc::new(StoreDelegatedTurnControlPeekController {
+                resolver: authority.resolver(),
+            });
+            Arc::new(StoreDelegatedTurnControlHost {
+                owner: Arc::clone(&configured_effect_host),
+                authority,
+                peek_controller,
+            }) as Arc<dyn EffectHost>
         } else {
             configured_effect_host
         };
-        Self {
+        Ok(Self {
             session_id,
             store,
             effect_host,
@@ -224,7 +267,7 @@ impl BoundSession {
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             catalog,
-        }
+        })
     }
 
     pub(crate) fn session_id(&self) -> &SessionId {

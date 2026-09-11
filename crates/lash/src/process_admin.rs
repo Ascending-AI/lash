@@ -614,6 +614,37 @@ impl Processes {
         let prunable = registry
             .prunable_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await?;
+        if let Some(factory) = self.core.store_factory.as_ref() {
+            let prunable_ids = prunable.iter().collect::<std::collections::BTreeSet<_>>();
+            let sessions = factory
+                .list_sessions(&lash_core::SessionListFilter {
+                    deleted: Some(false),
+                    ..lash_core::SessionListFilter::default()
+                })
+                .await?;
+            for session in sessions {
+                let matching = factory
+                    .pending_turn_cancel_closure_pins(&session.session_id)
+                    .await?
+                    .into_iter()
+                    .filter(|authorization| {
+                        matches!(
+                            authorization.admitted_scope(),
+                            lash_core::ExecutionScope::Process {
+                                process_id: admitted
+                            } if prunable_ids.contains(admitted)
+                        )
+                    })
+                    .count();
+                if matching != 0 {
+                    return Err(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
+                        session_id: session.session_id,
+                        pending_count: matching,
+                    }
+                    .into());
+                }
+            }
+        }
         for process_id in prunable {
             // The process journal and the worker's trigger-delivery reconcile
             // scope for the same process: that runtime operation exists only

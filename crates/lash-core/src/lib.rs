@@ -458,6 +458,9 @@ pub mod facade_support {
     pub use crate::runtime::TurnAddress;
     pub use crate::runtime::TurnAttach;
     pub use crate::runtime::TurnCancelAffectedInput;
+    pub use crate::runtime::TurnCancelClosureAuthorization;
+    pub use crate::runtime::TurnCancelClosureAuthorizationOutcome;
+    pub use crate::runtime::TurnCancelClosureProposal;
     pub use crate::runtime::TurnCancelDisposition;
     pub use crate::runtime::TurnCancelInputOutcome;
     pub use crate::runtime::TurnCancelIntentSnapshot;
@@ -468,6 +471,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelRequestRecord;
     pub use crate::runtime::TurnCancellationAuthority;
     pub use crate::runtime::TurnCancellationEvidence;
+    pub use crate::runtime::TurnControlAttachment;
     pub use crate::runtime::TurnControlAuthorityOwner;
     pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
@@ -1176,18 +1180,20 @@ pub use runtime::{
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget,
     StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
-    TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,
-    TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint, TurnCancelRequestRecord,
-    TurnCancellationAuthority, TurnContext, TurnControlAuthorityOwner, TurnControlBinding,
-    TurnControlParticipation, TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, ensure_process_lease_schema_version,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelDisposition,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
+    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation, TurnEvent,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
+    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
+    TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, UnreportedLedgerAttempt,
+    UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
+    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork,
+    WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
+    ensure_process_lease_schema_version,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,

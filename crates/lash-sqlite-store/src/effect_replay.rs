@@ -58,6 +58,7 @@ pub struct SqliteEffectReplayOptions {
 #[derive(Clone)]
 pub struct SqliteEffectHost {
     inner: Arc<SqliteEffectReplay>,
+    turn_control_binding_id: Arc<str>,
     /// The journal file, when the host is file-backed: a session-store
     /// factory attaches it for the retention sweep.
     fence_database: Option<PathBuf>,
@@ -85,6 +86,10 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteEffectHost {
 }
 
 impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.turn_control_binding_id.to_string()
+    }
+
     fn effect_scope_fence_database(&self) -> Option<PathBuf> {
         self.fence_database.clone()
     }
@@ -141,17 +146,24 @@ impl SqliteEffectHost {
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
         let registry = Arc::new(RegistryAttachment::default());
+        let inner = open_effect_replay_driver(
+            path,
+            StoreBacking::File,
+            options,
+            clock,
+            Arc::clone(&registry),
+        )
+        .await?;
+        // Opening creates the database before the host is returned, so the
+        // canonical path is a stable identity across relative paths and
+        // symlinked deployment configuration. Fall back only for platforms
+        // that cannot canonicalize an already-open file.
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
-            inner: open_effect_replay_driver(
-                path,
-                StoreBacking::File,
-                options,
-                clock,
-                Arc::clone(&registry),
-            )
-            .await?,
+            inner,
             fence_database: Some(path.to_path_buf()),
             registry,
+            turn_control_binding_id: Arc::from(format!("sqlite:{}", binding_path.display())),
         })
     }
 

@@ -231,6 +231,25 @@ impl LashRuntime {
         // Store-backed new turns acquire and admit the execution lane before
         // the acceptance effect writes mutable session payload (ADR 0077).
         *session_execution_lease = self.claim_session_execution_lease().await?;
+        let activation_controller = opts.scoped_effect_controller();
+        let activation_fence = session_execution_lease
+            .as_ref()
+            .map(SessionExecutionLeaseGuard::fence)
+            .expect("a store-backed turn acquires its execution lease before activation");
+        if let Err(error) = self
+            .defer_orphaned_turn_inputs_before_drain(
+                &store,
+                &activation_fence,
+                &trace_turn_id,
+                &activation_controller,
+            )
+            .await
+        {
+            if let Some(lease) = session_execution_lease.as_ref() {
+                let _ = lease.release_if_live().await;
+            }
+            return Err(error);
+        }
         // Acceptance is journaled, not written directly: it happens before the
         // turn runs, which puts it inside a durable engine's replay window, and
         // a replayed handler must re-derive this admission rather than mint a
@@ -278,12 +297,11 @@ impl LashRuntime {
         );
 
         let drive = {
-            let drain_effect_controller = opts.scoped_effect_controller();
             let fence = session_execution_lease
                 .as_ref()
                 .map(SessionExecutionLeaseGuard::fence)
                 .expect("a store-backed turn acquires its execution lease before acceptance");
-            let mut input_claim = store
+            let input_claim = store
                 .claim_next_turn_inputs(
                     &self.state.session_id,
                     &fence,
@@ -292,31 +310,6 @@ impl LashRuntime {
                 )
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
-            // Same FIG-1573 backstop the queued drain runs: a lane holder
-            // that finds its own fresh acceptance unclaimable is looking at
-            // rows a dead turn pinned. Repair them, then claim once more in
-            // this same call.
-            if input_claim.is_none()
-                && self
-                    .defer_orphaned_turn_inputs_before_drain(
-                        &store,
-                        &fence,
-                        &TurnId::from(opts.execution_scope_id()),
-                        &drain_effect_controller,
-                    )
-                    .await
-                    > 0
-            {
-                input_claim = store
-                    .claim_next_turn_inputs(
-                        &self.state.session_id,
-                        &fence,
-                        &self.runtime_lease_owner,
-                        MAX_CLAIMED_TURN_INPUTS,
-                    )
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?;
-            }
             let claimed_own_row = match input_claim {
                 Some(claim)
                     if claim
