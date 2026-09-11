@@ -689,8 +689,8 @@ pub mod sansio {
 // Re-exports
 pub use attachments::{
     AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
-    AttachmentStoreError, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
-    StoredBlobRef,
+    AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
+    EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,

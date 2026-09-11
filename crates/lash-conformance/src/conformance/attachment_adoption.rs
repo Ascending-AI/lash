@@ -41,9 +41,11 @@ impl AttachmentStore for FaultingAttachmentStore {
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
         if self.fail_put.load(Ordering::SeqCst) {
-            return Err(AttachmentStoreError::Backend(
-                "scripted attachment put failure".to_string(),
-            ));
+            return Err(AttachmentStoreError::Backend {
+                operation: "put",
+                class: AttachmentStoreFailureClass::Transient,
+                source: "scripted attachment put failure".into(),
+            });
         }
         self.inner.put(bytes, meta).await
     }
@@ -54,9 +56,11 @@ impl AttachmentStore for FaultingAttachmentStore {
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         if self.fail_delete.load(Ordering::SeqCst) {
-            return Err(AttachmentStoreError::Backend(
-                "scripted attachment delete failure".to_string(),
-            ));
+            return Err(AttachmentStoreError::Backend {
+                operation: "delete",
+                class: AttachmentStoreFailureClass::Transient,
+                source: "scripted attachment delete failure".into(),
+            });
         }
         self.inner.delete(id).await
     }
@@ -104,9 +108,11 @@ impl AttachmentStore for CoordinatedFailingPutStore {
         if self.fail_first_put.swap(false, Ordering::SeqCst) {
             self.first_put_started.notify_one();
             self.release_first_put.notified().await;
-            return Err(AttachmentStoreError::Backend(
-                "scripted first attachment put failure".to_string(),
-            ));
+            return Err(AttachmentStoreError::Backend {
+                operation: "put",
+                class: AttachmentStoreFailureClass::Transient,
+                source: "scripted first attachment put failure".into(),
+            });
         }
         self.inner.put(bytes, meta).await
     }

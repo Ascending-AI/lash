@@ -52,6 +52,41 @@ impl AttachmentSourcePolicy for OpenAttachmentSourcePolicy {
     }
 }
 
+/// Why an attachment-store backend operation failed, as a property a caller can
+/// act on without parsing the message.
+///
+/// The retry and operator verdicts are derived from the class, never stored
+/// separately, so a class and its verdicts cannot contradict each other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum AttachmentStoreFailureClass {
+    /// The operation may succeed if retried: a transport fault, timeout,
+    /// throttling, or an unclassified backend failure.
+    #[error("transient failure")]
+    Transient,
+    /// Credentials or authorization must be corrected before a retry can
+    /// succeed; the failure is operator-actionable.
+    #[error("credentials or authorization failure")]
+    Credentials,
+    /// The request, its configuration, or the backend's support for it cannot
+    /// succeed as written. Retrying changes nothing.
+    #[error("terminal failure")]
+    Terminal,
+}
+
+impl AttachmentStoreFailureClass {
+    /// Whether retrying the identical operation may succeed.
+    pub const fn is_retryable(self) -> bool {
+        matches!(self, Self::Transient)
+    }
+
+    /// Whether an operator must change credentials or authorization before the
+    /// operation can succeed.
+    pub const fn is_operator_actionable(self) -> bool {
+        matches!(self, Self::Credentials)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AttachmentStoreError {
@@ -70,15 +105,66 @@ pub enum AttachmentStoreError {
     },
     #[error("attachment manifest write failed: {0}")]
     ManifestRecordFailed(String),
-    #[error("attachment store backend failed: {0}")]
-    Backend(String),
+    /// The blob backend failed an operation. `operation` names the failed
+    /// request, `class` is the actionable verdict, and `source` preserves the
+    /// underlying cause for operators.
+    #[error("attachment store backend {operation} failed ({class}): {source}")]
+    Backend {
+        operation: &'static str,
+        class: AttachmentStoreFailureClass,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+    /// The attachment layer observed a state its own contract forbids: a stored
+    /// key that is not a valid [`AttachmentId`], an unreadable stored filename,
+    /// or a backend that returned an id other than the one requested. Always a
+    /// defect or foreign/corrupt data, never a transport fault.
+    #[error("attachment store contract violation: {0}")]
+    Contract(String),
+    /// The live root set could not be enumerated, so a sweep's destructive
+    /// scope is unwitnessed. `source` is the root-set (session store) failure;
+    /// this is not a blob-backend failure.
+    #[error("failed to enumerate live attachment refs: {source}")]
+    RootSetEnumerationFailed {
+        #[source]
+        source: Box<StoreError>,
+    },
     #[error(
-        "attachment `{attachment_id}` is being reclaimed or restored: a sweep armed its physical delete, or another writer owns its condemned state, and the state was still held after {attempts} fence attempts. A remote delete or put can outlast the retry window, so retrying the put is the normal response. If no restoring writer is running, the host may recover an abandoned write with `AttachmentRootSet::recover_abandoned_attachment_write`; a separately abandoned sweep is recovered with `release_attachment_condemnation`."
+        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; a successful delete leaves a reclaimed fact that the retry clears before re-putting the bytes. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
     )]
     ReclamationInFlight {
         attachment_id: AttachmentId,
         attempts: u32,
     },
+}
+
+impl AttachmentStoreError {
+    /// Whether retrying the identical operation may succeed. A transient
+    /// backend failure is retryable, and so is a write refused by an in-flight
+    /// reclamation: the retry clears the reclaimed fact and re-puts the bytes.
+    /// A contract violation or a terminal backend failure retries to the same
+    /// refusal.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Backend { class, .. } => class.is_retryable(),
+            Self::ReclamationInFlight { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether an operator must correct credentials or authorization before the
+    /// operation can succeed.
+    pub fn is_operator_actionable(&self) -> bool {
+        matches!(self, Self::Backend { class, .. } if class.is_operator_actionable())
+    }
+
+    /// The backend failure class, when this error is a backend failure.
+    pub fn failure_class(&self) -> Option<AttachmentStoreFailureClass> {
+        match self {
+            Self::Backend { class, .. } => Some(*class),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -673,7 +759,9 @@ where
                 .any(|blob| !within_grace(blob.last_modified_epoch_ms, now, grace_period_ms))
             {
                 return Err(AttachmentReclamationFailure::failed(
-                    AttachmentStoreError::Backend(failure),
+                    AttachmentStoreError::RootSetEnumerationFailed {
+                        source: Box::new(err),
+                    },
                     report,
                 ));
             }
@@ -1357,7 +1445,7 @@ impl SessionAttachmentStore {
             }
         };
         if reference.id != attachment_id {
-            let backend_error = AttachmentStoreError::Backend(format!(
+            let backend_error = AttachmentStoreError::Contract(format!(
                 "attachment store returned id `{}` after manifest intent for `{attachment_id}`",
                 reference.id
             ));
