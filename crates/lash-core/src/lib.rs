@@ -1220,14 +1220,15 @@ pub(crate) use session_model::RuntimeSessionPolicy;
 pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
-    AppendRequestIdentity, AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent,
-    AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence,
-    AttachmentWritePermit, AttachmentWriteToken, BlobRef, CURRENT_SESSION_STATE_VERSION,
-    CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload,
-    DurableScan, DurableScanPage, DurableSurface, GcReport, HydratedCheckpointComponent,
-    HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
-    MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
-    OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
+    AppendRequestIdentity, AttachmentCondemnation, AttachmentCondemnationPhase,
+    AttachmentCondemnationProvenance, AttachmentCondemnationRecord, AttachmentDeleteArming,
+    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
+    AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, BlobRef,
+    CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit,
+    DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, GcReport,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
+    MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop,
+    MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
     QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore, RetentionBound,
     RetentionReport, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome,
