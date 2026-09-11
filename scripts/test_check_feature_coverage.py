@@ -154,6 +154,29 @@ class FeatureCoverageContractTests(unittest.TestCase):
             timeout=30,
         )
 
+    def add_other_feature_commands(self, *, combined: bool = False) -> None:
+        manifest = self.root / "member" / "Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8") + "other = []\n",
+            encoding="utf-8",
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        contents = plan.read_text(encoding="utf-8")
+        contents = contents.replace(
+            '"member/testing:on", "member/testing:off"',
+            '"member/testing:on", "member/testing:off", "member/other:on", "member/other:off"',
+        )
+        commands = (
+            'commands = [["cargo", "check", "-p", "member", "--lib", '
+            '"--no-default-features", "--features", "other", "--locked"], '
+        )
+        if combined:
+            commands += (
+                '["cargo", "check", "-p", "member", "--lib", '
+                '"--no-default-features", "--features", "testing,other", "--locked"], '
+            )
+        plan.write_text(contents.replace("commands = [", commands), encoding="utf-8")
+
     def test_complete_contract_passes(self) -> None:
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -308,6 +331,131 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no compiled artifact witnesses cfg predicate", result.stdout)
         self.assertIn('all(feature = "testing", feature = "other")', result.stdout)
+
+    def test_runner_composes_enclosing_and_stacked_cfg_predicates(self) -> None:
+        self.add_other_feature_commands()
+        source = self.root / "member" / "src" / "lib.rs"
+        cases = {
+            "nested-module-and-impl": textwrap.dedent(
+                """
+                struct Holder;
+                #[cfg(feature = "testing")]
+                mod nested {
+                    impl super::Holder {
+                        #[cfg(feature = "other")]
+                        fn support() {}
+                    }
+                }
+                """
+            ),
+            "stacked-item": textwrap.dedent(
+                """
+                #[cfg(feature = "testing")]
+                #[allow(dead_code)]
+                #[cfg(feature = "other")]
+                fn support() {}
+                """
+            ),
+        }
+        for name, contents in cases.items():
+            with self.subTest(name=name):
+                source.write_text(contents, encoding="utf-8")
+                result = self.run_lane()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("no compiled artifact witnesses cfg predicate true", result.stdout)
+                self.assertIn('all(feature = "testing", feature = "other")', result.stdout)
+
+    def test_runner_accepts_combined_effective_predicate_witnesses(self) -> None:
+        self.add_other_feature_commands(combined=True)
+        source = self.root / "member" / "src" / "lib.rs"
+        cases = {
+            "nested": (
+                '#[cfg(feature = "testing")]\nmod nested {\n'
+                '    #[cfg(feature = "other")]\n    pub fn support() {}\n}\n'
+            ),
+            "stacked": (
+                '#[cfg(feature = "testing")]\n#[cfg(feature = "other")]\n'
+                'pub fn support() {}\n'
+            ),
+        }
+        for name, contents in cases.items():
+            with self.subTest(name=name):
+                source.write_text(contents, encoding="utf-8")
+                result = self.run_lane()
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn("feature coverage lane passed", result.stdout)
+
+    def test_cfg_attr_behavior_is_witnessed_inside_enclosing_cfg(self) -> None:
+        self.add_other_feature_commands()
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(feature = "other")]\nmod nested {\n'
+            '    #[cfg_attr(feature = "testing", allow(dead_code))]\n'
+            '    fn support() {}\n}\n',
+            encoding="utf-8",
+        )
+
+        result = self.run_lane()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no compiled artifact witnesses cfg predicate true", result.stdout)
+        self.assertIn('all(feature = "other", feature = "testing")', result.stdout)
+
+    def test_unknown_enclosing_cfg_fails_closed(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(custom_build)]\nmod nested {\n'
+            '    #[cfg(feature = "testing")]\n    pub fn support() {}\n}\n',
+            encoding="utf-8",
+        )
+
+        result = self.check()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported cfg in feature-gated composition", result.stdout)
+
+    def test_inner_cfg_is_composed_with_nested_item_cfg(self) -> None:
+        self.add_other_feature_commands()
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            'mod nested {\n    #![cfg(feature = "testing")]\n'
+            '    #[cfg(feature = "other")]\n    pub fn support() {}\n}\n',
+            encoding="utf-8",
+        )
+
+        result = self.run_lane()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no compiled artifact witnesses cfg predicate true", result.stdout)
+        self.assertIn('all(feature = "testing", feature = "other")', result.stdout)
+
+    def test_conditional_cfg_attr_composition_fails_closed(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg_attr(test, cfg(unix))]\nmod nested {\n'
+            '    #[cfg(feature = "testing")]\n    pub fn support() {}\n}\n',
+            encoding="utf-8",
+        )
+
+        result = self.check()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "conditional cfg_attr in a feature-gated composition is unsupported",
+            result.stdout,
+        )
+
+    def test_attribute_text_inside_raw_string_is_ignored(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            'const EXAMPLE: &str = r###"#[cfg(feature = "missing")] {"###;\n'
+            '#[cfg(feature = "testing")]\npub fn support() {}\n',
+            encoding="utf-8",
+        )
+
+        result = self.check()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_runner_rejects_doctest_as_test_context_artifact(self) -> None:
         source = self.root / "member" / "src" / "lib.rs"

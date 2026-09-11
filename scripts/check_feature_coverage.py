@@ -16,9 +16,14 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUST_COMMENT_OR_STRING = re.compile(
-    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\])*\"", re.DOTALL
+RUST_MASK_START = re.compile(
+    r'//|/\*|(?<![A-Za-z0-9_])(?:br|cr|r)(?P<hash>#{0,255})"|(?:b|c)?"|b?\''
 )
+RUST_STRING_LITERAL = re.compile(r'(?:b|c)?"(?:\\.|[^"\\])*"', re.DOTALL)
+RUST_CHAR_LITERAL = re.compile(
+    r"b?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^'\\\n])'",
+)
+NON_NEWLINE = re.compile(r"[^\n]")
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,15 @@ class CfgPredicateRequirement:
     context: str
     truths: frozenset[bool]
     features: frozenset[str]
+
+
+@dataclass(frozen=True)
+class RustAttribute:
+    kind: str
+    start: int
+    end: int
+    body: str
+    inner: bool
 
 
 @dataclass(frozen=True)
@@ -158,10 +172,53 @@ def workspace_packages(root: Path) -> dict[str, Package]:
 
 def masked_rust(source: str) -> str:
     """Mask comments and literals while preserving offsets for brace matching."""
-    return RUST_COMMENT_OR_STRING.sub(
-        lambda match: "".join("\n" if char == "\n" else " " for char in match.group()),
-        source,
-    )
+    ranges: list[tuple[int, int]] = []
+    search_from = 0
+    while match := RUST_MASK_START.search(source, search_from):
+        start = match.start()
+        token = match.group()
+        if token == "//":
+            newline = source.find("\n", match.end())
+            end = len(source) if newline == -1 else newline
+        elif token == "/*":
+            depth = 1
+            end = match.end()
+            while depth:
+                opening = source.find("/*", end)
+                closing = source.find("*/", end)
+                if closing == -1:
+                    end = len(source)
+                    break
+                if opening != -1 and opening < closing:
+                    depth += 1
+                    end = opening + 2
+                else:
+                    depth -= 1
+                    end = closing + 2
+        elif match.group("hash") is not None:
+            delimiter = '"' + match.group("hash")
+            closing = source.find(delimiter, match.end())
+            end = len(source) if closing == -1 else closing + len(delimiter)
+        elif token.endswith('"'):
+            literal = RUST_STRING_LITERAL.match(source, start)
+            end = len(source) if literal is None else literal.end()
+        else:
+            literal = RUST_CHAR_LITERAL.match(source, start)
+            if literal is None:
+                search_from = match.end()
+                continue
+            end = literal.end()
+        ranges.append((start, end))
+        search_from = end
+
+    pieces: list[str] = []
+    emitted = 0
+    for start, end in ranges:
+        pieces.append(source[emitted:start])
+        pieces.append(NON_NEWLINE.sub(" ", source[start:end]))
+        emitted = end
+    pieces.append(source[emitted:])
+    return "".join(pieces)
 
 
 def balanced_end(source: str, start: int, opening: str, closing: str) -> int | None:
@@ -411,101 +468,315 @@ def split_cfg_attr(body: str) -> tuple[str, str]:
     raise ValueError("cfg_attr requires a predicate and an attribute")
 
 
+def rust_attributes(source: Path, text: str, masked: str) -> tuple[RustAttribute, ...]:
+    attributes: list[RustAttribute] = []
+    for match in re.finditer(r"#\s*(?P<inner>!)?\s*\[", masked):
+        bracket = masked.find("[", match.start())
+        end = balanced_end(masked, bracket, "[", "]")
+        if end is None:
+            raise ValueError(f"{source.name}: unbalanced Rust attribute")
+        contents = masked[bracket + 1 : end]
+        cfg_match = re.match(r"\s*(cfg|cfg_attr)\s*\(", contents)
+        if cfg_match is None:
+            attributes.append(
+                RustAttribute("", match.start(), end + 1, "", match.group("inner") is not None)
+            )
+            continue
+        paren = bracket + 1 + cfg_match.end() - 1
+        paren_end = balanced_end(masked, paren, "(", ")")
+        if paren_end is None or masked[paren_end + 1 : end].strip():
+            line = text.count("\n", 0, match.start()) + 1
+            raise ValueError(f"{source.name}:{line}: malformed {cfg_match.group(1)} attribute")
+        attributes.append(
+            RustAttribute(
+                cfg_match.group(1),
+                match.start(),
+                end + 1,
+                text[paren + 1 : paren_end],
+                match.group("inner") is not None,
+            )
+        )
+    return tuple(attributes)
+
+
+def attribute_stacks(
+    attributes: tuple[RustAttribute, ...], masked: str
+) -> tuple[tuple[int, ...], ...]:
+    stacks: list[list[int]] = []
+    for index, attribute in enumerate(attributes):
+        if (
+            stacks
+            and attributes[stacks[-1][-1]].inner == attribute.inner
+            and not masked[attributes[stacks[-1][-1]].end : attribute.start].strip()
+        ):
+            stacks[-1].append(index)
+        else:
+            stacks.append([index])
+    return tuple(tuple(stack) for stack in stacks)
+
+
+def attached_brace_region(masked: str, start: int) -> tuple[int, int] | None:
+    """Return the bounded body attached to an outer attribute stack, if any."""
+    parentheses = 0
+    brackets = 0
+    for index in range(start, len(masked)):
+        character = masked[index]
+        if character == "(":
+            parentheses += 1
+        elif character == ")":
+            parentheses -= 1
+        elif character == "[":
+            brackets += 1
+        elif character == "]":
+            brackets -= 1
+        elif parentheses == 0 and brackets == 0:
+            if character == "{":
+                close = balanced_end(masked, index, "{", "}")
+                return (index, close) if close is not None else None
+            if character in ";,}":
+                return None
+    return None
+
+
+def brace_regions(masked: str) -> tuple[tuple[int, int], ...]:
+    openings: list[int] = []
+    regions: list[tuple[int, int]] = []
+    for index, character in enumerate(masked):
+        if character == "{":
+            openings.append(index)
+        elif character == "}" and openings:
+            regions.append((openings.pop(), index))
+    return tuple(regions)
+
+
+def normalized_cfg(body: str) -> str:
+    return re.sub(r"\s+", " ", body).strip()
+
+
+def combined_cfg(expressions: list[CfgExpr]) -> CfgExpr:
+    if len(expressions) == 1:
+        return expressions[0]
+    return CfgExpr(kind="all", children=tuple(expressions))
+
+
+def combined_cfg_text(predicates: list[str]) -> str:
+    if len(predicates) == 1:
+        return normalized_cfg(predicates[0])
+    return f"all({', '.join(normalized_cfg(predicate) for predicate in predicates)})"
+
+
+def parsed_cfg_attribute(
+    package: Package,
+    source: Path,
+    text: str,
+    attribute: RustAttribute,
+    *,
+    composition: bool,
+) -> tuple[CfgExpr, str]:
+    predicate = attribute.body
+    if attribute.kind == "cfg_attr":
+        predicate, applied = split_cfg_attr(attribute.body)
+        if re.match(r"\s*cfg(?:_attr)?\s*\(", applied):
+            line = text.count("\n", 0, attribute.start) + 1
+            if "feature" in attribute.body:
+                raise ValueError(
+                    f"{source.relative_to(package.path)}:{line}: "
+                    "nested feature-bearing cfg_attr is unsupported"
+                )
+            raise ValueError(
+                f"{source.relative_to(package.path)}:{line}: "
+                "conditional cfg_attr in a feature-gated composition is unsupported"
+            )
+        applied_match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)", applied)
+        applied_name = applied_match.group(1) if applied_match is not None else ""
+        if applied_name not in SUPPORTED_CFG_ATTRS:
+            line = text.count("\n", 0, attribute.start) + 1
+            scope = "feature-bearing" if "feature" in attribute.body else "composed"
+            raise ValueError(
+                f"{source.relative_to(package.path)}:{line}: "
+                f"unsupported {scope} cfg_attr action {applied_name!r}"
+            )
+    try:
+        return CfgParser(predicate).parse(), predicate
+    except (ValueError, json.JSONDecodeError) as error:
+        line = text.count("\n", 0, attribute.start) + 1
+        scope = " in feature-gated composition" if composition else ""
+        raise ValueError(
+            f"{source.relative_to(package.path)}:{line}: "
+            f"unsupported {attribute.kind}{scope}: {error}"
+        ) from error
+
+
 def cfg_requirements(package: Package) -> PackageCfgRequirements:
     found: dict[str, dict[str, set[str]]] = {}
     predicate_requirements: list[CfgPredicateRequirement] = []
     for source in package.path.rglob("*.rs"):
         text = source.read_text(encoding="utf-8")
         masked = masked_rust(text)
-        attributes: list[tuple[str, int, int, str]] = []
-        for match in re.finditer(r"#\s*!?\s*\[\s*(cfg|cfg_attr)\s*\(", masked):
-            paren = masked.find("(", match.start())
-            end = balanced_end(masked, paren, "(", ")")
-            if end is None:
-                raise ValueError(f"{source.relative_to(package.path)}: unbalanced cfg attribute")
-            attributes.append((match.group(1), match.start(), end + 1, text[paren + 1 : end]))
-
-        test_regions: list[tuple[int, int]] = []
-        for kind, _, end, body in attributes:
-            if kind != "cfg":
-                continue
-            predicate = body
-            if re.fullmatch(r"\s*test\s*", predicate) is None:
-                continue
-            brace = masked.find("{", end)
-            semicolon = masked.find(";", end)
-            if brace == -1 or (semicolon != -1 and semicolon < brace):
-                continue
-            close = balanced_end(masked, brace, "{", "}")
-            if close is not None:
-                test_regions.append((brace, close))
-
-        for kind, start, _, body in attributes:
-            if "feature" not in body:
-                continue
-            predicate = body
-            if kind == "cfg_attr":
-                predicate, applied = split_cfg_attr(body)
-                if re.search(r"\bcfg(?:_attr)?\s*\(", applied) or "feature" in applied:
-                    raise ValueError(
-                        f"{source.relative_to(package.path)}:{text.count(chr(10), 0, start) + 1}: "
-                        "nested feature-bearing cfg_attr is unsupported"
-                    )
-                applied_match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)", applied)
-                applied_name = applied_match.group(1) if applied_match is not None else ""
-                if applied_name not in SUPPORTED_CFG_ATTRS:
-                    raise ValueError(
-                        f"{source.relative_to(package.path)}:{text.count(chr(10), 0, start) + 1}: "
-                        f"unsupported feature-bearing cfg_attr action {applied_name!r}"
-                    )
-            try:
-                expression = CfgParser(predicate).parse()
-            except (ValueError, json.JSONDecodeError) as error:
-                raise ValueError(
-                    f"{source.relative_to(package.path)}:{text.count(chr(10), 0, start) + 1}: "
-                    f"unsupported feature-bearing {kind}: {error}"
-                ) from error
-            features = cfg_features(expression)
-            if not features:
-                raise ValueError(
-                    f"{source.relative_to(package.path)}:{text.count(chr(10), 0, start) + 1}: "
-                    f"feature-bearing {kind} contains no valid feature predicate"
-                )
-            enclosed_by_test = any(
-                region_start < start < region_end for region_start, region_end in test_regions
+        attributes = rust_attributes(source, text, masked)
+        stacks = attribute_stacks(attributes, masked)
+        stack_by_attribute = {
+            attribute_index: stack_index
+            for stack_index, stack in enumerate(stacks)
+            for attribute_index in stack
+        }
+        regions = {
+            stack_index: region
+            for stack_index, stack in enumerate(stacks)
+            if not attributes[stack[0]].inner
+            and any(attributes[index].kind in {"cfg", "cfg_attr"} for index in stack)
+            and (region := attached_brace_region(masked, attributes[stack[-1]].end))
+            is not None
+        }
+        inner_stack_indices = [
+            stack_index
+            for stack_index, stack in enumerate(stacks)
+            if attributes[stack[0]].inner
+            and any(attributes[index].kind in {"cfg", "cfg_attr"} for index in stack)
+        ]
+        braces = brace_regions(masked) if inner_stack_indices else ()
+        inner_scopes = {
+            stack_index: min(
+                (
+                    region
+                    for region in braces
+                    if region[0] < attributes[stacks[stack_index][0]].start < region[1]
+                ),
+                key=lambda region: region[1] - region[0],
+                default=(-1, len(masked)),
             )
-            if enclosed_by_test:
-                expression = CfgExpr(
-                    kind="all",
-                    children=(CfgExpr(kind="flag", name="test"), expression),
-                )
-                contexts = ("test",)
-            else:
-                contexts = feature_sensitive_contexts(expression)
-            for context in contexts:
-                predicate_requirements.append(
-                    CfgPredicateRequirement(
-                        source=source.resolve(),
-                        line=text.count("\n", 0, start) + 1,
-                        text=re.sub(r"\s+", " ", predicate).strip(),
-                        expr=expression,
-                        context=context,
-                        truths=frozenset((True,))
-                        if context == "test"
-                        else frozenset((False, True)),
-                        features=features,
-                    )
-                )
-            for name in features:
-                requirements = found.setdefault(name, {"normal": set(), "test": set()})
-                for context in contexts:
-                    legacy_context = "normal" if context == "any" else context
-                    if legacy_context == "normal":
-                        requirements[legacy_context].update(("on", "off"))
-                    else:
-                        requirements[legacy_context].update(
-                            true_feature_states(expression, name, context)
+            for stack_index in inner_stack_indices
+        }
+
+        for attribute_index, attribute in enumerate(attributes):
+            if attribute.kind not in {"cfg", "cfg_attr"} or "feature" not in attribute.body:
+                continue
+            current_stack = stack_by_attribute[attribute_index]
+            enclosing_stacks = sorted(
+                {
+                    stack_index
+                    for stack_index, (region_start, region_end) in regions.items()
+                    if region_start < attribute.start < region_end
+                }
+                | {
+                    stack_index
+                    for stack_index, (region_start, region_end) in inner_scopes.items()
+                    if stack_index != current_stack
+                    and attributes[stacks[stack_index][-1]].end <= attribute.start
+                    and region_start < attribute.start < region_end
+                },
+                key=lambda stack_index: (
+                    regions.get(stack_index, inner_scopes.get(stack_index, (-1, len(masked))))[0],
+                    attributes[stacks[stack_index][0]].start,
+                ),
+            )
+            controlling_indices = [
+                index
+                for stack_index in (*enclosing_stacks, current_stack)
+                for index in stacks[stack_index]
+                if attributes[index].kind == "cfg"
+            ]
+            relevant_stacks = set(enclosing_stacks) | {current_stack}
+            for stack_index in relevant_stacks:
+                for index in stacks[stack_index]:
+                    candidate = attributes[index]
+                    if candidate.kind == "cfg_attr" and index != attribute_index:
+                        parsed_cfg_attribute(
+                            package,
+                            source,
+                            text,
+                            candidate,
+                            composition=True,
                         )
+
+            controlling: list[CfgExpr] = []
+            controlling_text: list[str] = []
+            for index in controlling_indices:
+                expression, predicate = parsed_cfg_attribute(
+                    package,
+                    source,
+                    text,
+                    attributes[index],
+                    composition=index != attribute_index,
+                )
+                controlling.append(expression)
+                controlling_text.append(predicate)
+
+            expression, predicate = parsed_cfg_attribute(
+                package,
+                source,
+                text,
+                attribute,
+                composition=False,
+            )
+            if attribute.kind == "cfg":
+                effective = combined_cfg(controlling)
+                requirements = [
+                    (
+                        effective,
+                        combined_cfg_text(controlling_text),
+                        None,
+                    )
+                ]
+            else:
+                requirements = [
+                    (
+                        combined_cfg([*controlling, expression]),
+                        combined_cfg_text([*controlling_text, predicate]),
+                        frozenset((True,)),
+                    ),
+                    (
+                        combined_cfg(
+                            [
+                                *controlling,
+                                CfgExpr(kind="not", children=(expression,)),
+                            ]
+                        ),
+                        combined_cfg_text([*controlling_text, f"not({normalized_cfg(predicate)})"]),
+                        frozenset((True,)),
+                    ),
+                ]
+
+            own_features = cfg_features(expression)
+            if not own_features:
+                raise ValueError(
+                    f"{source.relative_to(package.path)}:"
+                    f"{text.count(chr(10), 0, attribute.start) + 1}: "
+                    f"feature-bearing {attribute.kind} contains no valid feature predicate"
+                )
+            for effective, effective_text, explicit_truths in requirements:
+                features = cfg_features(effective)
+                contexts = feature_sensitive_contexts(effective)
+                for context in contexts:
+                    truths = (
+                        explicit_truths
+                        if explicit_truths is not None
+                        else frozenset((True,))
+                        if context == "test"
+                        else frozenset((False, True))
+                    )
+                    predicate_requirements.append(
+                        CfgPredicateRequirement(
+                            source=source.resolve(),
+                            line=text.count("\n", 0, attribute.start) + 1,
+                            text=effective_text,
+                            expr=effective,
+                            context=context,
+                            truths=truths,
+                            features=features,
+                        )
+                    )
+                    for name in features:
+                        feature_requirements = found.setdefault(
+                            name, {"normal": set(), "test": set()}
+                        )
+                        legacy_context = "normal" if context == "any" else context
+                        if legacy_context == "normal":
+                            feature_requirements[legacy_context].update(("on", "off"))
+                        else:
+                            feature_requirements[legacy_context].update(
+                                true_feature_states(effective, name, context)
+                            )
     return PackageCfgRequirements(found, tuple(predicate_requirements))
 
 
