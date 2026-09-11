@@ -73,22 +73,31 @@ wait_reaped() {
   forget_pid "$pid"
 }
 
-app_child() {
+app_descendant() {
   local runner="$1" expected="$2"
-  local attempt child cmdline
+  local attempt parent child cmdline
   for attempt in $(seq 1 100); do
-    if [[ -r "/proc/$runner/task/$runner/children" ]]; then
-      for child in $(cat "/proc/$runner/task/$runner/children"); do
-        cmdline="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
-        if [[ "$cmdline" == *"$expected"* ]]; then
-          printf '%s\n' "$child"
-          return
+    local frontier=("$runner")
+    local next=()
+    while ((${#frontier[@]})); do
+      next=()
+      for parent in "${frontier[@]}"; do
+        if [[ -r "/proc/$parent/task/$parent/children" ]]; then
+          for child in $(cat "/proc/$parent/task/$parent/children"); do
+            cmdline="$(tr '\0' ' ' <"/proc/$child/cmdline" 2>/dev/null || true)"
+            if [[ "$cmdline" == *"$expected"* ]]; then
+              printf '%s\n' "$child"
+              return
+            fi
+            next+=("$child")
+          done
         fi
       done
-    fi
+      frontier=("${next[@]}")
+    done
     sleep 0.1
   done
-  echo "could not find $expected child of cargo runner $runner" >&2
+  echo "could not find $expected descendant of cargo runner $runner" >&2
   return 1
 }
 
@@ -138,7 +147,7 @@ run_agent_service_signal() {
   runner=$!
   owned_pids+=("$runner")
   wait_http "http://127.0.0.1:$port/" "$runner" "$log"
-  app="$(app_child "$runner" agent-service)"
+  app="$(app_descendant "$runner" target/judged/agent-service)"
   kill -TERM "$app"
   wait_reaped "$runner" agent-service-signal
   assert_count "$wait_status" 0 agent-service-signal-exit
@@ -231,7 +240,7 @@ run_workbench_signal_with_streams_and_fixture() {
   sleep 0.2
   kill -0 "$events"
   kill -0 "$observations"
-  app="$(app_child "$runner" agent-workbench)"
+  app="$(app_descendant "$runner" target/judged/agent-workbench)"
   kill -TERM "$app"
   wait_reaped "$runner" workbench-signal
   assert_count "$wait_status" 0 workbench-signal-exit
