@@ -60,6 +60,22 @@ wait_http() {
   return 1
 }
 
+wait_log_pattern() {
+  local runner="$1" log="$2" pattern="$3" attempt
+  for attempt in $(seq 1 6000); do
+    if grep -q "$pattern" "$log"; then
+      return
+    fi
+    if ! kill -0 "$runner" 2>/dev/null; then
+      cat "$log" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  cat "$log" >&2
+  return 1
+}
+
 wait_reaped() {
   local pid="$1" label="$2"
   if ! timeout 30s tail --pid="$pid" -f /dev/null >/dev/null 2>&1; then
@@ -197,6 +213,7 @@ PY
     cargo run -p agent-service --profile judged --locked >"$log" 2>&1 &
   runner=$!
   owned_pids+=("$runner")
+  wait_log_pattern "$runner" "$log" 'agent-service listening on'
   wait_reaped "$runner" agent-service-bind-error
   if [[ "$wait_status" == 0 ]]; then
     echo "agent-service bind-error command unexpectedly succeeded" >&2
@@ -299,6 +316,7 @@ PY
     cargo run -p agent-workbench --profile judged --locked >"$log" 2>&1 &
   runner=$!
   owned_pids+=("$runner")
+  wait_log_pattern "$runner" "$log" 'agent-workbench listening on'
   wait_reaped "$runner" workbench-bind-error
   if [[ "$wait_status" == 0 ]]; then
     echo "agent-workbench bind-error command unexpectedly succeeded" >&2
