@@ -325,22 +325,26 @@ pub fn compare_required_constraints(
             });
             continue;
         };
-        let expected_ast = parse_expression(expected.expression).map_err(|detail| {
-            StoreError::RequiredConstraintInspectionInconclusive {
-                backend,
-                table: expected.table.to_string(),
-                constraint: expected.name.to_string(),
-                detail: format!("published expression is outside the supported grammar: {detail}"),
-            }
-        })?;
-        let actual_ast = parse_expression(&actual.expression).map_err(|detail| {
-            StoreError::RequiredConstraintInspectionInconclusive {
-                backend,
-                table: expected.table.to_string(),
-                constraint: expected.name.to_string(),
-                detail: format!("live expression is outside the supported grammar: {detail}"),
-            }
-        })?;
+        let expected_ast =
+            parse_expression_for_backend(backend, expected.expression).map_err(|detail| {
+                StoreError::RequiredConstraintInspectionInconclusive {
+                    backend,
+                    table: expected.table.to_string(),
+                    constraint: expected.name.to_string(),
+                    detail: format!(
+                        "published expression is outside the supported grammar: {detail}"
+                    ),
+                }
+            })?;
+        let actual_ast =
+            parse_expression_for_backend(backend, &actual.expression).map_err(|detail| {
+                StoreError::RequiredConstraintInspectionInconclusive {
+                    backend,
+                    table: expected.table.to_string(),
+                    constraint: expected.name.to_string(),
+                    detail: format!("live expression is outside the supported grammar: {detail}"),
+                }
+            })?;
         if expected_ast != actual_ast {
             findings.push(RequiredConstraintFinding::Altered {
                 table: expected.table.to_string(),
@@ -368,67 +372,116 @@ pub fn compare_required_constraints(
 /// Extract named `CHECK` bodies from one SQLite `CREATE TABLE` statement.
 #[doc(hidden)]
 pub fn extract_named_check_expressions(source: &str) -> Result<BTreeMap<String, String>, String> {
-    let tokens = lex(source)?;
+    let tokens = lex_sqlite_ddl(source)?;
     let mut checks = BTreeMap::new();
-    let mut index = 0;
+    let Some(opening) = tokens
+        .iter()
+        .position(|token| token.kind == TokenKind::LParen)
+    else {
+        return Ok(checks);
+    };
+    let mut item_start = opening + 1;
+    let mut depth = 1_usize;
+    for index in opening + 1..tokens.len() {
+        match tokens[index].kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => {
+                depth -= 1;
+                if depth == 0 {
+                    extract_checks_from_sqlite_table_item(
+                        source,
+                        &tokens[item_start..index],
+                        &mut checks,
+                    )?;
+                    return Ok(checks);
+                }
+            }
+            TokenKind::Comma if depth == 1 => {
+                extract_checks_from_sqlite_table_item(
+                    source,
+                    &tokens[item_start..index],
+                    &mut checks,
+                )?;
+                item_start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    Err("CREATE TABLE statement has no closing `)`".to_string())
+}
+
+fn extract_checks_from_sqlite_table_item(
+    source: &str,
+    tokens: &[Token],
+    checks: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    let mut depth = 0_usize;
+    let mut index = 0_usize;
     while index < tokens.len() {
-        if !tokens[index].is_ident("constraint") {
-            index += 1;
-            continue;
-        }
-        let Some(name) = tokens.get(index + 1).and_then(Token::identifier) else {
-            index += 1;
-            continue;
-        };
-        if !tokens
-            .get(index + 2)
-            .is_some_and(|token| token.is_ident("check"))
-            || !tokens
-                .get(index + 3)
-                .is_some_and(|token| token.kind == TokenKind::LParen)
-        {
-            index += 1;
-            continue;
-        }
-        let body_start = tokens[index + 3].end;
-        let mut depth = 1_usize;
-        let mut closing = None;
-        for token in &tokens[index + 4..] {
-            match token.kind {
-                TokenKind::LParen => depth += 1,
-                TokenKind::RParen => {
-                    depth -= 1;
-                    if depth == 0 {
-                        closing = Some(token.start);
-                        break;
+        match tokens[index].kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => depth = depth.saturating_sub(1),
+            _ if depth == 0 && tokens[index].is_ident("constraint") => {
+                let Some(name) = tokens.get(index + 1).and_then(Token::identifier) else {
+                    index += 1;
+                    continue;
+                };
+                if !tokens
+                    .get(index + 2)
+                    .is_some_and(|token| token.is_ident("check"))
+                    || !tokens
+                        .get(index + 3)
+                        .is_some_and(|token| token.kind == TokenKind::LParen)
+                {
+                    index += 1;
+                    continue;
+                }
+                let body_start = tokens[index + 3].end;
+                let mut check_depth = 1_usize;
+                let mut closing_index = None;
+                for (offset, token) in tokens[index + 4..].iter().enumerate() {
+                    match token.kind {
+                        TokenKind::LParen => check_depth += 1,
+                        TokenKind::RParen => {
+                            check_depth -= 1;
+                            if check_depth == 0 {
+                                closing_index = Some(index + 4 + offset);
+                                break;
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
+                let closing_index = closing_index
+                    .ok_or_else(|| format!("constraint `{name}` has no closing `)`"))?;
+                if checks
+                    .insert(
+                        name.to_string(),
+                        source[body_start..tokens[closing_index].start]
+                            .trim()
+                            .to_string(),
+                    )
+                    .is_some()
+                {
+                    return Err(format!("constraint name `{name}` appears more than once"));
+                }
+                index = closing_index;
             }
+            _ => {}
         }
-        let closing = closing.ok_or_else(|| format!("constraint `{name}` has no closing `)`"))?;
-        if checks
-            .insert(
-                name.to_string(),
-                source[body_start..closing].trim().to_string(),
-            )
-            .is_some()
-        {
-            return Err(format!("constraint name `{name}` appears more than once"));
-        }
-        index += 4;
+        index += 1;
     }
-    Ok(checks)
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Expr {
-    Identifier(String),
+    Identifier(SqlIdentifier),
     String(String),
     Number(String),
     Boolean(bool),
-    Cast(Box<Self>, String),
-    Call(String, Vec<Self>),
+    Cast(Box<Self>, SqlIdentifier),
+    Call(SqlIdentifier, Vec<Self>),
     JsonText(Box<Self>, Box<Self>),
     Not(Box<Self>),
     And(Box<Self>, Box<Self>),
@@ -436,6 +489,34 @@ enum Expr {
     Compare(Box<Self>, Comparison, Box<Self>),
     IsNull(Box<Self>, bool),
     In(Box<Self>, Vec<Self>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SqlIdentifier {
+    Folded(String),
+    Exact(String),
+}
+
+impl SqlIdentifier {
+    fn unquoted(value: String) -> Self {
+        Self::Folded(value)
+    }
+
+    fn quoted(value: String) -> Self {
+        if is_unquoted_identifier(&value) && value == value.to_ascii_lowercase() {
+            Self::Folded(value)
+        } else {
+            Self::Exact(value)
+        }
+    }
+}
+
+fn is_unquoted_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -462,7 +543,7 @@ impl Token {
 
     fn identifier(&self) -> Option<&str> {
         match &self.kind {
-            TokenKind::Ident(value) => Some(value),
+            TokenKind::Ident(value) | TokenKind::QuotedIdent(value) => Some(value),
             _ => None,
         }
     }
@@ -471,6 +552,7 @@ impl Token {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TokenKind {
     Ident(String),
+    QuotedIdent(String),
     String(String),
     Number(String),
     LParen,
@@ -484,7 +566,17 @@ enum TokenKind {
     Other(char),
 }
 
-fn lex(source: &str) -> Result<Vec<Token>, String> {
+fn lex_sqlite_ddl(source: &str) -> Result<Vec<Token>, String> {
+    lex_with_mode(source, LexMode::Sqlite)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LexMode {
+    PostgresExpression,
+    Sqlite,
+}
+
+fn lex_with_mode(source: &str, mode: LexMode) -> Result<Vec<Token>, String> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut index = 0;
@@ -560,7 +652,11 @@ fn lex(source: &str) -> Result<Vec<Token>, String> {
                         index += character.len_utf8();
                     }
                 }
-                TokenKind::Ident(value.to_ascii_lowercase())
+                TokenKind::QuotedIdent(if mode == LexMode::Sqlite {
+                    value.to_ascii_lowercase()
+                } else {
+                    value
+                })
             }
             b'(' => {
                 index += 1;
@@ -569,6 +665,26 @@ fn lex(source: &str) -> Result<Vec<Token>, String> {
             b')' => {
                 index += 1;
                 TokenKind::RParen
+            }
+            b'[' if mode == LexMode::Sqlite => {
+                index += 1;
+                let mut value = String::new();
+                loop {
+                    let Some(next) = bytes.get(index).copied() else {
+                        return Err("unterminated bracket-quoted identifier".to_string());
+                    };
+                    if next == b']' {
+                        index += 1;
+                        break;
+                    }
+                    let character = source[index..]
+                        .chars()
+                        .next()
+                        .ok_or_else(|| "invalid UTF-8 boundary".to_string())?;
+                    value.push(character);
+                    index += character.len_utf8();
+                }
+                TokenKind::QuotedIdent(value.to_ascii_lowercase())
             }
             b'[' => {
                 index += 1;
@@ -653,8 +769,22 @@ fn lex(source: &str) -> Result<Vec<Token>, String> {
     Ok(tokens)
 }
 
+#[cfg(test)]
 fn parse_expression(source: &str) -> Result<Expr, String> {
-    let tokens = lex(source)?;
+    parse_expression_with_mode(source, LexMode::PostgresExpression)
+}
+
+fn parse_expression_for_backend(backend: &str, source: &str) -> Result<Expr, String> {
+    let mode = if backend == "sqlite" {
+        LexMode::Sqlite
+    } else {
+        LexMode::PostgresExpression
+    };
+    parse_expression_with_mode(source, mode)
+}
+
+fn parse_expression_with_mode(source: &str, mode: LexMode) -> Result<Expr, String> {
+    let tokens = lex_with_mode(source, mode)?;
     let mut parser = Parser { tokens, index: 0 };
     let expression = parser.parse_or()?;
     if parser.index != parser.tokens.len() {
@@ -757,6 +887,16 @@ impl Parser {
                 TokenKind::Ident(identifier) if identifier == "true" => Expr::Boolean(true),
                 TokenKind::Ident(identifier) if identifier == "false" => Expr::Boolean(false),
                 TokenKind::Ident(identifier) => {
+                    let identifier = SqlIdentifier::unquoted(identifier);
+                    if self.consume(TokenKind::LParen) {
+                        let arguments = self.parse_list(TokenKind::RParen)?;
+                        Expr::Call(identifier, arguments)
+                    } else {
+                        Expr::Identifier(identifier)
+                    }
+                }
+                TokenKind::QuotedIdent(identifier) => {
+                    let identifier = SqlIdentifier::quoted(identifier);
                     if self.consume(TokenKind::LParen) {
                         let arguments = self.parse_list(TokenKind::RParen)?;
                         Expr::Call(identifier, arguments)
@@ -776,15 +916,22 @@ impl Parser {
         };
         loop {
             if self.consume(TokenKind::Cast) {
-                let cast = self
+                let cast_token = self
                     .tokens
                     .get(self.index)
-                    .and_then(Token::identifier)
-                    .ok_or_else(|| "expected cast type".to_string())?
-                    .to_string();
+                    .map(|token| token.kind.clone())
+                    .ok_or_else(|| "expected cast type".to_string())?;
                 self.index += 1;
-                if !(cast == "text" && matches!(value, Expr::String(_))) {
-                    value = Expr::Cast(Box::new(value), cast);
+                match cast_token {
+                    TokenKind::Ident(cast)
+                        if cast == "text" && matches!(value, Expr::String(_)) => {}
+                    TokenKind::Ident(cast) => {
+                        value = Expr::Cast(Box::new(value), SqlIdentifier::unquoted(cast));
+                    }
+                    TokenKind::QuotedIdent(cast) => {
+                        value = Expr::Cast(Box::new(value), SqlIdentifier::Exact(cast));
+                    }
+                    _ => return Err("expected cast type".to_string()),
                 }
             } else if self.consume(TokenKind::JsonText) {
                 value = Expr::JsonText(Box::new(value), Box::new(self.parse_value()?));
@@ -846,6 +993,21 @@ mod tests {
     }
 
     #[test]
+    fn quoted_identifier_comparison_preserves_sql_identity() {
+        let expected = parse_expression("state IN ('pending', 'done')").unwrap();
+        let quoted_lowercase = parse_expression("\"state\" IN ('pending', 'done')").unwrap();
+        let quoted_uppercase = parse_expression("\"STATE\" IN ('pending', 'done')").unwrap();
+
+        assert_eq!(expected, quoted_lowercase);
+        assert_ne!(expected, quoted_uppercase);
+        assert_ne!(
+            parse_expression("'pending'::text").unwrap(),
+            parse_expression("'pending'::\"text\"").unwrap(),
+            "only PostgreSQL's unquoted built-in text cast may be discarded"
+        );
+    }
+
+    #[test]
     fn parser_preserves_grouping_literal_operator_and_cast_changes() {
         let expected = parse_expression("(a = 'x' AND b = 'y') OR c = 'z'").unwrap();
         for altered in [
@@ -871,6 +1033,26 @@ mod tests {
             parse_expression(&found["ck_example"]),
             parse_expression("value IN ('comma,paren)', 'quote''inside')")
         );
+    }
+
+    #[test]
+    fn sqlite_extraction_requires_a_real_declaration_keyword() {
+        let forged = r#"CREATE TABLE example (
+            "constraint" ck_example CHECK(value = 'ok'),
+            [CONSTRAINT ck_bracket CHECK (value = 'ok')] TEXT,
+            value TEXT CHECK (
+                coalesce(value, 'CONSTRAINT ck_nested CHECK (value = ''ok'')') <> ''
+            )
+        )"#;
+        assert!(extract_named_check_expressions(forged).unwrap().is_empty());
+
+        let genuine = r#"CREATE TABLE example (
+            value TEXT CONSTRAINT "ck_column" CHECK (value = 'column'),
+            CONSTRAINT `ck_table` CHECK (value = 'table')
+        )"#;
+        let found = extract_named_check_expressions(genuine).unwrap();
+        assert_eq!(found["ck_column"], "value = 'column'");
+        assert_eq!(found["ck_table"], "value = 'table'");
     }
 
     #[test]

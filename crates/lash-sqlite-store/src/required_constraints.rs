@@ -13,11 +13,15 @@ use crate::{SqliteDatabase, conn::SqliteConnection, sqlite_error};
 
 /// Inspect the registered named `CHECK`s in one existing SQLite database.
 ///
-/// The file is opened read-only. This does not create a database, apply DDL,
-/// repair rows, or run during normal store startup. An empty report establishes
-/// only that every registered named check for `database` matched in this read;
-/// it says nothing about the schema version, openability, unregistered checks,
-/// or existing row integrity.
+/// The database is opened with SQLite's read-only flag. This does not provision
+/// a missing database, apply DDL, stamp a version, change rows, or run during
+/// normal store startup. SQLite may create recoverable `-shm`/`-wal` sidecars
+/// while opening a WAL database read-only; inspection preserves durable main
+/// database and WAL content and reads committed changes still held in the WAL.
+///
+/// An empty report establishes only that every registered named check for
+/// `database` matched in this read; it says nothing about the schema version,
+/// openability, unregistered checks, or existing row integrity.
 ///
 /// ```no_run
 /// # async fn inspect(path: &std::path::Path) -> Result<(), lash_core::StoreError> {

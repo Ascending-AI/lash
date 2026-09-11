@@ -1897,6 +1897,98 @@ async fn fig2837_required_constraint_inspection_reports_live_drift_without_rejec
 }
 
 #[tokio::test]
+async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_identity() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping quoted-identifier inspection: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "ALTER TABLE lash_pending_turn_inputs
+                 ADD COLUMN \"STATE\" TEXT,
+                 ADD COLUMN \"CLAIM_ID\" TEXT;
+             ALTER TABLE lash_pending_turn_inputs
+                 DROP CONSTRAINT ck_pending_turn_inputs_state,
+                 DROP CONSTRAINT ck_pending_turn_inputs_state_ingress,
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+             ALTER TABLE lash_pending_turn_inputs
+                 ADD CONSTRAINT ck_pending_turn_inputs_state
+                     CHECK (\"STATE\" IN (
+                         'pending_active', 'deferred_next_turn', 'accepted',
+                         'cancelled', 'completed')),
+                 ADD CONSTRAINT ck_pending_turn_inputs_state_ingress
+                     CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn'
+                             AND \"STATE\" IN (
+                                 'pending_active', 'accepted', 'cancelled', 'completed'))
+                         OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
+                             AND \"STATE\" IN (
+                                 'deferred_next_turn', 'cancelled', 'completed'))),
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                     CHECK ((\"CLAIM_ID\" IS NULL AND claim_token IS NULL)
+                         OR (\"CLAIM_ID\" IS NOT NULL AND claim_token IS NOT NULL));
+             INSERT INTO lash_pending_turn_inputs (
+                 input_id, session_id, ingress_json, state, input_json,
+                 enqueued_at_ms, claim_id, \"STATE\"
+             ) VALUES (
+                 'quoted-identity-witness', 'session',
+                 '{\"scope\":\"active_turn\"}', 'invalid', '{}',
+                 0, 'orphan-real-claim-id', 'accepted'
+             )",
+        )
+        .await;
+
+    let altered = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect checks redirected to distinct quoted columns");
+    for expected_name in [
+        "ck_pending_turn_inputs_state",
+        "ck_pending_turn_inputs_state_ingress",
+        "ck_pending_turn_inputs_claim_id_token_all_or_none",
+    ] {
+        assert!(
+            altered.findings().iter().any(|finding| matches!(
+                finding,
+                RequiredConstraintFinding::Altered { table, name, .. }
+                    if table == "lash_pending_turn_inputs" && name == expected_name
+            )),
+            "quoted uppercase identifier must remain distinct for {expected_name}: {altered:?}"
+        );
+    }
+
+    scratch
+        .apply(
+            "DELETE FROM lash_pending_turn_inputs
+                 WHERE input_id = 'quoted-identity-witness';
+             ALTER TABLE lash_pending_turn_inputs
+                 DROP CONSTRAINT ck_pending_turn_inputs_state,
+                 DROP CONSTRAINT ck_pending_turn_inputs_state_ingress,
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+             ALTER TABLE lash_pending_turn_inputs
+                 ADD CONSTRAINT ck_pending_turn_inputs_state
+                     CHECK (\"state\" IN (
+                         'pending_active', 'deferred_next_turn', 'accepted',
+                         'cancelled', 'completed')),
+                 ADD CONSTRAINT ck_pending_turn_inputs_state_ingress
+                     CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn'
+                             AND \"state\" IN (
+                                 'pending_active', 'accepted', 'cancelled', 'completed'))
+                         OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
+                             AND \"state\" IN (
+                                 'deferred_next_turn', 'cancelled', 'completed'))),
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                     CHECK ((\"claim_id\" IS NULL AND claim_token IS NULL)
+                         OR (\"claim_id\" IS NOT NULL AND claim_token IS NOT NULL))",
+        )
+        .await;
+    let quoted_lowercase = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
+        .await
+        .expect("inspect equivalent quoted lowercase identifiers");
+    assert!(quoted_lowercase.is_conformant(), "{quoted_lowercase:?}");
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
 async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping corrupt predecessor rollback: database URL is not set");
