@@ -277,6 +277,7 @@ fn tool_context_with_provider<'run>(
     let processes = crate::testing::effect_backed_process_service(Arc::clone(&fixtures.registry));
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
     let effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
+    let attempt_parent = attempt_invocation().into_runtime_invocation();
     // The production client, minted against the very controller the sentinel
     // wraps: an `Independent` classification therefore shows up in the ledger
     // as a real crossing instead of being swallowed by a stub.
@@ -287,7 +288,8 @@ fn tool_context_with_provider<'run>(
         .direct_completion_client(
             effect_controller.clone(),
             Some(TurnId::from(TURN.to_string())),
-        );
+        )
+        .with_tool_attempt_parent_invocation(attempt_parent.clone());
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools,
@@ -303,7 +305,7 @@ fn tool_context_with_provider<'run>(
         )),
         effect_controller,
         direct_completions,
-        parent_invocation: Some(attempt_invocation().into_runtime_invocation()),
+        parent_invocation: Some(attempt_parent.clone()),
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -321,7 +323,7 @@ fn tool_context_with_provider<'run>(
     });
     crate::ToolContext::from_dispatch(dispatch)
         .tool_call_id(Some(CALL_ID.to_string()))
-        .parent_invocation(Some(attempt_invocation().into_runtime_invocation()))
+        .parent_invocation(Some(attempt_parent))
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
         .child_execution_trace_hook(Some(crate::ToolChildExecutionTraceHook::new(
             move |_started| {

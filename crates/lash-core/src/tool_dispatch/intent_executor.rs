@@ -346,10 +346,10 @@ async fn execute_one(
             context.parentless_attribution(),
             format!("tool-intent:{}", identity.intent_index),
         )
-        .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
-            identity.clone(),
-        ))
     });
+    let parent = parent.with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
+        identity.clone(),
+    ));
     let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
         .with_parent_invocation(Some(parent))
         .with_agent_frame_id(Some(context.agent_frame_id.clone()));
