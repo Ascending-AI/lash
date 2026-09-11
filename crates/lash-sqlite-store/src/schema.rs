@@ -16,25 +16,18 @@ pub(crate) enum StoreBacking {
     Memory,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SchemaRemedy {
-    DeleteDatabase,
-    RecreateTrustDomain,
-}
-
 #[derive(Clone, Copy)]
 struct SqliteDatabaseDefinition {
     name: &'static str,
     schema: &'static str,
     version: i32,
-    remedy: SchemaRemedy,
 }
 
 /// One of the four independently versioned SQLite databases a lash deployment
 /// can hold.
 ///
 /// The variant is the single table for each database's schema SQL, version,
-/// operator-facing name, and schema-drift remedy.
+/// and operator-facing name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SqliteDatabase {
     /// Sessions, graph nodes, checkpoints, leases, queued work.
@@ -54,25 +47,21 @@ impl SqliteDatabase {
                 name: "durable core",
                 schema: SCHEMA,
                 version: SCHEMA_VERSION,
-                remedy: SchemaRemedy::DeleteDatabase,
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
                 name: "process registry",
                 schema: PROCESS_SCHEMA,
                 version: PROCESS_SCHEMA_VERSION,
-                remedy: SchemaRemedy::DeleteDatabase,
             },
             Self::Triggers => SqliteDatabaseDefinition {
                 name: "trigger store",
                 schema: TRIGGER_SCHEMA,
                 version: TRIGGER_SCHEMA_VERSION,
-                remedy: SchemaRemedy::DeleteDatabase,
             },
             Self::EffectReplay => SqliteDatabaseDefinition {
                 name: "effect replay",
                 schema: EFFECT_SCHEMA,
                 version: EFFECT_SCHEMA_VERSION,
-                remedy: SchemaRemedy::RecreateTrustDomain,
             },
         }
     }
@@ -93,10 +82,6 @@ impl SqliteDatabase {
     /// The operator-facing name used in reports and refusal messages.
     pub fn name(self) -> &'static str {
         self.definition().name
-    }
-
-    fn remedy(self) -> SchemaRemedy {
-        self.definition().remedy
     }
 }
 
@@ -1154,29 +1139,20 @@ pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<boo
 }
 
 /// Build the error message for an unsupported on-disk schema. The expected and
-/// found `PRAGMA user_version` values are reported accurately. Effect replay is
-/// part of the trust domain documented in `docs/persistence.html#delete-sessions`,
-/// so its remedy must never prescribe an independent database wipe.
+/// found `PRAGMA user_version` values are reported accurately. Every database
+/// kind belongs to the one trust domain described by ADR 0049, so a refusal
+/// must prescribe one coordinated reset rather than an independent wipe.
 pub(crate) fn unsupported_schema_message(
     database: SqliteDatabase,
     expected_version: i32,
     found_version: i32,
 ) -> String {
-    let remedy = match database.remedy() {
-        SchemaRemedy::DeleteDatabase => {
-            format!("delete the {} database and start fresh.", database.name())
-        }
-        SchemaRemedy::RecreateTrustDomain => {
-            "drain affected sessions and recreate the whole Lash trust domain with this version. \
-         Reset the tombstones, await-event revocation ledger, effect journal, and Restate state \
-         together; see docs/persistence.html#delete-sessions."
-                .to_string()
-        }
-    };
     format!(
         "Unsupported lash {} schema: this binary supports schema version {expected_version}, but \
          the database reports version {found_version}. There is no \
-         migration chain — {remedy}",
+         migration chain — drain affected sessions and recreate the whole Lash trust domain with \
+         this version. Reset the tombstones, await-event revocation ledger, effect journal, and \
+         Restate state together; see docs/adr/0049-session-ids-are-used-once.md.",
         database.name()
     )
 }
@@ -1304,15 +1280,26 @@ mod schema_metadata_tests {
     use super::*;
 
     #[test]
-    fn effect_replay_selects_the_trust_domain_remedy_structurally() {
-        assert_eq!(
-            SqliteDatabase::EffectReplay.remedy(),
-            SchemaRemedy::RecreateTrustDomain
-        );
-        assert_eq!(
-            SqliteDatabase::DurableCore.remedy(),
-            SchemaRemedy::DeleteDatabase
-        );
+    fn every_database_kind_prescribes_the_coordinated_trust_domain_reset() {
+        let cases = [
+            (SqliteDatabase::DurableCore, "durable core"),
+            (SqliteDatabase::ProcessRegistry, "process registry"),
+            (SqliteDatabase::Triggers, "trigger store"),
+            (SqliteDatabase::EffectReplay, "effect replay"),
+        ];
+        for (database, name) in cases {
+            assert_eq!(database.name(), name);
+            assert_eq!(
+                unsupported_schema_message(database, 123, 45),
+                format!(
+                    "Unsupported lash {name} schema: this binary supports schema version 123, but \
+                     the database reports version 45. There is no migration chain — drain affected \
+                     sessions and recreate the whole Lash trust domain with this version. Reset the \
+                     tombstones, await-event revocation ledger, effect journal, and Restate state \
+                     together; see docs/adr/0049-session-ids-are-used-once.md."
+                )
+            );
+        }
     }
 }
 

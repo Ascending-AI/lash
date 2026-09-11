@@ -112,15 +112,42 @@ impl Parser {
                     }
                     "Process" => {
                         self.expect_exact(TokenKind::Less, "`<`")?;
-                        let input = self.parse_type_expr()?;
+                        self.expect_exact(TokenKind::LParen, "`(`")?;
+                        let mut params = Vec::new();
+                        while !matches!(self.peek_kind(), TokenKind::RParen | TokenKind::Eof) {
+                            let param_span = self.peek().span;
+                            let param_name = self.expect_ident()?;
+                            self.expect_exact(TokenKind::Colon, "`:`")?;
+                            let ty = self.parse_type_expr()?;
+                            params.push(ProcessParam {
+                                name: param_name,
+                                ty,
+                            });
+                            if matches!(self.peek_kind(), TokenKind::Comma) {
+                                self.bump();
+                                continue;
+                            }
+                            if !matches!(self.peek_kind(), TokenKind::RParen) {
+                                return Err(ParseError::Expected {
+                                    expected: "`,` or `)` in process signature",
+                                    found: render_kind(self.peek_kind()),
+                                    span: param_span,
+                                });
+                            }
+                        }
+                        self.expect_exact(TokenKind::RParen, "`)`")?;
                         self.expect_exact(TokenKind::Comma, "`,`")?;
                         let output = self.parse_type_expr()?;
                         self.expect_exact(TokenKind::Greater, "`>`")?;
-                        Ok(TypeExpr::Process {
-                            input: Box::new(input),
-                            output: Box::new(output),
-                            input_count: 1,
-                        })
+                        let signature =
+                            ProcessSignature::try_new(params, output).map_err(|error| {
+                                ParseError::Expected {
+                                    expected: "valid named process signature",
+                                    found: error.to_string(),
+                                    span: token.span,
+                                }
+                            })?;
+                        Ok(TypeExpr::Process(ProcessType::known(signature)))
                     }
                     "TriggerHandle" => {
                         self.expect_exact(TokenKind::Less, "`<`")?;

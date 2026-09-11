@@ -9,7 +9,6 @@ pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 #[cfg(feature = "lashlang")]
 const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
 const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
-pub(crate) const CURRENT_TRIGGER_MANIFEST_NAMESPACE: &str = "lashlang_trigger_manifest";
 
 impl PostgresLashlangArtifactStore {
     async fn put_namespaced_bytes(
@@ -94,92 +93,6 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
                 lashlang::ModuleArtifact::from_store_bytes(&bytes)
                     .map(Arc::new)
                     .map_err(lashlang::ArtifactStoreError::from)
-            })
-            .transpose()
-    }
-
-    async fn replace_current_trigger_manifest(
-        &self,
-        owner_namespace: &str,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> Result<lashlang::TriggerManifestReplacement, lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
-            return Err(lashlang::ArtifactStoreError::Backend(
-                "invalid artifact namespace key".into(),
-            ));
-        }
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(format!(
-                "{CURRENT_TRIGGER_MANIFEST_NAMESPACE}:{owner_namespace}"
-            ))
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
-        let previous_bytes: Option<Vec<u8>> = sqlx::query_scalar(
-            "SELECT artifact_bytes FROM lash_lashlang_artifacts
-             WHERE namespace = $1 AND artifact_ref = $2",
-        )
-        .bind(CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-        .bind(owner_namespace)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
-        let previous = previous_bytes
-            .map(|bytes| {
-                serde_json::from_slice::<lashlang::CurrentTriggerKeyManifest>(&bytes)
-                    .map_err(|err| lashlang::ArtifactStoreError::Decode(err.to_string()))
-            })
-            .transpose()?;
-        let current = lashlang::CurrentTriggerKeyManifest {
-            module_ref: artifact.module_ref.clone(),
-            manifest: artifact.trigger_key_manifest.clone(),
-        };
-        let current_bytes = serde_json::to_vec(&current)
-            .map_err(|err| lashlang::ArtifactStoreError::Encode(err.to_string()))?;
-        sqlx::query(
-            "INSERT INTO lash_lashlang_artifacts (namespace, artifact_ref, artifact_bytes)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (namespace, artifact_ref)
-             DO UPDATE SET artifact_bytes = EXCLUDED.artifact_bytes",
-        )
-        .bind(CURRENT_TRIGGER_MANIFEST_NAMESPACE)
-        .bind(owner_namespace)
-        .bind(current_bytes)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
-        tx.commit()
-            .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
-        Ok(lashlang::TriggerManifestReplacement {
-            previous_module_ref: previous.as_ref().map(|entry| entry.module_ref.clone()),
-            current_module_ref: artifact.module_ref.clone(),
-            diff: previous
-                .map(|entry| entry.manifest.diff(&artifact.trigger_key_manifest))
-                .unwrap_or_default(),
-        })
-    }
-
-    async fn get_current_trigger_manifest(
-        &self,
-        owner_namespace: &str,
-    ) -> Result<Option<lashlang::CurrentTriggerKeyManifest>, lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(owner_namespace) {
-            return Err(lashlang::ArtifactStoreError::Backend(
-                "invalid artifact namespace key".into(),
-            ));
-        }
-        self.get_namespaced_bytes(CURRENT_TRIGGER_MANIFEST_NAMESPACE, owner_namespace)
-            .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?
-            .map(|bytes| {
-                serde_json::from_slice(&bytes)
-                    .map_err(|err| lashlang::ArtifactStoreError::Decode(err.to_string()))
             })
             .transpose()
     }

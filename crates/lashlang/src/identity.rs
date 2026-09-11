@@ -97,6 +97,29 @@ impl ProcessDefinitionIdentity {
             .process_name_for_ref(&self.process_ref)
             .is_some_and(|export_name| export_name == self.process_name)
     }
+
+    /// Resolves this immutable identity to the complete signature stored by its artifact.
+    pub fn resolve_process_type(
+        &self,
+        artifact: &ModuleArtifact,
+    ) -> Result<crate::TypeExpr, ProcessDefinitionIdentityError> {
+        artifact
+            .verify()
+            .map_err(|source| ProcessDefinitionIdentityError::InvalidArtifact {
+                process: self.process_name.clone(),
+                message: source.to_string(),
+            })?;
+        if !self.matches_artifact_export(artifact) {
+            return Err(ProcessDefinitionIdentityError::ArtifactMismatch {
+                process: self.process_name.clone(),
+            });
+        }
+        artifact.process_type(&self.process_name).ok_or_else(|| {
+            ProcessDefinitionIdentityError::MissingSignature {
+                process: self.process_name.clone(),
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
@@ -111,6 +134,12 @@ pub enum ProcessDefinitionIdentityError {
         field: &'static str,
         message: String,
     },
+    #[error("process identity for `{process}` does not match the supplied artifact export")]
+    ArtifactMismatch { process: String },
+    #[error("artifact process `{process}` has no complete signature")]
+    MissingSignature { process: String },
+    #[error("artifact for process `{process}` failed identity verification: {message}")]
+    InvalidArtifact { process: String, message: String },
 }
 
 fn decode_field<T: serde::de::DeserializeOwned>(

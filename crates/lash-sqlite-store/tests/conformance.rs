@@ -50,6 +50,8 @@ use tempfile::TempDir;
 mod direct_turn_acceptance;
 #[path = "conformance/pre_frame_key.rs"]
 mod pre_frame_key;
+#[path = "conformance/schema_refusal.rs"]
+mod schema_refusal;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "conformance/trigger_occurrence_retention.rs"]
@@ -376,6 +378,42 @@ fn open_trigger_store(path: &Path) -> Arc<dyn TriggerStore> {
             .await
             .expect("file trigger store")
     })) as Arc<dyn TriggerStore>
+}
+
+struct SqliteTriggerOccurrenceListingFaultInjector {
+    path: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::TriggerOccurrenceListingFaultInjector
+    for SqliteTriggerOccurrenceListingFaultInjector
+{
+    async fn insert_malformed_occurrence(&self) {
+        let conn = rusqlite::Connection::open(&self.path)
+            .expect("open raw SQLite occurrence-listing fixture");
+        conn.execute(
+            "INSERT INTO trigger_occurrences (
+                occurrence_id, idempotency_key, source_type, source_key,
+                occurred_at_ms, record_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                "occurrence-listing-malformed",
+                "occurrence-listing-malformed",
+                "ui.button.pressed",
+                "occurrence-listing-malformed-source",
+                0_i64,
+                "{not valid json",
+            ],
+        )
+        .expect("insert malformed SQLite occurrence");
+    }
+
+    async fn make_occurrence_query_unavailable(&self) {
+        rusqlite::Connection::open(&self.path)
+            .expect("open raw SQLite occurrence-listing fixture")
+            .execute_batch("DROP TABLE trigger_occurrences")
+            .expect("make SQLite occurrence query unavailable");
+    }
 }
 
 struct SqliteFenceIntegrityInjector {
@@ -1032,25 +1070,6 @@ async fn sqlite_process_continuation_store_satisfies_conformance() {
 }
 
 #[tokio::test]
-async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_serving() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-unit-external-owner-processes.db");
-    let conn = rusqlite::Connection::open(&path).expect("open legacy process db");
-    conn.pragma_update(None, "user_version", 12)
-        .expect("stamp legacy process schema");
-    drop(conn);
-
-    let error = match SqliteProcessRegistry::open(&path, dir.path().join("sessions")).await {
-        Ok(_) => panic!("pre-unit-external-owner process stores must be recreated"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 32"));
-    assert!(message.contains("delete the process registry database and start fresh"));
-}
-
-#[tokio::test]
 async fn sqlite_session_store_factory_satisfies_conformance() {
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let unbound = Store::memory().await.expect("unbound durable-core store");
@@ -1213,22 +1232,12 @@ async fn sqlite_trigger_store_satisfies_conformance() {
 }
 
 #[tokio::test]
-async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-keyed-triggers.db");
-    let conn = rusqlite::Connection::open(&path).expect("open legacy trigger db");
-    conn.pragma_update(None, "user_version", 1)
-        .expect("stamp legacy trigger schema");
-    drop(conn);
-
-    let error = match SqliteTriggerStore::open(&path).await {
-        Ok(_) => panic!("pre-keyed trigger stores must be recreated"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash trigger store schema"));
-    assert!(message.contains("supports schema version 8"));
-    assert!(message.contains("delete the trigger store database and start fresh"));
+async fn sqlite_trigger_occurrence_listing_corruption_is_not_partial_success() {
+    let dir = tempfile::tempdir().expect("SQLite occurrence-listing tempdir");
+    let path = dir.path().join("occurrence-listing.db");
+    let store = open_trigger_store(&path);
+    let injector = SqliteTriggerOccurrenceListingFaultInjector { path };
+    lash_conformance::trigger_occurrence_listing_corruption_law(store, &injector).await;
 }
 
 #[tokio::test]

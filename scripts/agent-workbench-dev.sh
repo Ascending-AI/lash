@@ -448,7 +448,11 @@ write_meta() {
 
 start_detached() {
   log "building agent-workbench (profile: judged)"
-  cargo build -p agent-workbench --profile judged
+  local -a feature_args=()
+  if [[ "${AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO:-}" = "valid-empty-completion" ]]; then
+    feature_args=(--features provider-wire-fixtures)
+  fi
+  cargo build -p agent-workbench --profile judged "${feature_args[@]}"
 
   # Launch the binary cargo just built: honor CARGO_TARGET_DIR, or a stale
   # binary in the repo-local target/ boots instead of the fresh build.
@@ -552,6 +556,10 @@ run_foreground() {
   trap cleanup_foreground EXIT INT TERM
 
   log "starting workbench at $workbench_url"
+  local -a feature_args=()
+  if [[ "${AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO:-}" = "valid-empty-completion" ]]; then
+    feature_args=(--features provider-wire-fixtures)
+  fi
   local -a workbench_env=(
     "AGENT_WORKBENCH_ADDR=$workbench_addr"
     "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
@@ -562,7 +570,7 @@ run_foreground() {
   if [[ -n "${AGENT_WORKBENCH_DATA_DIR:-}" ]]; then
     workbench_env+=("AGENT_WORKBENCH_DATA_DIR=$AGENT_WORKBENCH_DATA_DIR")
   fi
-  env "${workbench_env[@]}" cargo run -p agent-workbench --profile judged &
+  env "${workbench_env[@]}" cargo run -p agent-workbench --profile judged "${feature_args[@]}" &
   started_pid="$!"
   write_pid_file "$pid_file" "$started_pid" || die "could not record process identity for $started_pid"
   started_start_time="$(process_start_time "$started_pid")"

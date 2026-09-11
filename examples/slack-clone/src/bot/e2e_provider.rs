@@ -82,12 +82,12 @@ impl State {
         if marker == Some("FIG1341-MCP-DEPTH") {
             return match self.next("mcp") {
                 0 => tool(
-                    SAMPLE_SUMMARY_TOOL,
+                    &SAMPLE_SUMMARY_TOOL,
                     json!({"text": "Host policy stays with the embedding application"}),
                 ),
-                1 => tool(ELICIT_CONFIRMATION_TOOL, json!({})),
-                2 => tool(URL_ELICITATION_TOOL, json!({})),
-                3 => tool(LIST_HOST_ROOTS_TOOL, json!({})),
+                1 => tool(&ELICIT_CONFIRMATION_TOOL, json!({})),
+                2 => tool(&URL_ELICITATION_TOOL, json!({})),
+                3 => tool(&LIST_HOST_ROOTS_TOOL, json!({})),
                 _ => text(
                     "Host-generated summary. Form accepted yes. URL accepted and completion notified. Root slack-clone.",
                 ),
@@ -99,7 +99,7 @@ impl State {
         // quietly skipped here.
         if marker == Some("FIG1341-MCP-ATTACH") {
             return match self.next("mcp-attach") {
-                0 => tool(WORKSPACE_BADGE_TOOL, json!({})),
+                0 => tool(&WORKSPACE_BADGE_TOOL, json!({})),
                 _ => text("The workspace badge came back from the attached HTTP server."),
             };
         }

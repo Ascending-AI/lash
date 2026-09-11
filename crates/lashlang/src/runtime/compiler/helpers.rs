@@ -1,5 +1,11 @@
 use super::*;
 
+use std::borrow::Cow;
+
+pub(crate) const BRANCH_EXECUTION_SITE_KIND: &str = "branch";
+pub(crate) const RESOURCE_OPERATION_EXECUTION_SITE_KIND: &str = "resource_operation";
+pub(crate) const STEP_EXECUTION_SITE_KIND: &str = "step";
+
 pub(super) fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
     matches!(expr, Expr::ReceiverCall { .. } | Expr::Await(_))
         || matches!(
@@ -125,6 +131,30 @@ fn collect_lashlang_execution_paths(
         collect_lashlang_execution_paths(child, path, paths);
         path.pop();
     }
+}
+
+pub(crate) fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, str>)> {
+    Some(match expr {
+        Expr::ReceiverCall { operation, .. } => (
+            RESOURCE_OPERATION_EXECUTION_SITE_KIND,
+            Cow::Borrowed(operation.as_str()),
+        ),
+        Expr::StartProcess(start) => (
+            "child_process",
+            Cow::Owned(format!("start {}", start.process)),
+        ),
+        Expr::SleepFor(_) => ("sleep", Cow::Borrowed("sleep for")),
+        Expr::SleepUntil(_) => ("sleep", Cow::Borrowed("sleep until")),
+        Expr::WaitSignal { .. } => ("wait", Cow::Borrowed("wait_signal")),
+        Expr::SignalRun { .. } => ("signal", Cow::Borrowed("signal_run")),
+        Expr::Finish(_) => ("terminal", Cow::Borrowed("result")),
+        Expr::Fail(_) => ("terminal", Cow::Borrowed("failure")),
+        Expr::Yield(_) => ("process_event", Cow::Borrowed("yield")),
+        Expr::Wake(_) => ("process_event", Cow::Borrowed("wake")),
+        Expr::If { .. } => (BRANCH_EXECUTION_SITE_KIND, Cow::Borrowed("if")),
+        Expr::Call { .. } => ("call", Cow::Borrowed("function call")),
+        _ => return None,
+    })
 }
 
 pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
@@ -365,7 +395,7 @@ pub(super) fn fold_type(ty: &TypeExpr) -> Option<Value> {
             rec.insert(ANY_OF.into(), Value::List(folded.into()));
             Some(Value::Record(Arc::new(rec)))
         }
-        TypeExpr::Process { .. } | TypeExpr::TriggerHandle(_) => Some(interned_scalar_schema(None)),
+        TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => Some(interned_scalar_schema(None)),
         TypeExpr::Ref(_) => None,
     }
 }
@@ -451,11 +481,9 @@ mod tests {
                 optional: false,
             }]),
             TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null]),
-            TypeExpr::Process {
-                input: Box::new(TypeExpr::Any),
-                output: Box::new(TypeExpr::Str),
-                input_count: 0,
-            },
+            TypeExpr::Process(crate::ProcessType::known(
+                crate::ProcessSignature::try_new(Vec::new(), TypeExpr::Str).unwrap(),
+            )),
             TypeExpr::TriggerHandle(Box::new(TypeExpr::Str)),
         ];
 
@@ -468,7 +496,7 @@ mod tests {
             let expected_type = match &ty {
                 TypeExpr::Any
                 | TypeExpr::Union(_)
-                | TypeExpr::Process { .. }
+                | TypeExpr::Process(_)
                 | TypeExpr::TriggerHandle(_) => None,
                 TypeExpr::Str | TypeExpr::Enum(_) => Some("string"),
                 TypeExpr::Int => Some("integer"),

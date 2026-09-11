@@ -101,12 +101,10 @@ pub(super) fn scenario_backend_regression_reference(
             "worker-stale-completion-fenced",
             "stale worker completion is rejected by durable commit fencing while the live incarnation remains active",
         ),
-        "standard.empty_provider_response_error" | "standard.provider_error_without_checkpoint" => {
-            (
-                "provider-protocol-terminalization",
-                "scripted provider mutation matrices classify retryable 429 and dropped-terminal parser failures through every migrated provider parser",
-            )
-        }
+        "standard.provider_error_without_checkpoint" => (
+            "provider-protocol-terminalization",
+            "scripted provider mutation matrices classify retryable 429 and dropped-terminal parser failures through every migrated provider parser",
+        ),
         "standard.streamed_text_finalizes_once"
         | "rlm.exec_tool_control_fail_terminal"
         | "rlm.exec_tool_control_frame_switch_terminal"

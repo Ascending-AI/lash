@@ -273,6 +273,12 @@ impl ByteBitmap {
         let bm = &self.0;
 
         let mut offset = 0;
+        // SAFETY: every bit pattern is a valid `u32`; `align_to` only splits
+        // this shared byte slice into aligned, read-only views.
+        #[expect(
+            unsafe_code,
+            reason = "read-only byte slices may be viewed as aligned u32 chunks"
+        )]
         let (prefix, body, suffix) = unsafe { bytes.align_to::<Chunk>() };
         for &byte in prefix.iter() {
             if self.contains(byte) {

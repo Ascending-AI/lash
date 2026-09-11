@@ -426,6 +426,62 @@ pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
     );
 }
 
+#[tokio::test]
+pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
+    let cases = [
+        (
+            crate::StoreError::HeadRevisionConflict {
+                expected: 7,
+                actual: 8,
+            },
+            crate::RuntimeErrorCode::StoreCommitSuperseded,
+            None,
+        ),
+        (
+            crate::StoreError::SessionDeleted {
+                session_id: SessionId::from("deleted-during-final-commit"),
+            },
+            crate::RuntimeErrorCode::SessionDeleted,
+            Some("deleted-during-final-commit"),
+        ),
+    ];
+
+    for (case_index, (store_error, expected_code, expected_deleted_session_id)) in
+        cases.into_iter().enumerate()
+    {
+        let transport = TestProvider::builder()
+            .kind("mock")
+            .complete(|_| async {
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "answered before the final commit refusal".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            })
+            .build();
+        let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+        store.fail_next_runtime_commit(store_error);
+
+        let error = runtime
+            .run_turn_assembled(
+                crate::TurnInput::text("reach the production final commit caller"),
+                CancellationToken::new(),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from(format!("host-commit-refusal-{case_index}")),
+                ),
+            )
+            .await
+            .expect_err("the injected final commit refusal must reject the turn");
+
+        assert_eq!(error.code, expected_code);
+        assert_eq!(error.deleted_session_id(), expected_deleted_session_id);
+    }
+}
+
 /// FIG-1573: a turn that ends without committing must not leave an input
 /// pinned to it - no crash required.
 ///

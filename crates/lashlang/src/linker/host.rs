@@ -166,7 +166,7 @@ fn validate_named_data_shape(ty: &TypeExpr) -> Result<(), NamedDataTypeError> {
         TypeExpr::Ref(name) => Err(NamedDataTypeError::NestedRef {
             name: name.to_string(),
         }),
-        TypeExpr::Process { .. } => Err(NamedDataTypeError::UnsupportedType { ty: "process" }),
+        TypeExpr::Process(_) => Err(NamedDataTypeError::UnsupportedType { ty: "process" }),
         TypeExpr::TriggerHandle(_) => Err(NamedDataTypeError::UnsupportedType {
             ty: "trigger handle",
         }),
@@ -416,7 +416,6 @@ impl LinkedModule {
         let surface = surface.borrow();
         let mut linker = Linker::new(&program, surface).with_dialect(dialect);
         let program = linker.link_program()?;
-        let program = materialize_default_trigger_keys(program)?;
         let requirements = host_requirements_for_program_with_catalog(&program, &surface.resources);
         let artifact = ModuleArtifact::from_program_with_requirements_and_dialect(
             program.clone(),

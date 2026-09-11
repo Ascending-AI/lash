@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{
-    ExecRequest, ExecResponse, Observation, RuntimeEffectKind, RuntimeExecutionContext,
-    TraceContext, facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+    ExecRequest, ExecResponse, RuntimeEffectKind, RuntimeExecutionContext, TraceContext,
+    facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
     facade_support::TraceSink,
 };
 // Cell execution itself is infallible, so the only fallible surface left in
@@ -23,10 +23,7 @@ use lash_lashlang_runtime::{
     LashlangSurface, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
 };
-use lashlang::{
-    ExecutionOutcome, State as FlowState, Value as FlowValue, ValueProjectionContext,
-    ValueProjector,
-};
+use lashlang::{ExecutionOutcome, State as FlowState};
 
 use self::host_bridge::{
     CollectedExecutionOutput, HostBridge, HostBridgeConfig, LashlangExecutionTrace,
@@ -429,48 +426,6 @@ async fn execute_code_inner(
             .stored_lashlang_modules
             .insert(linked_module.module_ref.clone());
     }
-    let owner_namespace = match ctx.trigger_owner_scope() {
-        Ok(owner_scope) => owner_scope.namespace(),
-        Err(err) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                format!("failed to resolve trigger owner namespace: {err}"),
-                start,
-                Vec::new(),
-            );
-        }
-    };
-    let manifest_replacement = artifact_store
-        .replace_current_trigger_manifest(&owner_namespace, &linked_module.artifact)
-        .await;
-    let manifest_replacement = match manifest_replacement {
-        Ok(replacement) => replacement,
-        Err(err) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                format!("failed to replace current trigger key manifest: {err}"),
-                start,
-                Vec::new(),
-            );
-        }
-    };
-    let reconcile_warnings = manifest_replacement
-        .diff
-        .removed
-        .iter()
-        .map(|subscription_key| {
-            format!(
-                "RECONCILE WARNING: trigger subscription `{subscription_key}` is absent from \
-                 the replacement artifact for owner `{owner_namespace}` and may be orphaned; \
-                 inspect it with `triggers.list({{}})` and remove it explicitly with \
-                 `triggers.prune({{ subscription_keys: [\"{subscription_key}\"] }})`"
-            )
-        })
-        .collect::<Vec<_>>();
     let compiled = cached_program.compiled_program();
 
     let rehydrated = {
@@ -521,21 +476,6 @@ async fn execute_code_inner(
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
     let print_projector = Arc::new(crate::rlm_support::print_history_projector());
-    let initial_observations = {
-        // Reconciliation warnings use the same projector contract as host prints.
-        let mut observations = Vec::with_capacity(reconcile_warnings.len());
-        for text in reconcile_warnings {
-            let value = FlowValue::String(text.clone().into());
-            let projected = print_projector
-                .project(ValueProjectionContext::new(&value))
-                .await;
-            observations.push(Observation {
-                projection: crate::rlm_support::observation_projection_metadata(&text, &projected),
-                text,
-            });
-        }
-        observations
-    };
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
         print_projector,
@@ -543,8 +483,6 @@ async fn execute_code_inner(
         host_environment,
         deferred_execution_grants,
         artifact_store: Arc::clone(&artifact_store),
-        trigger_key_manifest: linked_module.artifact.trigger_key_manifest.clone(),
-        initial_observations,
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()

@@ -442,20 +442,18 @@ pub(super) fn standard_protocol_execution_fact(
                 "done": false,
             })
         }
-        "standard.empty_provider_response_error" => {
+        "standard.empty_response_finishes" => {
             require_standard_bool(result, "/done", true, contract)?;
             require_standard_u64(result, "/llm_call_count", 1, contract)?;
-            require_standard_error_contains(
-                result,
-                "Model returned no assistant text or tool calls.",
-                contract,
-            )?;
-            require_standard_stopped_outcome(result, "ProviderError", contract)?;
+            require_standard_u64(result, "/text_delta_count", 0, contract)?;
+            require_standard_checkpoint(result, "before_completion", contract)?;
+            require_standard_finished_outcome_contains(result, "AssistantMessage", contract)?;
             json!({
                 "done": true,
-                "stop_reason": "provider_error",
-                "error": "empty_response",
                 "llm_call_count": 1,
+                "text_delta_count": 0,
+                "checkpoint": "before_completion",
+                "turn_outcome": "assistant_message",
             })
         }
         "standard.provider_error_without_checkpoint" => {
@@ -563,10 +561,10 @@ pub(super) fn standard_protocol_contract_metadata(
             "standard_initial_request_projection_execution",
             "StandardDriver projects the user input into the first TurnMachine LLM request",
         )),
-        "standard.empty_provider_response_error" => Ok((
-            "standard_protocol_scenario_empty_model_response_stops_provider_error",
-            "standard_empty_provider_response_error_execution",
-            "StandardDriver turns an empty model response into a provider-error stop with no generic success proxy",
+        "standard.empty_response_finishes" => Ok((
+            "standard_protocol_scenario_empty_model_response_finishes_after_checkpoint",
+            "standard_empty_response_finishes_execution",
+            "StandardDriver sends a valid empty model response through the normal completion checkpoint and finishes successfully",
         )),
         "standard.provider_error_without_checkpoint" => Ok((
             "standard_protocol_scenario_provider_error_stops_without_checkpoint",

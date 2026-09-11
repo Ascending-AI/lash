@@ -1227,6 +1227,39 @@ impl ProcessIdentity {
 /// carrying incarnation and liveness metadata for fenced reclaim.
 pub const PROCESS_LEASE_SCHEMA_VERSION: u32 = 2;
 
+/// A persisted process lease was written under a schema this reader does not support.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessLeaseSchemaVersionError {
+    pub actual: u32,
+    pub expected: u32,
+}
+
+impl fmt::Display for ProcessLeaseSchemaVersionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "unsupported process lease schema version {}; expected {}",
+            self.actual, self.expected
+        )
+    }
+}
+
+impl std::error::Error for ProcessLeaseSchemaVersionError {}
+
+/// Refuses a persisted process lease whose exact schema version is unsupported.
+pub fn ensure_process_lease_schema_version(
+    actual: u32,
+) -> Result<(), ProcessLeaseSchemaVersionError> {
+    if actual == PROCESS_LEASE_SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(ProcessLeaseSchemaVersionError {
+            actual,
+            expected: PROCESS_LEASE_SCHEMA_VERSION,
+        })
+    }
+}
+
 /// Durable session stores owned exclusively by one process execution.
 pub fn process_runtime_session_ids(process_id: &ProcessId) -> [SessionId; 2] {
     [
@@ -1253,7 +1286,7 @@ pub fn process_runtime_session_ids(process_id: &ProcessId) -> [SessionId; 2] {
 /// **This is not single-process theatre.** The owner / fencing-token /
 /// lease-token triple is the public contract that lets any backend detect and
 /// reject stale writers. Treat it as load-bearing, not defensive.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ProcessLease {
     pub schema_version: u32,
     pub process_id: ProcessId,

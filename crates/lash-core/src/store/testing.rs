@@ -1,5 +1,4 @@
 use super::{RuntimeCommit, RuntimeTurnCommitStamp, StoreError};
-use crate::SessionId;
 
 /// Test-only probes and fault-injection seams on a runtime store handle.
 ///
@@ -21,24 +20,6 @@ pub trait StoreTestSupport: Send + Sync {
             operation: "stamp_session_state_version_and_corrupt_payload_for_testing",
         })
     }
-
-    /// Seed the exact session-owned trigger-manifest artifact-ref namespace for
-    /// deletion conformance and differential tests.
-    ///
-    /// Returns `false` when the backend has no artifact-ref namespace on this
-    /// store surface (the in-memory runtime store is such a backend).
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<bool, StoreError>;
-
-    /// Return session-owned artifact-ref identities through this retained store
-    /// handle. Values are `(namespace, artifact_ref)` pairs; physical pointer
-    /// and body representations are deliberately excluded.
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<(String, String)>, StoreError>;
 }
 
 /// Build an identity-bearing append commit with a caller-owned clock.

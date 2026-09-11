@@ -80,10 +80,6 @@ fn trigger_registration_value() -> Value {
         Value::Record(std::sync::Arc::new(lashlang::Record::new())),
     );
     record.insert(
-        "manifest_membership".to_string(),
-        Value::String("present_in_current_artifact".into()),
-    );
-    record.insert(
         "source_key".to_string(),
         Value::String("timer.Schedule".into()),
     );

@@ -545,6 +545,15 @@ struct LashlangProcessHost<'run> {
 type ProcessHostAbilityFuture<'a> =
     Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;
 
+enum PreparedResourceInvocation {
+    Trigger {
+        operation: lashlang::TriggerHostOperation,
+        payload: serde_json::Value,
+        effect_id: String,
+    },
+    Tool(lash_core::facade_support::ToolInvocation),
+}
+
 impl LashlangProcessHost<'_> {
     fn resource_payload(
         &self,
@@ -589,7 +598,7 @@ impl LashlangProcessHost<'_> {
         args: Vec<lashlang::Value>,
         call_site: Option<lashlang::LashlangExecutionCallSite>,
         batch_index: Option<usize>,
-    ) -> Result<(String, lash_core::facade_support::ToolInvocation), ExecutionHostError> {
+    ) -> Result<PreparedResourceInvocation, ExecutionHostError> {
         let receiver = match &receiver {
             lashlang::Value::Resource(receiver) => receiver,
             _ => {
@@ -598,24 +607,33 @@ impl LashlangProcessHost<'_> {
         };
         let host_operation =
             resolve_lashlang_module_operation(&self.host_environment, receiver, &operation)?;
+        let payload = self.resource_payload(&args)?;
+        let call_site = call_site.ok_or_else(|| {
+            ExecutionHostError::from(LashlangHostError::OperationCallSiteMissing {
+                operation: operation.clone(),
+                host_operation: host_operation.clone(),
+            })
+        })?;
+        let call_id = self.resource_tool_call_id(&host_operation, &call_site, batch_index);
+        if let Some(operation) =
+            lashlang::TriggerHostOperation::from_host_operation(&host_operation)
+        {
+            return Ok(PreparedResourceInvocation::Trigger {
+                operation,
+                payload,
+                effect_id: call_id,
+            });
+        }
         let tool_id = lash_core::ToolId::from(host_operation.as_str());
         let manifest = self
             .ctx
             .callable_tool_manifest_by_id(&tool_id)
             .ok_or_else(|| {
                 ExecutionHostError::from(LashlangHostError::ResolvedOperationUnavailable {
-                    operation: operation.clone(),
-                    host_operation: host_operation.clone(),
+                    operation,
+                    host_operation,
                 })
             })?;
-        let payload = self.resource_payload(&args)?;
-        let call_site = call_site.ok_or_else(|| {
-            ExecutionHostError::from(LashlangHostError::OperationCallSiteMissing {
-                operation,
-                host_operation: host_operation.clone(),
-            })
-        })?;
-        let call_id = self.resource_tool_call_id(&host_operation, &call_site, batch_index);
         let mut invocation =
             lash_core::facade_support::ToolInvocation::new(call_id, manifest.id.clone(), payload);
         if let Some(hook) = self
@@ -624,7 +642,7 @@ impl LashlangProcessHost<'_> {
         {
             invocation = invocation.with_child_execution_trace_hook(hook);
         }
-        Ok((host_operation, invocation))
+        Ok(PreparedResourceInvocation::Tool(invocation))
     }
 
     async fn resource_operation(
@@ -645,8 +663,25 @@ impl LashlangProcessHost<'_> {
             .await
             .expect("TypeScript runtime receiver checked above");
         }
-        let (_, invocation) =
+        let invocation =
             self.prepare_resource_invocation(operation, receiver, args, call_site, None)?;
+        let invocation = match invocation {
+            PreparedResourceInvocation::Trigger {
+                operation,
+                payload,
+                effect_id,
+            } => {
+                return crate::execute_trigger_operation(
+                    &self.ctx,
+                    self.artifact_store.as_ref(),
+                    operation,
+                    payload,
+                    effect_id,
+                )
+                .await;
+            }
+            PreparedResourceInvocation::Tool(invocation) => invocation,
+        };
         let lash_core::facade_support::ToolInvocation {
             id,
             tool_id,
@@ -704,7 +739,22 @@ impl LashlangProcessHost<'_> {
                 operation.call_site,
                 Some(index),
             ) {
-                Ok((_, invocation)) => {
+                Ok(PreparedResourceInvocation::Trigger {
+                    operation,
+                    payload,
+                    effect_id,
+                }) => {
+                    let result = crate::execute_trigger_operation(
+                        &self.ctx,
+                        self.artifact_store.as_ref(),
+                        operation,
+                        payload,
+                        effect_id,
+                    )
+                    .await;
+                    results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
+                }
+                Ok(PreparedResourceInvocation::Tool(invocation)) => {
                     positions.push(index);
                     invocations.push(invocation);
                 }
@@ -1503,7 +1553,7 @@ pub fn lashlang_type_expr_schema(ty: &lashlang::TypeExpr) -> serde_json::Value {
         lashlang::TypeExpr::Any
         | lashlang::TypeExpr::Dict
         | lashlang::TypeExpr::Ref(_)
-        | lashlang::TypeExpr::Process { .. }
+        | lashlang::TypeExpr::Process(_)
         | lashlang::TypeExpr::TriggerHandle(_) => serde_json::json!({}),
         lashlang::TypeExpr::Str => serde_json::json!({ "type": "string" }),
         lashlang::TypeExpr::Int => serde_json::json!({ "type": "integer" }),

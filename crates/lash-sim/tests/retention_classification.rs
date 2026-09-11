@@ -153,7 +153,7 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     (
         "artifact_refs",
         LifecycleOwned {
-            scope: "session trigger manifest; other namespaces are explicit retained service roots",
+            scope: "artifact namespaces are explicit retained service roots",
         },
     ),
     (

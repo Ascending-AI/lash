@@ -194,6 +194,13 @@ impl<'a> Utf8Input<'a> {
     }
 
     #[inline(always)]
+    #[cfg_attr(
+        all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")),
+        expect(
+            unsafe_code,
+            reason = "validated positions delimit a slice within the original UTF-8 input"
+        )
+    )]
     fn slice(
         &self,
         start: <Self as InputIndexer>::Position,
@@ -210,6 +217,8 @@ impl<'a> Utf8Input<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: both positions were validated against this input above, are
+        // ordered, and originate from this input allocation.
         let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
@@ -227,17 +236,27 @@ impl<'a> Utf8Input<'a> {
     /// \return a byte at a given position.
     /// This asserts that we are not at the right end.
     #[inline(always)]
+    #[expect(
+        unsafe_code,
+        reason = "the validated position maps to an in-bounds UTF-8 byte"
+    )]
     fn getb(&self, pos: <Self as InputIndexer>::Position) -> u8 {
         debug_assert!(self.left_end() <= pos && pos < self.right_end());
         if cfg!(feature = "prohibit-unsafe") {
             self.contents()[self.pos_to_offset(pos)]
         } else {
+            // SAFETY: the matcher position is within this input, as checked by
+            // the invariant above.
             unsafe { *self.contents().get_unchecked(self.pos_to_offset(pos)) }
         }
     }
 
     /// \return a slice as a str.
     #[inline(always)]
+    #[expect(
+        unsafe_code,
+        reason = "validated matcher positions are UTF-8 boundaries within the input"
+    )]
     fn str_slice(&self, range: ops::Range<<Self as InputIndexer>::Position>) -> &'a str {
         self.debug_assert_boundary(range.start);
         self.debug_assert_boundary(range.end);
@@ -247,6 +266,8 @@ impl<'a> Utf8Input<'a> {
                 end: self.pos_to_offset(range.end),
             }]
         } else {
+            // SAFETY: both range endpoints were validated as boundaries within
+            // `self.input`, so the unchecked slice is valid UTF-8.
             unsafe {
                 self.input.get_unchecked(core::ops::Range {
                     start: self.pos_to_offset(range.start),
@@ -488,6 +509,13 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         Some(pos + idx)
     }
 
+    #[cfg_attr(
+        all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")),
+        expect(
+            unsafe_code,
+            reason = "matcher ranges delimit slices within the original UTF-8 input"
+        )
+    )]
     fn subrange_eq<Dir: Direction>(
         &self,
         _dir: Dir,
@@ -518,6 +546,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: `try_move_*` produced ordered positions within this input.
         let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
@@ -527,12 +556,21 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: the compared capture range was produced from this input and
+        // preserves ordered endpoints.
         let old_range =
             unsafe { core::slice::from_raw_parts(range.start.ptr(), range.end - range.start) };
 
         new_range == old_range
     }
 
+    #[cfg_attr(
+        all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")),
+        expect(
+            unsafe_code,
+            reason = "matcher positions delimit an N-byte slice within the UTF-8 input"
+        )
+    )]
     fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         _dir: Dir,
@@ -563,6 +601,8 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: `try_move_*` produced ordered positions exactly `N` bytes
+        // apart within this input.
         let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         bytes == new_range
@@ -587,6 +627,13 @@ impl<'a> AsciiInput<'a> {
     }
 
     #[inline(always)]
+    #[cfg_attr(
+        all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")),
+        expect(
+            unsafe_code,
+            reason = "validated positions delimit a slice within the original ASCII input"
+        )
+    )]
     fn slice(
         &self,
         start: <Self as InputIndexer>::Position,
@@ -602,6 +649,8 @@ impl<'a> AsciiInput<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: both positions were validated against this input above, are
+        // ordered, and originate from this input allocation.
         let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
@@ -621,11 +670,17 @@ impl<'a> AsciiInput<'a> {
     /// \return a byte at a given position.
     /// This asserts that we are not at the right end.
     #[inline(always)]
+    #[expect(
+        unsafe_code,
+        reason = "the validated position maps to an in-bounds ASCII byte"
+    )]
     fn getb(&self, pos: <Self as InputIndexer>::Position) -> u8 {
         debug_assert!(self.left_end() <= pos && pos < self.right_end());
         if cfg!(feature = "prohibit-unsafe") {
             self.contents()[self.pos_to_offset(pos)]
         } else {
+            // SAFETY: the matcher position is within this input, as checked by
+            // the invariant above.
             unsafe { *self.contents().get_unchecked(self.pos_to_offset(pos)) }
         }
     }
@@ -772,6 +827,13 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         Some(pos + idx)
     }
 
+    #[cfg_attr(
+        all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")),
+        expect(
+            unsafe_code,
+            reason = "matcher ranges delimit slices within the original ASCII input"
+        )
+    )]
     fn subrange_eq<Dir: Direction>(
         &self,
         _dir: Dir,
@@ -802,6 +864,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: `try_move_*` produced ordered positions within this input.
         let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
@@ -811,12 +874,21 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: the compared capture range was produced from this input and
+        // preserves ordered endpoints.
         let old_range =
             unsafe { core::slice::from_raw_parts(range.start.ptr(), range.end - range.start) };
 
         new_range == old_range
     }
 
+    #[cfg_attr(
+        all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")),
+        expect(
+            unsafe_code,
+            reason = "matcher positions delimit an N-byte slice within the ASCII input"
+        )
+    )]
     fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         _dir: Dir,
@@ -847,6 +919,8 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        // SAFETY: `try_move_*` produced ordered positions exactly `N` bytes
+        // apart within this input.
         let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         bytes == new_range

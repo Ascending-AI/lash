@@ -414,7 +414,7 @@ fn label_annotations_language_bullet(_abilities: &lashlang::LashlangAbilities) -
 }
 
 fn trigger_registry_language_bullet() -> String {
-    r#"- Triggers: `receipt = await triggers.register({ source: source, target: daily_digest, inputs: { tick: trigger.event }, name: "daily_digest", subscription_key: "daily-digest" })?` connects a source value (built with a documented pure constructor) to a process definition. `inputs` supplies every process parameter exactly once; `trigger.event` passes the whole event. Registrations, filters, orphans, prune and revision-checked enable/disable/delete are documented on the `triggers.*` operations."#.to_string()
+    r#"- Triggers: `receipt = await triggers.register({ source: source, target: daily_digest, inputs: { tick: trigger.event }, name: "daily_digest", subscription_key: "daily-digest" })?` connects a source value (built with a documented pure constructor) to a process definition. `inputs` supplies every process parameter exactly once; `trigger.event` passes the whole event. Registrations, filters, explicit pruning and revision-checked enable/disable/delete are documented on the `triggers.*` operations."#.to_string()
 }
 
 fn operation_scheduling_language_bullet(processes: bool) -> String {
@@ -482,10 +482,10 @@ pub(crate) fn host_operation_description(module: &str, operation: &str) -> Optio
             "Register a source value and process definition with every parameter supplied exactly once in inputs. `subscription_key` is stable within the caller's owner scope; supply it or use the linker-derived default. A different definition at an existing key conflicts. The source-owning host/plugin emits occurrences; constructors build source values.",
         ),
         ("triggers", "list") => Some(
-            "List visible registrations; filter by target, name, source_type or enabled. Each row carries registrant provenance and `manifest_membership`: `present_in_current_artifact` or `orphaned`. Reconcile warnings never delete subscriptions.",
+            "List visible registrations; filter by target, name, source_type or enabled. Each row carries registrant provenance. Registrations remain until an explicit mutation or owner-lifecycle cleanup removes them.",
         ),
         ("triggers", "prune") => Some(
-            "Remove reviewed orphan subscriptions by subscription_keys. Prune is restricted to the acting owner namespace.",
+            "Remove selected subscriptions by subscription_keys. Prune is restricted to the acting owner namespace.",
         ),
         ("triggers", "disable") => Some(
             "Pause future deliveries. Supply subscription_key and expected_revision from the current receipt; mutations are revision-checked.",

@@ -125,7 +125,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
         },
         other => return Err(format!("unsupported parked-cell dialect {other}")),
     };
-    let linked_module = cached_program.linked_module();
     let bridge = HostBridge::new(HostBridgeConfig {
         ctx,
         print_projector: Arc::new(crate::rlm_support::print_history_projector()),
@@ -133,8 +132,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
         host_environment,
         deferred_execution_grants: BTreeMap::new(),
         artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
-        trigger_key_manifest: linked_module.artifact.trigger_key_manifest.clone(),
-        initial_observations: Vec::new(),
     });
     let host = ParkedCellHost { bridge };
     let mut vm = Vm::from_state(cached_program.compiled_program(), &mut state.rlm, &host)

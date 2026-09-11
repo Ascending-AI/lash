@@ -15,7 +15,7 @@
 mod lifecycle_actor;
 
 use lash_sansio::sync::{LockResultExt, MutexExt, RwLockExt};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -38,7 +38,7 @@ use tokio::time::timeout;
 
 use lash_core::{
     AttachmentCreateMeta, AttemptContext, MediaType, ToolCallOutput, ToolDefinition, ToolFailure,
-    ToolFailureClass, ToolFailureSource, ToolOutcome, ToolRetryStatus, ToolValue,
+    ToolFailureClass, ToolFailureSource, ToolId, ToolOutcome, ToolRetryStatus, ToolValue,
 };
 use lash_tool_support::ToolDefinitionBindingExt;
 
@@ -80,12 +80,20 @@ fn entry_shutdown_total_bound(policy: &McpShutdownPolicy) -> Duration {
 /// any killed stdio child unreaped.
 pub struct McpConnectionPool {
     entries: RwLock<BTreeMap<String, Arc<McpEntry>>>,
+    /// Current entry incarnations and their derived model-name uniqueness
+    /// index. This assigns no names; it fences publication to entries that are
+    /// still installed in the pool.
+    publication_state: Arc<Mutex<PublicationState>>,
     host_services: McpHostServices,
     shut_down: AtomicBool,
     #[cfg(test)]
     mid_establish_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
     attach_return_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    #[cfg(test)]
+    resolved_target_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    #[cfg(test)]
+    advertised_tools_hook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Copied onto every entry this pool installs, so tests observe the
     /// lifecycle of children spawned before they can reach the entry.
     #[cfg(test)]
@@ -106,6 +114,8 @@ pub struct McpServerStatus {
 }
 
 struct McpEntry {
+    publication_state: Arc<Mutex<PublicationState>>,
+    publication_incarnation: Arc<()>,
     server_name: String,
     config: McpServerConfig,
     host_services: McpHostServices,
@@ -117,8 +127,8 @@ struct McpEntry {
     active_pid: Arc<AtomicU32>,
     /// Cached, prefixed tool definitions for this server, refreshed on every
     /// successful (re)connect and kept across a disconnect so the tool
-    /// surface stays stable. Keys are the prefixed names
-    /// (`mcp__<server>__<tool>`).
+    /// surface stays stable. Keys are the bounded, identity-suffixed model
+    /// names (`mcp__<server>__<tool>_<digest>`).
     imported_tools: RwLock<BTreeMap<String, ImportedTool>>,
     last_error: RwLock<Option<String>>,
     shutting_down: Arc<AtomicBool>,
@@ -135,6 +145,10 @@ struct McpEntry {
     ping_degrade_warned: AtomicBool,
     #[cfg(test)]
     mid_establish_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    #[cfg(test)]
+    probe_select_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    #[cfg(test)]
+    probe_completed: tokio::sync::Notify,
     #[cfg(test)]
     refresh_install_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
@@ -177,6 +191,25 @@ struct ImportedTool {
     definition: ToolDefinition,
 }
 
+#[derive(Clone)]
+struct PublishedToolIdentity {
+    tool_id: ToolId,
+    entry_incarnation: Arc<()>,
+}
+
+#[derive(Default)]
+struct PublicationState {
+    current_entries: BTreeMap<String, Arc<()>>,
+    tool_names: BTreeMap<String, PublishedToolIdentity>,
+}
+
+#[derive(Clone)]
+struct ResolvedToolTarget {
+    entry: Arc<McpEntry>,
+    advertised_name: String,
+    native_name: String,
+}
+
 impl McpConnectionPool {
     /// Construct an empty pool.
     pub fn empty() -> Self {
@@ -186,12 +219,17 @@ impl McpConnectionPool {
     pub(crate) fn empty_with_host_services(host_services: McpHostServices) -> Self {
         Self {
             entries: RwLock::new(BTreeMap::new()),
+            publication_state: Arc::new(Mutex::new(PublicationState::default())),
             host_services,
             shut_down: AtomicBool::new(false),
             #[cfg(test)]
             mid_establish_hook: RwLock::new(None),
             #[cfg(test)]
             attach_return_hook: RwLock::new(None),
+            #[cfg(test)]
+            resolved_target_hook: RwLock::new(None),
+            #[cfg(test)]
+            advertised_tools_hook: RwLock::new(None),
             #[cfg(test)]
             lifecycle_observer: RwLock::new(None),
         }
@@ -219,7 +257,12 @@ impl McpConnectionPool {
         let mut entries = Vec::with_capacity(servers.len());
         for (name, config) in servers {
             config.validate(&name)?;
-            let entry = McpEntry::new(name.clone(), config, pool.host_services.clone());
+            let entry = McpEntry::new_with_publication_state(
+                Arc::clone(&pool.publication_state),
+                name.clone(),
+                config,
+                pool.host_services.clone(),
+            );
             if let Err((rejected, error)) = pool.install(name.clone(), Arc::clone(&entry)) {
                 rejected.shutdown().await;
                 return Err(error);
@@ -254,7 +297,12 @@ impl McpConnectionPool {
         }
         config.validate(&server_name)?;
         self.validate_server_prefix_available(&server_name)?;
-        let entry = McpEntry::new(server_name.clone(), config, self.host_services.clone());
+        let entry = McpEntry::new_with_publication_state(
+            Arc::clone(&self.publication_state),
+            server_name.clone(),
+            config,
+            self.host_services.clone(),
+        );
         #[cfg(test)]
         entry.set_mid_establish_hook(self.mid_establish_hook.read_recover().clone());
         let previous = match self.install(server_name.clone(), Arc::clone(&entry)) {
@@ -295,7 +343,11 @@ impl McpConnectionPool {
     pub async fn detach(self: &Arc<Self>, server_name: &str) -> Result<(), McpError> {
         let removed = {
             let mut entries = self.entries.write_recover();
-            entries.remove(server_name)
+            let removed = entries.remove(server_name);
+            if let Some(entry) = &removed {
+                self.retire_publication(entry);
+            }
+            removed
         };
         if let Some(entry) = removed {
             entry.shutdown().await;
@@ -330,9 +382,37 @@ impl McpConnectionPool {
                     )),
                 ));
             }
-            entries.insert(server_name, entry)
+            let previous = entries.insert(server_name.clone(), Arc::clone(&entry));
+            let mut publication = self.publication_state.lock_recover();
+            if let Some(previous) = &previous {
+                publication.tool_names.retain(|_, identity| {
+                    !Arc::ptr_eq(
+                        &identity.entry_incarnation,
+                        &previous.publication_incarnation,
+                    )
+                });
+            }
+            publication
+                .current_entries
+                .insert(server_name, Arc::clone(&entry.publication_incarnation));
+            previous
         };
         Ok(previous)
+    }
+
+    fn retire_publication(&self, entry: &McpEntry) {
+        let mut publication = self.publication_state.lock_recover();
+        let is_current = publication
+            .current_entries
+            .get(&entry.server_name)
+            .is_some_and(|incarnation| Arc::ptr_eq(incarnation, &entry.publication_incarnation));
+        if !is_current {
+            return;
+        }
+        publication.current_entries.remove(&entry.server_name);
+        publication.tool_names.retain(|_, identity| {
+            !Arc::ptr_eq(&identity.entry_incarnation, &entry.publication_incarnation)
+        });
     }
 
     fn validate_server_prefix_available(&self, server_name: &str) -> Result<(), McpError> {
@@ -410,23 +490,34 @@ impl McpConnectionPool {
         Ok(())
     }
 
-    /// All advertised tools across every server, with `mcp__<server>__<tool>`
-    /// prefixed names. Cheap — these are precomputed `ToolDefinition` clones.
+    /// All advertised tools across every server, with bounded
+    /// `mcp__<server>__<tool>_<digest>` names. Cheap — these are precomputed
+    /// `ToolDefinition` clones.
     /// Includes tools of currently disconnected servers (last successful
     /// discovery) so the tool catalog stays stable across an outage.
     pub fn advertised_tools(&self) -> Vec<ToolDefinition> {
-        let guard = self.entries.read_recover();
-        guard
-            .values()
-            .flat_map(|entry| {
+        let entries = self.entries.read_recover();
+        // Catalog replacement reserves all model-facing names under this same
+        // guard. Holding it across every per-entry read prevents one returned
+        // snapshot from combining the old owner and the new owner of a name.
+        let _publication = self.publication_state.lock_recover();
+        #[cfg(test)]
+        let mut hook = self.advertised_tools_hook.read_recover().clone();
+        let mut tools = Vec::new();
+        for entry in entries.values() {
+            tools.extend(
                 entry
                     .imported_tools
                     .read_recover()
                     .values()
-                    .map(|tool| tool.definition.clone())
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+                    .map(|tool| tool.definition.clone()),
+            );
+            #[cfg(test)]
+            if let Some(hook) = hook.take() {
+                hook();
+            }
+        }
+        tools
     }
 
     /// Advertised tools belonging to the exact configured server name.
@@ -448,8 +539,7 @@ impl McpConnectionPool {
             .unwrap_or_default()
     }
 
-    /// Route a prefixed tool call (`mcp__<server>__<tool>`) to the appropriate
-    /// server and translate its result back to `ToolOutcome`.
+    /// Resolve a model-facing name once, then route the captured raw MCP tool.
     pub async fn call_tool(
         &self,
         prefixed_name: &str,
@@ -459,12 +549,44 @@ impl McpConnectionPool {
         if self.shut_down.load(Ordering::SeqCst) {
             return pool_shut_down_failure();
         }
-        let (entry, original_name) = match self.lookup(prefixed_name).await {
-            Some(found) => found,
-            None => {
-                return ToolOutcome::err_fmt(format!("Unknown MCP tool: {prefixed_name}"));
-            }
+        let Some(target) = self.lookup_by_name(prefixed_name) else {
+            return ToolOutcome::err_fmt(format!("Unknown MCP tool: {prefixed_name}"));
         };
+        self.pause_after_target_resolution().await;
+        self.call_resolved_tool(target, args, context).await
+    }
+
+    /// Resolve a durable id once, then route the captured raw MCP tool.
+    pub async fn call_tool_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &Value,
+        context: &AttemptContext<'_>,
+    ) -> ToolOutcome {
+        if self.shut_down.load(Ordering::SeqCst) {
+            return pool_shut_down_failure();
+        }
+        let Some(target) = self.lookup_by_id(tool_id) else {
+            return ToolOutcome::err_fmt(format!("Unknown MCP tool id: {tool_id}"));
+        };
+        self.pause_after_target_resolution().await;
+        self.call_resolved_tool(target, args, context).await
+    }
+
+    async fn call_resolved_tool(
+        &self,
+        target: ResolvedToolTarget,
+        args: &Value,
+        context: &AttemptContext<'_>,
+    ) -> ToolOutcome {
+        if self.shut_down.load(Ordering::SeqCst) {
+            return pool_shut_down_failure();
+        }
+        let ResolvedToolTarget {
+            entry,
+            advertised_name,
+            native_name,
+        } = target;
 
         let call_timeout = entry.config.call_timeout();
         let server_name = entry.server_name.clone();
@@ -473,7 +595,7 @@ impl McpConnectionPool {
             Value::Null => None,
             other => {
                 return ToolOutcome::err_fmt(format!(
-                    "MCP tool `{prefixed_name}` expected an object argument, got {}",
+                    "MCP tool `{advertised_name}` expected an object argument, got {}",
                     other
                 ));
             }
@@ -553,7 +675,7 @@ impl McpConnectionPool {
             );
         }
 
-        let mut params = CallToolRequestParams::new(original_name);
+        let mut params = CallToolRequestParams::new(native_name);
         params.arguments = arguments;
         let mut options = PeerRequestOptions::with_timeout(call_timeout)
             .with_max_total_timeout(entry.config.call_max_total_timeout());
@@ -622,20 +744,61 @@ impl McpConnectionPool {
         }
     }
 
-    async fn lookup(&self, prefixed_name: &str) -> Option<(Arc<McpEntry>, String)> {
+    fn lookup_by_name(&self, prefixed_name: &str) -> Option<ResolvedToolTarget> {
         let guard = self.entries.read_recover();
         for entry in guard.values() {
-            let original_name = entry
+            let target = entry
                 .imported_tools
                 .read_recover()
                 .get(prefixed_name)
-                .map(|tool| tool.original_name.clone());
-            if let Some(original_name) = original_name {
-                return Some((Arc::clone(entry), original_name));
+                .map(|tool| ResolvedToolTarget {
+                    entry: Arc::clone(entry),
+                    advertised_name: tool.definition.manifest.name.clone(),
+                    native_name: tool.original_name.clone(),
+                });
+            if target.is_some() {
+                return target;
             }
         }
         None
     }
+
+    fn lookup_by_id(&self, tool_id: &ToolId) -> Option<ResolvedToolTarget> {
+        let guard = self.entries.read_recover();
+        for entry in guard.values() {
+            let target = entry
+                .imported_tools
+                .read_recover()
+                .values()
+                .find(|tool| tool.definition.manifest.id == *tool_id)
+                .map(|tool| ResolvedToolTarget {
+                    entry: Arc::clone(entry),
+                    advertised_name: tool.definition.manifest.name.clone(),
+                    native_name: tool.original_name.clone(),
+                });
+            if target.is_some() {
+                return target;
+            }
+        }
+        None
+    }
+
+    #[cfg(test)]
+    fn set_resolved_target_hook(&self, hook: Option<Arc<policy_tests::ActorPauseHook>>) {
+        *self.resolved_target_hook.write_recover() = hook;
+    }
+
+    #[cfg(test)]
+    async fn pause_after_target_resolution(&self) {
+        let hook = self.resolved_target_hook.read_recover().clone();
+        if let Some(hook) = hook {
+            hook.reached.notify_one();
+            hook.release.notified().await;
+        }
+    }
+
+    #[cfg(not(test))]
+    async fn pause_after_target_resolution(&self) {}
 
     /// Tear down all connections in parallel. Call this before dropping the
     /// pool for a graceful shutdown; `Drop` itself cannot await. Every actor is
@@ -658,7 +821,11 @@ impl McpConnectionPool {
         }
         let entries: Vec<Arc<McpEntry>> = {
             let mut guard = self.entries.write_recover();
-            std::mem::take(&mut *guard).into_values().collect()
+            let entries: Vec<_> = std::mem::take(&mut *guard).into_values().collect();
+            let mut publication = self.publication_state.lock_recover();
+            publication.current_entries.clear();
+            publication.tool_names.clear();
+            entries
         };
         join_all(entries.iter().map(|entry| entry.shutdown())).await;
     }
@@ -737,7 +904,28 @@ fn prefix_collision_message(existing_server: &str, incoming_server: &str, prefix
 }
 
 impl McpEntry {
+    #[cfg(test)]
     fn new(
+        server_name: String,
+        config: McpServerConfig,
+        host_services: McpHostServices,
+    ) -> Arc<Self> {
+        let publication_state = Arc::new(Mutex::new(PublicationState::default()));
+        let entry = Self::new_with_publication_state(
+            Arc::clone(&publication_state),
+            server_name,
+            config,
+            host_services,
+        );
+        publication_state.lock_recover().current_entries.insert(
+            entry.server_name.clone(),
+            Arc::clone(&entry.publication_incarnation),
+        );
+        entry
+    }
+
+    fn new_with_publication_state(
+        publication_state: Arc<Mutex<PublicationState>>,
         server_name: String,
         config: McpServerConfig,
         host_services: McpHostServices,
@@ -760,6 +948,8 @@ impl McpEntry {
             );
             let actor_handle = tokio::spawn(actor.run());
             Self {
+                publication_state,
+                publication_incarnation: Arc::new(()),
                 server_name,
                 config,
                 host_services,
@@ -777,6 +967,10 @@ impl McpEntry {
                 #[cfg(test)]
                 mid_establish_hook: RwLock::new(None),
                 #[cfg(test)]
+                probe_select_hook: RwLock::new(None),
+                #[cfg(test)]
+                probe_completed: tokio::sync::Notify::new(),
+                #[cfg(test)]
                 refresh_install_hook: RwLock::new(None),
                 #[cfg(test)]
                 panic_actor_on_quit: AtomicBool::new(false),
@@ -792,6 +986,50 @@ impl McpEntry {
 
     fn service_snapshot(&self) -> Option<Arc<PublishedService>> {
         self.service.borrow().clone()
+    }
+
+    fn replace_imported_tools(
+        &self,
+        imported: BTreeMap<String, ImportedTool>,
+    ) -> Result<(), McpError> {
+        let mut publication = self.publication_state.lock_recover();
+        let is_current = publication
+            .current_entries
+            .get(&self.server_name)
+            .is_some_and(|incarnation| Arc::ptr_eq(incarnation, &self.publication_incarnation));
+        if !is_current {
+            return Err(McpError::Protocol(format!(
+                "MCP server entry `{}` is no longer installed; refusing stale tool publication",
+                self.server_name
+            )));
+        }
+        for (name, tool) in &imported {
+            if let Some(existing) = publication.tool_names.get(name)
+                && !Arc::ptr_eq(&existing.entry_incarnation, &self.publication_incarnation)
+            {
+                return Err(McpError::Config(format!(
+                    "MCP model-facing name collision for `{name}` between tool ids `{}` and `{}`",
+                    existing.tool_id, tool.definition.manifest.id
+                )));
+            }
+        }
+
+        publication.tool_names.retain(|_, identity| {
+            !Arc::ptr_eq(&identity.entry_incarnation, &self.publication_incarnation)
+        });
+        publication
+            .tool_names
+            .extend(imported.iter().map(|(name, tool)| {
+                (
+                    name.clone(),
+                    PublishedToolIdentity {
+                        tool_id: tool.definition.manifest.id.clone(),
+                        entry_incarnation: Arc::clone(&self.publication_incarnation),
+                    },
+                )
+            }));
+        *self.imported_tools.write_recover() = imported;
+        Ok(())
     }
 
     async fn establish(&self) -> Result<(), McpError> {
@@ -1069,10 +1307,17 @@ impl Drop for AbortOnDrop {
 
 fn import_tools(
     server_name: &str,
+    tools: Vec<rmcp::model::Tool>,
+) -> Result<BTreeMap<String, ImportedTool>, McpError> {
+    import_tools_with_name_builder(server_name, tools, naming::build_prefixed_name)
+}
+
+fn import_tools_with_name_builder(
+    server_name: &str,
     mut tools: Vec<rmcp::model::Tool>,
-) -> BTreeMap<String, ImportedTool> {
+    mut build_name: impl FnMut(&str, &str) -> (String, lash_tool_support::ToolBinding),
+) -> Result<BTreeMap<String, ImportedTool>, McpError> {
     tools.sort_by(|left, right| left.name.cmp(&right.name));
-    let mut used_names = BTreeSet::new();
     let mut imported = BTreeMap::new();
     for tool in tools {
         let original_name = tool.name.to_string();
@@ -1087,8 +1332,7 @@ fn import_tools(
             .as_ref()
             .map(|s| Value::Object((**s).clone()))
             .unwrap_or_else(|| json!({}));
-        let (prefixed, lashlang_binding) =
-            naming::build_prefixed_name(server_name, &original_name, &mut used_names);
+        let (prefixed, lashlang_binding) = build_name(server_name, &original_name);
         let tool_id = naming::durable_tool_id(server_name, &original_name);
 
         let description = if description.is_empty() {
@@ -1097,22 +1341,31 @@ fn import_tools(
             format!("[MCP {server_name}] {description}")
         };
 
-        imported.insert(
-            prefixed.clone(),
-            ImportedTool {
-                original_name,
-                definition: ToolDefinition::raw(
-                    tool_id,
-                    prefixed,
-                    description,
-                    input_schema,
-                    output_schema,
-                )
-                .with_tool_binding(lashlang_binding),
-            },
-        );
+        let imported_tool = ImportedTool {
+            original_name,
+            definition: ToolDefinition::raw(
+                tool_id,
+                prefixed.clone(),
+                description,
+                input_schema,
+                output_schema,
+            )
+            .with_tool_binding(lashlang_binding),
+        };
+        match imported.entry(prefixed.clone()) {
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(imported_tool);
+            }
+            std::collections::btree_map::Entry::Occupied(existing) => {
+                return Err(McpError::Config(format!(
+                    "MCP model-facing name collision for `{prefixed}` between tool ids `{}` and `{}`",
+                    existing.get().definition.manifest.id,
+                    imported_tool.definition.manifest.id
+                )));
+            }
+        }
     }
-    imported
+    Ok(imported)
 }
 
 async fn tool_result_from_rmcp(

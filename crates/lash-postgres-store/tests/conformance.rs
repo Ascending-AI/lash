@@ -18,6 +18,8 @@ use std::future::Future;
 mod attachment_owner_kind;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
+#[path = "conformance/occurrence_listing.rs"]
+mod occurrence_listing;
 
 use std::sync::Arc;
 
@@ -54,6 +56,7 @@ use injectors::{
     PostgresFenceIntegrityInjector, PostgresLegacyTriggerMutationReceiptInjector,
     PostgresLineageConformanceInjector,
 };
+use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;
 use support::{SharedDatabaseLock, database_url};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -167,52 +170,6 @@ async fn reset(storage: &PostgresStorage) {
     .execute(pool)
     .await
     .expect("reset postgres process change clock");
-}
-
-struct PostgresTriggerOccurrenceRetentionFaultInjector {
-    pool: sqlx::PgPool,
-}
-
-#[async_trait::async_trait]
-impl lash_conformance::TriggerOccurrenceRetentionFaultInjector
-    for PostgresTriggerOccurrenceRetentionFaultInjector
-{
-    async fn fail_occurrence_delete(&self, occurrence_id: &str) {
-        sqlx::query(
-            "CREATE OR REPLACE FUNCTION lash_fig1507_fail_occurrence_delete()
-             RETURNS TRIGGER LANGUAGE plpgsql AS $$
-             BEGIN
-                 RAISE EXCEPTION 'injected FIG-1507 occurrence delete failure';
-             END;
-             $$",
-        )
-        .execute(&self.pool)
-        .await
-        .expect("create Postgres occurrence delete failure function");
-        let occurrence_id = occurrence_id.replace('\'', "''");
-        sqlx::query(&format!(
-            "CREATE TRIGGER fail_fig1507_occurrence_delete
-             BEFORE DELETE ON lash_trigger_occurrences
-             FOR EACH ROW WHEN (OLD.occurrence_id = '{occurrence_id}')
-             EXECUTE FUNCTION lash_fig1507_fail_occurrence_delete()"
-        ))
-        .execute(&self.pool)
-        .await
-        .expect("install Postgres occurrence delete failure trigger");
-    }
-
-    async fn clear_occurrence_delete_failure(&self) {
-        sqlx::query(
-            "DROP TRIGGER IF EXISTS fail_fig1507_occurrence_delete ON lash_trigger_occurrences",
-        )
-        .execute(&self.pool)
-        .await
-        .expect("clear Postgres occurrence delete failure trigger");
-        sqlx::query("DROP FUNCTION IF EXISTS lash_fig1507_fail_occurrence_delete()")
-            .execute(&self.pool)
-            .await
-            .expect("clear Postgres occurrence delete failure function");
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

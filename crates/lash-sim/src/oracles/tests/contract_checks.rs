@@ -194,7 +194,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
 
     for contract in [
         "standard.initial_request_projection",
-        "standard.empty_provider_response_error",
+        "standard.empty_response_finishes",
         "standard.provider_error_without_checkpoint",
         "standard.native_tool_loop_reenters_model",
         "standard.parallel_tool_results_checkpoint_once",
@@ -311,6 +311,41 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
             .is_ok(),
         "positive fixture should prove Agent parallel spawn/join facts"
     );
+
+    for (pointer, replacement, description) in [
+        (
+            "/result/checkpoints",
+            json!([]),
+            "normal completion checkpoint",
+        ),
+        ("/result/llm_call_count", json!(2), "single provider call"),
+        (
+            "/result/turn_outcomes/0/finish",
+            json!("ProviderError"),
+            "successful assistant outcome",
+        ),
+    ] {
+        let mut malformed_empty_completion = events.clone();
+        mutate_contract_execution(
+            &mut malformed_empty_completion,
+            "standard.empty_response_finishes",
+            |execution| {
+                execution
+                    .pointer_mut(pointer)
+                    .unwrap_or_else(|| panic!("empty completion fixture missing {pointer}"))
+                    .clone_from(&replacement);
+            },
+        );
+        let err = scenario_contract_generated_facts_for_semantic(
+            "standard.empty_response_finishes",
+            &malformed_empty_completion,
+        )
+        .expect_err("empty completion oracle must reject a contract mutation");
+        assert!(
+            err.contains("fixed-source replay validation"),
+            "empty completion oracle accepted a mutation of {description}: {err}"
+        );
+    }
 
     let mut no_reentry_release = events.clone();
     no_reentry_release.retain(|event| {

@@ -659,6 +659,10 @@
               "budget_ms": 4.88,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 12.956,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 8.208,
               "required": true

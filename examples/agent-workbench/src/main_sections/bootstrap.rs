@@ -179,14 +179,27 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // `events_after`. Terminal observation still rides `await_terminal`.
     // `emit` must be fast, so it only hands each event to this channel; the
     // consumer task does the projection off the append path.
+    let (host_shutdown, _) = tokio::sync::watch::channel(false);
     let (process_event_tx, mut process_event_rx) =
         mpsc::channel::<lash::process::ProcessEvent>(256);
-    tokio::spawn(async move {
-        while let Some(event) = process_event_rx.recv().await {
-            eprintln!(
-                "agent-workbench process event: process={} seq={} type={}",
-                event.process_id, event.sequence, event.event_type
-            );
+    let mut process_event_shutdown = host_shutdown.subscribe();
+    let process_event_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                changed = process_event_shutdown.changed() => {
+                    if changed.is_err() || *process_event_shutdown.borrow() {
+                        break;
+                    }
+                }
+                event = process_event_rx.recv() => match event {
+                    Some(event) => eprintln!(
+                        "agent-workbench process event: process={} seq={} type={}",
+                        event.process_id, event.sequence, event.event_type
+                    ),
+                    None => break,
+                }
+            }
         }
     });
     // The worker's own faults ride the same sink, because the drive that loses
@@ -195,9 +208,24 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // behind event pressure — and are written to the workbench's stderr
     // process log, where an operator reads them.
     let (worker_fault_tx, mut worker_fault_rx) = mpsc::channel::<WorkerFaultNotice>(256);
-    tokio::spawn(async move {
-        while let Some(notice) = worker_fault_rx.recv().await {
-            eprintln!("agent-workbench process worker fault: {}", notice.render());
+    let mut worker_fault_shutdown = host_shutdown.subscribe();
+    let worker_fault_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                changed = worker_fault_shutdown.changed() => {
+                    if changed.is_err() || *worker_fault_shutdown.borrow() {
+                        break;
+                    }
+                }
+                notice = worker_fault_rx.recv() => match notice {
+                    Some(notice) => eprintln!(
+                        "agent-workbench process worker fault: {}",
+                        notice.render()
+                    ),
+                    None => break,
+                }
+            }
         }
     });
     let process_event_sink = Arc::new(ChannelProcessEventSink::new(
@@ -273,6 +301,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .map(|value| value.parse::<std::num::NonZeroUsize>())
         .transpose()
         .map_err(|error| anyhow!("invalid AGENT_WORKBENCH_OUTPUT_TOKEN_CAP: {error}"))?;
+    let shutdown_provider = provider.clone();
     let builder = LashCore::rlm_builder(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS), factory)
         .provider(provider)
         .session_spec(
@@ -296,16 +325,24 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     } else {
         builder
     };
+    let shutdown_marker =
+        shutdown_marker::factory_from_env("agent-workbench").map_err(anyhow::Error::msg)?;
+    let plugin_tavily_api_key = tavily_api_key.clone();
+    let plugin_mail_world = mail_world.clone();
+    let plugin_approvals = approvals.clone();
     let core = builder
-        .configure_plugins(|plugins| {
+        .configure_plugins(move |plugins| {
             configure_workbench_plugins(
                 plugins,
-                tavily_api_key.clone(),
-                mail_world.clone(),
+                plugin_tavily_api_key,
+                plugin_mail_world,
                 subagent_registry,
                 deferred_tools.clone(),
-                approvals.clone(),
+                plugin_approvals,
             );
+            if let Some(marker) = shutdown_marker {
+                plugins.push(marker);
+            }
         })
         .process_work(process_work_driver.clone())
         // The driver already carries this sink for appended events; the core
@@ -320,77 +357,93 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             process_incarnation_id(),
         ))
         .context("build Lash core")?;
-    let process_worker = lash::durability::DurableProcessWorker::new(
-        core.durable_process_worker_config()
-            .context("build Restate process worker config")?,
-    )
-    .context("validate Restate process worker config")?;
-    let process_observer = core
-        .processes()
-        .observer()
-        .expect("process observer configured");
+    let shutdown_core = core.clone();
+    let operation = async {
+        let process_worker = lash::durability::DurableProcessWorker::new(
+            core.durable_process_worker_config()
+                .context("build Restate process worker config")?,
+        )
+        .context("validate Restate process worker config")?;
+        let process_observer = core
+            .processes()
+            .observer()
+            .expect("process observer configured");
 
-    let state = AppState {
-        core,
-        rlm_dialect,
-        attachment_store,
-        session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store,
-        process_observer,
-        sessions,
-        messages: Arc::new(Mutex::new(Vec::new())),
-        selected_model: Arc::new(Mutex::new(ModelSelection {
-            model,
-            model_variant: Some(model_variant),
-        })),
-        web_configured: !tavily_api_key.trim().is_empty(),
-        trace_sink: Some(Arc::clone(&trace_sink)),
-        lashlang_execution,
-        event_tx,
-        queued_work_driver,
-        restate_ingress_url,
-        restate_admin_url,
-        restate_http,
-        restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
-        mail_world,
-        active_turns,
-        authorization: WorkbenchAuthorization::allow_all(),
-        approvals,
-    };
-    restate::spawn_restate_endpoint(
-        restate_endpoint_addr,
-        state.clone(),
-        process_deployment,
-        process_worker,
-    );
-    emit_workbench_trace(
-        &state.trace_sink,
-        None,
-        "startup",
-        json!({
-            "addr": addr.to_string(),
-            "data_dir": data_dir.display().to_string(),
-            "trace_path": trace_path_display,
-            "lashlang_execution_path": lashlang_execution_path.display().to_string(),
-            "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
-            "rlm_dialect": rlm_dialect.language_id(),
-            "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
-            "web_configured": state.web_configured,
-            "store_backend": stores.backend,
-            "restate_endpoint_addr": restate_endpoint_addr.to_string(),
-            "restate_ingress_url": state.restate_ingress_url,
-        }),
-    );
+        let state = AppState {
+            core,
+            rlm_dialect,
+            attachment_store,
+            session_store_factory: Arc::clone(&core_store_factory),
+            trigger_store,
+            process_observer,
+            sessions,
+            messages: Arc::new(Mutex::new(Vec::new())),
+            selected_model: Arc::new(Mutex::new(ModelSelection {
+                model,
+                model_variant: Some(model_variant),
+            })),
+            web_configured: !tavily_api_key.trim().is_empty(),
+            trace_sink: Some(Arc::clone(&trace_sink)),
+            lashlang_execution,
+            event_tx,
+            queued_work_driver,
+            restate_ingress_url,
+            restate_admin_url,
+            restate_http,
+            restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
+            mail_world,
+            active_turns,
+            authorization: WorkbenchAuthorization::allow_all(),
+            approvals,
+        };
+        emit_workbench_trace(
+            &state.trace_sink,
+            None,
+            "startup",
+            json!({
+                "addr": addr.to_string(),
+                "data_dir": data_dir.display().to_string(),
+                "trace_path": trace_path_display,
+                "lashlang_execution_path": lashlang_execution_path.display().to_string(),
+                "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
+                "rlm_dialect": rlm_dialect.language_id(),
+                "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
+                "web_configured": state.web_configured,
+                "store_backend": stores.backend,
+                "restate_endpoint_addr": restate_endpoint_addr.to_string(),
+                "restate_ingress_url": state.restate_ingress_url,
+            }),
+        );
 
-    let app = Router::new()
+        let event_stream_shutdown = host_shutdown.clone();
+        let observation_stream_shutdown = host_shutdown.clone();
+        let app = Router::new()
         .route("/", get(index))
         .route("/healthz", get(healthz))
         .route("/api/state", get(app_state))
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{key}/approve", post(approve_wait))
         .route("/api/approvals/{key}/deny", post(deny_wait))
-        .route("/api/events", get(session_events))
-        .route("/api/observations", get(session_observations))
+        .route(
+            "/api/events",
+            get(move |state, query| {
+                session_events_with_shutdown(
+                    state,
+                    query,
+                    Some(event_stream_shutdown.subscribe()),
+                )
+            }),
+        )
+        .route(
+            "/api/observations",
+            get(move |state, query| {
+                session_observations_with_shutdown(
+                    state,
+                    query,
+                    Some(observation_stream_shutdown.subscribe()),
+                )
+            }),
+        )
         .route("/api/turn", post(send_turn))
         .route("/api/attachments", post(upload_attachment))
         .route("/api/attachments/{attachment_id}", get(retrieve_attachment))
@@ -439,15 +492,115 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/work/{process_id}/await", get(await_work))
         .route("/api/lashlang-graphs", get(list_lashlang_graphs))
         .route("/api/lashlang-graph/{graph_key}", get(lashlang_graph))
-        .with_state(state);
+        .with_state(state.clone());
+        #[cfg(feature = "provider-wire-fixtures")]
+        let app = if dev_provider_scenario
+            == Some(failure_provider::DevProviderScenario::ValidEmptyCompletion)
+        {
+            app.route(
+                "/dev/valid-empty-completion",
+                get(crate::valid_empty_completion::page).post(crate::valid_empty_completion::run),
+            )
+        } else {
+            app
+        };
 
-    println!("agent-workbench listening on http://{addr}");
-    println!("agent-workbench Restate endpoint listening on http://{restate_endpoint_addr}");
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .context("bind listener")?;
-    axum::serve(listener, app).await.context("serve")?;
-    Ok(())
+        println!("agent-workbench listening on http://{addr}");
+        println!("agent-workbench Restate endpoint listening on http://{restate_endpoint_addr}");
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .context("bind listener")?;
+        let restate_listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
+            .await
+            .context("bind Restate listener")?;
+        let restate_task = restate::spawn_owned_restate_endpoint(
+            restate_listener,
+            state,
+            process_deployment,
+            process_worker,
+            host_shutdown.subscribe(),
+        );
+        let signal_shutdown = host_shutdown.clone();
+        let serve_result = axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_signal().await;
+                let _ = signal_shutdown.send(true);
+            })
+            .await
+            .context("serve");
+        let _ = host_shutdown.send(true);
+        if let Err(error) = restate_task.await {
+            eprintln!("agent-workbench: Restate endpoint task join failed: {error}");
+        }
+        serve_result
+    }
+    .await;
+    let _ = host_shutdown.send(true);
+    for (name, task) in [
+        ("process event logger", process_event_task),
+        ("process worker fault logger", worker_fault_task),
+    ] {
+        if let Err(error) = task.await {
+            eprintln!("agent-workbench: {name} task join failed: {error}");
+        }
+    }
+    let cleanup = shutdown_workbench(&shutdown_core, &shutdown_provider).await;
+    match (operation, cleanup) {
+        (Err(primary), Err(cleanup_error)) => {
+            eprintln!(
+                "agent-workbench: cleanup failed after primary error `{primary:#}`: {cleanup_error:#}"
+            );
+            Err(primary)
+        }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+        (Ok(()), Ok(())) => {
+            println!("agent-workbench shutdown complete");
+            Ok(())
+        }
+    }
+}
+
+async fn shutdown_workbench(core: &LashCore, provider: &ProviderHandle) -> AnyhowResult<()> {
+    let mut first_error = None;
+    if let Err(error) = core.shutdown().await {
+        first_error = Some(anyhow!("core shutdown failed: {error}"));
+    }
+    if let Err(error) = provider.close().await {
+        eprintln!("agent-workbench: provider close failed: {error}");
+        if first_error.is_none() {
+            first_error = Some(anyhow!("provider close failed: {error}"));
+        }
+    }
+    if let Err(error) = core.flush_trace_sink() {
+        eprintln!("agent-workbench: trace flush failed: {error}");
+        if first_error.is_none() {
+            first_error = Some(anyhow!("trace flush failed: {error}"));
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    println!("agent-workbench draining");
 }
 
 pub(crate) fn process_incarnation_id() -> &'static str {

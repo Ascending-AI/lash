@@ -428,7 +428,7 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
 }
 
 #[test]
-pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
+pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregister() {
     block_on(async {
         let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
         let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
@@ -455,7 +455,7 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
                           inputs: { tick: trigger.event },
                           subscription_key: "old-schedule"
                         })?
-                        finish true
+                        finish await triggers.list({})?
                     "#
                 .to_string(),
             },
@@ -468,23 +468,28 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
         )
         .await;
         assert!(first.error.is_none(), "{:?}", first.error);
+        let listed = first.terminal_finish.expect("registration list");
+        let listed = listed.as_array().expect("list result");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["subscription_key"], "old-schedule");
+        assert!(listed[0].get("manifest_membership").is_none());
+        assert!(listed[0]["registrant"].is_object());
 
-        let replacement = execute_code_unbounded_for_tests(
+        let before = lash_core::TriggerStore::list_subscriptions(
+            trigger_store.as_ref(),
+            lash_core::TriggerSubscriptionFilter::for_session("test-session"),
+        )
+        .await
+        .expect("list registration before unrelated execution");
+
+        let unrelated = execute_code_unbounded_for_tests(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(trigger_store.clone()),
             ExecRequest {
                 language: "lashlang".to_string(),
                 code: r#"
-                        process remember(tick: timer.Tick) { finish tick.fired_at }
-                        source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                        await triggers.register({
-                          source: source,
-                          target: remember,
-                          inputs: { tick: trigger.event },
-                          subscription_key: "new-schedule"
-                        })?
-                        print "post-reconcile observation"
-                        finish await triggers.list({})?
+                        print "unrelated observation"
+                        finish 42
                     "#
                 .to_string(),
             },
@@ -497,33 +502,16 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
         )
         .await;
 
-        assert!(replacement.error.is_none(), "{:?}", replacement.error);
-        assert_eq!(replacement.observations.len(), 2);
-        let reconcile_warning = replacement
-            .observations
-            .iter()
-            .find(|observation| {
-                observation.text.contains("RECONCILE WARNING")
-                    && observation.text.contains("old-schedule")
-                    && observation.text.contains("triggers.prune")
-            })
-            .unwrap_or_else(|| panic!("{:?}", replacement.observations));
-        assert!(!reconcile_warning.projection.truncated);
-        assert_eq!(
-            reconcile_warning.projection.projected_chars,
-            reconcile_warning.projection.original_chars
-        );
-        assert_eq!(
-            reconcile_warning.projection.projected_lines,
-            reconcile_warning.projection.original_lines
-        );
+        assert!(unrelated.error.is_none(), "{:?}", unrelated.error);
+        assert_eq!(unrelated.terminal_finish, Some(serde_json::json!(42)));
+        assert_eq!(unrelated.observations.len(), 1);
         assert!(
-            replacement
+            unrelated
                 .observations
                 .iter()
-                .any(|observation| { observation.text.contains("post-reconcile observation") })
+                .any(|observation| { observation.text.contains("unrelated observation") })
         );
-        for observation in &replacement.observations {
+        for observation in &unrelated.observations {
             assert_eq!(
                 observation.projection.original_chars,
                 observation.text.chars().count(),
@@ -535,22 +523,486 @@ pub(super) fn regenerated_trigger_manifest_warns_and_list_marks_the_orphan() {
                 "projection metadata must belong to its observation"
             );
         }
-        let registrations = replacement
-            .terminal_finish
-            .expect("replacement returns reconciled list");
-        let registrations = registrations.as_array().expect("list result");
-        let old = registrations
-            .iter()
-            .find(|record| record["subscription_key"] == "old-schedule")
-            .expect("old subscription remains visible");
-        let new = registrations
-            .iter()
-            .find(|record| record["subscription_key"] == "new-schedule")
-            .expect("new subscription is visible");
-        assert_eq!(old["manifest_membership"], "orphaned");
-        assert_eq!(new["manifest_membership"], "present_in_current_artifact");
-        assert!(old["registrant"].is_object());
-        assert!(new["registrant"].is_object());
+
+        let after = lash_core::TriggerStore::list_subscriptions(
+            trigger_store.as_ref(),
+            lash_core::TriggerSubscriptionFilter::for_session("test-session"),
+        )
+        .await
+        .expect("list registration after unrelated execution");
+        assert_eq!(
+            after, before,
+            "unrelated execution must not mutate registration"
+        );
+    });
+}
+
+#[test]
+pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
+    block_on(async {
+        let mut state = RlmExecutionState::new();
+        let registration = lash_core::ProcessRegistration::new(
+            "unscoped-host-process",
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        );
+        let context = lash_core::testing::code_execution_context_for_process(&registration);
+        let owner_error = context
+            .trigger_owner_scope()
+            .expect_err("a bare host process must not have a trigger owner namespace");
+        assert!(
+            owner_error.to_string().contains("bare host authority"),
+            "{owner_error}"
+        );
+        let response = execute_code_unbounded_for_tests(
+            &mut state,
+            context,
+            ExecRequest {
+                language: "lashlang".to_string(),
+                code: "finish 42".to_string(),
+            },
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::new(),
+            ),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
+    });
+}
+
+struct TriggerProcessResult {
+    terminal: lash_core::ProcessAwaitOutput,
+    trigger_effects: Vec<(String, &'static str)>,
+    subscriptions: Vec<lash_core::TriggerSubscriptionRecord>,
+}
+
+async fn execute_trigger_process(language: &str, code: &str) -> TriggerProcessResult {
+    execute_trigger_process_with_originator(
+        language,
+        code,
+        None,
+        Some(lash_core::TriggerOwnerScope::session("test-session")),
+        true,
+    )
+    .await
+}
+
+async fn execute_trigger_process_with_originator(
+    language: &str,
+    code: &str,
+    originator_override: Option<lash_core::ProcessOriginator>,
+    expected_owner_scope: Option<lash_core::TriggerOwnerScope>,
+    expect_success: bool,
+) -> TriggerProcessResult {
+    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+    let trigger_store: Arc<dyn lash_core::TriggerStore> =
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
+    let controller = CapturingTriggerEffectController::default();
+    let controller_dyn: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(controller.clone());
+    let surface = LashlangSurface::new(
+        lashlang::LashlangAbilities::default()
+            .with_processes()
+            .with_triggers(),
+        lashlang::LashlangLanguageFeatures::default(),
+        timer_trigger_resources(),
+    );
+    let session_policy = lash_core::SessionPolicy {
+        model: lash_core::ModelSpec::builder("mock-model")
+            .context_window_tokens(200_000)
+            .build()
+            .expect("trigger process test model"),
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+    };
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+        Arc::new(
+            lash_core::facade_support::NativeEffectHost::new(controller_dyn.clone())
+                .allow_process_lifetime_completion_keys(),
+        ),
+        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+        process_env_store.clone(),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
+        artifact_store.clone(),
+        surface.clone(),
+    )));
+    let watched = lash_core::facade_support::watch_process_registry(registry_dyn.clone());
+    let worker = lash_core::facade_support::DurableProcessWorker::new(
+        lash_core::facade_support::DurableProcessWorkerConfig::new(
+            Arc::new(lash_core::facade_support::PluginHost::new(
+                lash_core::testing::test_code_protocol_factories(),
+            )),
+            runtime_host,
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
+            lash_core::testing::runtime_lease_owner(),
+        )
+        .with_trigger_store(trigger_store.clone())
+        .with_session_policy(session_policy.clone()),
+    )
+    .expect("valid trigger process worker");
+    let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
+        registry: registry.clone(),
+        controller: controller_dyn.clone(),
+        originator_override: originator_override.clone(),
+    });
+    let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
+        Arc::new(EmptyTypeScriptSignalToolProvider),
+        lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+        None,
+        processes,
+        controller_dyn,
+        process_env_store,
+        lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::default(),
+            session_policy,
+        ),
+    );
+    let mut state = if language == "typescript" {
+        RlmExecutionState::for_engine("typescript")
+    } else {
+        RlmExecutionState::new()
+    };
+    let response = execute_code_with_dialect_and_bounds(
+        &mut state,
+        ctx,
+        ExecRequest {
+            language: language.to_string(),
+            code: code.to_string(),
+        },
+        artifact_store,
+        surface,
+        None,
+        RlmProjectedBindings::default(),
+        Arc::new(ProjectionRegistry::new()),
+        RlmLashlangExecutionTraceConfig::default(),
+        lashlang::ExecutionBounds::unbounded(),
+        RlmSourceContext::cell(if language == "typescript" {
+            SourceDialect::Typescript
+        } else {
+            SourceDialect::Lashlang
+        }),
+    )
+    .await;
+    assert!(response.error.is_none(), "{:?}", response.error);
+    assert!(
+        response.terminal_finish.is_some(),
+        "process start must finish"
+    );
+
+    let _ = worker
+        .drive_pending_processes()
+        .await
+        .expect("drive trigger process");
+    let records = registry
+        .list_observed_by(
+            &SessionId::from("test-session"),
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("list trigger process");
+    let [record] = records.as_slice() else {
+        panic!("expected exactly one trigger process, got {records:?}");
+    };
+    assert_eq!(
+        record.provenance.originator,
+        originator_override.unwrap_or_else(|| {
+            lash_core::ProcessOriginator::session(lash_core::SessionScope::new("test-session"))
+        })
+    );
+    let terminal = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        lash_core::NativeProcessWork::for_registry(registry_dyn).await_terminal(&record.id),
+    )
+    .await
+    .expect("trigger process reaches terminal state")
+    .expect("await trigger process");
+    assert_eq!(
+        matches!(
+            terminal,
+            lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()
+        ),
+        expect_success,
+        "unexpected process trigger terminal: {terminal:?}"
+    );
+    let subscriptions = if let Some(owner_scope) = expected_owner_scope {
+        trigger_store
+            .list_subscriptions(lash_core::TriggerSubscriptionFilter::for_registrant_scope(
+                owner_scope.namespace(),
+            ))
+            .await
+            .expect("list process-created trigger subscriptions")
+    } else {
+        Vec::new()
+    };
+    TriggerProcessResult {
+        terminal,
+        trigger_effects: controller.trigger_effects(),
+        subscriptions,
+    }
+}
+
+#[test]
+pub(super) fn named_host_process_trigger_uses_host_owner_scope() {
+    block_on(async {
+        let owner_scope =
+            lash_core::TriggerOwnerScope::host("automation-a").expect("valid host owner");
+        let result = execute_trigger_process_with_originator(
+            "lashlang",
+            r#"
+                process remember(tick: timer.Tick) { finish true }
+                process registrar() {
+                  source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
+                  receipt = await triggers.register({
+                    source: source, target: remember, inputs: { tick: trigger.event },
+                    subscription_key: "named-host-process"
+                  })?
+                  finish receipt.owner_scope
+                }
+                handle = start registrar()
+                finish handle.id
+            "#,
+            Some(lash_core::ProcessOriginator::host_scoped("automation-a")),
+            Some(owner_scope.clone()),
+            true,
+        )
+        .await;
+
+        assert_eq!(result.subscriptions.len(), 1);
+        assert_eq!(result.subscriptions[0].owner_scope, owner_scope);
+        assert_eq!(
+            result.subscriptions[0].registrant,
+            lash_core::ProcessOriginator::host_scoped("automation-a")
+        );
+        assert!(result.subscriptions[0].wake_target.is_some());
+        assert_eq!(
+            result
+                .trigger_effects
+                .iter()
+                .map(|(_, operation)| *operation)
+                .collect::<Vec<_>>(),
+            ["register"]
+        );
+    });
+}
+
+#[test]
+pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
+    block_on(async {
+        let registration = lash_core::ProcessRegistration::new(
+            "bare-host-trigger-process",
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        );
+        let context = lash_core::testing::code_execution_context_for_process(&registration);
+        let owner_error = context
+            .trigger_owner_scope()
+            .expect_err("a bare host process must not have a trigger owner namespace");
+        assert!(
+            owner_error.to_string().contains("bare host authority"),
+            "{owner_error}"
+        );
+
+        let result = execute_trigger_process_with_originator(
+            "lashlang",
+            r#"
+                process registrar() { finish await triggers.list({})? }
+                handle = start registrar()
+                finish handle.id
+            "#,
+            Some(lash_core::ProcessOriginator::host()),
+            None,
+            false,
+        )
+        .await;
+
+        let terminal = serde_json::to_string(&result.terminal).expect("serialize terminal");
+        assert!(terminal.contains("bare host authority"), "{terminal}");
+        assert!(
+            result.trigger_effects.is_empty(),
+            "authority refusal must happen before trigger effect execution"
+        );
+        assert!(result.subscriptions.is_empty());
+    });
+}
+
+#[test]
+pub(super) fn lashlang_process_trigger_batch_uses_command_handler_in_source_order() {
+    block_on(async {
+        let result = execute_trigger_process(
+            "lashlang",
+            r#"
+                process remember(tick: timer.Tick) { finish true }
+                process registrar() {
+                  source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
+                  seed = await triggers.register({
+                    source: source, target: remember, inputs: { tick: trigger.event },
+                    subscription_key: "process-update"
+                  })?
+                  results = await {
+                    registered: triggers.register({
+                      source: source, target: remember, inputs: { tick: trigger.event },
+                      subscription_key: "process-register"
+                    })?,
+                    listed: triggers.list({ target: remember })?,
+                    updated: triggers.update({
+                      subscription_key: "process-update", expected_revision: seed.revision,
+                      source: source, target: remember, inputs: { tick: trigger.event },
+                      name: "updated-by-process"
+                    })?
+                  }
+                  finish { registered: results.registered, count: len(results.listed) }
+                }
+                handle = start registrar()
+                finish handle.id
+            "#,
+        )
+        .await;
+
+        let expected = lash_core::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::success(serde_json::json!({
+                "registered": result.subscriptions.iter().find(|record| {
+                    record.subscription_key == "process-register"
+                }).map(|record| serde_json::json!({
+                    "type": "trigger_handle",
+                    "id": record.subscription_key,
+                    "owner_scope": record.owner_scope,
+                    "subscription_key": record.subscription_key,
+                    "subscription_id": record.subscription_id,
+                    "incarnation": record.incarnation,
+                    "revision": record.revision,
+                    "definition_fingerprint": record.definition_fingerprint,
+                    "enabled": record.enabled,
+                    "disposition": "created",
+                    "record_snapshot": record,
+                })).expect("registered subscription"),
+                "count": 2,
+            })),
+        );
+        assert_eq!(result.terminal, expected);
+        assert!(result.subscriptions.iter().all(|record| {
+            record.owner_scope == lash_core::TriggerOwnerScope::session("test-session")
+                && record.registrant
+                    == lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                        "test-session",
+                    ))
+                && record.wake_target.is_some()
+        }));
+        assert_eq!(
+            result
+                .trigger_effects
+                .iter()
+                .map(|(_, operation)| *operation)
+                .collect::<Vec<_>>(),
+            ["register", "register", "list", "update"]
+        );
+        assert!(
+            result.trigger_effects[1..]
+                .iter()
+                .all(|(effect_id, _)| effect_id.contains(":child:")),
+            "batched process effects must retain child positions: {:?}",
+            result.trigger_effects
+        );
+    });
+}
+
+#[test]
+pub(super) fn typescript_process_body_uses_trigger_command_handler() {
+    block_on(async {
+        let result = execute_trigger_process(
+            "typescript",
+            r#"
+                const registrar = defineProcess({
+                  name: "registrar", signals: {},
+                  run: async () => await triggers.list({})
+                });
+                const handle = start(registrar);
+                finish(handle.id);
+            "#,
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result.terminal,
+                lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()
+            ),
+            "{:?}",
+            result.terminal
+        );
+        assert_eq!(
+            result
+                .trigger_effects
+                .iter()
+                .map(|(_, operation)| *operation)
+                .collect::<Vec<_>>(),
+            ["list"]
+        );
+        assert!(result.trigger_effects[0].0.starts_with("lashlang:"));
+        assert!(result.subscriptions.is_empty());
+    });
+}
+
+#[test]
+pub(super) fn typescript_process_local_helper_reaches_trigger_command_handler() {
+    block_on(async {
+        let result = execute_trigger_process(
+            "typescript",
+            r#"
+                const registrar = defineProcess({
+                  name: "registrar", signals: {},
+                  run: async () => {
+                    const listRegistrations = () => triggers.list({});
+                    return await listRegistrations();
+                  }
+                });
+                const handle = start(registrar);
+                finish(handle.id);
+            "#,
+        )
+        .await;
+
+        assert_eq!(
+            result.terminal,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!([])
+            ))
+        );
+        assert_eq!(
+            result
+                .trigger_effects
+                .iter()
+                .map(|(_, operation)| *operation)
+                .collect::<Vec<_>>(),
+            ["list"]
+        );
+        assert!(result.trigger_effects[0].0.starts_with("lashlang:"));
+        assert!(result.subscriptions.is_empty());
     });
 }
 

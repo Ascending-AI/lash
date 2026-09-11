@@ -905,6 +905,12 @@ pub struct ResponsesStreamingToolCall {
     pub item_id: String,
 }
 
+mod slots;
+use slots::{
+    ResponsesPartKind, ResponsesPartSlot, ResponsesPartSlotAllocation, ResponsesPartSlotIdentity,
+    ResponsesPartSlotKey,
+};
+
 #[derive(Clone, Debug, Default)]
 pub struct ResponsesStreamState {
     pub pending_text_deltas: Vec<String>,
@@ -916,22 +922,20 @@ pub struct ResponsesStreamState {
     /// Set only by a terminal Responses event, never merely by an event that
     /// happens to carry a `response` snapshot.
     pub terminal_event_seen: bool,
-    pub current_text_part: Option<usize>,
-    /// Maps a server output slot to the index of its `Text` part. Responses
-    /// streams are ordered by `output_index`; ids may be absent or change
-    /// across terminal snapshots.
-    pub message_parts_by_output: HashMap<usize, usize>,
-    /// Secondary id lookup for older fixtures and providers that still send
-    /// stable message ids. Slot semantics take precedence.
-    pub message_parts: HashMap<String, usize>,
-    /// Index of the reasoning-summary part currently receiving deltas. The
+    /// True only when a terminal Responses payload carries the normal
+    /// successful `completed` status.
+    pub completed_status_seen: bool,
+    pub(crate) current_text_slot: Option<usize>,
+    /// Owner of the reasoning-summary part currently receiving deltas. The
     /// server groups reasoning output into multiple "parts" (paragraphs); we
     /// keep one slot per part instead of merging into a single blob.
-    pub current_reasoning_part: Option<usize>,
-    pub reasoning_parts_by_output: HashMap<usize, usize>,
+    pub(crate) current_reasoning_slot: Option<usize>,
+    pub(crate) last_reasoning_slot: Option<usize>,
     pub reasoning_deltas: Vec<String>,
-    pub tool_calls: HashMap<usize, ResponsesStreamingToolCall>,
-    pub tool_call_output_by_id: HashMap<String, usize>,
+    /// Both Responses identifier forms resolve through this table to one
+    /// canonical owner per part kind. Aliases never carry payloads.
+    pub(crate) part_slots: HashMap<ResponsesPartSlotKey, usize>,
+    pub(crate) slot_owners: Vec<ResponsesPartSlot>,
     /// Set once streamed output evidence has arrived. Allocating an empty
     /// message, reasoning, or tool-call slot does not set this flag. The terminal
     /// `response.completed.response.output` is authoritative for status/usage
@@ -945,6 +949,128 @@ pub struct ResponsesStreamState {
 }
 
 impl ResponsesStreamState {
+    fn slot_has_kind(&self, owner: usize, kind: ResponsesPartKind) -> bool {
+        self.slot_owners
+            .get(owner)
+            .is_some_and(|slot| slot.kind() == kind)
+    }
+
+    fn allocate_part_slot(&mut self, kind: ResponsesPartKind) -> usize {
+        let slot = match kind {
+            ResponsesPartKind::Message => {
+                let part_index = self.parts.len();
+                self.parts.push(LlmOutputPart::Text {
+                    text: String::new(),
+                    response_meta: None,
+                });
+                ResponsesPartSlot::Message(part_index)
+            }
+            ResponsesPartKind::Reasoning => {
+                let part_index = self.parts.len();
+                self.parts.push(LlmOutputPart::Reasoning {
+                    text: String::new(),
+                    replay: None,
+                });
+                ResponsesPartSlot::Reasoning(part_index)
+            }
+            ResponsesPartKind::ToolCall => {
+                ResponsesPartSlot::ToolCall(ResponsesStreamingToolCall::default())
+            }
+        };
+        let owner = self.slot_owners.len();
+        self.slot_owners.push(slot);
+        owner
+    }
+
+    fn part_slot_index(&self, owner: usize, kind: ResponsesPartKind) -> Option<usize> {
+        match (self.slot_owners.get(owner)?, kind) {
+            (ResponsesPartSlot::Message(index), ResponsesPartKind::Message)
+            | (ResponsesPartSlot::Reasoning(index), ResponsesPartKind::Reasoning) => Some(*index),
+            _ => None,
+        }
+    }
+
+    fn bind_part_slot(&mut self, key: ResponsesPartSlotKey, owner: usize) {
+        self.part_slots.insert(key, owner);
+    }
+
+    /// Resolve both Responses identifier forms to one canonical payload owner.
+    /// `output_index` wins an existing disagreement because server output order
+    /// remains stable even when item ids change between snapshots.
+    fn allocate_or_find_part_slot(
+        &mut self,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+        kind: ResponsesPartKind,
+        current: Option<usize>,
+        allocation: ResponsesPartSlotAllocation,
+    ) -> Option<usize> {
+        let output_key = output_index.map(|output_index| ResponsesPartSlotKey {
+            kind,
+            identity: ResponsesPartSlotIdentity::OutputIndex(output_index),
+        });
+        let item_key = item_id
+            .filter(|id| !id.is_empty())
+            .map(|id| ResponsesPartSlotKey {
+                kind,
+                identity: ResponsesPartSlotIdentity::ItemId(id.to_string()),
+            });
+        let output_owner = (allocation != ResponsesPartSlotAllocation::Fresh)
+            .then(|| {
+                output_key
+                    .as_ref()
+                    .and_then(|key| self.part_slots.get(key).copied())
+            })
+            .flatten()
+            .filter(|owner| self.slot_has_kind(*owner, kind));
+        let item_owner = (allocation != ResponsesPartSlotAllocation::Fresh)
+            .then(|| {
+                item_key
+                    .as_ref()
+                    .and_then(|key| self.part_slots.get(key).copied())
+            })
+            .flatten()
+            .filter(|owner| self.slot_has_kind(*owner, kind));
+        let has_key = output_key.is_some() || item_key.is_some();
+        let owner = output_owner
+            .or(item_owner)
+            .or_else(|| {
+                (!has_key || allocation == ResponsesPartSlotAllocation::ReuseCurrent)
+                    .then_some(current)
+                    .flatten()
+                    .filter(|_| allocation != ResponsesPartSlotAllocation::Fresh)
+                    .filter(|owner| self.slot_has_kind(*owner, kind))
+            })
+            .or_else(|| {
+                (kind != ResponsesPartKind::ToolCall || has_key)
+                    .then(|| self.allocate_part_slot(kind))
+            })?;
+
+        if let Some(key) = output_key {
+            self.bind_part_slot(key, owner);
+        }
+        if let Some(key) = item_key {
+            self.bind_part_slot(key, owner);
+        }
+        Some(owner)
+    }
+
+    pub(crate) fn pending_tool_call_has_output_evidence(&self) -> bool {
+        self.slot_owners.iter().any(|slot| {
+            matches!(
+                slot,
+                ResponsesPartSlot::ToolCall(tool_call) if !tool_call.input_json.is_empty()
+            )
+        })
+    }
+
+    fn tool_call_mut(&mut self, owner: usize) -> Option<&mut ResponsesStreamingToolCall> {
+        match self.slot_owners.get_mut(owner) {
+            Some(ResponsesPartSlot::ToolCall(tool_call)) => Some(tool_call),
+            _ => None,
+        }
+    }
+
     pub fn capture_execution_evidence(
         &mut self,
         response: &Value,
@@ -999,8 +1125,8 @@ impl ResponsesStreamState {
             .and_then(|item| item.get("id").and_then(|v| v.as_str()))
             .map(str::to_string);
         let meta = item.map(response_text_meta_from_message_item);
-        let index = self.message_part_index(output_index, item_id.as_deref(), meta);
-        self.current_text_part = Some(index);
+        let (owner, _) = self.message_part_index(output_index, item_id.as_deref(), meta);
+        self.current_text_slot = Some(owner);
     }
 
     pub fn finish_message(
@@ -1013,30 +1139,40 @@ impl ResponsesStreamState {
             let text = message_text_from_item(item);
             let meta = response_text_meta_from_message_item(item);
             let item_id = meta.id.clone();
-            let index = self.message_part_index(output_index, item_id.as_deref(), Some(meta));
+            let (_, index) = self.message_part_index(output_index, item_id.as_deref(), Some(meta));
             if !text.is_empty() {
                 self.reconcile_text_part(index, &text);
                 self.streamed_item_content_received = true;
             }
             finalized = self.parts.get(index).cloned();
         }
-        self.current_text_part = None;
+        self.current_text_slot = None;
         finalized
     }
 
-    pub fn push_text_delta(&mut self, piece: &str, output_index: Option<usize>) {
+    pub fn push_text_delta(
+        &mut self,
+        piece: &str,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+    ) {
         if piece.is_empty() {
             return;
         }
-        let part_index = self.ensure_text_part_index(output_index);
+        let part_index = self.ensure_text_part_index(output_index, item_id);
         self.append_text_delta_to_part(part_index, piece);
     }
 
-    pub fn reconcile_text_event(&mut self, text: &str, output_index: Option<usize>) {
+    pub fn reconcile_text_event(
+        &mut self,
+        text: &str,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+    ) {
         if text.is_empty() {
             return;
         }
-        let part_index = self.ensure_text_part_index(output_index);
+        let part_index = self.ensure_text_part_index(output_index, item_id);
         self.reconcile_text_part(part_index, text);
         self.streamed_item_content_received = true;
     }
@@ -1083,7 +1219,8 @@ impl ResponsesStreamState {
                     {
                         continue;
                     }
-                    let index = self.message_part_index(None, item_id.as_deref(), response_meta);
+                    let (_, index) =
+                        self.message_part_index(None, item_id.as_deref(), response_meta);
                     self.reconcile_text_part(index, &text);
                 }
                 part @ LlmOutputPart::Reasoning { .. } => {
@@ -1140,46 +1277,23 @@ impl ResponsesStreamState {
         }
     }
 
-    pub fn ensure_text_part_index(&mut self, output_index: Option<usize>) -> usize {
-        if let Some(output_index) = output_index
-            && let Some(index) = self.message_parts_by_output.get(&output_index).copied()
-        {
-            self.current_text_part = Some(index);
-            return index;
-        }
-        let index = if let Some(index) = self.current_text_part {
-            index
-        } else if let Some(index) = self
-            .parts
-            .iter()
-            .rposition(|part| matches!(part, LlmOutputPart::Text { .. }))
-        {
-            index
-        } else {
-            let index = self.parts.len();
-            self.parts.push(LlmOutputPart::Text {
-                text: String::new(),
-                response_meta: None,
-            });
-            index
-        };
-        // A text delta can arrive before the slot's `output_item.added`. The
-        // part chosen above is the one receiving that slot's text, so bind the
-        // slot to it: otherwise the slot stays unregistered and the later
-        // `output_item.done` allocates a second part, emitting the same
-        // message twice. Skip the binding when another slot already owns this
-        // part — that is a mis-routed delta, and aliasing two slots onto one
-        // part would compound it rather than fix it.
-        if let Some(output_index) = output_index
-            && !self
-                .message_parts_by_output
-                .iter()
-                .any(|(slot, part)| *part == index && *slot != output_index)
-        {
-            self.message_parts_by_output.insert(output_index, index);
-            self.current_text_part = Some(index);
-        }
-        index
+    pub fn ensure_text_part_index(
+        &mut self,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+    ) -> usize {
+        let owner = self
+            .allocate_or_find_part_slot(
+                output_index,
+                item_id,
+                ResponsesPartKind::Message,
+                self.current_text_slot,
+                ResponsesPartSlotAllocation::ReuseCurrent,
+            )
+            .expect("message slots can be allocated without a provider key");
+        self.current_text_slot = Some(owner);
+        self.part_slot_index(owner, ResponsesPartKind::Message)
+            .expect("message slot owns a text part")
     }
 
     fn message_part_index(
@@ -1187,44 +1301,19 @@ impl ResponsesStreamState {
         output_index: Option<usize>,
         item_id: Option<&str>,
         response_meta: Option<ResponseTextMeta>,
-    ) -> usize {
-        let index = if let Some(output_index) = output_index {
-            if let Some(index) = self.message_parts_by_output.get(&output_index).copied() {
-                index
-            } else {
-                let index = self.parts.len();
-                self.parts.push(LlmOutputPart::Text {
-                    text: String::new(),
-                    response_meta: response_meta.clone(),
-                });
-                self.message_parts_by_output.insert(output_index, index);
-                if let Some(item_id) = item_id.filter(|id| !id.is_empty()) {
-                    self.message_parts.insert(item_id.to_string(), index);
-                }
-                index
-            }
-        } else if let Some(item_id) = item_id.filter(|id| !id.is_empty()) {
-            if let Some(index) = self.message_parts.get(item_id).copied() {
-                index
-            } else {
-                let index = self.parts.len();
-                self.parts.push(LlmOutputPart::Text {
-                    text: String::new(),
-                    response_meta: response_meta.clone(),
-                });
-                self.message_parts.insert(item_id.to_string(), index);
-                index
-            }
-        } else if let Some(index) = self.current_text_part {
-            index
-        } else {
-            let index = self.parts.len();
-            self.parts.push(LlmOutputPart::Text {
-                text: String::new(),
-                response_meta: response_meta.clone(),
-            });
-            index
-        };
+    ) -> (usize, usize) {
+        let owner = self
+            .allocate_or_find_part_slot(
+                output_index,
+                item_id,
+                ResponsesPartKind::Message,
+                self.current_text_slot,
+                ResponsesPartSlotAllocation::Resolve,
+            )
+            .expect("message slots can be allocated without a provider key");
+        let index = self
+            .part_slot_index(owner, ResponsesPartKind::Message)
+            .expect("message slot owns a text part");
 
         if let Some(response_meta) = response_meta
             && let Some(LlmOutputPart::Text {
@@ -1234,7 +1323,7 @@ impl ResponsesStreamState {
         {
             *existing_meta = Some(response_meta);
         }
-        index
+        (owner, index)
     }
 
     fn set_text_part(&mut self, part_index: usize, text: String) {
@@ -1258,51 +1347,53 @@ impl ResponsesStreamState {
         lash_core::facade_support::visible_response_text_from_parts(&self.parts)
     }
 
-    pub fn begin_reasoning_part(&mut self, output_index: Option<usize>) {
-        let index = if let Some(output_index) = output_index {
-            if let Some(index) = self.reasoning_parts_by_output.get(&output_index).copied() {
-                index
-            } else {
-                let index = self.parts.len();
-                self.parts.push(LlmOutputPart::Reasoning {
-                    text: String::new(),
-                    replay: None,
-                });
-                self.reasoning_parts_by_output.insert(output_index, index);
-                index
-            }
-        } else {
-            let index = self.parts.len();
-            self.parts.push(LlmOutputPart::Reasoning {
-                text: String::new(),
-                replay: None,
-            });
-            index
-        };
-        self.current_reasoning_part = Some(index);
+    pub fn begin_reasoning_item(&mut self, output_index: Option<usize>, item_id: Option<&str>) {
+        self.current_reasoning_slot = self.allocate_or_find_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Reasoning,
+            None,
+            ResponsesPartSlotAllocation::Resolve,
+        );
     }
 
-    pub fn push_reasoning_delta(&mut self, delta: &str, output_index: Option<usize>) {
+    pub fn begin_reasoning_part(&mut self, output_index: Option<usize>, item_id: Option<&str>) {
+        let allocation = if output_index.is_some() {
+            ResponsesPartSlotAllocation::Resolve
+        } else {
+            ResponsesPartSlotAllocation::Fresh
+        };
+        self.current_reasoning_slot = self.allocate_or_find_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Reasoning,
+            None,
+            allocation,
+        );
+    }
+
+    pub fn push_reasoning_delta(
+        &mut self,
+        delta: &str,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+    ) {
         if delta.is_empty() {
             return;
         }
-        let index = if let Some(output_index) = output_index
-            && let Some(index) = self.reasoning_parts_by_output.get(&output_index).copied()
-        {
-            self.current_reasoning_part = Some(index);
-            index
-        } else {
-            match self.current_reasoning_part {
-                Some(index) => index,
-                None => {
-                    // Some providers send a delta before the `part.added` event.
-                    // Open an implicit part so we don't drop text.
-                    self.begin_reasoning_part(output_index);
-                    self.current_reasoning_part
-                        .expect("reasoning part just pushed")
-                }
-            }
-        };
+        let owner = self
+            .allocate_or_find_part_slot(
+                output_index,
+                item_id,
+                ResponsesPartKind::Reasoning,
+                self.current_reasoning_slot,
+                ResponsesPartSlotAllocation::Resolve,
+            )
+            .expect("reasoning slots can be allocated without a provider key");
+        self.current_reasoning_slot = Some(owner);
+        let index = self
+            .part_slot_index(owner, ResponsesPartKind::Reasoning)
+            .expect("reasoning slot owns a reasoning part");
         if let Some(LlmOutputPart::Reasoning { text, .. }) = self.parts.get_mut(index) {
             text.push_str(delta);
         }
@@ -1310,12 +1401,48 @@ impl ResponsesStreamState {
         self.reasoning_deltas.push(delta.to_string());
     }
 
+    pub fn reconcile_reasoning_event(
+        &mut self,
+        text: &str,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+    ) {
+        let Some(owner) = self.allocate_or_find_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Reasoning,
+            self.current_reasoning_slot,
+            ResponsesPartSlotAllocation::Resolve,
+        ) else {
+            return;
+        };
+        self.current_reasoning_slot = Some(owner);
+        let Some(index) = self.part_slot_index(owner, ResponsesPartKind::Reasoning) else {
+            return;
+        };
+        let existing = self
+            .parts
+            .get(index)
+            .and_then(|part| match part {
+                LlmOutputPart::Reasoning { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if text != existing
+            && let Some(suffix) = text.strip_prefix(existing.as_str())
+        {
+            self.push_reasoning_delta(suffix, output_index, item_id);
+        }
+    }
+
     pub fn finish_reasoning_part(&mut self) {
         // Drop the cursor; the next `part.added` opens a fresh slot. Trim
         // trailing whitespace so concatenated paragraphs don't carry blanks.
-        if let Some(index) = self.current_reasoning_part.take()
+        if let Some(owner) = self.current_reasoning_slot.take()
+            && let Some(index) = self.part_slot_index(owner, ResponsesPartKind::Reasoning)
             && let Some(LlmOutputPart::Reasoning { text, .. }) = self.parts.get_mut(index)
         {
+            self.last_reasoning_slot = Some(owner);
             let trimmed = text.trim_end();
             if trimmed.len() != text.len() {
                 *text = trimmed.to_string();
@@ -1333,18 +1460,16 @@ impl ResponsesStreamState {
     ) -> Option<LlmOutputPart> {
         self.streamed_item_content_received |=
             crate::responses_output_evidence::reasoning_item_has_output_evidence(item);
-        let target_index = output_index
-            .and_then(|output_index| self.reasoning_parts_by_output.get(&output_index).copied())
-            .or(self.current_reasoning_part)
-            .or_else(|| {
-                self.parts
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .find(|(_, p)| matches!(p, LlmOutputPart::Reasoning { .. }))
-                    .map(|(index, _)| index)
-            });
-        let index = target_index?;
+        let item_id = item.get("id").and_then(Value::as_str);
+        let owner = self.allocate_or_find_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Reasoning,
+            self.current_reasoning_slot.or(self.last_reasoning_slot),
+            ResponsesPartSlotAllocation::ReuseCurrent,
+        )?;
+        self.current_reasoning_slot = Some(owner);
+        let index = self.part_slot_index(owner, ResponsesPartKind::Reasoning)?;
         let part = self.parts.get_mut(index)?;
         let LlmOutputPart::Reasoning { replay, .. } = part else {
             return None;
@@ -1381,29 +1506,13 @@ impl ResponsesStreamState {
         output_index: Option<usize>,
         item_id: Option<&str>,
     ) -> Option<usize> {
-        if let Some(output_index) = output_index {
-            if let Some(item_id) = item_id.filter(|id| !id.is_empty()) {
-                self.tool_call_output_by_id
-                    .insert(item_id.to_string(), output_index);
-            }
-            return Some(output_index);
-        }
-        if let Some(item_id) = item_id.filter(|id| !id.is_empty()) {
-            if let Some(slot) = self.tool_call_output_by_id.get(item_id).copied() {
-                return Some(slot);
-            }
-            let slot = self
-                .tool_calls
-                .keys()
-                .copied()
-                .max()
-                .map(|value| value.saturating_add(1))
-                .unwrap_or(0);
-            self.tool_call_output_by_id
-                .insert(item_id.to_string(), slot);
-            return Some(slot);
-        }
-        None
+        self.allocate_or_find_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::ToolCall,
+            None,
+            ResponsesPartSlotAllocation::Resolve,
+        )
     }
 
     pub fn update_tool_call_from_item(
@@ -1412,27 +1521,30 @@ impl ResponsesStreamState {
         output_index: Option<usize>,
     ) -> Option<usize> {
         let item_id = item.get("id").and_then(|v| v.as_str());
-        let slot = self.tool_call_slot(output_index, item_id)?;
-        let tool_call = self.tool_calls.entry(slot).or_default();
-        if tool_call.item_id.is_empty()
-            && let Some(item_id) = item_id
-        {
-            tool_call.item_id = item_id.to_string();
+        let owner = self.tool_call_slot(output_index, item_id)?;
+        let mut content_received = false;
+        if let Some(tool_call) = self.tool_call_mut(owner) {
+            if tool_call.item_id.is_empty()
+                && let Some(item_id) = item_id
+            {
+                tool_call.item_id = item_id.to_string();
+            }
+            if let Some(call_id) = item.get("call_id").and_then(|v| v.as_str()) {
+                tool_call.call_id = call_id.to_string();
+            }
+            if let Some(tool_name) = item.get("name").and_then(|v| v.as_str()) {
+                tool_call.tool_name = tool_name.to_string();
+                content_received |= !tool_name.is_empty();
+            }
+            if let Some(arguments) = item.get("arguments").and_then(|v| v.as_str())
+                && !arguments.is_empty()
+            {
+                tool_call.input_json = arguments.to_string();
+                content_received = true;
+            }
         }
-        if let Some(call_id) = item.get("call_id").and_then(|v| v.as_str()) {
-            tool_call.call_id = call_id.to_string();
-        }
-        if let Some(tool_name) = item.get("name").and_then(|v| v.as_str()) {
-            tool_call.tool_name = tool_name.to_string();
-            self.streamed_item_content_received |= !tool_name.is_empty();
-        }
-        if let Some(arguments) = item.get("arguments").and_then(|v| v.as_str())
-            && !arguments.is_empty()
-        {
-            tool_call.input_json = arguments.to_string();
-            self.streamed_item_content_received = true;
-        }
-        Some(slot)
+        self.streamed_item_content_received |= content_received;
+        Some(owner)
     }
 
     pub fn push_tool_call_delta(
@@ -1444,15 +1556,13 @@ impl ResponsesStreamState {
         if delta.is_empty() {
             return;
         }
-        let Some(slot) = self.tool_call_slot(output_index, item_id) else {
+        let Some(owner) = self.tool_call_slot(output_index, item_id) else {
             return;
         };
         self.streamed_item_content_received = true;
-        self.tool_calls
-            .entry(slot)
-            .or_default()
-            .input_json
-            .push_str(delta);
+        if let Some(tool_call) = self.tool_call_mut(owner) {
+            tool_call.input_json.push_str(delta);
+        }
     }
 
     pub fn set_tool_call_arguments(
@@ -1461,14 +1571,16 @@ impl ResponsesStreamState {
         item_id: Option<&str>,
         arguments: &str,
     ) {
-        let Some(slot) = self.tool_call_slot(output_index, item_id) else {
+        let Some(owner) = self.tool_call_slot(output_index, item_id) else {
             return;
         };
         if arguments.is_empty() {
             return;
         }
         self.streamed_item_content_received = true;
-        self.tool_calls.entry(slot).or_default().input_json = arguments.to_string();
+        if let Some(tool_call) = self.tool_call_mut(owner) {
+            tool_call.input_json = arguments.to_string();
+        }
     }
 
     pub fn finish_tool_call(
@@ -1476,20 +1588,20 @@ impl ResponsesStreamState {
         item: &Value,
         output_index: Option<usize>,
     ) -> Option<LlmOutputPart> {
-        let slot = self.update_tool_call_from_item(item, output_index)?;
-        let mut tool_call = self.tool_calls.remove(&slot).unwrap_or_default();
-        if !tool_call.item_id.is_empty() {
-            self.tool_call_output_by_id.remove(&tool_call.item_id);
-        }
-        if tool_call.call_id.is_empty() {
-            tool_call.call_id = uuid::Uuid::new_v4().to_string();
-        }
-        if tool_call.tool_name.is_empty() {
-            return None;
-        }
-        if tool_call.input_json.is_empty() {
-            tool_call.input_json = "{}".to_string();
-        }
+        let owner = self.update_tool_call_from_item(item, output_index)?;
+        let tool_call = {
+            let tool_call = self.tool_call_mut(owner)?;
+            if tool_call.call_id.is_empty() {
+                tool_call.call_id = uuid::Uuid::new_v4().to_string();
+            }
+            if tool_call.tool_name.is_empty() {
+                return None;
+            }
+            if tool_call.input_json.is_empty() {
+                tool_call.input_json = "{}".to_string();
+            }
+            tool_call.clone()
+        };
         let part = LlmOutputPart::ToolCall {
             call_id: tool_call.call_id,
             tool_name: tool_call.tool_name,

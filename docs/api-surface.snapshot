@@ -2096,11 +2096,9 @@ lash::persistence::InMemorySessionStoreFactory::with_clock
 lash::persistence::LashlangArtifactStore
 lash::persistence::LashlangArtifactStore::durability_tier
 lash::persistence::LashlangArtifactStore::get_artifact_bytes
-lash::persistence::LashlangArtifactStore::get_current_trigger_manifest
 lash::persistence::LashlangArtifactStore::get_module_artifact
 lash::persistence::LashlangArtifactStore::put_artifact_bytes
 lash::persistence::LashlangArtifactStore::put_module_artifact
-lash::persistence::LashlangArtifactStore::replace_current_trigger_manifest
 lash::persistence::LeaseClaimNonce
 lash::persistence::LeaseClaimNonce::as_str
 lash::persistence::LeaseClaimNonce::for_testing
@@ -3018,8 +3016,6 @@ lash::persistence::StoreSchemaVerdict::Unreadable::reason
 lash::persistence::StoreSchemaVerdict::is_undecided
 lash::persistence::StoreSchemaVerdict::refuses_open
 lash::persistence::StoreTestSupport
-lash::persistence::StoreTestSupport::raw_session_owned_artifact_refs_for_testing
-lash::persistence::StoreTestSupport::seed_session_trigger_manifest_ref_for_testing
 lash::persistence::StoreTestSupport::stamp_session_state_version_and_corrupt_payload_for_testing
 lash::persistence::StoredAttachment
 lash::persistence::StoredAttachment::bytes
@@ -7077,7 +7073,6 @@ lash::remote::triggers::RemoteTriggerRegisterSubscriptionRequest::validate
 lash::remote::triggers::RemoteTriggerRegistration
 lash::remote::triggers::RemoteTriggerRegistration::enabled
 lash::remote::triggers::RemoteTriggerRegistration::incarnation
-lash::remote::triggers::RemoteTriggerRegistration::manifest_membership
 lash::remote::triggers::RemoteTriggerRegistration::name
 lash::remote::triggers::RemoteTriggerRegistration::registrant
 lash::remote::triggers::RemoteTriggerRegistration::revision
@@ -7750,9 +7745,7 @@ lash::rlm::TypeExpr::Null
 lash::rlm::TypeExpr::Object
 lash::rlm::TypeExpr::Object::0
 lash::rlm::TypeExpr::Process
-lash::rlm::TypeExpr::Process::input
-lash::rlm::TypeExpr::Process::input_count
-lash::rlm::TypeExpr::Process::output
+lash::rlm::TypeExpr::Process::0
 lash::rlm::TypeExpr::Ref
 lash::rlm::TypeExpr::Ref::0
 lash::rlm::TypeExpr::Str
@@ -8489,6 +8482,7 @@ lash::runtime::RuntimeErrorCode::SessionCommandPostDriveRefresh
 lash::runtime::RuntimeErrorCode::SessionCommandRefresh
 lash::runtime::RuntimeErrorCode::SessionCommandRefreshTools
 lash::runtime::RuntimeErrorCode::SessionDeleteScopeMismatch
+lash::runtime::RuntimeErrorCode::SessionDeleted
 lash::runtime::RuntimeErrorCode::SessionExecutionLaneBusy
 lash::runtime::RuntimeErrorCode::SessionExecutionLeaseLost
 lash::runtime::RuntimeErrorCode::SessionHeadRefresh
@@ -8511,6 +8505,7 @@ lash::runtime::RuntimeErrorCode::StoreCommitByteBudgetExceeded
 lash::runtime::RuntimeErrorCode::StoreCommitContended
 lash::runtime::RuntimeErrorCode::StoreCommitFailed
 lash::runtime::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+lash::runtime::RuntimeErrorCode::StoreCommitSuperseded
 lash::runtime::RuntimeErrorCode::ToolBatchMissingResult
 lash::runtime::RuntimeErrorCode::ToolBatchResultCountMismatch
 lash::runtime::RuntimeErrorCode::ToolCatalogResolutionFailed
@@ -10365,9 +10360,7 @@ lash::triggers::TriggerOwnerScope::session
 lash::triggers::TriggerOwnerScope::session_id
 lash::triggers::TriggerRegistration
 lash::triggers::TriggerRegistration::enabled
-lash::triggers::TriggerRegistration::from_record_with_manifest
 lash::triggers::TriggerRegistration::incarnation
-lash::triggers::TriggerRegistration::manifest_membership
 lash::triggers::TriggerRegistration::name
 lash::triggers::TriggerRegistration::registrant
 lash::triggers::TriggerRegistration::revision

@@ -304,12 +304,17 @@ pub(super) fn live_restate_effect_group_conformance() {
                 println!("RESTATE_QUIESCENCE executing_handler_effect PASS");
                 let registries = harness.run_cold_reopen_witnesses().await;
                 println!("RESTATE_COLD_REOPEN registries={registries} PASS");
-                lash_conformance::effect_host_await_events_cold_instance(
+                lash_conformance::effect_host_await_events_cold_instance_with_active_wait_witness(
                     harness.effect_host_factory(),
+                    |host| harness.run_active_wait_registration_witnesses(host),
                 )
                 .await;
                 println!("RESTATE_CONFORMANCE effect_host_await_events_cold_instance PASS");
-                lash_conformance::effect_host_await_events(harness.effect_host_factory()).await;
+                lash_conformance::effect_host_await_events_with_active_wait_witness(
+                    harness.effect_host_factory(),
+                    |host| harness.run_active_wait_registration_witnesses(host),
+                )
+                .await;
                 println!("RESTATE_CONFORMANCE effect_host_await_events PASS");
 
                 println!("RESTATE_CONFORMANCE_PARITY live=4/4 PASS");

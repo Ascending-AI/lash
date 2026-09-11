@@ -1,5 +1,6 @@
 use super::*;
 use crate::ast::{Declaration, Expr, ListComprehensionClause};
+use crate::format_type_expr;
 
 fn block(program: &Program) -> &[Expr] {
     let Expr::Block(expressions) = &program.main else {
@@ -38,6 +39,37 @@ fn type_expression_fragment_consumes_the_complete_input() {
     let error = parse_type_expression("any trailing")
         .expect_err("trailing type fragment input should be rejected");
     assert!(error.to_string().contains("end of type expression"));
+}
+
+#[test]
+fn named_process_signatures_parse_all_canonical_shapes_and_reject_anonymous_input() {
+    for (source, names) in [
+        ("Process<(), bool>", vec![]),
+        ("Process<(message: str), bool>", vec!["message"]),
+        ("Process<(payload: { value: str }), bool>", vec!["payload"]),
+        (
+            "Process<(left: str, right: int), bool>",
+            vec!["left", "right"],
+        ),
+    ] {
+        let TypeExpr::Process(process) =
+            parse_type_expression(source).expect("canonical process type should parse")
+        else {
+            panic!("expected process type");
+        };
+        let signature = process.as_signature().expect("source signature is known");
+        assert_eq!(
+            signature
+                .params()
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            names
+        );
+        assert_eq!(format_type_expr(&TypeExpr::Process(process)), source);
+    }
+
+    assert!(parse_type_expression("Process<str, bool>").is_err());
 }
 
 #[test]

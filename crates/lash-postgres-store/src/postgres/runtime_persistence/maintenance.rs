@@ -11,10 +11,9 @@ impl StoreMaintenance for PostgresSessionStore {
     /// Checkpoint-rooted mark/sweep over `lash_blobs`, mirroring the SQLite
     /// store's semantics ([`GcReport`] fields match). PostgreSQL stores each
     /// checkpoint as one manifest plus separately addressed tool, plugin, and
-    /// execution-state components. The four Lashlang artifact namespaces live
+    /// execution-state components. The Lashlang artifact namespaces live
     /// in a separate, upsert-in-place table (`lash_lashlang_artifacts`).
-    /// Session-owned trigger-manifest rows are removed with their session; the
-    /// other artifact rows are retained service roots, so GC does not touch
+    /// Those artifact rows are retained service roots, so GC does not touch
     /// this table.
     async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<GcReport> {
         // One transaction: a failure rolls every delete back, so no work

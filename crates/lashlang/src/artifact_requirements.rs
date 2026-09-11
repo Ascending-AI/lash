@@ -118,9 +118,13 @@ impl<'program> RequirementsCollector<'program> {
                     self.collect_type(item);
                 }
             }
-            TypeExpr::Process { input, output, .. } => {
-                self.collect_type(input);
-                self.collect_type(output);
+            TypeExpr::Process(process) => {
+                if let Some(signature) = process.as_signature() {
+                    for param in signature.params() {
+                        self.collect_type(&param.ty);
+                    }
+                    self.collect_type(signature.output());
+                }
             }
             TypeExpr::TriggerHandle(event) => self.collect_type(event),
             TypeExpr::Ref(name)

@@ -369,9 +369,19 @@ fn render_type(ty: &TypeExpr) -> String {
         TypeExpr::List(item) => format!("Array<{}>", render_type(item)),
         TypeExpr::Object(fields) => render_object(fields),
         TypeExpr::Ref(name) => render_identifier(name),
-        TypeExpr::Process { input, output, .. } => {
-            format!("Process<{}, {}>", render_type(input), render_type(output))
-        }
+        TypeExpr::Process(process) => match process.as_signature() {
+            Some(signature) => format!(
+                "Process<[{}], {}>",
+                signature
+                    .params()
+                    .iter()
+                    .map(|param| format!("{}: {}", param.name, render_type(&param.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                render_type(signature.output())
+            ),
+            None => "Process".to_string(),
+        },
         TypeExpr::TriggerHandle(event) => format!("TriggerHandle<{}>", render_type(event)),
         TypeExpr::Union(items) => items
             .iter()
@@ -542,6 +552,47 @@ mod tests {
             "required": ["query"]
         }));
         assert_eq!(ty, "{ limit?: number; query: string }");
+    }
+
+    #[test]
+    fn renders_named_and_unknown_process_types_without_fabricating_a_signature() {
+        let process = |params: Vec<lashlang::ProcessParam>| {
+            TypeExpr::Process(lashlang::ProcessType::known(
+                lashlang::ProcessSignature::try_new(params, TypeExpr::Bool).unwrap(),
+            ))
+        };
+        let param = |name: &str, ty| lashlang::ProcessParam {
+            name: name.into(),
+            ty,
+        };
+
+        assert_eq!(render_type(&process(vec![])), "Process<[], boolean>");
+        assert_eq!(
+            render_type(&process(vec![param("message", TypeExpr::Str)])),
+            "Process<[message: string], boolean>"
+        );
+        assert_eq!(
+            render_type(&process(vec![param(
+                "payload",
+                TypeExpr::Object(vec![TypeField {
+                    name: "value".into(),
+                    ty: TypeExpr::Str,
+                    optional: false,
+                }]),
+            )])),
+            "Process<[payload: { value: string }], boolean>"
+        );
+        assert_eq!(
+            render_type(&process(vec![
+                param("left", TypeExpr::Str),
+                param("right", TypeExpr::Int),
+            ])),
+            "Process<[left: string, right: number], boolean>"
+        );
+        assert_eq!(
+            render_type(&TypeExpr::Process(lashlang::ProcessType::unknown())),
+            "Process"
+        );
     }
 
     /// The literal-receiver matrix the hand-written arms in the lowerer used to
