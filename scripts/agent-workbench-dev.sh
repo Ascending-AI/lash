@@ -12,12 +12,12 @@ if [[ -e "$configured_data_dir" || -L "$configured_data_dir" ]]; then
 fi
 data_dir_created_this_attempt=$((1 - data_dir_existed_before_invocation))
 state_dir="${AGENT_WORKBENCH_RUN_DIR:-.agent-workbench/run}"
-mkdir -p "$state_dir"
 
 started_workbench_this_attempt=0
 started_workbench_pid=""
 started_workbench_start_time=""
 started_restate_this_attempt=0
+external_restate_used_this_attempt=0
 started_postgres_this_attempt=0
 start_attempt_active=0
 reset_committed=0
@@ -335,6 +335,28 @@ path_has_symlink_component() {
   return 1
 }
 
+data_path_overlaps_reset_owner() {
+  local candidate="$data_dir"
+  while [[ "$candidate" != / ]]; do
+    [[ -e "$candidate/.agent-workbench-dev-reset-owner" ]] && return 0
+    candidate="$(dirname "$candidate")"
+  done
+
+  [[ -d "$data_dir" ]] || return 1
+  local descendant=""
+  descendant="$(
+    find -P "$data_dir" -xdev -mindepth 2 \
+      -name .agent-workbench-dev-reset-owner -print -quit 2>/dev/null
+  )" || return 0
+  [[ -n "$descendant" ]]
+}
+
+require_exclusive_data_path_for_start() {
+  if data_path_overlaps_reset_owner; then
+    die "application data path overlaps another launcher-owned disposable stack"
+  fi
+}
+
 write_container_marker() {
   local file="$1" name="$2" id="$3" component="$4"
   printf '%s %s %s %s\n' "$name" "$id" "$ownership_token" "$component" > "$file"
@@ -430,7 +452,10 @@ require_workbench_alive() {
     fi
   fi
   tail_log
-  remove_stale_pid_file "$pid_file"
+  if [[ -e "$pid_file" ]]; then
+    log "removing stale or mismatched PID file $pid_file"
+  fi
+  rm -f "$pid_file"
   if [[ -z "$pid" ]]; then
     die "workbench process metadata disappeared $phase"
   fi
@@ -510,7 +535,7 @@ stop_attempt_workbench() {
   if [[ -n "$started_workbench_pid" && -n "$started_workbench_start_time" ]]; then
     stop_process_identity "$started_workbench_pid" "$started_workbench_start_time" \
       || return 1
-    rm -f "$pid_file" "$meta_file"
+    rm -f "$pid_file"
     return 0
   fi
   stop_pid_file "$pid_file"
@@ -545,6 +570,10 @@ cleanup_start_attempt() {
     fi
     started_workbench_this_attempt=0
   fi
+  if (( external_restate_used_this_attempt )); then
+    log "startup cleanup cannot retire the external Restate engine; retaining application state, managed stores, and ownership metadata"
+    return 1
+  fi
   if (( started_restate_this_attempt )); then
     if ! stop_started_restate; then
       log "startup cleanup could not remove the exact owned Restate engine; retaining application state and ownership metadata"
@@ -570,6 +599,7 @@ cleanup_start_attempt() {
       "$restate_marker_file" "$postgres_marker_file"
   fi
   remove_attempt_reset_ownership
+  rm -f "$pid_file" "$meta_file"
 }
 
 cleanup_failed_attempt() {
@@ -668,6 +698,7 @@ ensure_ports_available() {
 
 ensure_restate() {
   if tcp_ready "$ingress_host" "$ingress_port" && tcp_ready "$admin_host" "$admin_port"; then
+    external_restate_used_this_attempt=1
     log "using existing Restate at ingress=$restate_ingress_url admin=$restate_admin_url"
     return
   fi
@@ -775,7 +806,7 @@ write_reset_metadata() {
     postgres_record="$(read_container_marker "$postgres_marker_file")" || return 1
   fi
   {
-    printf 'reset_schema=1\n'
+    printf 'reset_schema=2\n'
     printf 'owned_token=%q\n' "$ownership_token"
     printf 'owned_state_key=%q\n' "$state_key"
     printf 'owned_workbench_addr=%q\n' "$workbench_addr"
@@ -794,10 +825,11 @@ write_reset_metadata() {
   } > "$reset_file"
   chmod 600 "$reset_file"
   {
-    printf 'data_owner_schema=1\n'
+    printf 'data_owner_schema=2\n'
     printf 'data_owner_token=%q\n' "$ownership_token"
     printf 'data_owner_state_key=%q\n' "$state_key"
     printf 'data_owner_path=%q\n' "$data_dir"
+    printf 'data_owner_state_dir=%q\n' "$state_dir"
   } > "$data_owner_file"
   chmod 600 "$data_owner_file"
 }
@@ -806,12 +838,14 @@ data_owner_matches() {
   regular_private_file "$data_owner_file" || return 1
   (
     data_owner_schema="" data_owner_token="" data_owner_state_key="" data_owner_path=""
+    data_owner_state_dir=""
     # shellcheck disable=SC1090
     source "$data_owner_file"
-    [[ "$data_owner_schema" = 1 \
+    [[ "$data_owner_schema" = 2 \
       && "$data_owner_token" = "$owned_token" \
       && "$data_owner_state_key" = "$state_key" \
-      && "$data_owner_path" = "$owned_data_dir" ]]
+      && "$data_owner_path" = "$owned_data_dir" \
+      && "$data_owner_state_dir" = "$state_dir" ]]
   )
 }
 
@@ -875,7 +909,7 @@ validate_reset_ownership() {
   owned_restate_record="" owned_postgres_record=""
   # shellcheck disable=SC1090
   source "$reset_file"
-  [[ "$reset_schema" = 1 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
+  [[ "$reset_schema" = 2 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
     || die "reset refused: invalid ownership record $reset_file"
   [[ "$owned_state_key" = "$state_key" \
     && "$owned_workbench_addr" = "$workbench_addr" \
@@ -949,11 +983,13 @@ start_detached() {
   if command -v setsid >/dev/null 2>&1; then
     (
       exec {launcher_lock_fd}>&-
+      exec {launcher_data_lock_fd}>&-
       exec setsid env "${workbench_env[@]}" "$workbench_bin"
     ) >> "$log_file" 2>&1 < /dev/null &
   else
     (
       exec {launcher_lock_fd}>&-
+      exec {launcher_data_lock_fd}>&-
       exec nohup env "${workbench_env[@]}" "$workbench_bin"
     ) >> "$log_file" 2>&1 < /dev/null &
   fi
@@ -1001,6 +1037,8 @@ run_up() {
   if ! ensure_ports_available; then
     return
   fi
+  require_exclusive_data_path_for_start
+  mkdir -p "$state_dir"
   start_attempt_active=1
   ensure_restate
   local deployment_url
@@ -1062,6 +1100,7 @@ run_reset_dev_state() {
   started_workbench_pid=""
   started_workbench_start_time=""
   started_restate_this_attempt=0
+  external_restate_used_this_attempt=0
   started_postgres_this_attempt=0
   created_reset_ownership_this_attempt=0
   log "disposable dev state cleared; starting a fresh stack"
@@ -1073,6 +1112,8 @@ run_foreground() {
   if ! ensure_ports_available; then
     return
   fi
+  require_exclusive_data_path_for_start
+  mkdir -p "$state_dir"
   start_attempt_active=1
   ensure_restate
 
@@ -1091,8 +1132,12 @@ run_foreground() {
         log "foreground cleanup could not stop the owned workbench; retaining its engine and application state"
         return 1
       fi
-      rm -f "$pid_file" "$meta_file"
+      rm -f "$pid_file"
       wait "$started_pid" >/dev/null 2>&1 || true
+    fi
+    if (( external_restate_used_this_attempt )); then
+      log "foreground cleanup cannot retire the external Restate engine; retaining application state, managed stores, and ownership metadata"
+      return 1
     fi
     if (( started_restate_this_attempt )); then
       if ! stop_started_restate; then
@@ -1106,6 +1151,7 @@ run_foreground() {
         return 1
       fi
     fi
+    rm -f "$pid_file" "$meta_file"
   }
   trap cleanup_foreground EXIT INT TERM
 
@@ -1422,6 +1468,7 @@ case "$action" in
     private_owned_directory "$launcher_lock_root" \
       || die "unsafe launcher lock directory $launcher_lock_root"
     launcher_lock_file="$launcher_lock_root/$launcher_lock_hash.lock"
+    launcher_data_lock_file="$launcher_lock_root/data-ownership.lock"
     reset_recovery_file="$launcher_lock_root/$launcher_lock_hash-$state_key-recover.sh"
     if [[ -e "$launcher_lock_file" ]] && ! regular_private_file "$launcher_lock_file"; then
       die "unsafe launcher lock file $launcher_lock_file"
@@ -1430,6 +1477,13 @@ case "$action" in
     chmod 600 "$launcher_lock_file"
     flock -n "$launcher_lock_fd" \
       || die "another launcher lifecycle command is already running for this workbench checkout"
+    if [[ -e "$launcher_data_lock_file" ]] && ! regular_private_file "$launcher_data_lock_file"; then
+      die "unsafe launcher data lock file $launcher_data_lock_file"
+    fi
+    exec {launcher_data_lock_fd}>"$launcher_data_lock_file"
+    chmod 600 "$launcher_data_lock_file"
+    flock -n "$launcher_data_lock_fd" \
+      || die "another launcher lifecycle command is updating application data ownership"
     ;;
 esac
 

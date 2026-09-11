@@ -9,14 +9,13 @@ mkdir -p "$mock_bin" "$mock_state" "$test_tmp/runtime"
 
 cleanup() {
   local file pid start current
-  for file in "$test_tmp"/data-*/run/workbench-*.pid; do
-    [[ -f "$file" ]] || continue
+  while IFS= read -r file; do
     read -r pid start < "$file" || continue
     current="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
     if [[ "$current" = "$start" ]]; then
       kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
     fi
-  done
+  done < <(find "$test_tmp" -type f -name 'workbench-*.pid' -print 2>/dev/null)
   rm -rf -- "$test_tmp"
 }
 trap cleanup EXIT
@@ -164,6 +163,9 @@ printf 'attempt application state\n' > "$AGENT_WORKBENCH_DATA_DIR/attempt-app-st
 while :; do sleep 1; done
 BIN
 chmod +x "$CARGO_TARGET_DIR/judged/agent-workbench"
+if [[ " $* " = *' run '* ]]; then
+  exec "$CARGO_TARGET_DIR/judged/agent-workbench"
+fi
 MOCK
 
 cat > "$mock_bin/curl" <<'MOCK'
@@ -641,5 +643,147 @@ replacement_recovery_file="$(sed -n \
   "$test_tmp/reset-failed-retirement.log")"
 [[ -f "$replacement_recovery_file" && "$(stat -c '%a' "$replacement_recovery_file")" = 600 ]] \
   || fail "replacement retirement failure did not retain private recovery evidence"
+
+data_external_sqlite="$test_tmp/data-external-sqlite"
+port_external_sqlite=3052
+external_sqlite_rm_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
+if launcher_env "$data_external_sqlite" "$port_external_sqlite" \
+  MOCK_EXTERNAL_PORTS='8300 19290' MOCK_POST_KILL=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_external_sqlite" \
+  > "$test_tmp/external-sqlite-failure.log" 2>&1; then
+  fail "external-Restate SQLite host failure unexpectedly succeeded"
+fi
+external_sqlite_state_key="127.0.0.1_${port_external_sqlite}"
+[[ -f "$data_external_sqlite/attempt-app-state" \
+  && -f "$data_external_sqlite/run/workbench-$external_sqlite_state_key.meta" ]] \
+  || fail "external Restate failure deleted SQLite application state or private run metadata"
+grep -Fxq 'http://127.0.0.1:9301' "$mock_state/deployments" \
+  || fail "external Restate failure did not retain its registered deployment"
+[[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$external_sqlite_rm_before" ]] \
+  || fail "external Restate failure attempted to remove an engine"
+grep -Fq 'cannot retire the external Restate engine' "$test_tmp/external-sqlite-failure.log" \
+  || fail "external Restate failure did not explain retained application state"
+
+data_external_postgres="$test_tmp/data-external-postgres"
+port_external_postgres=3054
+external_postgres_rm_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
+if launcher_env "$data_external_postgres" "$port_external_postgres" \
+  AGENT_WORKBENCH_POSTGRES=1 MOCK_EXTERNAL_PORTS='8320 19310' MOCK_POST_KILL=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_external_postgres" \
+  > "$test_tmp/external-postgres-failure.log" 2>&1; then
+  fail "external-Restate managed-Postgres host failure unexpectedly succeeded"
+fi
+external_postgres_state_key="127.0.0.1_${port_external_postgres}"
+[[ -f "$data_external_postgres/attempt-app-state" \
+  && -f "$data_external_postgres/run/workbench-$external_postgres_state_key.meta" \
+  && -f "$data_external_postgres/run/postgres-$external_postgres_state_key.container" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_external_postgres" ]] \
+  || fail "external Restate failure deleted managed Postgres or its ownership evidence"
+grep -Fxq 'http://127.0.0.1:9321' "$mock_state/deployments" \
+  || fail "external Restate managed-Postgres failure lost its registered deployment"
+[[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$external_postgres_rm_before" ]] \
+  || fail "external Restate failure attempted dependent managed-Postgres removal"
+
+data_external_foreground="$test_tmp/data-external-foreground"
+port_external_foreground=3056
+foreground_rm_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
+if launcher_env "$data_external_foreground" "$port_external_foreground" \
+  AGENT_WORKBENCH_POSTGRES=1 MOCK_EXTERNAL_PORTS='8340 19330' MOCK_POST_KILL=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" foreground --port "$port_external_foreground" \
+  > "$test_tmp/external-foreground-failure.log" 2>&1; then
+  fail "external-Restate foreground host failure unexpectedly succeeded"
+fi
+external_foreground_state_key="127.0.0.1_${port_external_foreground}"
+[[ -f "$data_external_foreground/attempt-app-state" \
+  && -f "$data_external_foreground/run/workbench-$external_foreground_state_key.meta" \
+  && -f "$data_external_foreground/run/postgres-$external_foreground_state_key.container" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_external_foreground" ]] \
+  || fail "foreground external-engine failure deleted application or managed-Postgres state"
+grep -Fxq 'http://127.0.0.1:9341' "$mock_state/deployments" \
+  || fail "foreground external-engine failure lost its registered deployment"
+[[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$foreground_rm_before" ]] \
+  || fail "foreground external-engine failure attempted dependent store removal"
+grep -Fq 'foreground cleanup cannot retire the external Restate engine' \
+  "$test_tmp/external-foreground-failure.log" \
+  || fail "foreground external-engine failure did not report retained state"
+
+data_shared="$test_tmp/data-shared-owner"
+port_shared_owner=3058
+run_launcher "$data_shared" "$port_shared_owner" up > "$test_tmp/shared-owner-up.log" 2>&1
+shared_pid_file="$data_shared/run/workbench-127.0.0.1_${port_shared_owner}.pid"
+shared_pid_record="$(<"$shared_pid_file")"
+printf 'shared owner state\n' > "$data_shared/shared-owner-state"
+shared_builds_before="$(<"$mock_state/build-count")"
+shared_containers_before="$(<"$mock_state/container-counter")"
+alternate_run_dir="$test_tmp/alternate-shared-run"
+if launcher_env "$data_shared" 3060 AGENT_WORKBENCH_RUN_DIR="$alternate_run_dir" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3060 \
+  > "$test_tmp/shared-data-refusal.log" 2>&1; then
+  fail "second port with the same owned data directory unexpectedly started"
+fi
+[[ ! -e "$alternate_run_dir" \
+  && "$(<"$mock_state/build-count")" = "$shared_builds_before" \
+  && "$(<"$mock_state/container-counter")" = "$shared_containers_before" \
+  && "$(<"$shared_pid_file")" = "$shared_pid_record" \
+  && -f "$data_shared/shared-owner-state" ]] \
+  || fail "same-data refusal mutated the alternate run directory or existing stack"
+grep -Fq 'data path overlaps another launcher-owned disposable stack' \
+  "$test_tmp/shared-data-refusal.log" \
+  || fail "same-data refusal did not identify the ownership overlap"
+
+nested_data="$data_shared/nested-consumer"
+if launcher_env "$nested_data" 3062 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3062 \
+  > "$test_tmp/nested-data-refusal.log" 2>&1; then
+  fail "nested data consumer unexpectedly started inside an owned data directory"
+fi
+[[ ! -e "$nested_data" && "$(<"$shared_pid_file")" = "$shared_pid_record" \
+  && -f "$data_shared/shared-owner-state" ]] \
+  || fail "nested data refusal mutated the existing stack"
+
+shared_reset_file="$data_shared/run/reset-127.0.0.1_${port_shared_owner}.meta"
+sed -i 's/^reset_schema=2$/reset_schema=1/' "$shared_reset_file"
+if run_launcher "$data_shared" "$port_shared_owner" restart --reset-dev-state \
+  > "$test_tmp/legacy-exclusive-lease-refusal.log" 2>&1; then
+  fail "pre-exclusivity reset record unexpectedly authorized deletion"
+fi
+[[ "$(<"$shared_pid_file")" = "$shared_pid_record" \
+  && -f "$data_shared/shared-owner-state" ]] \
+  || fail "pre-exclusivity reset refusal changed the existing stack"
+
+data_parent="$test_tmp/data-parent-owner"
+data_owned_child="$data_parent/owned-child"
+port_owned_child=3064
+run_launcher "$data_owned_child" "$port_owned_child" up \
+  > "$test_tmp/owned-child-up.log" 2>&1
+owned_child_pid_file="$data_owned_child/run/workbench-127.0.0.1_${port_owned_child}.pid"
+owned_child_pid_record="$(<"$owned_child_pid_file")"
+printf 'owned child state\n' > "$data_owned_child/owned-child-state"
+parent_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$data_parent" 3066 AGENT_WORKBENCH_RUN_DIR="$test_tmp/alternate-parent-run" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3066 \
+  > "$test_tmp/parent-data-refusal.log" 2>&1; then
+  fail "parent data consumer unexpectedly enclosed an owned data directory"
+fi
+[[ ! -e "$test_tmp/alternate-parent-run" \
+  && "$(<"$mock_state/build-count")" = "$parent_builds_before" \
+  && "$(<"$owned_child_pid_file")" = "$owned_child_pid_record" \
+  && -f "$data_owned_child/owned-child-state" ]] \
+  || fail "parent data refusal mutated the existing child stack"
+
+data_ownership_lock="$test_tmp/runtime/lash-agent-workbench-$UID/data-ownership.lock"
+exec 10> "$data_ownership_lock"
+flock 10
+if run_launcher "$test_tmp/data-locked-ownership" 3068 up \
+  > "$test_tmp/data-ownership-lock-refusal.log" 2>&1; then
+  fail "launcher ignored the same-user data-ownership lock"
+fi
+flock -u 10
+exec 10>&-
+[[ ! -e "$test_tmp/data-locked-ownership" ]] \
+  || fail "data-ownership lock refusal mutated the candidate data path"
+grep -Fq 'another launcher lifecycle command is updating application data ownership' \
+  "$test_tmp/data-ownership-lock-refusal.log" \
+  || fail "data-ownership lock refusal was not precise"
 
 printf '%s\n' 'agent-workbench explicit reset lifecycle checks passed'
