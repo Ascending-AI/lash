@@ -4,7 +4,8 @@
 //! reconnect pacing, and generation allocator. Callers observe a cheap
 //! published peer snapshot and submit lifecycle observations as messages.
 
-use std::future::pending;
+use std::future::{Future, pending};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Weak;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -61,7 +62,228 @@ enum ConnectionExit {
     Shutdown,
 }
 
+#[derive(Clone, Copy)]
+enum CommandPhase {
+    Idle,
+    Handshake,
+    Discovery,
+    Connected {
+        generation: u64,
+    },
+    Probe {
+        generation: u64,
+    },
+    Reaping,
+    #[cfg(test)]
+    TestPause,
+}
+
+impl CommandPhase {
+    fn observes(self, generation: u64) -> bool {
+        matches!(
+            self,
+            Self::Connected {
+                generation: current
+            } | Self::Probe {
+                generation: current
+            } if current == generation
+        )
+    }
+}
+
+enum CommandAction {
+    Establish {
+        reply: oneshot::Sender<Result<(), McpError>>,
+    },
+    Disconnect {
+        cause: String,
+    },
+    CallSucceeded,
+    CallTimedOut {
+        reply: oneshot::Sender<Option<String>>,
+    },
+    InstallToolCatalog {
+        tools: Vec<rmcp::model::Tool>,
+    },
+    Shutdown,
+    Continue,
+}
+
+type WaitingFuture =
+    Pin<Box<dyn Future<Output = Result<QuitReason, tokio::task::JoinError>> + Send + 'static>>;
+
+enum ServiceWaiting {
+    Pending(WaitingFuture),
+    Complete,
+}
+
+impl ServiceWaiting {
+    fn new(waiting: WaitingFuture) -> Self {
+        Self::Pending(waiting)
+    }
+
+    async fn wait_for_cleanup(self, graceful_period: Duration) {
+        if let Self::Pending(mut waiting) = self {
+            let _ = timeout(graceful_period, waiting.as_mut()).await;
+        }
+    }
+}
+
+impl Future for ServiceWaiting {
+    type Output = Result<QuitReason, tokio::task::JoinError>;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let waiting = self.get_mut();
+        let Self::Pending(future) = waiting else {
+            panic!("service waiting future polled after completion");
+        };
+        match future.as_mut().poll(cx) {
+            std::task::Poll::Ready(reason) => {
+                *waiting = Self::Complete;
+                std::task::Poll::Ready(reason)
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+struct Connection {
+    cancellation: rmcp::service::RunningServiceCancellationToken,
+    request_tasks: Arc<crate::host::McpHostRequestTasks>,
+    waiting: ServiceWaiting,
+    child: Option<StdioChildGuard>,
+}
+
+impl Connection {
+    // Cooperative terminal paths consume this owner and await cleanup. If the
+    // actor itself is aborted, dropping the child guard retains the pool's
+    // documented forced-abandonment kill-and-log fallback.
+    async fn cancel_and_reap(mut self, actor: &mut LifecycleActor, server_name: &str) -> bool {
+        if let Some(child) = self.child.as_mut() {
+            child.begin_bounded_cleanup();
+        }
+        self.cancellation.cancel();
+        let entry = actor.entry.clone();
+        let active_pid = Arc::clone(&actor.active_pid);
+        let shutdown_policy = actor.shutdown_policy;
+        let cleanup = async move {
+            if self.child.is_some() {
+                // Host request cancellation cannot delay process cleanup: the
+                // two shutdown responsibilities advance concurrently.
+                let (_, ()) = tokio::join!(
+                    self.request_tasks.shutdown(),
+                    reap_child(entry, active_pid, server_name, self.child, shutdown_policy,),
+                );
+            } else {
+                // HTTP has no child to reap, but still gets the configured
+                // grace for its transport task to drain. A waiting future that
+                // already completed returns immediately without being re-polled.
+                shutdown_http_connection(
+                    self.request_tasks,
+                    self.waiting,
+                    shutdown_policy.graceful_period,
+                )
+                .await;
+            }
+        };
+        tokio::pin!(cleanup);
+
+        let mut shutdown_observed = false;
+        loop {
+            tokio::select! {
+                () = &mut cleanup => return shutdown_observed,
+                command = actor.commands.recv(), if !shutdown_observed => {
+                    match LifecycleActor::reduce_command(
+                        CommandPhase::Reaping,
+                        command,
+                        server_name,
+                    ) {
+                        CommandAction::Shutdown => {
+                            // Keep the already-running reap future alive. The
+                            // entry deadline includes both policy durations plus margin.
+                            shutdown_observed = true;
+                        }
+                        CommandAction::Continue => {}
+                        _ => unreachable!("reaping command reducer returned an active action"),
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl LifecycleActor {
+    fn reduce_command(
+        phase: CommandPhase,
+        command: Option<LifecycleCommand>,
+        server_name: &str,
+    ) -> CommandAction {
+        let Some(command) = command else {
+            return CommandAction::Shutdown;
+        };
+        match command {
+            LifecycleCommand::Establish { reply } => match phase {
+                CommandPhase::Idle => CommandAction::Establish { reply },
+                CommandPhase::Connected { .. } | CommandPhase::Probe { .. } => {
+                    let _ = reply.send(Ok(()));
+                    CommandAction::Continue
+                }
+                CommandPhase::Handshake | CommandPhase::Discovery => {
+                    let _ = reply.send(Err(McpError::Protocol(format!(
+                        "MCP connection for `{server_name}` is already being established"
+                    ))));
+                    CommandAction::Continue
+                }
+                CommandPhase::Reaping => {
+                    let _ = reply.send(Err(McpError::Protocol(
+                        "MCP connection is restarting or being reaped".to_string(),
+                    )));
+                    CommandAction::Continue
+                }
+                #[cfg(test)]
+                CommandPhase::TestPause => {
+                    let _ = reply.send(Err(McpError::Protocol(
+                        "MCP connection is already being established".to_string(),
+                    )));
+                    CommandAction::Continue
+                }
+            },
+            LifecycleCommand::Disconnect { generation, cause } => {
+                if phase.observes(generation) {
+                    CommandAction::Disconnect { cause }
+                } else {
+                    CommandAction::Continue
+                }
+            }
+            LifecycleCommand::CallSucceeded { generation } => {
+                if phase.observes(generation) {
+                    CommandAction::CallSucceeded
+                } else {
+                    CommandAction::Continue
+                }
+            }
+            LifecycleCommand::CallTimedOut { generation, reply } => {
+                if phase.observes(generation) {
+                    CommandAction::CallTimedOut { reply }
+                } else {
+                    let _ = reply.send(None);
+                    CommandAction::Continue
+                }
+            }
+            LifecycleCommand::InstallToolCatalog { generation, tools } => {
+                if phase.observes(generation) {
+                    CommandAction::InstallToolCatalog { tools }
+                } else {
+                    CommandAction::Continue
+                }
+            }
+            LifecycleCommand::Shutdown => CommandAction::Shutdown,
+        }
+    }
+
     pub(super) fn new(
         entry: Weak<McpEntry>,
         commands: mpsc::UnboundedReceiver<LifecycleCommand>,
@@ -92,8 +314,8 @@ impl LifecycleActor {
             let keepalive_at = self.keepalive_at;
             tokio::select! {
                 command = self.commands.recv() => {
-                    match command {
-                        Some(LifecycleCommand::Establish { reply }) => {
+                    match Self::reduce_command(CommandPhase::Idle, command, "") {
+                        CommandAction::Establish { reply } => {
                             self.reconnect_at = None;
                             self.reconnect_attempts = 0;
                             self.set_reconnect_exhausted(false);
@@ -102,17 +324,12 @@ impl LifecycleActor {
                             }
                             self.schedule_reconnect();
                         }
-                        Some(LifecycleCommand::Disconnect { .. }) => {}
-                        Some(LifecycleCommand::CallSucceeded { .. }) => {}
-                        Some(LifecycleCommand::CallTimedOut { reply, .. }) => {
-                            let _ = reply.send(None);
-                        }
-                        Some(LifecycleCommand::InstallToolCatalog { .. }) => {}
-                        Some(LifecycleCommand::Shutdown) => {
+                        CommandAction::Shutdown => {
                             self.wedge_shutdown_if_injected().await;
                             return;
                         }
-                        None => return,
+                        CommandAction::Continue => {}
+                        _ => unreachable!("idle command reducer returned an active connection action"),
                     }
                 }
                 () = sleep_until(reconnect_at), if reconnect_at.is_some() => {
@@ -204,8 +421,12 @@ impl LifecycleActor {
         let connected = loop {
             tokio::select! {
                 result = &mut connection_attempt => break result,
-                command = self.commands.recv() => match command {
-                    Some(LifecycleCommand::Shutdown) | None => {
+                command = self.commands.recv() => match Self::reduce_command(
+                    CommandPhase::Handshake,
+                    command,
+                    &server_name,
+                ) {
+                    CommandAction::Shutdown => {
                         drop(connection_attempt);
                         if let Some(pid) = stdio_child.as_ref().map(StdioChildGuard::pid) {
                             self.record_error(format!(
@@ -216,17 +437,8 @@ impl LifecycleActor {
                         send_shutdown(initial_reply);
                         return ConnectionExit::Shutdown;
                     }
-                    Some(LifecycleCommand::Establish { reply }) => {
-                        let _ = reply.send(Err(McpError::Protocol(format!(
-                            "MCP connection for `{server_name}` is already being established"
-                        ))));
-                    }
-                    Some(LifecycleCommand::Disconnect { .. }) => {}
-                    Some(LifecycleCommand::CallSucceeded { .. }) => {}
-                    Some(LifecycleCommand::CallTimedOut { reply, .. }) => {
-                        let _ = reply.send(None);
-                    }
-                    Some(LifecycleCommand::InstallToolCatalog { .. }) => {}
+                    CommandAction::Continue => {}
+                    _ => unreachable!("handshake command reducer returned an active action"),
                 }
             }
         };
@@ -251,19 +463,19 @@ impl LifecycleActor {
             }
         };
 
-        if self
-            .pause_mid_establish(&server_name, &mut stdio_child)
-            .await
-        {
+        let peer = running.peer().clone();
+        let mut connection = Connection {
+            cancellation: running.cancellation_token(),
+            request_tasks: running.service().request_tasks(),
+            waiting: ServiceWaiting::new(Box::pin(running.waiting())),
+            child: stdio_child.take(),
+        };
+        if self.pause_mid_establish().await {
+            connection.cancel_and_reap(self, &server_name).await;
             send_shutdown(initial_reply);
             return ConnectionExit::Shutdown;
         }
 
-        let peer = running.peer().clone();
-        let request_tasks = running.service().request_tasks();
-        let mut cancellation = Some(running.cancellation_token());
-        let waiting = running.waiting();
-        tokio::pin!(waiting);
         let discovery = timeout(startup_timeout, peer.list_all_tools());
         tokio::pin!(discovery);
         let tools = loop {
@@ -275,13 +487,7 @@ impl LifecycleActor {
                         Ok(Err(error)) => {
                             let error = McpError::Protocol(format!("list_tools failed: {error}"));
                             self.record_error(error.to_string());
-                            let shutdown = self.cancel_and_reap(
-                                &server_name,
-                                &request_tasks,
-                                cancellation.take().expect("service cancellation token"),
-                                &mut waiting,
-                                stdio_child.take(),
-                            ).await;
+                            let shutdown = connection.cancel_and_reap(self, &server_name).await;
                             if shutdown {
                                 send_shutdown(initial_reply);
                                 return ConnectionExit::Shutdown;
@@ -295,13 +501,7 @@ impl LifecycleActor {
                                 timeout_ms: startup_timeout.as_millis() as u64,
                             };
                             self.record_error(error.to_string());
-                            let shutdown = self.cancel_and_reap(
-                                &server_name,
-                                &request_tasks,
-                                cancellation.take().expect("service cancellation token"),
-                                &mut waiting,
-                                stdio_child.take(),
-                            ).await;
+                            let shutdown = connection.cancel_and_reap(self, &server_name).await;
                             if shutdown {
                                 send_shutdown(initial_reply);
                                 return ConnectionExit::Shutdown;
@@ -311,16 +511,10 @@ impl LifecycleActor {
                         }
                     }
                 }
-                reason = &mut waiting => {
+                reason = &mut connection.waiting => {
                     let cause = format!("MCP server `{server_name}` service quit during discovery: {reason:?}");
                     self.record_error(cause.clone());
-                    let shutdown = self.cancel_and_reap(
-                        &server_name,
-                        &request_tasks,
-                        cancellation.take().expect("service cancellation token"),
-                        &mut waiting,
-                        stdio_child.take(),
-                    ).await;
+                    let shutdown = connection.cancel_and_reap(self, &server_name).await;
                     if shutdown {
                         send_shutdown(initial_reply);
                         return ConnectionExit::Shutdown;
@@ -328,29 +522,18 @@ impl LifecycleActor {
                     send_result(initial_reply, Err(McpError::Protocol(cause)));
                     return ConnectionExit::Failed;
                 }
-                command = self.commands.recv() => match command {
-                    Some(LifecycleCommand::Shutdown) | None => {
-                        self.cancel_and_reap(
-                            &server_name,
-                            &request_tasks,
-                            cancellation.take().expect("service cancellation token"),
-                            &mut waiting,
-                            stdio_child.take(),
-                        ).await;
+                command = self.commands.recv() => match Self::reduce_command(
+                    CommandPhase::Discovery,
+                    command,
+                    &server_name,
+                ) {
+                    CommandAction::Shutdown => {
+                        connection.cancel_and_reap(self, &server_name).await;
                         send_shutdown(initial_reply);
                         return ConnectionExit::Shutdown;
                     }
-                    Some(LifecycleCommand::Establish { reply }) => {
-                        let _ = reply.send(Err(McpError::Protocol(format!(
-                            "MCP connection for `{server_name}` is already being established"
-                        ))));
-                    }
-                    Some(LifecycleCommand::Disconnect { .. }) => {}
-                    Some(LifecycleCommand::CallSucceeded { .. }) => {}
-                    Some(LifecycleCommand::CallTimedOut { reply, .. }) => {
-                        let _ = reply.send(None);
-                    }
-                    Some(LifecycleCommand::InstallToolCatalog { .. }) => {}
+                    CommandAction::Continue => {}
+                    _ => unreachable!("discovery command reducer returned an active action"),
                 }
             }
         };
@@ -359,15 +542,7 @@ impl LifecycleActor {
             Ok(imported) => imported,
             Err(error) => {
                 self.record_error(error.to_string());
-                let shutdown = self
-                    .cancel_and_reap(
-                        &server_name,
-                        &request_tasks,
-                        cancellation.take().expect("service cancellation token"),
-                        &mut waiting,
-                        stdio_child.take(),
-                    )
-                    .await;
+                let shutdown = connection.cancel_and_reap(self, &server_name).await;
                 if shutdown {
                     send_shutdown(initial_reply);
                     return ConnectionExit::Shutdown;
@@ -377,29 +552,13 @@ impl LifecycleActor {
             }
         };
         let Some(entry) = self.entry.upgrade() else {
-            let _ = self
-                .cancel_and_reap(
-                    &server_name,
-                    &request_tasks,
-                    cancellation.take().expect("service cancellation token"),
-                    &mut waiting,
-                    stdio_child.take(),
-                )
-                .await;
+            let _ = connection.cancel_and_reap(self, &server_name).await;
             return ConnectionExit::Shutdown;
         };
         if let Err(error) = entry.replace_imported_tools(imported) {
             drop(entry);
             self.record_error(error.to_string());
-            let shutdown = self
-                .cancel_and_reap(
-                    &server_name,
-                    &request_tasks,
-                    cancellation.take().expect("service cancellation token"),
-                    &mut waiting,
-                    stdio_child.take(),
-                )
-                .await;
+            let shutdown = connection.cancel_and_reap(self, &server_name).await;
             if shutdown {
                 send_shutdown(initial_reply);
                 return ConnectionExit::Shutdown;
@@ -428,17 +587,11 @@ impl LifecycleActor {
         loop {
             let keepalive_at = self.keepalive_at;
             tokio::select! {
-                reason = &mut waiting => {
+                reason = &mut connection.waiting => {
                     let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
                     self.record_error(cause);
                     self.unpublish(generation);
-                    let shutdown = self.cancel_and_reap(
-                        &server_name,
-                        &request_tasks,
-                        cancellation.take().expect("service cancellation token"),
-                        &mut waiting,
-                        stdio_child.take(),
-                    ).await;
+                    let shutdown = connection.cancel_and_reap(self, &server_name).await;
                     self.maybe_panic_on_service_quit();
                     return if shutdown {
                         ConnectionExit::Shutdown
@@ -446,46 +599,37 @@ impl LifecycleActor {
                         ConnectionExit::Disconnected
                     };
                 }
-                command = self.commands.recv() => match command {
-                    Some(LifecycleCommand::Disconnect { generation: observed, cause }) if observed == generation => {
+                command = self.commands.recv() => match Self::reduce_command(
+                    CommandPhase::Connected { generation },
+                    command,
+                    &server_name,
+                ) {
+                    CommandAction::Disconnect { cause } => {
                         self.unpublish(generation);
                         self.record_error(cause);
-                        let shutdown = self.cancel_and_reap(
-                            &server_name,
-                            &request_tasks,
-                            cancellation.take().expect("service cancellation token"),
-                            &mut waiting,
-                            stdio_child.take(),
-                        ).await;
+                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
                         return if shutdown {
                             ConnectionExit::Shutdown
                         } else {
                             ConnectionExit::Disconnected
                         };
                     }
-                    Some(LifecycleCommand::Shutdown) | None => {
+                    CommandAction::Shutdown => {
                         self.unpublish(generation);
-                        let _ = self.cancel_and_reap(
-                            &server_name,
-                            &request_tasks,
-                            cancellation.take().expect("service cancellation token"),
-                            &mut waiting,
-                            stdio_child.take(),
-                        ).await;
+                        let _ = connection.cancel_and_reap(self, &server_name).await;
                         return ConnectionExit::Shutdown;
                     }
-                    Some(LifecycleCommand::Establish { reply }) => {
-                        let _ = reply.send(Ok(()));
-                    }
-                    Some(LifecycleCommand::CallSucceeded { generation: observed }) if observed == generation => {
+                    CommandAction::CallSucceeded => {
                         if let Some(entry) = self.entry.upgrade() {
                             entry.consecutive_timeouts.store(0, Ordering::SeqCst);
                             *entry.last_error.write_recover() = None;
                         }
                     }
-                    Some(LifecycleCommand::CallTimedOut { generation: observed, reply }) if observed == generation => {
+                    CommandAction::CallTimedOut { reply } => {
                         let Some(entry) = self.entry.upgrade() else {
                             let _ = reply.send(None);
+                            self.unpublish(generation);
+                            let _ = connection.cancel_and_reap(self, &server_name).await;
                             return ConnectionExit::Shutdown;
                         };
                         let consecutive = entry.consecutive_timeouts.fetch_add(1, Ordering::SeqCst) + 1;
@@ -501,23 +645,14 @@ impl LifecycleActor {
                         drop(entry);
                         self.unpublish(generation);
                         self.record_error(cause);
-                        let shutdown = self.cancel_and_reap(
-                            &server_name,
-                            &request_tasks,
-                            cancellation.take().expect("service cancellation token"),
-                            &mut waiting,
-                            stdio_child.take(),
-                        ).await;
+                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
                         return if shutdown {
                             ConnectionExit::Shutdown
                         } else {
                             ConnectionExit::Disconnected
                         };
                     }
-                    Some(LifecycleCommand::CallTimedOut { reply, .. }) => {
-                        let _ = reply.send(None);
-                    }
-                    Some(LifecycleCommand::InstallToolCatalog { generation: observed, tools }) if observed == generation => {
+                    CommandAction::InstallToolCatalog { tools } => {
                         if let Some(entry) = self.entry.upgrade()
                             && let Err(error) = import_tools(&server_name, tools)
                                 .and_then(|imported| entry.replace_imported_tools(imported))
@@ -530,9 +665,10 @@ impl LifecycleActor {
                             self.record_error(error.to_string());
                         }
                     }
-                    Some(LifecycleCommand::InstallToolCatalog { .. }) => {}
-                    Some(LifecycleCommand::CallSucceeded { .. }) => {}
-                    Some(LifecycleCommand::Disconnect { .. }) => {}
+                    CommandAction::Continue => {}
+                    CommandAction::Establish { .. } => {
+                        unreachable!("connected reducer returned an establish action")
+                    }
                 },
                 () = &mut healthy, if !healthy_observed => {
                     healthy_observed = true;
@@ -547,13 +683,7 @@ impl LifecycleActor {
                     self.advance_keepalive_deadline();
                     let Some(entry) = self.entry.upgrade() else {
                         self.unpublish(generation);
-                        let _ = self.cancel_and_reap(
-                            &server_name,
-                            &request_tasks,
-                            cancellation.take().expect("service cancellation token"),
-                            &mut waiting,
-                            stdio_child.take(),
-                        ).await;
+                        let _ = connection.cancel_and_reap(self, &server_name).await;
                         return ConnectionExit::Shutdown;
                     };
                     if !entry.peer_supports_ping(&peer) {
@@ -565,48 +695,63 @@ impl LifecycleActor {
                     } else {
                         let mut probe = Box::pin(entry.probe_peer(&peer));
                         loop {
+                            #[cfg(test)]
+                            pause_probe_select_if_injected(&entry).await;
                             tokio::select! {
+                                biased;
+                                () = &mut healthy, if !healthy_observed => {
+                                    healthy_observed = true;
+                                    if self.current_generation() == Some(generation) {
+                                        self.reconnect_backoff = self.entry.upgrade().map_or(
+                                            self.reconnect_backoff,
+                                            |entry| entry.config.reconnect_initial_backoff(),
+                                        );
+                                    }
+                                }
+                                reason = &mut connection.waiting => {
+                                    let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
+                                    drop(probe);
+                                    drop(entry);
+                                    self.record_error(cause);
+                                    self.unpublish(generation);
+                                    let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                                    self.maybe_panic_on_service_quit();
+                                    return if shutdown {
+                                        ConnectionExit::Shutdown
+                                    } else {
+                                        ConnectionExit::Disconnected
+                                    };
+                                }
                                 result = &mut probe => break result.err().map(|error| error.to_string()),
-                                command = self.commands.recv() => match command {
-                                    Some(LifecycleCommand::Shutdown) | None => {
+                                command = self.commands.recv() => match Self::reduce_command(
+                                    CommandPhase::Probe { generation },
+                                    command,
+                                    &server_name,
+                                ) {
+                                    CommandAction::Shutdown => {
                                         drop(probe);
                                         drop(entry);
                                         self.unpublish(generation);
-                                        let _ = self.cancel_and_reap(
-                                            &server_name,
-                                            &request_tasks,
-                                            cancellation.take().expect("service cancellation token"),
-                                            &mut waiting,
-                                            stdio_child.take(),
-                                        ).await;
+                                        let _ = connection.cancel_and_reap(self, &server_name).await;
                                         return ConnectionExit::Shutdown;
                                     }
-                                    Some(LifecycleCommand::Disconnect { generation: observed, cause }) if observed == generation => {
+                                    CommandAction::Disconnect { cause } => {
                                         drop(probe);
                                         drop(entry);
                                         self.unpublish(generation);
                                         self.record_error(cause);
-                                        let shutdown = self.cancel_and_reap(
-                                            &server_name,
-                                            &request_tasks,
-                                            cancellation.take().expect("service cancellation token"),
-                                            &mut waiting,
-                                            stdio_child.take(),
-                                        ).await;
+                                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
                                         return if shutdown {
                                             ConnectionExit::Shutdown
                                         } else {
                                             ConnectionExit::Disconnected
                                         };
                                     }
-                                    Some(LifecycleCommand::Establish { reply }) => {
-                                        let _ = reply.send(Ok(()));
-                                    }
-                                    Some(LifecycleCommand::CallSucceeded { generation: observed }) if observed == generation => {
+                                    CommandAction::CallSucceeded => {
                                         entry.consecutive_timeouts.store(0, Ordering::SeqCst);
                                         *entry.last_error.write_recover() = None;
                                     }
-                                    Some(LifecycleCommand::CallTimedOut { generation: observed, reply }) if observed == generation => {
+                                    CommandAction::CallTimedOut { reply } => {
                                         let consecutive = entry.consecutive_timeouts.fetch_add(1, Ordering::SeqCst) + 1;
                                         let threshold = entry.config.consecutive_timeouts_before_disconnect();
                                         if consecutive < threshold {
@@ -621,23 +766,14 @@ impl LifecycleActor {
                                         drop(entry);
                                         self.unpublish(generation);
                                         self.record_error(cause);
-                                        let shutdown = self.cancel_and_reap(
-                                            &server_name,
-                                            &request_tasks,
-                                            cancellation.take().expect("service cancellation token"),
-                                            &mut waiting,
-                                            stdio_child.take(),
-                                        ).await;
+                                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
                                         return if shutdown {
                                             ConnectionExit::Shutdown
                                         } else {
                                             ConnectionExit::Disconnected
                                         };
                                     }
-                                    Some(LifecycleCommand::CallTimedOut { reply, .. }) => {
-                                        let _ = reply.send(None);
-                                    }
-                                    Some(LifecycleCommand::InstallToolCatalog { generation: observed, tools }) if observed == generation => {
+                                    CommandAction::InstallToolCatalog { tools } => {
                                         if let Err(error) = import_tools(&server_name, tools)
                                             .and_then(|imported| entry.replace_imported_tools(imported))
                                         {
@@ -649,95 +785,29 @@ impl LifecycleActor {
                                             self.record_error(error.to_string());
                                         }
                                     }
-                                    Some(LifecycleCommand::InstallToolCatalog { .. })
-                                    | Some(LifecycleCommand::CallSucceeded { .. })
-                                    | Some(LifecycleCommand::Disconnect { .. }) => {}
+                                    CommandAction::Continue => {}
+                                    CommandAction::Establish { .. } => {
+                                        unreachable!("probe reducer returned an establish action")
+                                    }
                                 }
                             }
                         }
                     };
+                    #[cfg(test)]
+                    entry.probe_completed.notify_one();
                     drop(entry);
                     if let Some(failure) = failure {
                         self.unpublish(generation);
                         self.record_error(format!(
                             "MCP server `{server_name}` background liveness probe failed: {failure}"
                         ));
-                        let shutdown = self.cancel_and_reap(
-                            &server_name,
-                            &request_tasks,
-                            cancellation.take().expect("service cancellation token"),
-                            &mut waiting,
-                            stdio_child.take(),
-                        ).await;
+                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
                         return if shutdown {
                             ConnectionExit::Shutdown
                         } else {
                             ConnectionExit::Disconnected
                         };
                     }
-                }
-            }
-        }
-    }
-
-    async fn cancel_and_reap<F>(
-        &mut self,
-        server_name: &str,
-        request_tasks: &Arc<crate::host::McpHostRequestTasks>,
-        cancellation: rmcp::service::RunningServiceCancellationToken,
-        waiting: &mut std::pin::Pin<&mut F>,
-        mut child: Option<StdioChildGuard>,
-    ) -> bool
-    where
-        F: std::future::Future<Output = Result<QuitReason, tokio::task::JoinError>>,
-    {
-        if let Some(child) = child.as_mut() {
-            child.begin_bounded_cleanup();
-        }
-        cancellation.cancel();
-        let entry = self.entry.clone();
-        let active_pid = Arc::clone(&self.active_pid);
-        let shutdown_policy = self.shutdown_policy;
-        let cleanup = async move {
-            if child.is_some() {
-                // Host request cancellation cannot delay process cleanup: the
-                // two shutdown responsibilities advance concurrently.
-                let (_, ()) = tokio::join!(
-                    request_tasks.shutdown(),
-                    reap_child(entry, active_pid, server_name, child, shutdown_policy,),
-                );
-            } else {
-                // HTTP has no child to reap, but still gets the configured
-                // grace for its transport task to drain.
-                let (_, _) = tokio::join!(
-                    request_tasks.shutdown(),
-                    timeout(shutdown_policy.graceful_period, waiting.as_mut()),
-                );
-            }
-        };
-        tokio::pin!(cleanup);
-
-        let mut shutdown_observed = false;
-        loop {
-            tokio::select! {
-                () = &mut cleanup => return shutdown_observed,
-                command = self.commands.recv(), if !shutdown_observed => match command {
-                    Some(LifecycleCommand::Shutdown) | None => {
-                        // Keep the already-running reap future alive. The entry
-                        // deadline includes both policy durations plus margin.
-                        shutdown_observed = true;
-                    }
-                    Some(LifecycleCommand::Establish { reply }) => {
-                        let _ = reply.send(Err(McpError::Protocol(
-                            "MCP connection is restarting or being reaped".to_string(),
-                        )));
-                    }
-                    Some(LifecycleCommand::CallTimedOut { reply, .. }) => {
-                        let _ = reply.send(None);
-                    }
-                    Some(LifecycleCommand::Disconnect { .. })
-                    | Some(LifecycleCommand::CallSucceeded { .. })
-                    | Some(LifecycleCommand::InstallToolCatalog { .. }) => {}
                 }
             }
         }
@@ -845,11 +915,7 @@ impl LifecycleActor {
     }
 
     #[cfg(test)]
-    async fn pause_mid_establish(
-        &mut self,
-        server_name: &str,
-        child: &mut Option<StdioChildGuard>,
-    ) -> bool {
+    async fn pause_mid_establish(&mut self) -> bool {
         let hook = self
             .entry
             .upgrade()
@@ -861,35 +927,21 @@ impl LifecycleActor {
         loop {
             tokio::select! {
                 () = hook.release.notified() => return false,
-                command = self.commands.recv() => match command {
-                    Some(LifecycleCommand::Shutdown) | None => {
-                        if let Some(child) = child.take() {
-                            self.reap_child(server_name, Some(child)).await;
-                        }
-                        return true;
-                    }
-                    Some(LifecycleCommand::Establish { reply }) => {
-                        let _ = reply.send(Err(McpError::Protocol(
-                            "MCP connection is already being established".to_string(),
-                        )));
-                    }
-                    Some(LifecycleCommand::Disconnect { .. }) => {}
-                    Some(LifecycleCommand::CallSucceeded { .. }) => {}
-                    Some(LifecycleCommand::CallTimedOut { reply, .. }) => {
-                        let _ = reply.send(None);
-                    }
-                    Some(LifecycleCommand::InstallToolCatalog { .. }) => {}
+                command = self.commands.recv() => match Self::reduce_command(
+                    CommandPhase::TestPause,
+                    command,
+                    "",
+                ) {
+                    CommandAction::Shutdown => return true,
+                    CommandAction::Continue => {}
+                    _ => unreachable!("test-pause reducer returned an active action"),
                 }
             }
         }
     }
 
     #[cfg(not(test))]
-    async fn pause_mid_establish(
-        &mut self,
-        _server_name: &str,
-        _child: &mut Option<StdioChildGuard>,
-    ) -> bool {
+    async fn pause_mid_establish(&mut self) -> bool {
         false
     }
 
@@ -963,10 +1015,30 @@ async fn reap_child(
     active_pid.store(0, Ordering::SeqCst);
 }
 
+async fn shutdown_http_connection(
+    request_tasks: Arc<crate::host::McpHostRequestTasks>,
+    waiting: ServiceWaiting,
+    graceful_period: Duration,
+) {
+    let (_, ()) = tokio::join!(
+        waiting.wait_for_cleanup(graceful_period),
+        request_tasks.shutdown(),
+    );
+}
+
 async fn sleep_until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => pending().await,
+    }
+}
+
+#[cfg(test)]
+async fn pause_probe_select_if_injected(entry: &McpEntry) {
+    let hook = entry.probe_select_hook.write_recover().take();
+    if let Some(hook) = hook {
+        hook.reached.notify_one();
+        hook.release.notified().await;
     }
 }
 
@@ -978,4 +1050,36 @@ fn send_result(reply: Option<oneshot::Sender<Result<(), McpError>>>, result: Res
 
 fn send_shutdown(reply: Option<oneshot::Sender<Result<(), McpError>>>) {
     send_result(reply, Err(McpError::PoolShutDown));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn completed_http_wait_still_shuts_down_host_tasks_without_repoll() {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let observed_polls = Arc::clone(&polls);
+        let future = std::future::poll_fn(move |_| {
+            assert_eq!(
+                observed_polls.fetch_add(1, Ordering::SeqCst),
+                0,
+                "ordinary async waiting future was polled after completion"
+            );
+            std::task::Poll::Ready(Ok(QuitReason::Closed))
+        });
+        let mut waiting = ServiceWaiting::new(Box::pin(future));
+
+        assert!(matches!((&mut waiting).await, Ok(QuitReason::Closed)));
+        shutdown_http_connection(
+            Arc::new(crate::host::McpHostRequestTasks::default()),
+            waiting,
+            Duration::from_secs(3),
+        )
+        .await;
+
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+    }
 }
