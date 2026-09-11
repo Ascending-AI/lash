@@ -642,3 +642,156 @@ async fn every_honest_exception_boundary_resumes() {
         "no boundary suspended inside a cleanup body"
     );
 }
+
+/// One program's boundaries, swept twice over. Honest state must survive an
+/// encode/decode/resume and finish identically, and at that same boundary every
+/// single-record corruption of the handler stack the chain rule exists to catch
+/// — a handler omitted, a handler moved into another frame's group, the order of
+/// one frame's chain reversed — must be refused.
+async fn sweep_handler_chain(name: &str, program: &CompiledProgram) -> usize {
+    let host = Host;
+    let expected = uninterrupted_continuation_result(program).await;
+    let mut boundaries = 0usize;
+    for budget in 1..=program.chunk.code.len() * 4 {
+        let mut vm = continuation_test_vm(program, &host);
+        vm.suspend_after_instructions(budget);
+        if !matches!(vm.run_for_mode().await, Ok(ExecutionOutcome::Continued)) {
+            continue;
+        }
+        let honest = vm
+            .suspend()
+            .unwrap_or_else(|error| panic!("{name}: boundary {budget} must capture: {error}"));
+
+        for index in 0..honest.handler_stack.len() {
+            let mut omitted = honest.clone();
+            omitted.handler_stack.remove(index);
+            assert!(
+                Vm::resume_from(omitted, program, &host).is_err(),
+                "{name}: boundary {budget} resumed with handler {index} omitted"
+            );
+            for depth in 0..=honest.frame_depth() {
+                if depth == honest.handler_stack[index].frame_depth {
+                    continue;
+                }
+                let mut moved = honest.clone();
+                moved.handler_stack[index].frame_depth = depth;
+                assert!(
+                    Vm::resume_from(moved, program, &host).is_err(),
+                    "{name}: boundary {budget} resumed with handler {index} moved to frame {depth}"
+                );
+            }
+        }
+        if honest.handler_stack.len() > 1 {
+            let mut reversed = honest.clone();
+            reversed.handler_stack.reverse();
+            assert!(
+                Vm::resume_from(reversed, program, &host).is_err(),
+                "{name}: boundary {budget} resumed with its handler chain reversed"
+            );
+        }
+
+        let bytes = serde_json::to_vec(&honest).expect("encode");
+        let decoded = serde_json::from_slice::<VmContinuation>(&bytes).expect("decode");
+        let mut restored = Vm::resume_from(decoded, program, &host)
+            .unwrap_or_else(|error| panic!("{name}: boundary {budget} must resume: {error}"));
+        assert_eq!(
+            restored
+                .run_for_mode()
+                .await
+                .unwrap_or_else(|error| panic!("{name}: boundary {budget} must finish: {error}")),
+            expected,
+            "{name}: boundary {budget} finished differently"
+        );
+        boundaries += 1;
+    }
+    assert!(boundaries > 0, "{name}: the sweep captured no boundaries");
+    boundaries
+}
+
+/// The shapes a single hand-written program does not reach: cleanup scopes left
+/// by a loop edge, callback frames, and chains spread across several call
+/// frames. The chain the lowerer records has to be right at every boundary of
+/// each of them, and wrong for every corruption of each.
+#[tokio::test(flavor = "current_thread")]
+async fn the_handler_chain_holds_across_control_flow_shapes() {
+    let cleanup = |body: Expr| exception_try(body, None, Some(Expr::Number(1.0)));
+    let call = |body: Expr| Expr::Call {
+        function: Box::new(exception_function(body, &[])),
+        args: Vec::new(),
+    };
+    let mut swept = 0usize;
+
+    // A loop edge crossing two nested cleanups, and a cleanup body that itself
+    // leaves the loop.
+    for action in [Expr::Break, Expr::Continue] {
+        let body = cleanup(cleanup(action.clone()));
+        let loop_expr = Expr::For {
+            binding: "i".into(),
+            iterable: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
+            body: Box::new(body),
+        };
+        let program = compile_program(&exception_finish(cleanup(loop_expr)));
+        swept += sweep_handler_chain("loop edge through cleanups", &program).await;
+
+        let leaving = exception_try(cleanup(Expr::Number(1.0)), None, Some(cleanup(action)));
+        let loop_expr = Expr::For {
+            binding: "i".into(),
+            iterable: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
+            body: Box::new(leaving),
+        };
+        let program = compile_program(&exception_finish(cleanup(loop_expr)));
+        swept += sweep_handler_chain("loop edge from a cleanup body", &program).await;
+    }
+
+    // A callback frame: the caller's chain is anchored at the `Map`
+    // instruction rather than at a `Call`.
+    for throws in [false, true] {
+        let body = if throws {
+            Expr::Throw(Box::new(Expr::Number(1.0)))
+        } else {
+            Expr::Number(1.0)
+        };
+        let callback = Expr::Function(Box::new(crate::FunctionExpr {
+            name: None,
+            params: vec!["item".into()],
+            captures: Vec::new(),
+            body: Box::new(exception_try(
+                body,
+                None,
+                Some(exception_resource_call("echo", Expr::String("cb".into()))),
+            )),
+        }));
+        let program = compile_program(&exception_finish(exception_try(
+            Expr::Map {
+                items: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
+                function: Box::new(callback),
+            },
+            Some(("error", Expr::Variable("error".into()))),
+            Some(Expr::Number(1.0)),
+        )));
+        swept += sweep_handler_chain("callback frame", &program).await;
+    }
+
+    // A throw unwinding several frames at once, each holding its own cleanup.
+    let mut nested = Expr::Throw(Box::new(Expr::Number(1.0)));
+    for _ in 0..4 {
+        nested = call(cleanup(nested));
+    }
+    let program = compile_program(&exception_finish(exception_try(
+        nested,
+        Some(("error", Expr::Variable("error".into()))),
+        Some(Expr::Number(1.0)),
+    )));
+    swept += sweep_handler_chain("throw across frames", &program).await;
+
+    // A `return` leaving a cleanup that is itself inside a cleanup.
+    let returning = exception_try(
+        cleanup(Expr::Return(Box::new(Expr::Number(1.0)))),
+        None,
+        Some(cleanup(Expr::Number(1.0))),
+    );
+    let program = compile_program(&exception_finish(cleanup(call(returning))));
+    swept += sweep_handler_chain("return through cleanups", &program).await;
+
+    assert!(swept > 100, "the matrix swept only {swept} boundaries");
+}
