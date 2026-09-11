@@ -6,18 +6,50 @@ async fn register_cron_test_subscription(
     session_id: &SessionId,
     source_key: &str,
 ) {
-    lash::triggers::TriggerStore::execute_command(
+    register_cron_test_subscription_record(
         trigger_store,
-        &format!("register:{session_id}:{source_key}"),
+        session_id,
+        &format!("cron-test:{source_key}"),
+        source_key,
+    )
+    .await;
+}
+
+async fn register_cron_test_subscription_record(
+    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    session_id: &SessionId,
+    subscription_key: &str,
+    source_key: &str,
+) -> lash::triggers::TriggerSubscriptionRecord {
+    register_test_subscription_record(
+        trigger_store,
+        session_id,
+        subscription_key,
+        crate::CRON_SCHEDULE_SOURCE_TYPE,
+        source_key,
+    )
+    .await
+}
+
+async fn register_test_subscription_record(
+    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    session_id: &SessionId,
+    subscription_key: &str,
+    source_type: &str,
+    source_key: &str,
+) -> lash::triggers::TriggerSubscriptionRecord {
+    let outcome = lash::triggers::TriggerStore::execute_command(
+        trigger_store,
+        &format!("register:{session_id}:{subscription_key}"),
         lash::triggers::TriggerCommand::Register {
             owner_scope: lash::triggers::TriggerOwnerScope::session(session_id),
             actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
                 session_id,
             )),
             draft: lash::triggers::TriggerSubscriptionDraft::for_process(
-                format!("cron-test:{source_key}"),
+                subscription_key,
                 lash::process::ProcessExecutionEnvRef::new(format!("process-env:{source_key}")),
-                crate::CRON_SCHEDULE_SOURCE_TYPE,
+                source_type,
                 source_key,
                 lash::process::ProcessInput::Engine {
                     kind: "cron-test-engine".to_string(),
@@ -29,8 +61,60 @@ async fn register_cron_test_subscription(
         },
     )
     .await
-    .expect("register cron trigger")
-    .expect("cron trigger mutation");
+    .expect("register trigger")
+    .expect("trigger mutation");
+    let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
+        panic!("register must return a mutation receipt");
+    };
+    receipt.record_snapshot
+}
+
+async fn disable_cron_test_subscription(
+    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    record: &lash::triggers::TriggerSubscriptionRecord,
+) {
+    lash::triggers::TriggerStore::execute_command(
+        trigger_store,
+        &format!("disable:{session}", session = record.subscription_key),
+        lash::triggers::TriggerCommand::Disable {
+            owner_scope: record.owner_scope.clone(),
+            actor: record.registrant.clone(),
+            subscription_key: record.subscription_key.clone(),
+            expected_revision: record.revision,
+        },
+    )
+    .await
+    .expect("disable cron trigger")
+    .expect("cron disable mutation");
+}
+
+async fn delete_cron_test_subscription(
+    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    record: &lash::triggers::TriggerSubscriptionRecord,
+) {
+    let filter = lash::triggers::TriggerSubscriptionFilter {
+        subscription_key: Some(record.subscription_key.clone()),
+        ..Default::default()
+    };
+    let current = lash::triggers::TriggerStore::list_subscriptions(trigger_store, filter)
+        .await
+        .expect("list current cron trigger")
+        .into_iter()
+        .find(|candidate| candidate.subscription_key == record.subscription_key)
+        .expect("current cron trigger");
+    lash::triggers::TriggerStore::execute_command(
+        trigger_store,
+        &format!("delete:{session}", session = record.subscription_key),
+        lash::triggers::TriggerCommand::Delete {
+            owner_scope: current.owner_scope,
+            actor: current.registrant,
+            subscription_key: current.subscription_key,
+            expected_revision: current.revision,
+        },
+    )
+    .await
+    .expect("delete cron trigger")
+    .expect("cron delete mutation");
 }
 
 #[derive(Clone, Default)]
@@ -1073,6 +1157,16 @@ fn cron_tick_test_state(session_id: &SessionId) -> crate::restate::WorkbenchCron
     }
 }
 
+fn cron_tick_basis(
+    session: CronSessionDisposition,
+    registration: CronRegistrationDisposition,
+) -> CronTickBasis {
+    CronTickBasis {
+        session,
+        registration,
+    }
+}
+
 struct RecordingCronTickCancelSurface {
     state: crate::AppState,
     controller: CountingProcessEffectController,
@@ -1143,11 +1237,18 @@ impl crate::restate::CronTickCancelSurface for RecordingCronTickCancelSurface {
 }
 
 #[test]
-fn cron_tick_decision_runs_for_a_live_session() {
+fn cron_tick_decision_runs_for_a_live_session_with_an_enabled_registration() {
     let state = cron_tick_test_state(&SessionId::from("live-cron-session"));
 
     assert_eq!(
-        crate::restate::cron_tick_decision(CronSessionDisposition::Live, &state, "cron-job-live"),
+        crate::restate::cron_tick_decision(
+            cron_tick_basis(
+                CronSessionDisposition::Live,
+                CronRegistrationDisposition::Enabled,
+            ),
+            &state,
+            "cron-job-live",
+        ),
         crate::restate::CronTick::Run
     );
 }
@@ -1157,7 +1258,10 @@ fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
     let state = cron_tick_test_state(&SessionId::from("retired-cron-session"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        CronSessionDisposition::Retired,
+        cron_tick_basis(
+            CronSessionDisposition::Retired,
+            CronRegistrationDisposition::Enabled,
+        ),
         &state,
         "cron-job-retired",
     ) else {
@@ -1176,7 +1280,10 @@ fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     let state = cron_tick_test_state(&SessionId::from("absent-cron-session"));
 
     let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
-        CronSessionDisposition::Unknown,
+        cron_tick_basis(
+            CronSessionDisposition::Unknown,
+            CronRegistrationDisposition::Enabled,
+        ),
         &state,
         "cron-job-absent",
     ) else {
@@ -1188,6 +1295,123 @@ fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     assert_eq!(trace["session_state"], "unknown");
     assert_eq!(trace["reason"], "session_absent");
     assert_eq!(reason, "session_absent");
+}
+
+#[test]
+fn cron_tick_decision_cancels_a_live_session_with_an_absent_registration() {
+    let state = cron_tick_test_state(&SessionId::from("live-absent-registration"));
+
+    let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
+        cron_tick_basis(
+            CronSessionDisposition::Live,
+            CronRegistrationDisposition::Absent,
+        ),
+        &state,
+        "cron-job-registration-absent",
+    ) else {
+        panic!("a live session with no registration must cancel its cron tick");
+    };
+    assert_eq!(reason, "registration_absent");
+    assert_eq!(
+        trace,
+        serde_json::json!({
+            "job_key": "cron-job-registration-absent",
+            "job_session_id": "live-absent-registration",
+            "decision_basis": "registration_record_absent",
+            "session_state": "live",
+            "registration_state": "absent",
+            "reason": "registration_absent",
+        })
+    );
+}
+
+#[test]
+fn cron_tick_decision_cancels_a_live_session_with_a_disabled_registration() {
+    let state = cron_tick_test_state(&SessionId::from("live-disabled-registration"));
+
+    let crate::restate::CronTick::Cancel { reason, trace } = crate::restate::cron_tick_decision(
+        cron_tick_basis(
+            CronSessionDisposition::Live,
+            CronRegistrationDisposition::Disabled,
+        ),
+        &state,
+        "cron-job-registration-disabled",
+    ) else {
+        panic!("a live session with a disabled registration must cancel its cron tick");
+    };
+    assert_eq!(reason, "registration_disabled");
+    assert_eq!(
+        trace,
+        serde_json::json!({
+            "job_key": "cron-job-registration-disabled",
+            "job_session_id": "live-disabled-registration",
+            "decision_basis": "registration_record_disabled",
+            "session_state": "live",
+            "registration_state": "disabled",
+            "reason": "registration_disabled",
+        })
+    );
+}
+
+#[test]
+fn cron_tick_decision_keeps_session_arms_ahead_of_registration_arms() {
+    let state = cron_tick_test_state(&SessionId::from("retired-regardless-of-registration"));
+
+    let decision = crate::restate::cron_tick_decision(
+        cron_tick_basis(
+            CronSessionDisposition::Retired,
+            CronRegistrationDisposition::Absent,
+        ),
+        &state,
+        "cron-job-retired-absent-registration",
+    );
+    let crate::restate::CronTick::Cancel { reason, .. } = decision else {
+        panic!("the retired session arm must win over the registration arm");
+    };
+    assert_eq!(reason, "session_retired");
+}
+
+#[test]
+fn cron_tick_basis_journal_round_trips_and_legacy_live_replays_as_a_bounded_tick() {
+    let disabled = cron_tick_basis(
+        CronSessionDisposition::Live,
+        CronRegistrationDisposition::Disabled,
+    );
+    assert_eq!(disabled.journal_value(), "live:disabled");
+    assert_eq!(
+        CronTickBasis::from_journal_value("live:disabled").expect("decode combined basis"),
+        disabled
+    );
+
+    // Pre-FIG-1071 invocations journaled the session axis alone. A live legacy
+    // value must replay as live/enabled so the handler continues; that means an
+    // in-flight legacy tick may run once before the next tick self-cancels. The
+    // bounded exception is deliberate, so this test pins the legacy decodes and
+    // the run decision that follows, not immediate post-retirement silence.
+    let legacy_live = CronTickBasis::from_journal_value("live").expect("decode legacy live basis");
+    assert_eq!(
+        legacy_live,
+        cron_tick_basis(
+            CronSessionDisposition::Live,
+            CronRegistrationDisposition::Enabled
+        )
+    );
+    assert_eq!(
+        crate::restate::cron_tick_decision(
+            legacy_live,
+            &cron_tick_test_state(&SessionId::from("legacy-live-session")),
+            "cron-job-legacy-live",
+        ),
+        crate::restate::CronTick::Run
+    );
+    assert_eq!(
+        CronTickBasis::from_journal_value("retired")
+            .expect("decode legacy retired basis")
+            .session,
+        CronSessionDisposition::Retired
+    );
+    assert!(CronTickBasis::from_journal_value("live:bogus").is_err());
+    assert!(CronTickBasis::from_journal_value("bogus:enabled").is_err());
 }
 
 #[tokio::test]
@@ -1334,7 +1558,7 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
     let mut cron_state = cron_tick_test_state(&SessionId::from(session_id));
     cron_state.request.source_key = source_key.to_string();
     let decision = crate::restate::cron_tick_decision(
-        disposition,
+        cron_tick_basis(disposition, CronRegistrationDisposition::Enabled),
         &cron_state,
         "cron-job-retired-integration",
     );
@@ -1396,5 +1620,357 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
             .expect("list retired cron tick deliveries")
             .is_empty(),
         "a dropped tick outcome must not wake its retired subscription"
+    );
+}
+
+#[tokio::test]
+async fn cron_registration_disposition_aggregates_duplicate_registrations() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let source_key = "cron-source:fig1071-duplicate";
+    let first = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:fig1071-duplicate-a",
+        source_key,
+    )
+    .await;
+    let second = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:fig1071-duplicate-b",
+        source_key,
+    )
+    .await;
+
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify duplicate registrations"),
+        CronRegistrationDisposition::Enabled
+    );
+
+    disable_cron_test_subscription(trigger_store.as_ref(), &first).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify one-enabled duplicate"),
+        CronRegistrationDisposition::Enabled,
+        "any enabled match must dominate disabled matches"
+    );
+
+    disable_cron_test_subscription(trigger_store.as_ref(), &second).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify all-disabled duplicates"),
+        CronRegistrationDisposition::Disabled
+    );
+
+    assert_eq!(
+        crate::restate::cron_registration_disposition(
+            &state,
+            &session_id,
+            "cron-source:fig1071-no-match"
+        )
+        .await
+        .expect("classify no registration"),
+        CronRegistrationDisposition::Absent
+    );
+}
+
+#[tokio::test]
+async fn cron_registration_disposition_ignores_record_order() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+
+    // Records sort by subscription key: the disabled record is first here.
+    let source_key = "cron-source:fig1071-order-disabled-first";
+    let disabled_first = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-a",
+        source_key,
+    )
+    .await;
+    let _enabled_second = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-b",
+        source_key,
+    )
+    .await;
+    disable_cron_test_subscription(trigger_store.as_ref(), &disabled_first).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify disabled-first duplicates"),
+        CronRegistrationDisposition::Enabled,
+        "a leading disabled record must not mask a later enabled record"
+    );
+
+    // Mirror image: the enabled record is first and the disabled one last.
+    let source_key = "cron-source:fig1071-order-enabled-first";
+    let _enabled_first = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-c",
+        source_key,
+    )
+    .await;
+    let disabled_second = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-d",
+        source_key,
+    )
+    .await;
+    disable_cron_test_subscription(trigger_store.as_ref(), &disabled_second).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify enabled-first duplicates"),
+        CronRegistrationDisposition::Enabled,
+        "an enabled first record must dominate a trailing disabled record"
+    );
+}
+
+#[tokio::test]
+async fn cron_registration_disposition_confines_matches_to_session_source_type_and_key() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let other_session = SessionId::from("fig1071-isolation-other-session");
+    let source_key = "cron-source:fig1071-isolation-shared";
+
+    // The single matching registration is disabled.
+    let matching = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:isolation-match",
+        source_key,
+    )
+    .await;
+    disable_cron_test_subscription(trigger_store.as_ref(), &matching).await;
+
+    // Every decoy is enabled; each violates exactly one filter dimension.
+    let _wrong_source_type = register_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "button-test:isolation",
+        crate::BUTTON_TRIGGER_SOURCE_TYPE,
+        source_key,
+    )
+    .await;
+    let _wrong_source_key = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:isolation-other-key",
+        "cron-source:fig1071-isolation-other",
+    )
+    .await;
+    let _wrong_session = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &other_session,
+        "cron-test:isolation-other-session",
+        source_key,
+    )
+    .await;
+
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify amid enabled decoys"),
+        CronRegistrationDisposition::Disabled,
+        "source type, source key, and session must all confine the read"
+    );
+
+    delete_cron_test_subscription(trigger_store.as_ref(), &matching).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify absent amid enabled decoys"),
+        CronRegistrationDisposition::Absent,
+        "enabled decoys outside the filter must not resurrect an absent registration"
+    );
+}
+
+#[tokio::test]
+async fn cron_registration_disposition_is_absent_after_delete() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let source_key = "cron-source:fig1071-deleted-probe";
+    let record = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:fig1071-deleted-probe",
+        source_key,
+    )
+    .await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify live registration"),
+        CronRegistrationDisposition::Enabled
+    );
+
+    delete_cron_test_subscription(trigger_store.as_ref(), &record).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify tombstoned registration"),
+        CronRegistrationDisposition::Absent
+    );
+}
+
+#[tokio::test]
+async fn cron_registration_disposition_propagates_classified_store_failures() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(OccurrenceFailureTriggerStore::for_subscription_list(
+        lash::plugins::PluginError::Session("temporary trigger-store outage".to_string()),
+    )) as Arc<dyn lash::triggers::TriggerStore>;
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        trigger_store,
+    )
+    .await;
+    let session_id = state.current_session_id();
+
+    let error = crate::restate::cron_registration_disposition(
+        &state,
+        &session_id,
+        "cron-source:fig1071-fail",
+    )
+    .await
+    .expect_err("a failing subscription list must propagate");
+    let expected = crate::restate::classified_plugin_handler_error(
+        lash::plugins::PluginError::Session("temporary trigger-store outage".to_string()),
+    );
+    let rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
+            .to_string();
+    let rendered_expected =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&expected)
+            .to_string();
+    assert_eq!(
+        rendered, rendered_expected,
+        "probe failures must flow through the shared classified handler error"
+    );
+}
+
+#[tokio::test]
+async fn cron_tick_cancels_a_live_session_with_a_deleted_registration_without_rearming() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let source_key = "cron-source:fig1071-deleted";
+    materialize_cron_test_session(&state, &session_id).await;
+    let record = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:fig1071-deleted",
+        source_key,
+    )
+    .await;
+    delete_cron_test_subscription(trigger_store.as_ref(), &record).await;
+
+    assert_eq!(
+        cron_session_disposition(&state.core, &session_id)
+            .await
+            .expect("classify live session"),
+        CronSessionDisposition::Live
+    );
+    let registration =
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify deleted registration");
+    assert_eq!(registration, CronRegistrationDisposition::Absent);
+
+    let mut cron_state = cron_tick_test_state(&session_id);
+    cron_state.request.source_key = source_key.to_string();
+    let decision = crate::restate::cron_tick_decision(
+        cron_tick_basis(CronSessionDisposition::Live, registration),
+        &cron_state,
+        "cron-job-registration-deleted",
+    );
+    let crate::restate::CronTick::Cancel { ref trace, .. } = decision else {
+        panic!("a deleted registration must produce a cancel decision");
+    };
+    assert_eq!(trace["decision_basis"], "registration_record_absent");
+    assert_eq!(trace["registration_state"], "absent");
+    assert_eq!(trace["reason"], "registration_absent");
+
+    let cancel_surface =
+        RecordingCronTickCancelSurface::new(state.clone(), "cron-job-registration-deleted");
+    assert_eq!(
+        crate::restate::handle_observed_cron_tick(&cancel_surface, &cron_state, decision)
+            .await
+            .expect("run the public registration-absent cancel branch"),
+        crate::restate::CronTickHandling::Cancelled
+    );
+    assert_eq!(cancel_surface.events(), vec!["trace", "record", "clear"]);
+    assert!(
+        cancel_surface
+            .cleared
+            .load(std::sync::atomic::Ordering::SeqCst),
+        "the public cancel path clears cron state after recording the decision"
+    );
+
+    let occurrences = lash::triggers::TriggerStore::list_occurrences(
+        trigger_store.as_ref(),
+        lash::triggers::TriggerOccurrenceFilter::default(),
+    )
+    .await
+    .expect("list absent-registration tick outcomes");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "a cancelled tick must persist exactly one dropped outcome; records={occurrences:?}"
+    );
+    assert_eq!(occurrences[0].source_key, source_key);
+    assert_eq!(
+        occurrences[0].payload,
+        serde_json::json!({ "scheduled_for": cron_state.next_execution_time })
+    );
+    assert_eq!(
+        occurrences[0].outcome,
+        lash::triggers::TriggerOccurrenceOutcome::Dropped {
+            reason: "registration_absent".to_string(),
+        }
+    );
+    assert!(
+        lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())
+            .await
+            .expect("list absent-registration tick deliveries")
+            .is_empty(),
+        "a cancelled tick must not re-arm or emit a delivery"
     );
 }
