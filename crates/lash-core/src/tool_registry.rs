@@ -14,8 +14,8 @@ use self::facade_ops::ToolRegistryFacadeOps;
 use self::facade_ops::ToolStateFacadeOps;
 
 mod state;
-pub(crate) use state::ToolSourceExecutor;
 pub use state::{PLUGIN_TOOL_SOURCE_ID, ToolSourceHandle, ToolState, ToolStateEntry};
+pub(crate) use state::{ToolSourceCapture, ToolSourceExecutor};
 mod sources;
 use sources::{OrchestratingToolSource, ToolBinding, ToolProviderSource};
 mod registry_types;

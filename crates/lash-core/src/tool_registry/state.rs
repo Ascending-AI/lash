@@ -198,11 +198,43 @@ impl<'de> Deserialize<'de> for ToolState {
     }
 }
 
+pub(crate) trait ToolSourceCapture: Send + 'static {
+    fn advertised_tools(&self) -> Vec<ToolManifest>;
+    fn freeze(
+        self: Box<Self>,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError>;
+}
+
+struct FrozenToolSourceCapture {
+    source: Arc<dyn ToolSourceExecutor>,
+}
+
+impl ToolSourceCapture for FrozenToolSourceCapture {
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        self.source.advertised_tools()
+    }
+
+    fn freeze(
+        self: Box<Self>,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        self.source.snapshot_execution_source(known_resident_ids)
+    }
+}
+
 #[async_trait::async_trait]
 pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     fn id(&self) -> &str;
-    /// Enumerate this source once and capture immutable resident execution
-    /// routes for the resulting advertisement.
+    /// Capture this source's current advertisement and route inputs for a
+    /// two-phase resident snapshot.
+    fn capture_execution_source(&self) -> Result<Box<dyn ToolSourceCapture>, ReconfigureError> {
+        let source = self.snapshot_execution_source(&BTreeSet::new())?;
+        Ok(Box::new(FrozenToolSourceCapture { source }))
+    }
+    /// Freeze this source for resident execution, retaining any supplied known
+    /// resident IDs that it can resolve. Two-phase callers use
+    /// [`Self::capture_execution_source`] so advertisements are not reread.
     fn snapshot_execution_source(
         &self,
         known_resident_ids: &BTreeSet<ToolId>,

@@ -97,25 +97,16 @@ struct ToolProviderIndex {
 
 impl ToolProviderIndex {
     fn from_providers(providers: &[Arc<dyn ToolProvider>]) -> Self {
-        Self::from_providers_with_advertisements(providers).0
-    }
-
-    fn from_providers_with_advertisements(
-        providers: &[Arc<dyn ToolProvider>],
-    ) -> (Self, Vec<Arc<[ToolManifest]>>) {
         let mut index = Self::default();
-        let mut advertisements = Vec::with_capacity(providers.len());
         for (provider_idx, provider) in providers.iter().enumerate() {
-            let manifests = Arc::<[ToolManifest]>::from(provider.tool_manifests());
-            for manifest in manifests.iter().cloned() {
+            for manifest in provider.tool_manifests() {
                 index
                     .by_id
                     .insert(manifest.id.clone(), (manifest, provider_idx));
             }
-            advertisements.push(manifests);
         }
         index.rebuild_name_index();
-        (index, advertisements)
+        index
     }
 
     fn rebuild_name_index(&mut self) {
@@ -148,15 +139,65 @@ impl ToolProviderIndex {
 
 pub(super) struct ToolProviderSource {
     id: String,
-    tools: RwLock<ToolProviderIndex>,
+    tools: Arc<RwLock<ToolProviderIndex>>,
     providers: Vec<Arc<dyn ToolProvider>>,
+}
+
+struct ToolProviderSourceCapture {
+    id: String,
+    index: ToolProviderIndex,
+    live_tools: Arc<RwLock<ToolProviderIndex>>,
+    providers: Vec<Arc<dyn ToolProvider>>,
+}
+
+impl ToolSourceCapture for ToolProviderSourceCapture {
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        self.index
+            .by_id
+            .values()
+            .map(|(manifest, _)| manifest.clone())
+            .collect()
+    }
+
+    fn freeze(
+        self: Box<Self>,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        let mut index = self.index.clone();
+        let advertised_ids = index.by_id.keys().cloned().collect();
+        for id in known_resident_ids {
+            if index.by_id.contains_key(id) {
+                continue;
+            }
+            for (provider_idx, provider) in self.providers.iter().enumerate() {
+                if let Some(manifest) = provider.resolve_manifest_by_id(id) {
+                    if manifest.id != *id {
+                        return Err(ReconfigureError::Validation(format!(
+                            "source `{}` resolved tool id `{id}` with mismatched manifest id `{}`",
+                            ToolSourceKey::Leaf(self.id.clone()),
+                            manifest.id,
+                        )));
+                    }
+                    index.insert(manifest, provider_idx);
+                    break;
+                }
+            }
+        }
+        *self.live_tools.write_recover() = index.clone();
+        Ok(Arc::new(PinnedToolProviderSource::new(
+            self.id.clone(),
+            index,
+            advertised_ids,
+            &self.providers,
+        )))
+    }
 }
 
 impl ToolProviderSource {
     pub(super) fn new(id: impl Into<String>, providers: Vec<Arc<dyn ToolProvider>>) -> Self {
         Self {
             id: id.into(),
-            tools: RwLock::new(ToolProviderIndex::default()),
+            tools: Arc::new(RwLock::new(ToolProviderIndex::default())),
             providers,
         }
     }
@@ -200,45 +241,6 @@ impl ToolProviderSource {
         }
         None
     }
-
-    fn snapshot(
-        &self,
-        known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Result<PinnedToolProviderSource, ReconfigureError> {
-        let (mut index, advertisements) =
-            ToolProviderIndex::from_providers_with_advertisements(&self.providers);
-        let advertised_ids = index.by_id.keys().cloned().collect();
-        for id in known_resident_ids {
-            if index.by_id.contains_key(id) {
-                continue;
-            }
-            for (provider_idx, provider) in self.providers.iter().enumerate() {
-                let manifest = crate::tool_provider::with_captured_provider_manifests(
-                    provider.as_ref(),
-                    Arc::clone(&advertisements[provider_idx]),
-                    || provider.resolve_manifest_by_id(id),
-                );
-                if let Some(manifest) = manifest {
-                    if manifest.id != *id {
-                        return Err(ReconfigureError::Validation(format!(
-                            "source `{}` resolved tool id `{id}` with mismatched manifest id `{}`",
-                            self.source_key(),
-                            manifest.id,
-                        )));
-                    }
-                    index.insert(manifest, provider_idx);
-                    break;
-                }
-            }
-        }
-        *self.tools.write_recover() = index.clone();
-        Ok(PinnedToolProviderSource::new(
-            self.id.clone(),
-            index,
-            advertised_ids,
-            &self.providers,
-        ))
-    }
 }
 
 #[async_trait::async_trait]
@@ -247,11 +249,20 @@ impl ToolSourceExecutor for ToolProviderSource {
         &self.id
     }
 
+    fn capture_execution_source(&self) -> Result<Box<dyn ToolSourceCapture>, ReconfigureError> {
+        Ok(Box::new(ToolProviderSourceCapture {
+            id: self.id.clone(),
+            index: ToolProviderIndex::from_providers(&self.providers),
+            live_tools: Arc::clone(&self.tools),
+            providers: self.providers.clone(),
+        }))
+    }
+
     fn snapshot_execution_source(
         &self,
         known_resident_ids: &BTreeSet<ToolId>,
     ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
-        Ok(Arc::new(self.snapshot(known_resident_ids)?))
+        self.capture_execution_source()?.freeze(known_resident_ids)
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {

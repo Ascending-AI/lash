@@ -315,7 +315,9 @@ impl ToolRegistry {
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
         let live_source = Arc::clone(&source);
-        let source = source.snapshot_execution_source(&BTreeSet::new())?;
+        let source = source
+            .capture_execution_source()?
+            .freeze(&BTreeSet::new())?;
         let source_key = source.source_key();
         debug_assert_eq!(live_source.source_key(), source_key);
         let manifests = source
@@ -517,15 +519,37 @@ impl ToolRegistry {
                     ),
                 )
             };
-            let known_resident_ids = snapshot.entries().keys().cloned().collect::<BTreeSet<_>>();
-            let sources = live_sources
+            let captures = live_sources
                 .iter()
-                .map(|(key, source)| {
-                    Ok((
-                        key.clone(),
-                        source.snapshot_execution_source(&known_resident_ids)?,
-                    ))
-                })
+                .map(|(key, source)| Ok((key.clone(), source.capture_execution_source()?)))
+                .collect::<Result<BTreeMap<_, _>, ReconfigureError>>();
+            let captures = match captures {
+                Ok(captures) => captures,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        snapshot.generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+            let advertised_ids = captures
+                .values()
+                .flat_map(|capture| capture.advertised_tools())
+                .map(|manifest| manifest.id)
+                .collect::<BTreeSet<_>>();
+            let unresolved_known_ids = snapshot
+                .entries()
+                .keys()
+                .filter(|id| !advertised_ids.contains(*id))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let sources = captures
+                .into_iter()
+                .map(|(key, capture)| Ok((key, capture.freeze(&unresolved_known_ids)?)))
                 .collect::<Result<BTreeMap<_, _>, ReconfigureError>>();
             let sources = match sources {
                 Ok(sources) => sources,

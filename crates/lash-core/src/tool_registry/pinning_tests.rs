@@ -11,6 +11,15 @@ struct ToggleExactProvider {
 
 struct HiddenOrchestratingSource;
 
+struct DefaultHiddenProvider {
+    definition: ToolDefinition,
+}
+
+#[repr(transparent)]
+struct FilteringProvider {
+    inner: DefaultHiddenProvider,
+}
+
 fn test_tool(name: &str, description: &str) -> ToolDefinition {
     ToolDefinition::raw(
         format!("tool:{name}"),
@@ -66,6 +75,40 @@ impl ToolProvider for ToggleExactProvider {
 
     async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
         ToolOutcome::ok(json!(self.route))
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for DefaultHiddenProvider {
+    fn tool_manifests(&self) -> Vec<ToolManifest> {
+        vec![self.definition.manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::ok(json!("delegated-default"))
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for FilteringProvider {
+    fn tool_manifests(&self) -> Vec<ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+        self.inner.resolve_manifest_by_id(id)
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        self.inner.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+        self.inner.execute(call).await
     }
 }
 
@@ -153,6 +196,45 @@ fn request_pin_detects_hidden_cross_lane_known_id_collision() {
         ),
         "unexpected collision error: {error:?}"
     );
+}
+
+#[tokio::test]
+async fn request_pin_preserves_transparent_wrapper_delegated_default_resolution() {
+    let definition = test_tool("wrapped_hidden", "delegated default resolver");
+    let provider = FilteringProvider {
+        inner: DefaultHiddenProvider {
+            definition: definition.clone(),
+        },
+    };
+    assert!(
+        provider.resolve_manifest_by_id(definition.id()).is_some(),
+        "the wrapper delegates exact-id resolution to the inner default"
+    );
+    let registry =
+        ToolRegistry::from_tool_provider(Arc::new(provider)).expect("filtering wrapper registry");
+    let mut entries = BTreeMap::new();
+    entries.insert(
+        definition.id().clone(),
+        ToolStateEntry::new(definition.manifest()),
+    );
+    registry
+        .restore_state(ToolState::new(registry.generation(), entries))
+        .expect("the delegated default initially binds the known resident");
+
+    let pinned = registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("two-phase capture preserves the delegated default result");
+    let entry = pinned
+        .export_state()
+        .get(definition.id())
+        .expect("wrapped resident remains in state")
+        .clone();
+    assert!(entry.is_member());
+    assert!(!entry.is_orphaned());
+    let result = pinned
+        .execute_by_id(definition.id(), &json!({}), &test_attempt_context())
+        .await;
+    assert_eq!(result.value_for_projection(), json!("delegated-default"));
 }
 
 #[tokio::test]

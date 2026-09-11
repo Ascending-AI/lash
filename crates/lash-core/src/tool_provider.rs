@@ -1,7 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
 pub(crate) use completion_support::AttemptCompletionSupport;
-use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
@@ -13,72 +12,6 @@ use crate::plugin::{
     PluginError, SessionGraphService, SessionLifecycleService, SessionSnapshot, SessionStateService,
 };
 use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome};
-
-// Registry admission scopes the default by-id resolver to the provider's
-// already-captured advertisement. Custom provider overrides still run and may
-// resolve known resident ids that are absent from that advertisement.
-struct CapturedProviderManifests {
-    provider: *const (),
-    manifests: Arc<[ToolManifest]>,
-}
-
-thread_local! {
-    static CAPTURED_PROVIDER_MANIFESTS: RefCell<Vec<CapturedProviderManifests>> =
-        const { RefCell::new(Vec::new()) };
-}
-
-struct CapturedProviderManifestGuard;
-
-impl Drop for CapturedProviderManifestGuard {
-    fn drop(&mut self) {
-        CAPTURED_PROVIDER_MANIFESTS.with(|captured| {
-            captured
-                .borrow_mut()
-                .pop()
-                .expect("captured provider manifest scopes are balanced");
-        });
-    }
-}
-
-fn provider_identity<T: ?Sized>(provider: &T) -> *const () {
-    std::ptr::from_ref(provider).cast::<()>()
-}
-
-fn captured_provider_manifest_by_id<T: ?Sized>(
-    provider: &T,
-    id: &ToolId,
-) -> Option<Option<ToolManifest>> {
-    let provider = provider_identity(provider);
-    CAPTURED_PROVIDER_MANIFESTS.with(|captured| {
-        captured
-            .borrow()
-            .iter()
-            .rev()
-            .find(|capture| capture.provider == provider)
-            .map(|capture| {
-                capture
-                    .manifests
-                    .iter()
-                    .find(|manifest| manifest.id == *id)
-                    .cloned()
-            })
-    })
-}
-
-pub(crate) fn with_captured_provider_manifests<R>(
-    provider: &dyn ToolProvider,
-    manifests: Arc<[ToolManifest]>,
-    resolve: impl FnOnce() -> R,
-) -> R {
-    CAPTURED_PROVIDER_MANIFESTS.with(|captured| {
-        captured.borrow_mut().push(CapturedProviderManifests {
-            provider: provider_identity(provider),
-            manifests,
-        });
-    });
-    let _guard = CapturedProviderManifestGuard;
-    resolve()
-}
 
 mod attachments;
 mod completion_support;
@@ -1433,9 +1366,6 @@ pub trait ToolProvider: Send + Sync + 'static {
             .find(|manifest| manifest.name == name)
     }
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        if let Some(manifest) = captured_provider_manifest_by_id(self, id) {
-            return manifest;
-        }
         self.tool_manifests()
             .into_iter()
             .find(|manifest| manifest.id == *id)
