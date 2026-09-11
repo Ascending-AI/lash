@@ -108,6 +108,12 @@ replacing such an authority across a protocol change.
 - Fresh-acquire and takeover retries cannot double-bump generation, and the
   public nonce type prevents stable host identity from silently defeating
   per-claim uniqueness.
+- Queued-work and pending-turn-input claim tokens use v3 canonical bytes:
+  opaque session, owner, incarnation, and claim identifiers are length-framed,
+  and the claim timestamp is fixed-width. Existing v2 tokens remain valid
+  across a rolling upgrade because settlement, release, and recovery compare
+  the claim-carried token with the stored opaque token rather than rederiving
+  it; a later reclaim simply stores a newly derived v3 token.
 - Execution-fence authority is decided once in core from incarnation,
   generation, expiry, and current-token equality. Commit authority remains the
   ADR 0029 head CAS. No durable schema, existing ID, or serialized authority
