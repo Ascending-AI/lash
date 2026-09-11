@@ -366,7 +366,7 @@ description = "stable process-transfer set identity"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/effect/envelope.rs"]
+paths = ["crates/lash-core/src/runtime/effect/identity_types.rs"]
 symbols = ["process_transfer_set_preimage"]
 
 [[surface]]

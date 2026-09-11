@@ -234,12 +234,12 @@ fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
     assert_eq!(state.protocol_turn_options, checkpoint_options);
 }
 
-/// Refusal witness (FIG-2505): a v6 head predating instruction capabilities
-/// is refused by the strict
-/// schema-version fence every store backend decodes through.
+/// Refusal witness: the immediate-predecessor v7 head is rejected after the
+/// effect-address identity cutover by the strict schema-version fence every
+/// store backend decodes through.
 #[test]
-fn immediate_predecessor_head_meta_v6_is_refused() {
-    const PREDECESSOR: u32 = 6;
+fn immediate_predecessor_head_meta_v7_is_refused() {
+    const PREDECESSOR: u32 = 7;
     assert_eq!(
         PREDECESSOR + 1,
         SESSION_HEAD_META_SCHEMA_VERSION,
@@ -250,7 +250,7 @@ fn immediate_predecessor_head_meta_v6_is_refused() {
         "SessionHeadMeta",
         SESSION_HEAD_META_SCHEMA_VERSION,
     )
-    .expect_err("v6 session head must be refused");
+    .expect_err("v7 session head must be refused");
     assert!(matches!(
         err,
         StoreError::UnsupportedRecordSchemaVersion {

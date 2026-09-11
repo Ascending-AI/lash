@@ -343,9 +343,10 @@ pub(crate) fn direct_request_discriminator(
     caused_by: Option<&CausalRef>,
     ordinal: u64,
 ) -> String {
-    // Family v2 removes request content from replay identity entirely. Store
-    // schemas are bumped as a reject-and-recreate cutover; durable workflow
-    // adapters must likewise begin a fresh state namespace before deployment.
+    // Family v3 removes request content from replay identity and admits the
+    // execution scope. Store schemas are bumped as a reject-and-recreate
+    // cutover; durable workflow adapters must likewise begin a fresh state
+    // namespace before deployment.
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.direct-effect-discriminator",
         DIRECT_EFFECT_FAMILY_VERSION,
@@ -536,34 +537,34 @@ mod tests {
                     session_id: SessionId::from("ab"),
                     turn_id: TurnId::from("c"),
                 },
-                "direct-discriminator:v2:blake3:990084fc9028c4cdec32cdc3182e323cdc03bf1fef212862fbd9442d60a69d42",
+                "direct-discriminator:v3:blake3:78e0554f9dc6f57ec9fb07dacb6a6bc9dc221c5d696da56562d52480951c025a",
             ),
             (
                 CausalRef::Effect {
                     address: EffectAddress::new(ExecutionScope::runtime_operation("s"), "e")
                         .expect("valid effect cause"),
                 },
-                "direct-discriminator:v2:blake3:3f43a9b312aa3b7f98045904632bd4daf3aada4430019b4427616f600b6f0857",
+                "direct-discriminator:v3:blake3:6a86c188f94aabd14d86ec775e19ad91498610bf7c3f8865cc1231d4cb467efc",
             ),
             (
                 CausalRef::ToolCall {
                     session_id: SessionId::from("s"),
                     call_id: "c".to_string(),
                 },
-                "direct-discriminator:v2:blake3:e54157dc19ee5d6d23ca76d9e7eb671f67422b83fd18519a279c1adf1f949202",
+                "direct-discriminator:v3:blake3:f731dff92e6119ed6f49dad112351e389440d6f591fa2ace2fd3972241110949",
             ),
             (
                 CausalRef::Process {
                     process_id: ProcessId::from("p"),
                 },
-                "direct-discriminator:v2:blake3:ae12c1bd5c974ce1df6254fdff30ce90dfba1332bf8317caadc39d1cc32a9d36",
+                "direct-discriminator:v3:blake3:eac75dd2c168f76cea7cae3e74092032011f7780d7ad02de1d58802c8fe5fc8a",
             ),
             (
                 CausalRef::ProcessEvent {
                     process_id: ProcessId::from("p"),
                     sequence: 0,
                 },
-                "direct-discriminator:v2:blake3:0644b6d881b463c4a0af5439e1215e344eedf6722cb58aadcf0cb85936086304",
+                "direct-discriminator:v3:blake3:b5038f10e78fe53324ca47ca7b8aa50a47203e4784f6bb6c895e31a8536b3034",
             ),
             (
                 CausalRef::TriggerOccurrence {
@@ -572,14 +573,14 @@ mod tests {
                     subscription_incarnation: None,
                     subscription_revision: Some(0),
                 },
-                "direct-discriminator:v2:blake3:ca1bcd4e4d73231f9aed50b606f78c0d5b4f008c03127d27f7e8ee615a0986e1",
+                "direct-discriminator:v3:blake3:d56a11d6ab13e7e6d320486668f8c684d0d72725161f4f2d655729bd751a9c04",
             ),
             (
                 CausalRef::SessionNode {
                     session_id: SessionId::from("s"),
                     node_id: "n".to_string(),
                 },
-                "direct-discriminator:v2:blake3:16c84d9fc9b0b5190737be74c70df27637aa93a72558ff00fc639cfb17188403",
+                "direct-discriminator:v3:blake3:6910556f4a2679c13d3329a613bc5467cecc143d30b2a4013eead1fe77b1b067",
             ),
         ];
         for (cause, expected) in causes {
@@ -597,7 +598,7 @@ mod tests {
                 None,
                 99,
             ),
-            "direct-discriminator:v2:blake3:eea6883a6f67874275731b7f5a3c9cf2e87ee743edd7c9e06004b39d5d47e2b5"
+            "direct-discriminator:v3:blake3:62222a794daf6905fa399028c7384ed983a60058bca0c630a91a2e7466b46d88"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -608,7 +609,7 @@ mod tests {
                 None,
                 0,
             ),
-            "direct-discriminator:v2:blake3:464a8832ef048a3c853cc771a55b2b10ce49699f6c7265fa1992047b533021b6"
+            "direct-discriminator:v3:blake3:5ba4e3f6185036771681615925aa5cd3287065402ec0ec69630d8288629bd046"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -619,7 +620,7 @@ mod tests {
                 }),
                 1,
             ),
-            "direct-discriminator:v2:blake3:990084fc9028c4cdec32cdc3182e323cdc03bf1fef212862fbd9442d60a69d42"
+            "direct-discriminator:v3:blake3:78e0554f9dc6f57ec9fb07dacb6a6bc9dc221c5d696da56562d52480951c025a"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -630,7 +631,7 @@ mod tests {
                 }),
                 1,
             ),
-            "direct-discriminator:v2:blake3:4652b5ce2ed67bdb741213cc408c6da739e11ff4d9cced560bd083384a31dc98"
+            "direct-discriminator:v3:blake3:c71a5192c9a6d515e0c954b8e295d8c72db1d9215b7a960b5c320b01ca73def6"
         );
 
         let discriminator = direct_request_discriminator(None, None, 1);
@@ -642,7 +643,7 @@ mod tests {
         );
         assert_eq!(
             hex(&preimage),
-            "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
+            "6c6173682d737461626c652d6964656e746974790203000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76333a626c616b65333a31666631386539313861383032313933623937636263346537316433313039626639306232656230323966396137343233396264333865386331343839663665"
         );
         assert_eq!(
             direct_effect_invocation(
@@ -654,7 +655,7 @@ mod tests {
                 None,
             )
             .replay_key(),
-            "direct:v2:blake3:c92b5337c6f126eb1f8951b3c0c5eea412be5953c0e254bc4369e08d29d33451"
+            "direct:v3:blake3:43bfa7f80a468e47f435784b0cf43f95ffef5a368e3fb26ee78929ffaf618c35"
         );
 
         let first_discriminator = direct_request_discriminator(
@@ -673,7 +674,7 @@ mod tests {
         );
         assert_eq!(
             hex(&first_preimage),
-            "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a38356537333765643465663038366634653336616436386263396330333632393264363665623430613831646130383031356436363163653530373435303263"
+            "6c6173682d737461626c652d6964656e746974790203000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76333a626c616b65333a34336339616331396231653233316136616162653966386265623333623337376365343731313666343165336661653963373133363535306233346464616634"
         );
         let first = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
@@ -685,7 +686,7 @@ mod tests {
         );
         assert_eq!(
             first.replay_key(),
-            "direct:v2:blake3:359eeeb5c5899114070602cf4659773cf646c6bd8aa919596785bfe55de41e34"
+            "direct:v3:blake3:f8af7289056d371cc0b80d6d1f4ad3f8cccfd86bc863e9744a080354544dfa9e"
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
@@ -696,7 +697,7 @@ mod tests {
         );
         assert_eq!(
             hex(&second_preimage),
-            "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
+            "6c6173682d737461626c652d6964656e746974790203000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76333a626c616b65333a31666631386539313861383032313933623937636263346537316433313039626639306232656230323966396137343233396264333865386331343839663665"
         );
         let second = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
@@ -708,7 +709,7 @@ mod tests {
         );
         assert_eq!(
             second.replay_key(),
-            "direct:v2:blake3:91275bb8dccd63323941efc579d9177fbc134adde4f970c0c521623d7ef5edc7"
+            "direct:v3:blake3:89749b2923cda770d21363d4c9723d995d61023fe30a4d9d086f8ef240f60c0c"
         );
         assert_ne!(first.replay_key(), second.replay_key());
     }

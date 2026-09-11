@@ -338,7 +338,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             return;
         };
         let context = if let Some(invocation) = invocation {
-            let context = trace_context_for_invocation(trace, invocation);
+            let context = trace_context_for_invocation(&trace.base_context, invocation);
             *trace
                 .current_context
                 .lock()
@@ -367,17 +367,18 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         *trace
             .current_context
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(trace_context_for_invocation(trace, invocation));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(
+            trace_context_for_invocation(&trace.base_context, invocation),
+        );
     }
 }
 
 fn trace_context_for_invocation(
-    trace: &RestateTraceObserver,
+    base_context: &lash_trace::TraceContext,
     invocation: &RuntimeEffectInvocation,
 ) -> lash_trace::TraceContext {
     lash_core::facade_support::trace_context_for_runtime_effect_invocation(
-        trace.base_context.clone(),
+        base_context.clone(),
         invocation,
     )
 }
@@ -1497,4 +1498,47 @@ fn tracing_sleep_error(invocation: &RuntimeEffectInvocation, err: &TerminalError
         error = %err,
         "Restate durable sleep failed"
     );
+}
+
+#[cfg(test)]
+mod identity_trace_tests {
+    use super::*;
+
+    #[test]
+    fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
+        let parent_address = lash_core::EffectAddress::new(
+            ExecutionScope::process("restate-parent-process"),
+            "shared-replay-key",
+        )
+        .expect("valid Restate causal address");
+        let invocation = RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::turn("restate-session", "restate-turn"),
+                "restate-child-key",
+            )
+            .expect("valid Restate child address"),
+            lash_core::RuntimeAttribution::for_turn("restate-session", "restate-turn", 4, 2),
+            "restate-child",
+        )
+        .with_caused_by(Some(lash_core::CausalRef::Effect {
+            address: parent_address.clone(),
+        }));
+
+        let caused =
+            trace_context_for_invocation(&lash_trace::TraceContext::default(), &invocation);
+        assert_eq!(
+            caused.parent_graph_node_id.as_deref(),
+            Some(parent_address.graph_key().as_str())
+        );
+
+        let mut explicit = lash_trace::TraceContext::default();
+        explicit.parent_graph_node_id = Some("host:explicit-parent".to_string());
+        explicit.run_id = Some("restate-host-run".to_string());
+        let explicit = trace_context_for_invocation(&explicit, &invocation);
+        assert_eq!(
+            explicit.parent_graph_node_id.as_deref(),
+            Some("host:explicit-parent")
+        );
+        assert_eq!(explicit.run_id.as_deref(), Some("restate-host-run"));
+    }
 }

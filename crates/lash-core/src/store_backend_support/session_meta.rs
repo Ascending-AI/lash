@@ -435,3 +435,38 @@ impl SessionMetaCodec {
             .map_err(|_| self.corrupt(format!("{field} is not an unsigned integer: `{value}`")))
     }
 }
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn session_relation_effect_cause_refuses_legacy_shape_and_round_trips_address() {
+        let codec = SessionMetaCodec::new("test integer");
+        let legacy = CausalColumns {
+            kind: Some("effect".to_string()),
+            session_id: Some(SessionId::from("legacy-session")),
+            effect_id: Some("legacy-effect".to_string()),
+            ..CausalColumns::default()
+        };
+        let error = legacy
+            .decode(codec)
+            .expect_err("legacy session/effect identity must fail closed");
+        assert!(error.to_string().contains("effect_identity_format_cutover"));
+
+        let address = crate::EffectAddress::new(
+            crate::ExecutionScope::process("admitted-process"),
+            "shared-replay-key",
+        )
+        .expect("valid effect address");
+        let cause = CausalRef::Effect {
+            address: address.clone(),
+        };
+        assert_eq!(
+            CausalColumns::encode(Some(&cause))
+                .decode(codec)
+                .expect("current effect address decodes"),
+            Some(CausalRef::Effect { address })
+        );
+    }
+}
