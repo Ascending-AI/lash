@@ -94,11 +94,6 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
-    def test_api_surface_snapshot_runs_every_expensive_family(self) -> None:
-        plan = ci_plan.classify([("M", "docs/api-surface.snapshot")])
-        self.assertEqual("false", plan["docs_only"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
-
     def test_docs_deletion_mixed_with_docs_modification_runs_everything(self) -> None:
         plan = ci_plan.classify([("D", "docs/old.md"), ("M", "README.md")])
         self.assertEqual("false", plan["docs_only"])
@@ -150,10 +145,6 @@ def successful_needs() -> dict[str, dict[str, object]]:
         {"docs_only": "false", "fail_open": "false", "identity_versions": "false"}
     )
     needs = {job: {"result": "success", "outputs": {}} for job in ci_plan.UNGATED_JOBS | set(ci_plan.GATED_JOBS)}
-    # Full-profile jobs are skipped on every event but workflow_dispatch,
-    # which is what these event-less fixtures exercise.
-    for job in ci_plan.FULL_PROFILE_JOBS:
-        needs[job] = {"result": "skipped", "outputs": {}}
     needs["plan"]["outputs"] = plan_outputs
     return needs
 
@@ -234,9 +225,6 @@ class ConclusionTests(unittest.TestCase):
 class ProducerConclusionTests(unittest.TestCase):
     def event_needs(self, event, enabled=True):
         needs = successful_needs()
-        if event == "workflow_dispatch":
-            for job in ci_plan.FULL_PROFILE_JOBS:
-                needs[job]["result"] = "success"
         apply_event_deferrals(needs, event)
         if not enabled:
             for job in ci_plan.WORKERS_E2E_JOBS:
@@ -629,16 +617,10 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
     def test_push_and_dispatch_keep_the_rust_family_expectation(self) -> None:
         for event in ("push", "workflow_dispatch"):
             needs = self.board(event)
-            if event == "workflow_dispatch":
-                for job in ci_plan.FULL_PROFILE_JOBS:
-                    needs[job]["result"] = "success"
             self.assertEqual([], ci_plan.evaluate_conclusion(needs, event, "refs/heads/main"))
             for job in self.JOBS:
                 with self.subTest(event=event, job=job):
                     wrongly_skipped = self.board(event)
-                    if event == "workflow_dispatch":
-                        for full in ci_plan.FULL_PROFILE_JOBS:
-                            wrongly_skipped[full]["result"] = "success"
                     wrongly_skipped[job]["result"] = "skipped"
                     self.assertIn(
                         f"{job} ended with 'skipped' although plan.rust required it to run",
@@ -646,9 +628,6 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
                     )
                     # A docs-only trunk run may still skip them: unchanged.
                     docs = self.board(event, docs_only=True)
-                    if event == "workflow_dispatch":
-                        for full in ci_plan.FULL_PROFILE_JOBS:
-                            docs[full]["result"] = "skipped"
                     docs[job]["result"] = "skipped"
                     self.assertEqual(
                         [], ci_plan.evaluate_conclusion(docs, event, "refs/heads/main")

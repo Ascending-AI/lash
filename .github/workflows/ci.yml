@@ -366,8 +366,6 @@ jobs:
       - name: Test repository scripts
         run: |
           python3 scripts/test_agent_workbench_restate_e2e.py
-          python3 scripts/test_api_surface.py
-          python3 scripts/test_check_facade_external_types.py
           python3 scripts/test_check_facade_only_examples.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
@@ -387,7 +385,6 @@ jobs:
           python3 scripts/test_judged_runbook_matrix.py
           python3 scripts/test_check_judged_build_geometry.py
           python3 scripts/test_restate_workers_e2e_coverage.py
-          python3 scripts/test_rustdoc_json_cache.py
           python3 scripts/test_runtime_perf_percentiles.py
           python3 scripts/test_perfreport.py
           python3 scripts/test_ci_plan.py
@@ -439,69 +436,6 @@ jobs:
 
       - name: Check for unused dependencies
         run: cargo shear
-
-  # The generated facade contract gates build rustdoc JSON for the facade crate,
-  # independently of the workspace build. They run only on the full profile.
-  facade-gates:
-    name: Facade API contract gates
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: plan
-    # Full-profile only (2026-08-26 ruling): the surface snapshot and related
-    # facade gates certify docs/ artifacts, not the build, so they
-    # run on workflow_dispatch — which the release gate requires on the
-    # release SHA — instead of spending a rustdoc compile on every PR.
-    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true'
-
-    steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
-
-      - name: Check facade external types
-        run: python3 scripts/check_facade_external_types.py
-
-      # Same rustdoc graph and cache geometry as the coverage gate, so it
-      # rides in this job instead of paying a second rustdoc build.
-      - name: Check public API surface snapshot
-        run: python3 scripts/api_surface.py check
-
-      - name: Report cache disk capacity
-        if: always()
-        run: bash scripts/ci/report-cache.sh
 
   # A dependency workspace's [patch] table is invisible to its consumers.
   # Resolve lashlang from this checkout as a Git dependency in a fresh external
@@ -2525,7 +2459,6 @@ jobs:
       - test-doc
       - repo-gates
       - unused-deps
-      - facade-gates
       - lashlang-git-consumer
       - package-feature-checks
       - runtime-feature-boundary
