@@ -212,7 +212,7 @@ impl RuntimeBoundaryHarness {
             .unwrap_or(&event.boundary_id)
             .to_string();
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            lash_core::RuntimeEffectInvocation::new(
                 EffectAddress::new(
                     ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
                     durable_key.clone(),
@@ -355,7 +355,7 @@ impl RuntimeBoundaryHarness {
             json!({"prepared_by": "lash-sim"}),
         );
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            lash_core::RuntimeEffectInvocation::new(
                 EffectAddress::new(
                     ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
                     format!("tool/{}/{}", event.actor_alias, event.boundary_id),
@@ -443,7 +443,7 @@ impl RuntimeBoundaryHarness {
             .unwrap_or(0);
         let code = format!("sim_exec('{}')", event.boundary_id);
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            lash_core::RuntimeEffectInvocation::new(
                 EffectAddress::new(
                     ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
                     format!("exec/{}/{}", event.actor_alias, event.boundary_id),

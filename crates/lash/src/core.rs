@@ -12,7 +12,7 @@ use crate::support::{
 use lash_core::facade_support;
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_sansio::SessionId;
 
@@ -650,7 +650,7 @@ impl LashCore {
             }
         }
         let process = if let Some(process) = administration.process() {
-            let invocation = RuntimeInvocation::effect(
+            let invocation = RuntimeEffectInvocation::new(
                 lash_core::EffectAddress::new(
                     lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
                         context.controller(),

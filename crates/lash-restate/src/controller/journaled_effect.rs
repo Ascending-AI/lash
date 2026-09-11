@@ -9,8 +9,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use lash_core::{
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectOutcome, RuntimeErrorCode,
-    RuntimeInvocation, facade_support::CanonicalRuntimeEffectEnvelope,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectOutcome, RuntimeErrorCode, facade_support::CanonicalRuntimeEffectEnvelope,
 };
 use restate_sdk::serde::Json;
 
@@ -45,7 +45,7 @@ where
     /// the next redrive would execute it again.
     pub(super) async fn journaled_effect_give_up<'run>(
         &'run self,
-        metadata: &RuntimeInvocation,
+        metadata: &RuntimeEffectInvocation,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
     ) -> Option<Result<RecordedRuntimeEffect, RestateEffectError>>
     where
@@ -83,7 +83,7 @@ where
     /// attempt must not run the effect at all.
     pub(super) async fn journaled_budget_give_up<'run>(
         &'run self,
-        metadata: &RuntimeInvocation,
+        metadata: &RuntimeEffectInvocation,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
     ) -> Option<Result<RecordedRuntimeEffect, RestateEffectError>>
     where
@@ -135,7 +135,7 @@ where
 
     pub(super) async fn record_effect<'run>(
         &'run self,
-        metadata: &RuntimeInvocation,
+        metadata: &RuntimeEffectInvocation,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
         // Keep the full journaled-effect executor behind one allocation. The
         // Restate SDK stores this future in its ctx.run state machine, so

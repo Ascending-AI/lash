@@ -74,7 +74,7 @@ impl RuntimeEffectKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeAttribution {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
@@ -87,6 +87,13 @@ pub struct RuntimeAttribution {
 }
 
 impl RuntimeAttribution {
+    pub fn is_none(&self) -> bool {
+        self.session_id.is_none()
+            && self.turn_id.is_none()
+            && self.turn_index.is_none()
+            && self.protocol_iteration.is_none()
+    }
+
     pub fn none() -> Self {
         Self {
             session_id: None,
@@ -191,6 +198,7 @@ pub enum RuntimeSubject {
         subscription_revision: Option<u64>,
     },
     SessionNode {
+        session_id: SessionId,
         node_id: String,
     },
 }

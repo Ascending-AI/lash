@@ -1202,7 +1202,7 @@ impl ModelStore {
             .unwrap_or(&event.boundary_id)
             .to_string();
         let envelope = lash_core::RuntimeEffectEnvelope::new(
-            lash_core::RuntimeInvocation::effect(
+            lash_core::RuntimeEffectInvocation::new(
                 lash_core::EffectAddress::new(
                     lash_core::ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
                     durable_key.clone(),

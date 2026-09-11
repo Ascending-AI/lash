@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::envelope::{RuntimeEffectOutcome, RuntimeInvocation};
+use super::envelope::{RuntimeEffectInvocation, RuntimeEffectOutcome};
 use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
 
 /// Wake rule of a durable effect group, recorded in the group's journal
@@ -95,7 +95,7 @@ pub struct EffectGroupMembership {
 /// refuses.
 #[derive(Clone, Debug)]
 pub struct RuntimeEffectGroup {
-    invocation: RuntimeInvocation,
+    invocation: RuntimeEffectInvocation,
     group_key: String,
     children: Vec<RuntimeEffectEnvelope>,
     wake: GroupWakePolicy,
@@ -149,7 +149,7 @@ impl RuntimeEffectGroup {
     /// group-drain path had to invent one, silently running a deadline arm's
     /// losers to completion on exactly the failure path this contract exists for.
     pub fn try_new(
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         group_key: impl Into<String>,
         children: Vec<RuntimeEffectEnvelope>,
         wake: GroupWakePolicy,
@@ -211,9 +211,7 @@ impl RuntimeEffectGroup {
             .collect::<Result<Vec<_>, _>>()?;
         let mut first_seen_at: HashMap<&str, usize> = HashMap::with_capacity(children.len());
         for (index, child) in children.iter().enumerate() {
-            let Some(replay_key) = child.invocation.replay_key() else {
-                continue;
-            };
+            let replay_key = child.invocation.replay_key();
             if let Some(first) = first_seen_at.insert(replay_key, index) {
                 return Err(group_shape_error(format!(
                     "children {first} and {index} of durable effect group {group_key} share \
@@ -234,7 +232,7 @@ impl RuntimeEffectGroup {
     /// The group's durable identity. Children derive their replay keys from it
     /// exactly as batch leaves already do.
     #[must_use]
-    pub fn invocation(&self) -> &RuntimeInvocation {
+    pub fn invocation(&self) -> &RuntimeEffectInvocation {
         &self.invocation
     }
 
@@ -676,9 +674,9 @@ mod effect_group_contract_tests {
     use crate::TurnId;
     use crate::runtime::effect::envelope::RuntimeEffectCommand;
 
-    fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
+    fn invocation(kind: RuntimeEffectKind) -> RuntimeEffectInvocation {
         let _ = kind;
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             crate::EffectAddress::new(crate::ExecutionScope::turn("session", "turn"), "replay")
                 .expect("valid group contract address"),
             crate::RuntimeAttribution::for_session("session"),
@@ -690,8 +688,8 @@ mod effect_group_contract_tests {
     ///
     /// Siblings need distinct replay keys — one replay key is one journaled
     /// child — so a group's children cannot share the flat [`invocation`] key.
-    fn child_invocation(_kind: RuntimeEffectKind, position: usize) -> RuntimeInvocation {
-        RuntimeInvocation::effect(
+    fn child_invocation(_kind: RuntimeEffectKind, position: usize) -> RuntimeEffectInvocation {
+        RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 crate::ExecutionScope::turn("session", "turn"),
                 format!("replay-{position}"),

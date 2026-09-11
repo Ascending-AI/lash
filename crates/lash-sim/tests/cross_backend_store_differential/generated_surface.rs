@@ -481,7 +481,7 @@ impl SurfaceRunner {
                 let replay_key = format!("surface-effect-{key}");
                 let scope = ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN);
                 let envelope = RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
+                    lash_core::RuntimeEffectInvocation::new(
                         EffectAddress::new(scope.clone(), replay_key.clone())
                             .expect("surface effect carries an admitted effect scope"),
                         RuntimeAttribution::for_turn(SURFACE_SESSION, SURFACE_TURN, 1, 0),
@@ -1050,7 +1050,7 @@ impl SurfaceRunner {
                 let scope = ExecutionScope::runtime_operation(surface_operation_id(*key));
                 let replay_key = format!("surface-op-effect-{key}");
                 let envelope = RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
+                    lash_core::RuntimeEffectInvocation::new(
                         EffectAddress::new(scope.clone(), replay_key.clone())
                             .expect("surface runtime operation carries an admitted effect scope"),
                         RuntimeAttribution::for_session(SURFACE_SESSION),

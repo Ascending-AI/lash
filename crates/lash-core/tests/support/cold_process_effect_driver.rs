@@ -68,7 +68,7 @@ fn effect_envelope(
 ) -> lash_core::RuntimeEffectEnvelope {
     let replay_key = format!("cold-process-effect-{nonce}");
     lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 lash_core::ExecutionScope::turn(session_id, turn_id),
                 replay_key.clone(),

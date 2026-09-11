@@ -189,7 +189,7 @@ impl RuntimeEffectController for EffectAdmissionProbe {
 
 fn sleep_envelope(scope: ExecutionScope, replay_key: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        crate::RuntimeInvocation::effect(
+        crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(scope, replay_key).expect("effect address"),
             crate::RuntimeAttribution::none(),
             "scope-admission-sleep",

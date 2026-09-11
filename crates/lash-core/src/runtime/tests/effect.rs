@@ -228,11 +228,7 @@ impl RecordingEffectController {
         self.records.lock_recover().push(EffectControllerRecord {
             kind: envelope.command.kind(),
             turn_id: envelope.invocation.attribution.turn_id.clone(),
-            replay_key: envelope
-                .invocation
-                .replay_key()
-                .expect("replay key")
-                .to_string(),
+            replay_key: envelope.invocation.replay_key().to_string(),
         });
     }
 }
@@ -395,11 +391,7 @@ impl RuntimeEffectController for RecordingEffectController {
                 "forced parent-end failure",
             ));
         }
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("replay key")
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         if self.replay_by_key
             && let Some(outcome) = self
                 .replay_outcomes
@@ -2068,7 +2060,6 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         Some(caused_by),
     )
     .replay_key()
-    .expect("derived direct-effect replay key")
     .to_string();
     assert!(recorder.records().iter().any(|record| {
         record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key

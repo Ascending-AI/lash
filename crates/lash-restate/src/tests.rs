@@ -40,8 +40,8 @@ use lash_core::{
     ProcessExecutionContext, ProcessExternalRef, ProcessRegistry, QueuedLaneAcquisition,
     QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
-    facade_support::DurableProcessWorker, facade_support::TurnAddress, facade_support::TurnAttach,
+    RuntimeEffectOutcome, ScopedEffectController, facade_support::DurableProcessWorker,
+    facade_support::TurnAddress, facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_http_transport::HttpRequest;
@@ -175,7 +175,7 @@ async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_exec
         .scoped_effect_controller(ExecutionScope::process("admitted-restate-process"))
         .expect("scoped Restate controller");
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 ExecutionScope::process("wrong-restate-process"),
                 "shared-replay-key",
@@ -221,8 +221,8 @@ fn test_turn_effect_invocation(
     protocol_iteration: usize,
     effect_id: impl Into<String>,
     replay_key: impl Into<String>,
-) -> RuntimeInvocation {
-    RuntimeInvocation::effect(
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
             .expect("valid Restate test effect address"),
         lash_core::RuntimeAttribution::for_turn(
@@ -1044,9 +1044,15 @@ impl Fig806TriggerRedrive for Fig806TriggerRedriveImpl {
         Json(input): Json<Fig806TriggerRedriveInput>,
     ) -> HandlerResult<Json<lash_core::facade_support::TriggerEmitReport>> {
         let controller = RestateRuntimeEffectController::new(ctx);
+        let scoped = controller
+            .scoped_effect_controller(ExecutionScope::runtime_operation(format!(
+                "fig806-trigger:{}",
+                input.occurrence.idempotency_key
+            )))
+            .map_err(HandlerError::from)?;
         let report = self
             .router
-            .emit(input.occurrence, &controller)
+            .emit(input.occurrence, &scoped)
             .await
             .map_err(HandlerError::from)?;
         let request: restate_sdk::context::Request<'_, Json<()>, Json<()>> = ContextClient::request(

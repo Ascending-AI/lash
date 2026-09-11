@@ -277,14 +277,31 @@ impl RemoteTriggerOwnerScope {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Session { session_id } => {
-                require_non_empty(type_name, "owner_scope.session_id", session_id)
+                validate_owner_key(type_name, "owner_scope.session_id", session_id)
             }
             Self::Host { binding_id } => {
-                require_non_empty(type_name, "owner_scope.binding_id", binding_id)
+                validate_owner_key(type_name, "owner_scope.binding_id", binding_id.trim())
             }
             Self::Platform => Ok(()),
         }
     }
+}
+
+fn validate_owner_key(
+    type_name: &'static str,
+    field: &'static str,
+    value: &str,
+) -> Result<(), RemoteProtocolError> {
+    if value.is_empty() {
+        return Err(RemoteProtocolError::MissingRequiredField { type_name, field });
+    }
+    if value.contains('\0') {
+        return Err(RemoteProtocolError::InvalidEnvelope {
+            type_name,
+            message: format!("{field} contains a NUL byte"),
+        });
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

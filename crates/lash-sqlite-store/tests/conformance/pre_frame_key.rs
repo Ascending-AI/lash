@@ -3,7 +3,7 @@ use super::*;
 fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffectOutcome) {
     let call_id = "continue-as-call";
     let envelope = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 lash_core::ExecutionScope::turn("cutover-session", "cutover-turn"),
                 "continue-as-attempt-replay",

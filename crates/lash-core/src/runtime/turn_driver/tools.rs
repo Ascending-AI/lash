@@ -238,11 +238,10 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<crate::Resolution, RuntimeEffectControllerError> {
         let parent =
             self.turn_effect_invocation(machine, parent_effect_id, RuntimeEffectKind::ToolBatch)?;
-        let invocation = crate::runtime::causal::child_effect_invocation(
+        let invocation = crate::runtime::causal::child_effect_invocation_from_effect(
             self.scoped_effect_controller.execution_scope(),
             &parent,
             format!("{}:{call_id}:await", parent_effect_id.0),
-            RuntimeEffectKind::AwaitEvent,
             format!("{call_id}:await"),
         );
         let _ = event_tx;

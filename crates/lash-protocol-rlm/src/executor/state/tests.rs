@@ -3,8 +3,6 @@
 
 use super::*;
 use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect};
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 use lashlang::{
     ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record as FlowRecord, Value as FlowValue,
@@ -85,7 +83,6 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             "replay",
         )
         .expect("valid snapshot test address"),
-        effect_id: "effect".to_string(),
     };
     let deferred_resolutions = DeferredResolutionRecord {
         link_key: Some(link_key.clone()),
@@ -795,7 +792,6 @@ fn version_17_root_encodes_to_golden_bytes() {
                     "replay-1",
                 )
                 .expect("valid snapshot golden address"),
-                effect_id: "effect-9".to_string(),
             }),
             resolutions,
         },

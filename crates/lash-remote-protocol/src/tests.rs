@@ -7,6 +7,11 @@ use schemars::JsonSchema;
 
 use super::*;
 
+#[path = "tests/identity.rs"]
+mod identity_tests;
+#[path = "tests/process_validation.rs"]
+mod process_validation_tests;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[derive(serde::Deserialize)]
@@ -2405,69 +2410,6 @@ fn remote_process_record() -> RemoteProcessRecord {
     }
 }
 
-#[test]
-fn remote_terminal_semantics_reject_non_terminal_status() {
-    let terminal = RemoteProcessTerminalSpec {
-        status: RemoteProcessStatus::Running,
-        await_output: Some(RemoteProcessValueSelector::Payload),
-    };
-    assert!(
-        terminal
-            .validate("RemoteProcessTerminalSpec")
-            .expect_err("running terminal semantics must be rejected")
-            .to_string()
-            .contains("require a terminal status")
-    );
-}
-
-#[test]
-fn remote_process_record_rejects_contradictory_status_and_outcome() {
-    let mut terminal_without_outcome = remote_process_record();
-    terminal_without_outcome.status = RemoteProcessStatus::Completed;
-    assert!(
-        terminal_without_outcome
-            .validate("RemoteProcessRecord")
-            .expect_err("terminal status without outcome must be rejected")
-            .to_string()
-            .contains("must carry an outcome")
-    );
-
-    let mut non_terminal_with_outcome = remote_process_record();
-    non_terminal_with_outcome.outcome = Some(RemoteProcessAwaitOutput::Settled {
-        output: RemoteProcessToolCallOutput {
-            outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
-            control: None,
-        },
-    });
-    assert!(
-        non_terminal_with_outcome
-            .validate("RemoteProcessRecord")
-            .expect_err("non-terminal status with outcome must be rejected")
-            .to_string()
-            .contains("must not carry an outcome")
-    );
-
-    let mut mismatched = remote_process_record();
-    mismatched.status = RemoteProcessStatus::Completed;
-    mismatched.outcome = Some(RemoteProcessAwaitOutput::Settled {
-        output: RemoteProcessToolCallOutput {
-            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
-                message: "cancelled".to_string(),
-                source: RemoteProcessToolFailureSource::Cancellation,
-                raw: None,
-            }),
-            control: None,
-        },
-    });
-    assert!(
-        mismatched
-            .validate("RemoteProcessRecord")
-            .expect_err("mismatched terminal status and outcome must be rejected")
-            .to_string()
-            .contains("contradicts its outcome")
-    );
-}
-
 fn remote_process_event() -> RemoteProcessEvent {
     RemoteProcessEvent {
         process_id: ProcessId::from("process:1"),
@@ -2511,63 +2453,6 @@ fn remote_process_event() -> RemoteProcessEvent {
         },
         occurred_at_ms: 3,
     }
-}
-
-#[test]
-fn remote_owner_scope_validation_accepts_core_grammar_and_refuses_empty_ids() {
-    for owner in [
-        RemoteTriggerOwnerScope::Session {
-            session_id: SessionId::from("owner/session:alpha"),
-        },
-        RemoteTriggerOwnerScope::Host {
-            binding_id: "host binding/alpha:1".to_string(),
-        },
-        RemoteTriggerOwnerScope::Platform,
-    ] {
-        owner
-            .validate("RemoteTriggerOwnerScope")
-            .expect("existing non-empty core owner grammar must survive");
-    }
-
-    for owner in [
-        RemoteTriggerOwnerScope::Session {
-            session_id: SessionId::from("  "),
-        },
-        RemoteTriggerOwnerScope::Host {
-            binding_id: String::new(),
-        },
-    ] {
-        assert!(
-            owner.validate("RemoteTriggerOwnerScope").is_err(),
-            "empty owner identifiers must be refused"
-        );
-    }
-}
-
-#[test]
-fn remote_cause_validation_preserves_partial_trigger_identity_and_checks_effect_scope() {
-    let partial = RemoteCausalRef::TriggerOccurrence {
-        occurrence_id: "occurrence:partial".to_string(),
-        subscription_id: Some("subscription:known".to_string()),
-        subscription_incarnation: None,
-        subscription_revision: None,
-    };
-    partial
-        .validate("RemoteCausalRef")
-        .expect("truthful partial trigger cause");
-    let encoded = serde_json::to_value(&partial).expect("encode partial cause");
-    assert_eq!(
-        serde_json::from_value::<RemoteCausalRef>(encoded).expect("decode partial cause"),
-        partial
-    );
-
-    let invalid_effect = RemoteCausalRef::Effect {
-        address: lash_sansio::EffectAddress {
-            execution_scope: lash_sansio::ExecutionScope::runtime_operation(" "),
-            replay_key: "replay".to_string(),
-        },
-    };
-    assert!(invalid_effect.validate("RemoteCausalRef").is_err());
 }
 
 #[test]

@@ -174,9 +174,11 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         entry_ref: graph.entry_ref.clone(),
         entry_name: graph.entry_name.clone(),
     };
+    let mut context = TraceContext::default();
+    context.session_id = graph.scope.session_id.clone();
     store
         .append(&TraceRecord::new(
-            TraceContext::default().for_session(graph.scope.session_id.clone()),
+            context,
             TraceEvent::LanguageExecution {
                 language: "lashlang".to_string(),
                 event: TraceLanguageExecution {

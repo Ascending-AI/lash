@@ -131,7 +131,7 @@ async fn proxied_controller_owned_replay_mismatch_aborts_with_structured_summary
                 controller.as_ref(),
                 pump_scope.clone(),
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
+                    RuntimeEffectInvocation::new(
                         EffectAddress::new(pump_scope, "proxy-pump:sleep")
                             .expect("valid proxy pump address"),
                         RuntimeAttribution::none(),

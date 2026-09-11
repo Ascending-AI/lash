@@ -7,7 +7,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         machine: &TurnMachine,
         effect_id: crate::sansio::EffectId,
         effect_kind: RuntimeEffectKind,
-    ) -> Result<RuntimeInvocation, RuntimeEffectControllerError> {
+    ) -> Result<RuntimeEffectInvocation, RuntimeEffectControllerError> {
         Ok(crate::runtime::causal::turn_effect_invocation(
             &self.session_id,
             &self.turn_id,

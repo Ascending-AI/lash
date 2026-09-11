@@ -209,7 +209,6 @@ enum EffectReplayFailure {
     Decode,
     Encode,
     HashConflict,
-    KeyMissing,
     LeaseLost,
     Missing,
     Store,
@@ -246,9 +245,6 @@ impl EffectReplayVocabulary {
             (EffectReplayBackend::Sqlite, EffectReplayFailure::HashConflict) => {
                 RuntimeErrorCode::SqliteEffectReplayHashConflict
             }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::KeyMissing) => {
-                RuntimeErrorCode::SqliteEffectReplayKeyMissing
-            }
             (EffectReplayBackend::Sqlite, EffectReplayFailure::LeaseLost) => {
                 RuntimeErrorCode::SqliteEffectReplayLeaseLost
             }
@@ -269,9 +265,6 @@ impl EffectReplayVocabulary {
             }
             (EffectReplayBackend::Postgres, EffectReplayFailure::HashConflict) => {
                 RuntimeErrorCode::PostgresEffectReplayHashConflict
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::KeyMissing) => {
-                RuntimeErrorCode::PostgresEffectReplayKeyMissing
             }
             (EffectReplayBackend::Postgres, EffectReplayFailure::LeaseLost) => {
                 RuntimeErrorCode::PostgresEffectReplayLeaseLost
@@ -1463,16 +1456,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         reconstructed_envelope: &CanonicalRuntimeEffectEnvelope,
     ) -> Result<PreparedEffect, RuntimeEffectControllerError> {
         let vocabulary = self.vocabulary();
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .ok_or_else(|| {
-                vocabulary.error(
-                    EffectReplayFailure::KeyMissing,
-                    "runtime effect envelope requires replay.key",
-                )
-            })?
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         let envelope_json = serde_json::to_string(reconstructed_envelope)
             .map_err(|err| vocabulary.encode_error(err))?;
         let journal_identity = scope

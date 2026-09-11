@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeInvocation,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor,
 };
 
 use super::effect::RecordingEffectController;
@@ -11,7 +11,7 @@ use super::effect::RecordingEffectController;
 async fn values_are_sampled_once_and_replayed_by_effect_id() {
     let recorder = RecordingEffectController::default().with_replay_by_key();
     let clock = Arc::new(crate::testing::TestClock::new(1_234));
-    let invocation = RuntimeInvocation::effect(
+    let invocation = RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             crate::ExecutionScope::runtime_operation("typescript-runtime-test"),
             "typescript.runtime:date-now:0",

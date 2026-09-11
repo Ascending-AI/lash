@@ -122,7 +122,6 @@ fn serialized_dependency_schemas() -> Vec<(&'static str, Vec<String>)> {
             "replay",
         )
         .expect("valid generated snapshot address"),
-        effect_id: "effect".to_string(),
     };
     let deferred_resolutions = DeferredResolutionRecord {
         link_key: Some(link_key.clone()),

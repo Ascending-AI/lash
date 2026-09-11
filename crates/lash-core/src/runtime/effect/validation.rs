@@ -321,7 +321,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{RuntimeEffectCommand, RuntimeInvocation};
+    use crate::{RuntimeEffectCommand, RuntimeEffectInvocation};
 
     #[derive(Default)]
     struct RecordingSink {
@@ -337,7 +337,7 @@ mod tests {
 
     fn envelope(input: Value) -> RuntimeEffectEnvelope {
         RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
                     crate::ExecutionScope::turn("session", "turn"),
                     "tool-attempt:test",

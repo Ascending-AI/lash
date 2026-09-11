@@ -35,9 +35,9 @@ use lash_core::{
     ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
     ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
     RecoveryContract, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence,
-    SessionCommitStore, SessionStoreFactory, TriggerStore,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionCommitStore,
+    SessionStoreFactory, TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry,
@@ -768,7 +768,7 @@ async fn sqlite_artifact_store_satisfies_conformance() {
 
 fn exec_envelope(replay_key: &str, code: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 durable_turn_scope("effect-session", "effect-turn"),
                 replay_key,
@@ -2201,7 +2201,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
     let path = dir.path().join("recorded-intent-effect.db");
     let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(scope.clone(), "sqlite-recorded-intent-attempt")
                 .expect("valid SQLite intent address"),
             lash_core::RuntimeAttribution::for_turn(

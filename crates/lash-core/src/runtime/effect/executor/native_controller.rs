@@ -237,7 +237,7 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
             }
             RuntimeEffectCommand::Trigger { command } => {
                 local_executor
-                    .execute_trigger(envelope.invocation.into_runtime_invocation(), *command)
+                    .execute_trigger(envelope.invocation, *command)
                     .await
             }
             _ => local_executor.execute(envelope).await,
@@ -582,11 +582,7 @@ impl NativeEffectGroups {
                          it is recorded: a group whose child can never settle holds a \
                          rank no settlement can take",
                         group.group_key(),
-                        child
-                            .invocation
-                            .replay_key()
-                            .map(|key| format!(" (replay key {key})"))
-                            .unwrap_or_default(),
+                        format!(" (replay key {})", child.invocation.replay_key()),
                     ))
                 })
             })

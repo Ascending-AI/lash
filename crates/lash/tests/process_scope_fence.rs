@@ -15,13 +15,12 @@ use lash_core::ProcessRegistrar as _;
 use lash_core::{
     AwaitEventWaitIdentity, EffectAddress, ExecutionScope, Resolution, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation,
 };
 use serde_json::json;
 
 fn envelope(scope: &ExecutionScope, effect_id: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             EffectAddress::new(scope.clone(), effect_id)
                 .expect("process fence effect carries an admitted scope"),
             RuntimeAttribution::none(),

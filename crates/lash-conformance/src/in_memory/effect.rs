@@ -24,7 +24,7 @@ const SCOPE: &str = "fig1535-session";
 
 fn child(key: &str, position: usize) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(
                 ExecutionScope::runtime_operation(SCOPE),
                 format!("{key}:child:{position}"),
@@ -44,7 +44,7 @@ fn group(
     disposition: LoserPolicy,
 ) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(
                 ExecutionScope::runtime_operation(SCOPE),
                 format!("{key}:group"),

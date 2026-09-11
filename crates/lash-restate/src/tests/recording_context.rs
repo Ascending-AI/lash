@@ -133,11 +133,10 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             }
         }
 
-        let execution = restate_effect_execution(RuntimeEffectEnvelope {
-            invocation: runtime_invocation(kind, "classification"),
+        let execution = restate_effect_execution(RuntimeEffectEnvelope::new(
+            runtime_invocation(kind, "classification"),
             command,
-            group: None,
-        })
+        ))
         .expect("an ungrouped effect classifies");
         let actual = match execution {
             RestateEffectExecution::DirectProcess { .. } => "direct_process",
@@ -1082,7 +1081,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
         let attempt = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
+                    lash_core::RuntimeEffectInvocation::new(
                         lash_core::EffectAddress::new(scope.clone(), "tool-intent-corpus-attempt")
                             .expect("valid tool-intent corpus address"),
                         lash_core::RuntimeAttribution::for_turn(
@@ -2083,8 +2082,11 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     }
 }
 
-pub(super) fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> RuntimeInvocation {
-    RuntimeInvocation::effect(
+pub(super) fn runtime_invocation(
+    kind: RuntimeEffectKind,
+    effect_id: &str,
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
             durable_turn_scope("session", "turn"),
             format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),

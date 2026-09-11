@@ -245,14 +245,15 @@ use lash_core::{
     ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessValueSelector,
     ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark, ProtocolTurnOptions,
     RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SegmentHandover, SessionAppendNode,
-    SessionNodePayload, SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, TextProjectionMetadata, TokenLedgerEntry, TokenUsage,
-    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservationOutcome, TriggerInputBinding,
-    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
-    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
-    WaitKind, WaitState,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState, SegmentHandover,
+    SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TextProjectionMetadata,
+    TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
+    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
+    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
+    WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1661,7 +1662,7 @@ fn fixture_plugin_state() -> PluginState {
 
 fn fixture_effect_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 ExecutionScope::turn(SESSION_ID, "durable-read-effect-turn"),
                 "durable-read-exec-replay",

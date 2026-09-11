@@ -1,7 +1,8 @@
 use crate::ProcessId;
 use crate::{
-    PreparedToolCall, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeInvocation,
-    ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,
+    PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeInvocation, ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome,
+    ToolRetryPolicy,
 };
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
@@ -32,7 +33,7 @@ impl ToolAttemptEffectIdentity {
         context: &ToolDispatchContext<'_>,
         call: &PreparedToolCall,
         attempt: u32,
-    ) -> RuntimeInvocation {
+    ) -> RuntimeEffectInvocation {
         let replay_prefix = match self {
             Self::Scalar { .. } => call.call_id.clone(),
             Self::Batch { replay_suffix, .. } => replay_suffix.clone(),
@@ -58,7 +59,7 @@ impl ToolAttemptEffectIdentity {
         }
 
         let effect_id = format!("tool:{suffix}");
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 context.effect_controller.scoped().execution_scope().clone(),
                 effect_id.clone(),
@@ -74,7 +75,7 @@ impl ToolAttemptEffectIdentity {
         context: &ToolDispatchContext<'_>,
         call: &PreparedToolCall,
         attempt: u32,
-    ) -> RuntimeInvocation {
+    ) -> RuntimeEffectInvocation {
         if let Self::Batch {
             parent,
             replay_suffix,
@@ -104,7 +105,7 @@ impl ToolAttemptEffectIdentity {
             context.session_id, call.call_id, call.tool_name
         );
         let effect_id = format!("{replay_base}:attempt:{attempt}:sleep");
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 context.effect_controller.scoped().execution_scope().clone(),
                 effect_id.clone(),
@@ -528,7 +529,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
 /// guard's lifetime: the slot is claimed for the whole drain and discharged
 /// when this body ends, on every path out of it.
 struct TerminalAttemptSettlement<'settlement> {
-    minting_emission: &'settlement RuntimeInvocation,
+    minting_emission: &'settlement RuntimeEffectInvocation,
     intent_drain_slot: Option<IntentDrainGuard>,
     child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
     recorded_call_id: Option<&'settlement str>,
@@ -554,7 +555,7 @@ async fn settle_terminal_attempt(
         slot.begin_final_drain().await;
     }
     let mut intent_context = context.clone();
-    intent_context.parent_invocation = Some(minting_emission.clone());
+    intent_context.parent_invocation = Some(minting_emission.clone().into_runtime_invocation());
     let intent_outcomes = super::execute_final_tool_intents(
         &intent_context,
         recorded_call_id,
@@ -738,7 +739,7 @@ fn runtime_failure_outcome(
 
 async fn sleep_before_retry(
     context: &ToolDispatchContext<'_>,
-    invocation: RuntimeInvocation,
+    invocation: RuntimeEffectInvocation,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     retry_after_ms: u64,
 ) -> Result<(), crate::RuntimeEffectControllerError> {

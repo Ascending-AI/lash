@@ -1,9 +1,42 @@
 use super::{
-    EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangSegmentStateError,
-    SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
-    process_lashlang_execution_result, record_segment_boundary_decline,
+    EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
+    LashlangSegmentStateError, SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
+    process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
     validate_lashlang_program_hash,
 };
+
+#[test]
+fn process_trace_session_attribution_comes_only_from_a_session_originator() {
+    let identity = |originator: lash_core::ProcessOriginator| {
+        let hash = lashlang::ContentHash::new("trace-provenance");
+        LashlangProcessExecutionTrace::new(
+            None,
+            lash_trace::TraceContext::default().for_session("ambient-capability"),
+            process_trace_session_id(&originator),
+            lash_core::ProcessId::from("process"),
+            lashlang::ModuleRef::new(&hash),
+            lashlang::ProcessRef::new(hash, 0),
+            "main".to_string(),
+        )
+        .identity()
+    };
+
+    assert_eq!(
+        identity(lash_core::ProcessOriginator::host_scoped("operator"))
+            .scope
+            .session_id,
+        None,
+        "a host namespace and ambient capability are not runtime session attribution"
+    );
+    assert_eq!(
+        identity(lash_core::ProcessOriginator::session(
+            lash_core::SessionScope::new("actual-session")
+        ))
+        .scope
+        .session_id,
+        Some(lash_sansio::SessionId::from("actual-session"))
+    );
+}
 use std::sync::atomic::Ordering;
 
 const UNVERSIONED_SEGMENT_STATE: &[u8] =

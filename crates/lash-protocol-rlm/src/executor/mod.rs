@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{
-    ExecRequest, ExecResponse, RuntimeEffectKind, RuntimeExecutionContext, TraceContext,
+    ExecRequest, ExecResponse, RuntimeExecutionContext, TraceContext,
     facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
     facade_support::TraceSink,
 };
@@ -818,7 +818,7 @@ fn emit_step_trace(
     let Some(invocation) = ctx.parent_invocation() else {
         return;
     };
-    let mut context = lash_core::facade_support::trace_context_for_runtime_invocation(
+    let context = lash_core::facade_support::trace_context_for_runtime_invocation(
         config.trace_context.clone(),
         invocation,
     );

@@ -5,8 +5,8 @@ fn operation_effect_invocation(
     attribution: lash_core::RuntimeAttribution,
     effect_id: impl Into<String>,
     replay_key: impl Into<String>,
-) -> RuntimeInvocation {
-    RuntimeInvocation::effect(
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
             ExecutionScope::runtime_operation(operation_id.into()),
             replay_key,
@@ -24,8 +24,8 @@ fn turn_effect_invocation(
     protocol_iteration: usize,
     effect_id: impl Into<String>,
     replay_key: impl Into<String>,
-) -> RuntimeInvocation {
-    RuntimeInvocation::effect(
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
             .expect("valid test turn effect address"),
         lash_core::RuntimeAttribution::for_turn(
@@ -1120,7 +1120,7 @@ pub(super) async fn journaled_cancel_peeks_replay_while_live_watcher_observes_la
         .expect("cancel gate key");
     let envelope = |identity: &str| {
         RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            lash_core::RuntimeEffectInvocation::new(
                 lash_core::EffectAddress::new(scope.clone(), identity)
                     .expect("valid journaled peek address"),
                 lash_core::RuntimeAttribution {

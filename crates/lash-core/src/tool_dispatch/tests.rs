@@ -414,11 +414,7 @@ impl crate::RuntimeEffectController for IntentReplayController {
         envelope: crate::RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("law effects carry replay keys")
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         let frame = serde_json::to_string(&envelope).expect("serialize law effect frame");
         self.frame_sightings
             .lock_recover()

@@ -3,8 +3,8 @@ use crate::SessionId;
 use crate::TurnId;
 use crate::sansio::EffectId;
 use crate::{
-    CausalRef, EffectAddress, ExecutionScope, RuntimeAttribution, RuntimeEffectKind,
-    RuntimeInvocation, RuntimeReplay, RuntimeSubject,
+    CausalRef, EffectAddress, ExecutionScope, RuntimeAttribution, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeInvocation, RuntimeReplay, RuntimeSubject,
 };
 
 pub(crate) fn turn_effect_invocation(
@@ -14,7 +14,7 @@ pub(crate) fn turn_effect_invocation(
     protocol_iteration: usize,
     effect_id: EffectId,
     effect_kind: RuntimeEffectKind,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     let replay_key = turn_effect_replay_key(
         session_id,
         turn_id,
@@ -23,7 +23,7 @@ pub(crate) fn turn_effect_invocation(
         effect_kind,
         effect_id,
     );
-    RuntimeInvocation::effect(
+    RuntimeEffectInvocation::new(
         EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
             .expect("turn effect identity is admitted from validated session and turn ids"),
         RuntimeAttribution::for_turn(session_id, turn_id, turn_index, protocol_iteration),
@@ -42,12 +42,12 @@ pub(crate) fn turn_acceptance_effect_invocation(
     session_id: &SessionId,
     turn_id: &TurnId,
     turn_index: usize,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     let replay_key = format!(
         "{session_id}:{turn_id}:{}",
         RuntimeEffectKind::AcceptTurnInput.as_str()
     );
-    RuntimeInvocation::effect(
+    RuntimeEffectInvocation::new(
         EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
             .expect("turn acceptance identity is admitted from validated session and turn ids"),
         RuntimeAttribution::for_turn(session_id, turn_id, turn_index, 0),
@@ -68,15 +68,14 @@ pub(crate) fn turn_acceptance_effect_invocation(
 /// prefix, which is a naming coincidence, not a recorded fact.
 pub(crate) fn turn_phase_effect_invocation(
     execution_scope: &ExecutionScope,
-    parent: &RuntimeInvocation,
+    parent: &RuntimeEffectInvocation,
     effect_id: EffectId,
     phase_kind: RuntimeEffectKind,
-) -> RuntimeInvocation {
-    child_effect_invocation(
+) -> RuntimeEffectInvocation {
+    child_effect_invocation_from_effect(
         execution_scope,
         parent,
         format!("{}.{}", effect_id.0, phase_kind.as_str()),
-        phase_kind,
         phase_kind.as_str(),
     )
 }
@@ -102,24 +101,40 @@ pub(crate) fn child_effect_invocation(
     effect_id: impl Into<String>,
     _kind: RuntimeEffectKind,
     replay_suffix: impl AsRef<str>,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     let replay_base = parent
         .replay_key()
         .or_else(|| parent.effect_id())
         .unwrap_or("effect");
-    RuntimeInvocation {
+    RuntimeEffectInvocation {
+        address: EffectAddress::new(
+            execution_scope.clone(),
+            format!("{replay_base}:{}", replay_suffix.as_ref()),
+        )
+        .expect("child effect uses the already admitted controller scope"),
         attribution: parent.attribution.clone(),
-        subject: RuntimeSubject::Effect {
-            address: EffectAddress::new(
-                execution_scope.clone(),
-                format!("{replay_base}:{}", replay_suffix.as_ref()),
-            )
-            .expect("child effect uses the already admitted controller scope"),
-            effect_id: effect_id.into(),
-            replay_attribution: parent.replay_attribution().cloned(),
-        },
+        effect_id: effect_id.into(),
         caused_by: parent.causal_ref(),
-        replay: None,
+        replay_attribution: parent.replay_attribution().cloned(),
+    }
+}
+
+pub(crate) fn child_effect_invocation_from_effect(
+    execution_scope: &ExecutionScope,
+    parent: &RuntimeEffectInvocation,
+    effect_id: impl Into<String>,
+    replay_suffix: impl AsRef<str>,
+) -> RuntimeEffectInvocation {
+    RuntimeEffectInvocation {
+        address: EffectAddress::new(
+            execution_scope.clone(),
+            format!("{}:{}", parent.replay_key(), replay_suffix.as_ref()),
+        )
+        .expect("child effect uses the already admitted controller scope"),
+        attribution: parent.attribution.clone(),
+        effect_id: effect_id.into(),
+        caused_by: Some(parent.causal_ref()),
+        replay_attribution: parent.replay_attribution.clone(),
     }
 }
 
@@ -128,7 +143,7 @@ pub(crate) fn tool_retry_sleep_invocation(
     parent: &RuntimeInvocation,
     tool_name: &str,
     attempt: u32,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     let parent_effect_id = parent.effect_id().unwrap_or("effect");
     child_effect_invocation(
         execution_scope,
@@ -145,7 +160,7 @@ pub(crate) fn process_sleep_invocation(
     parent: Option<&RuntimeInvocation>,
     scope: &str,
     sequence: u64,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     let suffix = format!("process:{scope}:sleep:{sequence}");
     if let Some(parent) = parent {
         let parent_effect_id = parent.effect_id().unwrap_or("effect");
@@ -157,7 +172,7 @@ pub(crate) fn process_sleep_invocation(
             suffix,
         );
     }
-    RuntimeInvocation::effect(
+    RuntimeEffectInvocation::new(
         EffectAddress::new(execution_scope.clone(), suffix.clone())
             .expect("process sleep uses the already admitted controller scope"),
         attribution,
@@ -172,7 +187,7 @@ pub(crate) fn process_await_event_invocation(
     process_id: &ProcessId,
     signal_name: &str,
     ordinal: u64,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     let suffix = format!("process:{process_id}:signal.{signal_name}:await:{ordinal}");
     if let Some(parent) = parent {
         let parent_effect_id = parent.effect_id().unwrap_or("effect");
@@ -184,7 +199,7 @@ pub(crate) fn process_await_event_invocation(
             suffix,
         );
     }
-    RuntimeInvocation::effect(
+    RuntimeEffectInvocation::new(
         EffectAddress::new(execution_scope.clone(), suffix.clone())
             .expect("process await uses the already admitted controller scope"),
         attribution,
@@ -197,25 +212,22 @@ pub(crate) fn process_effect_invocation(
     attribution: RuntimeAttribution,
     parent: Option<RuntimeInvocation>,
     effect_id: &str,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     if let Some(parent) = parent {
         let replay_base = parent.replay_key().unwrap_or("process");
-        return RuntimeInvocation {
+        return RuntimeEffectInvocation {
+            address: EffectAddress::new(
+                execution_scope.clone(),
+                format!("{replay_base}:{effect_id}"),
+            )
+            .expect("process effect uses the already admitted controller scope"),
             attribution,
-            subject: RuntimeSubject::Effect {
-                address: EffectAddress::new(
-                    execution_scope.clone(),
-                    format!("{replay_base}:{effect_id}"),
-                )
-                .expect("process effect uses the already admitted controller scope"),
-                effect_id: effect_id.to_string(),
-                replay_attribution: parent.replay_attribution().cloned(),
-            },
+            effect_id: effect_id.to_string(),
             caused_by: parent.causal_ref(),
-            replay: None,
+            replay_attribution: parent.replay_attribution().cloned(),
         };
     }
-    RuntimeInvocation::effect(
+    RuntimeEffectInvocation::new(
         EffectAddress::new(execution_scope.clone(), effect_id.to_string())
             .expect("process effect uses the already admitted controller scope"),
         attribution,
@@ -279,7 +291,7 @@ pub(crate) fn direct_effect_invocation(
     replay_discriminator: String,
     turn_id: Option<&TurnId>,
     caused_by: Option<CausalRef>,
-) -> RuntimeInvocation {
+) -> RuntimeEffectInvocation {
     let replay_preimage = direct_effect_replay_preimage(
         session_id,
         turn_id.filter(|value| !value.is_empty()),
@@ -291,7 +303,7 @@ pub(crate) fn direct_effect_invocation(
         DIRECT_EFFECT_FAMILY_VERSION,
         &replay_preimage,
     );
-    RuntimeInvocation::effect(
+    RuntimeEffectInvocation::new(
         EffectAddress::new(execution_scope.clone(), replay_key)
             .expect("direct effect uses the already admitted controller scope"),
         RuntimeAttribution {
@@ -642,9 +654,7 @@ mod tests {
                 None,
             )
             .replay_key(),
-            Some(
-                "direct:v2:blake3:c92b5337c6f126eb1f8951b3c0c5eea412be5953c0e254bc4369e08d29d33451"
-            )
+            "direct:v2:blake3:c92b5337c6f126eb1f8951b3c0c5eea412be5953c0e254bc4369e08d29d33451"
         );
 
         let first_discriminator = direct_request_discriminator(
@@ -675,9 +685,7 @@ mod tests {
         );
         assert_eq!(
             first.replay_key(),
-            Some(
-                "direct:v2:blake3:359eeeb5c5899114070602cf4659773cf646c6bd8aa919596785bfe55de41e34"
-            )
+            "direct:v2:blake3:359eeeb5c5899114070602cf4659773cf646c6bd8aa919596785bfe55de41e34"
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
@@ -700,9 +708,7 @@ mod tests {
         );
         assert_eq!(
             second.replay_key(),
-            Some(
-                "direct:v2:blake3:91275bb8dccd63323941efc579d9177fbc134adde4f970c0c521623d7ef5edc7"
-            )
+            "direct:v2:blake3:91275bb8dccd63323941efc579d9177fbc134adde4f970c0c521623d7ef5edc7"
         );
         assert_ne!(first.replay_key(), second.replay_key());
     }

@@ -1255,10 +1255,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
             format!(
                 "effect `{}` must enter a Restate handler and use RestateRuntimeEffectController::scoped_effect_controller",
-                envelope
-                    .invocation
-                    .effect_id()
-                    .unwrap_or_else(|| envelope.command.kind().as_str())
+                envelope.invocation.effect_id()
             ),
         ))
     }

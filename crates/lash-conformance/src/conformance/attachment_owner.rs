@@ -262,7 +262,7 @@ fn tool_attempt_envelope(
     turn_id: &TurnId,
 ) -> crate::RuntimeEffectEnvelope {
     crate::RuntimeEffectEnvelope::new(
-        crate::RuntimeInvocation::effect(
+        crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 crate::ExecutionScope::turn("attachment-owner-cold-replay", turn_id),
                 format!("attachment-owner:{turn_id}:{effect_id}"),

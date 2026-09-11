@@ -12,7 +12,7 @@ use lash::CancellationToken;
 use lash::runtime::{
     GroupExecutors, GroupWakePolicy, LoserPolicy, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
+    RuntimeEffectOutcome, RuntimeScope,
 };
 use lash_restate::{
     EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupSettlementTerminal,
@@ -347,7 +347,7 @@ fn effect_group(
         .enumerate()
         .map(|(position, duration_ms)| {
             RuntimeEffectEnvelope::new(
-                RuntimeInvocation::effect(
+                lash_core::RuntimeEffectInvocation::new(
                     scope.clone(),
                     format!("sleep-{position}"),
                     RuntimeEffectKind::Sleep,
@@ -360,7 +360,7 @@ fn effect_group(
         })
         .collect();
     RuntimeEffectGroup::try_new(
-        RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             scope,
             "effect-group",
             RuntimeEffectKind::Sleep,
@@ -414,7 +414,7 @@ mod tests {
         );
 
         let unsupported = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            lash_core::RuntimeEffectInvocation::new(
                 RuntimeScope::new("routing-test"),
                 "unsupported",
                 RuntimeEffectKind::LanguageRuntimeValue,

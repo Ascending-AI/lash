@@ -278,30 +278,65 @@ pub(crate) fn trace_context_from_invocation(invocation: &crate::RuntimeInvocatio
 }
 
 pub(crate) fn trace_context_for_invocation(
-    mut context: TraceContext,
+    context: TraceContext,
     invocation: &crate::RuntimeInvocation,
 ) -> TraceContext {
-    if let Some(session_id) = invocation.attribution.session_id.as_ref() {
+    trace_context_for_invocation_parts(
+        context,
+        &invocation.attribution,
+        invocation.effect_id(),
+        invocation.replay_key(),
+        invocation.caused_by.as_ref(),
+    )
+}
+
+pub(crate) fn trace_context_from_effect_invocation(
+    invocation: &crate::RuntimeEffectInvocation,
+) -> TraceContext {
+    trace_context_for_effect_invocation(TraceContext::default(), invocation)
+}
+
+pub(crate) fn trace_context_for_effect_invocation(
+    context: TraceContext,
+    invocation: &crate::RuntimeEffectInvocation,
+) -> TraceContext {
+    trace_context_for_invocation_parts(
+        context,
+        &invocation.attribution,
+        Some(invocation.effect_id()),
+        Some(invocation.replay_key()),
+        invocation.caused_by.as_ref(),
+    )
+}
+
+fn trace_context_for_invocation_parts(
+    mut context: TraceContext,
+    attribution: &crate::RuntimeAttribution,
+    effect_id: Option<&str>,
+    replay_key: Option<&str>,
+    caused_by: Option<&crate::CausalRef>,
+) -> TraceContext {
+    if let Some(session_id) = attribution.session_id.as_ref() {
         context = context.for_session(session_id.clone());
     }
-    if let Some(turn_id) = invocation.attribution.turn_id.as_ref() {
+    if let Some(turn_id) = attribution.turn_id.as_ref() {
         context = context.for_turn(turn_id.clone());
     }
-    if let Some(turn_index) = invocation.attribution.turn_index {
+    if let Some(turn_index) = attribution.turn_index {
         context = context.for_turn_index(turn_index);
     }
-    if let Some(protocol_iteration) = invocation.attribution.protocol_iteration {
+    if let Some(protocol_iteration) = attribution.protocol_iteration {
         context = context.for_protocol_iteration(protocol_iteration);
     }
-    if let Some(effect_id) = invocation.effect_id() {
+    if let Some(effect_id) = effect_id {
         context.effect_id = Some(effect_id.to_string());
     }
-    if let Some(replay_key) = invocation.replay_key() {
+    if let Some(replay_key) = replay_key {
         context
             .metadata
             .insert("replay_key".to_string(), serde_json::json!(replay_key));
     }
-    if let Some(caused_by) = invocation.caused_by.as_ref() {
+    if let Some(caused_by) = caused_by {
         context = trace_context_with_causal_ref(context, caused_by);
         if context.parent_graph_node_id.is_none() {
             context.parent_graph_node_id = Some(causal_node_id(caused_by));
@@ -309,8 +344,8 @@ pub(crate) fn trace_context_for_invocation(
     }
     if context.parent_graph_node_id.is_none()
         && let (Some(session_id), Some(turn_id)) = (
-            invocation.attribution.session_id.as_ref(),
-            invocation.attribution.turn_id.as_ref(),
+            attribution.session_id.as_ref(),
+            attribution.turn_id.as_ref(),
         )
     {
         context.parent_graph_node_id = Some(format!("turn:{session_id}:{turn_id}"));

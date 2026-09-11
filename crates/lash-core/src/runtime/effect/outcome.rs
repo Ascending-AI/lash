@@ -401,12 +401,7 @@ mod tests {
         );
 
         assert_eq!(invocation.attribution.session_id.as_deref(), Some("s"));
-        assert!(
-            invocation
-                .replay_key()
-                .expect("replay key")
-                .starts_with("direct:v2:blake3:")
-        );
+        assert!(invocation.replay_key().starts_with("direct:v2:blake3:"));
     }
 
     #[test]
@@ -422,16 +417,11 @@ mod tests {
 
         let sleep = crate::runtime::causal::tool_retry_sleep_invocation(
             &crate::ExecutionScope::turn("s", "turn"),
-            &parent,
+            &parent.into_runtime_invocation(),
             "probe",
             2,
         );
 
-        assert!(
-            sleep
-                .replay_key()
-                .expect("replay key")
-                .ends_with(":probe:attempt:2:sleep")
-        );
+        assert!(sleep.replay_key().ends_with(":probe:attempt:2:sleep"));
     }
 }

@@ -1,6 +1,6 @@
 use lash_core::{
-    ExecutionScope, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ExecutionScope, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_sansio::SessionId;
@@ -48,7 +48,7 @@ fn completed_continue_as_effect_fixture() -> (lash_core::RuntimeEffectEnvelope, 
 {
     let call_id = "continue-as-call";
     let envelope = lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 lash_core::ExecutionScope::turn("cutover-session", "cutover-turn"),
                 "continue-as-attempt-replay",

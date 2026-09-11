@@ -295,7 +295,7 @@ pub async fn run_lashlang_process(
         None => None,
     };
     let process_id = context.registration().id.clone();
-    let session_id = lash_sansio::SessionId::from(context.session_id());
+    let session_id = process_trace_session_id(&context.registration().provenance.originator);
     let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
         engine.execution_sink.clone(),
         engine.trace_context.clone(),
@@ -1073,7 +1073,7 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
 struct LashlangProcessExecutionTrace {
     sink: Option<Arc<dyn TraceSink>>,
     base_context: TraceContext,
-    session_id: SessionId,
+    session_id: Option<SessionId>,
     process_id: ProcessId,
     module_ref: lashlang::ModuleRef,
     process_ref: lashlang::ProcessRef,
@@ -1084,7 +1084,7 @@ impl LashlangProcessExecutionTrace {
     fn new(
         sink: Option<Arc<dyn TraceSink>>,
         base_context: TraceContext,
-        session_id: SessionId,
+        session_id: Option<SessionId>,
         process_id: ProcessId,
         module_ref: lashlang::ModuleRef,
         process_ref: lashlang::ProcessRef,
@@ -1101,9 +1101,18 @@ impl LashlangProcessExecutionTrace {
         }
     }
 
+    fn scope(&self) -> TraceRuntimeScope {
+        TraceRuntimeScope {
+            session_id: self.session_id.clone(),
+            turn_id: None,
+            turn_index: None,
+            protocol_iteration: None,
+        }
+    }
+
     fn identity(&self) -> TraceLanguageExecutionIdentity {
         TraceLanguageExecutionIdentity {
-            scope: TraceRuntimeScope::new(self.session_id.clone()),
+            scope: self.scope(),
             subject: TraceRuntimeSubject::Process {
                 process_id: self.process_id.clone(),
             },
@@ -1226,7 +1235,7 @@ impl LashlangProcessExecutionTrace {
                     parent_node_id: site.node_id,
                     occurrence,
                     child: TraceLanguageChildExecution {
-                        scope: TraceRuntimeScope::new(self.session_id.clone()),
+                        scope: self.scope(),
                         subject: TraceRuntimeSubject::Process {
                             process_id: child.process_id,
                         },
@@ -1254,7 +1263,7 @@ impl LashlangProcessExecutionTrace {
         let occurrence = call_site.occurrence;
         Some(ToolChildExecutionTraceHook::new(move |started| {
             let child = TraceLanguageChildExecution {
-                scope: TraceRuntimeScope::new(trace.session_id.clone()),
+                scope: trace.scope(),
                 subject: TraceRuntimeSubject::Process {
                     process_id: started.process_id,
                 },
@@ -1282,7 +1291,7 @@ impl LashlangProcessExecutionTrace {
             return;
         };
         let mut context = self.base_context.clone();
-        context.session_id = Some(self.session_id.clone());
+        context.session_id = self.session_id.clone();
         let _ = sink.append(&TraceRecord::new(
             context,
             TraceEvent::LanguageExecution {
@@ -1290,6 +1299,13 @@ impl LashlangProcessExecutionTrace {
                 event,
             },
         ));
+    }
+}
+
+fn process_trace_session_id(originator: &lash_core::ProcessOriginator) -> Option<SessionId> {
+    match originator {
+        lash_core::ProcessOriginator::Session { session_id, .. } => Some(session_id.clone()),
+        lash_core::ProcessOriginator::Host { .. } => None,
     }
 }
 
@@ -1548,57 +1564,9 @@ pub fn lashlang_process_signal_event_types(
         .collect()
 }
 
-pub fn lashlang_type_expr_schema(ty: &lashlang::TypeExpr) -> serde_json::Value {
-    match ty {
-        lashlang::TypeExpr::Any
-        | lashlang::TypeExpr::Dict
-        | lashlang::TypeExpr::Ref(_)
-        | lashlang::TypeExpr::Process(_)
-        | lashlang::TypeExpr::TriggerHandle(_) => serde_json::json!({}),
-        lashlang::TypeExpr::Str => serde_json::json!({ "type": "string" }),
-        lashlang::TypeExpr::Int => serde_json::json!({ "type": "integer" }),
-        lashlang::TypeExpr::Float => serde_json::json!({ "type": "number" }),
-        lashlang::TypeExpr::Bool => serde_json::json!({ "type": "boolean" }),
-        lashlang::TypeExpr::Null => serde_json::json!({ "type": "null" }),
-        lashlang::TypeExpr::Enum(values) => serde_json::json!({
-            "enum": values.iter().map(|value| value.as_str()).collect::<Vec<_>>()
-        }),
-        lashlang::TypeExpr::List(item) => serde_json::json!({
-            "type": "array",
-            "items": lashlang_type_expr_schema(item),
-        }),
-        lashlang::TypeExpr::Object(fields) => {
-            let mut properties = serde_json::Map::new();
-            let mut required = Vec::new();
-            for field in fields {
-                properties.insert(field.name.to_string(), lashlang_type_expr_schema(&field.ty));
-                if !field.optional {
-                    required.push(serde_json::Value::String(field.name.to_string()));
-                }
-            }
-            let mut schema = serde_json::Map::new();
-            schema.insert(
-                "type".to_string(),
-                serde_json::Value::String("object".to_string()),
-            );
-            schema.insert(
-                "properties".to_string(),
-                serde_json::Value::Object(properties),
-            );
-            if !required.is_empty() {
-                schema.insert("required".to_string(), serde_json::Value::Array(required));
-            }
-            schema.insert(
-                "additionalProperties".to_string(),
-                serde_json::Value::Bool(true),
-            );
-            serde_json::Value::Object(schema)
-        }
-        lashlang::TypeExpr::Union(variants) => serde_json::json!({
-            "anyOf": variants.iter().map(lashlang_type_expr_schema).collect::<Vec<_>>()
-        }),
-    }
-}
+#[path = "process/schema.rs"]
+mod schema;
+pub use schema::lashlang_type_expr_schema;
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]

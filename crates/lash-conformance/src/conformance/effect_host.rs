@@ -37,13 +37,9 @@ impl RuntimeEffectController for RecordingEffectHostController {
         self.records.lock_recover().push(RecordingEffectHostRecord {
             runtime_attribution: envelope.invocation.attribution.clone(),
             execution_scope: self.execution_scope.clone(),
-            effect_id: envelope
-                .invocation
-                .effect_id()
-                .expect("effect invocation")
-                .to_string(),
+            effect_id: envelope.invocation.effect_id().to_string(),
             effect_kind: envelope.command.kind(),
-            replay_key: envelope.invocation.replay_key().map(ToOwned::to_owned),
+            replay_key: Some(envelope.invocation.replay_key().to_owned()),
             envelope_hash,
         });
         match envelope.command {
@@ -456,7 +452,7 @@ where
         "replay_error_tool",
     );
     let trigger = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(execution_scope.clone(), "replay-trigger-list")
                 .expect("valid replay trigger address"),
             RuntimeAttribution::for_session("replay-session"),
@@ -534,7 +530,7 @@ where
         (
             operation,
             RuntimeEffectEnvelope::new(
-                RuntimeInvocation::effect(
+                RuntimeEffectInvocation::new(
                     EffectAddress::new(execution_scope.clone(), effect_id.clone())
                         .expect("valid replay trigger mutation address"),
                     RuntimeAttribution::for_session("replay-session"),
@@ -1367,7 +1363,7 @@ pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
         }
     });
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(scope.clone(), format!("executing-effect-{suffix}"))
                 .expect("valid executing-effect address"),
             RuntimeAttribution::none(),
@@ -1836,7 +1832,7 @@ pub(super) fn exec_code_conformance_envelope(
 ) -> RuntimeEffectEnvelope {
     let replay_key = format!("exec-code-replay:{effect_id}");
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(execution_scope.clone(), replay_key)
                 .expect("valid exec-code conformance address"),
             RuntimeAttribution::for_turn("journaled-session", "journaled-turn", 7, 0),
@@ -1977,7 +1973,7 @@ fn lease_fencing_system_clock() -> Arc<dyn crate::Clock> {
 
 fn lease_fencing_envelope(replay_key: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(ExecutionScope::turn("session", "turn"), replay_key)
                 .expect("valid lease-fencing address"),
             RuntimeAttribution::for_turn("effect-lease-session", "effect-lease-turn", 1, 0),
@@ -2249,7 +2245,7 @@ fn replay_conformance_tool_attempt_envelope(
     tool_name: &'static str,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(
                 execution_scope.clone(),
                 format!("tool-attempt-conformance:tool-attempt-conformance-turn:{effect_id}"),
@@ -2397,7 +2393,7 @@ fn replay_conformance_tool_attempt_recording_executor(
     concurrent_probe: Option<ReplayConformanceProbe>,
 ) -> RuntimeEffectLocalExecutor<'static> {
     RuntimeEffectLocalExecutor::testing(move |envelope| async move {
-        assert_eq!(envelope.invocation.effect_id(), Some(attempt.effect_id));
+        assert_eq!(envelope.invocation.effect_id(), attempt.effect_id);
         if let Some(probe) = concurrent_probe {
             probe
                 .entered
@@ -2422,7 +2418,7 @@ fn replay_conformance_failing_executor(
     RuntimeEffectLocalExecutor::testing(move |envelope| async move {
         replay_local_calls
             .lock_recover()
-            .push(envelope.invocation.effect_id().unwrap_or("").to_string());
+            .push(envelope.invocation.effect_id().to_string());
         Err(RuntimeEffectControllerError::foreign(
             "conformance_replay_local_executor_called",
             "recorded replay must not invoke local effect execution",

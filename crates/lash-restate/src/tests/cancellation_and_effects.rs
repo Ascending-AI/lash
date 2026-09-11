@@ -261,7 +261,7 @@ pub(super) async fn completed_waits_unregister_the_shared_test_turn_cancel_gate(
 #[test]
 pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
     let turn_scope = durable_turn_scope("session", "turn");
-    let process_scoped_sleep = RuntimeInvocation::effect(
+    let process_scoped_sleep = lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
             ExecutionScope::process("worker"),
             "session:turn:1:0:process:worker:sleep:1",

@@ -352,7 +352,7 @@ mod tests {
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
         );
-        let invocation = RuntimeInvocation::effect(
+        let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(
                 ExecutionScope::turn("session", "turn"),
                 "session:turn:process:start:call-123",
@@ -424,7 +424,7 @@ mod tests {
                 prepared_tool_call("call-2", "lookup"),
             ],
         );
-        let invocation = RuntimeInvocation::effect(
+        let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(
                 ExecutionScope::turn("session", "turn"),
                 "session:turn:tool-batch:batch-123",

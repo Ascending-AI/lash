@@ -102,20 +102,20 @@ pub trait DeferredToolResolver: Send + Sync {
 /// no deferral.
 pub type SharedDeferredToolResolver = Arc<dyn DeferredToolResolver>;
 
-/// Stable identity of one `ExecCode` link. The scope distinguishes logical
-/// turns and protocol iterations, while the effect and replay keys distinguish
-/// individual code effects and their durable re-drives.
+/// Stable identity of one `ExecCode` link.
+///
+/// The admitted address is the whole identity: `effect_id` remains a
+/// descriptive label and changing it cannot discard resolutions recorded for
+/// the same durable code effect.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeferredResolutionLinkKey {
     pub address: lash_core::EffectAddress,
-    pub effect_id: String,
 }
 
 impl DeferredResolutionLinkKey {
     pub fn from_exec_code_invocation(invocation: &lash_core::RuntimeInvocation) -> Option<Self> {
         Some(Self {
             address: invocation.effect_address()?.clone(),
-            effect_id: invocation.effect_id()?.to_string(),
         })
     }
 }
@@ -277,6 +277,35 @@ mod tests {
     use lash_sansio::sync::MutexExt;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn deferred_link_identity_ignores_descriptive_effect_label() {
+        let address = lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::turn("session", "turn"),
+            "exec-code:0",
+        )
+        .expect("valid deferred-link address");
+        let invocation = |effect_id: &str| {
+            lash_core::RuntimeInvocation::effect(
+                address.clone(),
+                lash_core::RuntimeAttribution::for_turn("session", "turn", 0, 0),
+                effect_id,
+            )
+        };
+
+        assert_eq!(
+            DeferredResolutionLinkKey::from_exec_code_invocation(&invocation("first")),
+            DeferredResolutionLinkKey::from_exec_code_invocation(&invocation("renamed")),
+        );
+        assert_eq!(
+            serde_json::to_value(
+                DeferredResolutionLinkKey::from_exec_code_invocation(&invocation("first"))
+                    .expect("effect invocation has a link identity")
+            )
+            .expect("link identity encodes"),
+            serde_json::json!({"address": address})
+        );
+    }
 
     fn grant(name: &str, module: &str, operation: &str) -> ToolGrant {
         let definition = lash_core::ToolDefinition::raw(

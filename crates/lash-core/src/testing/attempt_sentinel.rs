@@ -166,7 +166,7 @@ impl<'run> AttemptAtomicitySentinel<'run> {
 
 fn effect_crossing_label(envelope: &RuntimeEffectEnvelope) -> String {
     let kind = envelope.command.kind().as_str();
-    let effect_id = envelope.invocation.effect_id().unwrap_or("no_effect_id");
+    let effect_id = envelope.invocation.effect_id();
     format!("execute_effect:{kind}:{effect_id}")
 }
 

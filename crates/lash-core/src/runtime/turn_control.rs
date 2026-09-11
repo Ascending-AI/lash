@@ -13,7 +13,6 @@ use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeInvocation,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -860,7 +859,7 @@ impl ActiveTurnControl {
         causal_identity: String,
         key: &AwaitEventKey,
     ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
-        let invocation = RuntimeInvocation::effect(
+        let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 crate::ExecutionScope::turn(
                     self.address.session_id.clone(),

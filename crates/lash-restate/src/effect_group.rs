@@ -145,19 +145,8 @@ impl EffectGroupShape {
             .children()
             .iter()
             .enumerate()
-            .map(|(position, child)| {
-                child
-                    .invocation
-                    .replay_key()
-                    .map(str::to_owned)
-                    .ok_or_else(|| {
-                        group_shape_error(format!(
-                            "child {position} of effect group {} has no replay key",
-                            group.group_key()
-                        ))
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|(_, child)| child.invocation.replay_key().to_owned())
+            .collect();
         let wait_scope = ExecutionScope::runtime_operation(group.group_key());
         Ok(Self {
             children: group.children().len(),

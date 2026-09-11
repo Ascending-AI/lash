@@ -1208,6 +1208,7 @@ pub enum RemoteRuntimeSubject {
         subscription_revision: Option<u64>,
     },
     SessionNode {
+        session_id: SessionId,
         node_id: String,
     },
 }
@@ -1240,7 +1241,11 @@ impl RemoteRuntimeSubject {
             Self::TriggerOccurrence { occurrence_id, .. } => {
                 require_non_empty(type_name, "runtime_subject.occurrence_id", occurrence_id)
             }
-            Self::SessionNode { node_id } => {
+            Self::SessionNode {
+                session_id,
+                node_id,
+            } => {
+                require_non_empty(type_name, "runtime_subject.session_id", session_id)?;
                 require_non_empty(type_name, "runtime_subject.node_id", node_id)
             }
         }

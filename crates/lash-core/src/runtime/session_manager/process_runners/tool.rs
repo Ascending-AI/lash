@@ -8,7 +8,7 @@ mod turn_cancel_gate_tests;
 async fn await_pending_process_tool(
     effect_controller: &dyn crate::RuntimeEffectController,
     clock: Arc<dyn crate::Clock>,
-    invocation: crate::RuntimeInvocation,
+    invocation: crate::RuntimeEffectInvocation,
     pending: crate::tool_dispatch::PendingToolDispatchOutcome,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
 ) -> Result<crate::Resolution, crate::PluginError> {

@@ -9,7 +9,7 @@
 use super::*;
 
 impl RuntimeExecutionContext<'_> {
-    fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeInvocation {
+    fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeEffectInvocation {
         let suffix = format!("tool-batch:{batch_id}");
         if let Some(parent) = self.parent_invocation.as_ref() {
             let parent_effect_id = parent.effect_id().unwrap_or("effect");
@@ -22,7 +22,7 @@ impl RuntimeExecutionContext<'_> {
             );
         }
         let replay_key = format!("{}:{suffix}", self.execution_scope_id());
-        crate::RuntimeInvocation::effect(
+        crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 self.dispatch
                     .effect_controller
@@ -32,7 +32,7 @@ impl RuntimeExecutionContext<'_> {
                 replay_key,
             )
             .expect("tool batch carries an admitted effect scope"),
-            crate::RuntimeAttribution::for_session(self.session_id.clone()),
+            self.effect_attribution(),
             suffix,
         )
     }
@@ -495,7 +495,7 @@ impl RuntimeExecutionContext<'_> {
                         let dispatch_outcome = self
                             .await_pending_tool_dispatch_outcome(
                                 &call_id,
-                                Some(invocation.clone()),
+                                Some(invocation.clone().into_runtime_invocation()),
                                 crate::tool_dispatch::PendingToolDispatchOutcome {
                                     tool_name: prepared.tool_name.clone(),
                                     args: prepared.args.clone(),

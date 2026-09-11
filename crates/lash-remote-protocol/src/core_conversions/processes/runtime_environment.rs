@@ -222,9 +222,13 @@ impl From<lash_core::runtime::RuntimeSubject> for RemoteRuntimeSubject {
                 subscription_incarnation,
                 subscription_revision,
             },
-            lash_core::runtime::RuntimeSubject::SessionNode { node_id } => {
-                Self::SessionNode { node_id }
-            }
+            lash_core::runtime::RuntimeSubject::SessionNode {
+                session_id,
+                node_id,
+            } => Self::SessionNode {
+                session_id,
+                node_id,
+            },
         }
     }
 }
@@ -275,7 +279,13 @@ impl From<RemoteRuntimeSubject> for lash_core::runtime::RuntimeSubject {
                 subscription_incarnation,
                 subscription_revision,
             },
-            RemoteRuntimeSubject::SessionNode { node_id } => Self::SessionNode { node_id },
+            RemoteRuntimeSubject::SessionNode {
+                session_id,
+                node_id,
+            } => Self::SessionNode {
+                session_id,
+                node_id,
+            },
         }
     }
 }

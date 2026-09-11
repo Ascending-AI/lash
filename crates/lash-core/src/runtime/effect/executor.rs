@@ -911,8 +911,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     group.as_deref(),
                     "trigger",
                 )?;
-                self.execute_trigger(invocation.into_runtime_invocation(), *command)
-                    .await
+                self.execute_trigger(invocation, *command).await
             }
             command => {
                 self.execute(RuntimeEffectEnvelope {
@@ -943,18 +942,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// effect.
     pub async fn execute_trigger(
         self,
-        invocation: crate::RuntimeInvocation,
+        invocation: crate::RuntimeEffectInvocation,
         command: crate::TriggerCommand,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let operation_id = invocation
-            .effect_id()
-            .ok_or_else(|| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
-                    "trigger effect requires an effect id",
-                )
-            })?
-            .to_string();
+        let operation_id = invocation.effect_id().to_string();
         match self.state {
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
                 let result = execution.execute(&operation_id, command).await?;
@@ -1426,7 +1417,7 @@ async fn sleep_with_cancellation(
 #[cfg(test)]
 mod task_boundary_tests {
     use super::*;
-    use crate::RuntimeInvocation;
+    use crate::RuntimeEffectInvocation;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct TaskIdentityRunner {
@@ -1463,7 +1454,7 @@ mod task_boundary_tests {
             let parent_id = tokio::task::id();
             let outcome = executor
                 .execute(RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
+                    RuntimeEffectInvocation::new(
                         crate::EffectAddress::new(
                             crate::ExecutionScope::runtime_operation("task-boundary"),
                             "task-boundary:exec",
@@ -1550,7 +1541,7 @@ mod task_boundary_tests {
             EffectTaskController::scoped(&controller, execution_scope.clone())
                 .expect("task controller");
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(execution_scope, "replay-skips-local:sleep")
                     .expect("valid task proxy address"),
                 crate::RuntimeAttribution::none(),

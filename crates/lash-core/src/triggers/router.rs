@@ -675,7 +675,7 @@ impl TriggerRouter {
             execution_context: Box::new(execution_context),
         };
         let effect_id = command.effect_id();
-        let invocation = crate::RuntimeInvocation::effect(
+        let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 effect_controller.execution_scope().clone(),
                 format!(

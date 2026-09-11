@@ -292,14 +292,16 @@ pub struct UnsettledGroupChild {
 
 #[cfg(test)]
 mod tests {
-    use super::super::envelope::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeInvocation};
+    use super::super::envelope::{
+        RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    };
     use super::*;
 
     fn group_of(children: usize, wake: GroupWakePolicy, loser: LoserPolicy) -> RuntimeEffectGroup {
         // Siblings carry distinct replay keys, because one replay key is one
         // journaled child and a group of duplicates is refused at construction.
         let invocation = |replay_key: String| {
-            RuntimeInvocation::effect(
+            RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
                     crate::ExecutionScope::turn("session", "turn"),
                     replay_key,

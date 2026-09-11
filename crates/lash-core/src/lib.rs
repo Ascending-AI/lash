@@ -237,6 +237,15 @@ pub mod facade_support {
     ) -> lash_trace::TraceContext {
         crate::trace::trace_context_for_invocation(context, invocation)
     }
+
+    /// Apply the canonical effect-header projection to an existing trace context.
+    #[doc(hidden)]
+    pub fn trace_context_for_runtime_effect_invocation(
+        context: lash_trace::TraceContext,
+        invocation: &crate::RuntimeEffectInvocation,
+    ) -> lash_trace::TraceContext {
+        crate::trace::trace_context_for_effect_invocation(context, invocation)
+    }
     pub use crate::runtime::bounded_multiplicative_jitter;
     pub use crate::runtime::run_head_advancing_commit_attempt;
     pub use crate::runtime::turn_loop::{

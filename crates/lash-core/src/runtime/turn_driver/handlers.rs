@@ -489,7 +489,7 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
-        let graph_key = foreground_exec_graph_key(&invocation);
+        let graph_key = Some(foreground_effect_graph_key(&invocation));
         send_turn_activity(
             event_tx,
             code_correlation_id.clone(),
@@ -730,6 +730,10 @@ fn join_observations(observations: &[crate::Observation]) -> String {
         .join("\n")
 }
 
+pub(super) fn foreground_effect_graph_key(invocation: &RuntimeEffectInvocation) -> String {
+    invocation.address().graph_key()
+}
+
 pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Option<String> {
     invocation
         .effect_address()
@@ -742,7 +746,7 @@ mod tests {
 
     #[test]
     fn foreground_exec_graph_key_uses_runtime_invocation_identity() {
-        let invocation = RuntimeInvocation::effect(
+        let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(ExecutionScope::turn("session-1", "turn-1"), "replay-key")
                 .expect("valid foreground exec address"),
             RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
@@ -750,10 +754,8 @@ mod tests {
         );
 
         assert_eq!(
-            foreground_exec_graph_key(&invocation).as_deref(),
-            Some(
-                "effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"session-1\",\"execution_id\":\"turn-1\"}:\"replay-key\""
-            )
+            foreground_effect_graph_key(&invocation),
+            "effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"session-1\",\"execution_id\":\"turn-1\"}:\"replay-key\""
         );
     }
 }

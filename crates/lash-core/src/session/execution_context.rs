@@ -164,6 +164,43 @@ impl<'run> RuntimeExecutionContext<'run> {
         process_ids
     }
 
+    pub(super) fn effect_attribution(&self) -> crate::RuntimeAttribution {
+        if let Some(parent) = self.parent_invocation.as_ref() {
+            return parent.attribution.clone();
+        }
+        match self
+            .process_execution
+            .as_ref()
+            .map(|execution| &execution.originator)
+        {
+            Some(crate::ProcessOriginator::Host { .. }) => crate::RuntimeAttribution::none(),
+            Some(crate::ProcessOriginator::Session { session_id, .. }) => {
+                crate::RuntimeAttribution::for_session(session_id.clone())
+            }
+            None => crate::RuntimeAttribution::for_session(self.session_id.clone()),
+        }
+    }
+
+    fn language_runtime_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
+        let execution_scope = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .execution_scope()
+            .clone();
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(execution_scope, effect_id)
+                .expect("runtime context carries an admitted effect scope"),
+            self.effect_attribution(),
+            effect_id,
+        )
+        .with_caused_by(
+            self.parent_invocation
+                .as_ref()
+                .and_then(crate::RuntimeInvocation::causal_ref),
+        )
+    }
+
     /// Executes a nondeterministic language-runtime operation behind the
     /// durable effect controller so replay returns the recorded sample.
     pub async fn journaled_language_runtime_value(
@@ -171,28 +208,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         effect_id: String,
         operation: String,
     ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
-        let attribution = self
-            .parent_invocation
-            .as_ref()
-            .map(|invocation| invocation.attribution.clone())
-            .unwrap_or_else(|| crate::RuntimeAttribution::for_session(self.session_id.clone()));
-        let execution_scope = self
-            .dispatch
-            .effect_controller
-            .scoped()
-            .execution_scope()
-            .clone();
-        let invocation = crate::RuntimeInvocation::effect(
-            crate::EffectAddress::new(execution_scope, effect_id.clone())
-                .expect("runtime context carries an admitted effect scope"),
-            attribution,
-            effect_id.clone(),
-        )
-        .with_caused_by(
-            self.parent_invocation
-                .as_ref()
-                .and_then(crate::RuntimeInvocation::causal_ref),
-        );
+        let invocation = self.language_runtime_invocation(&effect_id);
         self.dispatch
             .effect_controller
             .scoped()
@@ -966,12 +982,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "trigger store is unavailable in this runtime",
             )
         })?;
-        let attribution = self
-            .parent_invocation
-            .as_ref()
-            .map(|invocation| invocation.attribution.clone())
-            .unwrap_or_else(|| crate::RuntimeAttribution::for_session(self.session_id.clone()));
-        let invocation = crate::RuntimeInvocation::effect(
+        let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 self.dispatch
                     .effect_controller
@@ -981,7 +992,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 effect_id.clone(),
             )
             .expect("runtime context carries an admitted effect scope"),
-            attribution,
+            self.effect_attribution(),
             effect_id.clone(),
         )
         .with_caused_by(
@@ -1266,6 +1277,55 @@ mod tests {
             None,
             crate::TurnContext::default(),
         )
+    }
+
+    #[test]
+    fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
+        let envelope = |context: &RuntimeExecutionContext<'_>, effect_id: &str| {
+            crate::RuntimeEffectEnvelope::new(
+                context.language_runtime_invocation(effect_id),
+                crate::RuntimeEffectCommand::LanguageRuntimeValue {
+                    operation: "sample".to_string(),
+                },
+            )
+        };
+
+        let foreground = test_execution_context();
+        assert_eq!(
+            envelope(&foreground, "foreground").invocation.attribution,
+            crate::RuntimeAttribution::for_session("session")
+        );
+
+        let mut host_process = test_execution_context();
+        host_process.process_execution = Some(RuntimeProcessExecution {
+            process_id: ProcessId::from("host-process"),
+            originator: crate::ProcessOriginator::host_scoped("automation"),
+            env_ref: None,
+            wake_session_id: None,
+            event_context: None,
+        });
+        assert_eq!(
+            envelope(&host_process, "host").invocation.attribution,
+            crate::RuntimeAttribution::none(),
+            "ambient current-session capability is descriptive inside a host-owned process"
+        );
+
+        let mut session_process = test_execution_context();
+        session_process.process_execution = Some(RuntimeProcessExecution {
+            process_id: ProcessId::from("session-process"),
+            originator: crate::ProcessOriginator::session(crate::SessionScope::new(
+                "origin-session",
+            )),
+            env_ref: None,
+            wake_session_id: None,
+            event_context: None,
+        });
+        assert_eq!(
+            envelope(&session_process, "session-origin")
+                .invocation
+                .attribution,
+            crate::RuntimeAttribution::for_session("origin-session")
+        );
     }
 
     #[tokio::test]

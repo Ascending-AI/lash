@@ -1797,11 +1797,7 @@ impl crate::RuntimeEffectController for JournalReplayEffectController {
         envelope: crate::RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let effect_id = envelope
-            .invocation
-            .effect_id()
-            .expect("journal replay effect has an id")
-            .to_string();
+        let effect_id = envelope.invocation.effect_id().to_string();
         if let Some(outcome) = self.outcomes.lock_recover().get(&effect_id) {
             return Ok(outcome.clone());
         }

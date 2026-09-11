@@ -990,7 +990,7 @@ fn child(
     position: usize,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(
                 execution_scope.clone(),
                 child_replay_key(group_key, position),
@@ -1012,7 +1012,7 @@ fn group(
     disposition: LoserPolicy,
 ) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(execution_scope.clone(), format!("{key}:group"))
                 .expect("valid group address"),
             RuntimeAttribution::none(),
@@ -1285,11 +1285,7 @@ impl GroupExecutors for RecordingExecutors {
         if let Some(staged) = staged_executors().executor_for(envelope) {
             return Some(staged);
         }
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("a journaled child carries its replay key")
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         let position = envelope
             .group
             .as_ref()

@@ -269,9 +269,9 @@ impl Processes {
     fn process_invocation(
         command: &lash_core::ProcessCommand,
         scope: &lash_core::ExecutionScope,
-    ) -> lash_core::RuntimeInvocation {
+    ) -> lash_core::RuntimeEffectInvocation {
         let effect_id = command.effect_id();
-        lash_core::RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(scope.clone(), effect_id.clone())
                 .expect("process command carries an admitted effect scope"),
             lash_core::RuntimeAttribution::none(),

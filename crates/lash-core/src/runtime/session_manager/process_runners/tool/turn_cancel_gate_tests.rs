@@ -104,7 +104,7 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
         duration_ms: 0,
         attempts: Vec::new(),
     };
-    let invocation = crate::RuntimeInvocation::effect(
+    let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             crate::ExecutionScope::process("process-1"),
             "process:process-1:tool:deferred:await",

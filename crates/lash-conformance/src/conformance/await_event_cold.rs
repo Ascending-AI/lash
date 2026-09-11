@@ -93,7 +93,7 @@ where
         .await
         .expect("host A mints parked-owner key");
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             EffectAddress::new(scope.clone(), "cold_await_event.parked_owner")
                 .expect("valid parked-owner address"),
             RuntimeAttribution {

@@ -5,7 +5,7 @@ async fn sqlite_sleep_replay_returns_after_recorded_due_time() {
     let (_controller_dir, controller) =
         open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(durable_turn_scope("session", "turn"), "sleep-key")
                 .expect("valid sleep effect address"),
             lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),

@@ -14,11 +14,10 @@ use lash::plugins::{
     SessionPlugin,
 };
 use lash::{LashCore, PluginBinding};
-use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectAddress, ExecutionScope, Resolution,
     RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimeEffectOutcome,
 };
 use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::SqliteEffectHost;
@@ -162,7 +161,7 @@ impl SessionPlugin for JournalSessionPlugin {
                     .unwrap_or_else(RuntimeAttribution::none);
                 let controller = ctx.scoped_effect_controller.controller();
                 let group = lash_core::RuntimeEffectGroup::try_new(
-                    RuntimeInvocation::effect(
+                    lash_core::RuntimeEffectInvocation::new(
                         EffectAddress::new(scope.clone(), format!("{scope_key}:drain-group"))
                             .expect("drain group carries an admitted effect scope"),
                         attribution.clone(),
@@ -317,7 +316,7 @@ fn envelope(
     attribution: RuntimeAttribution,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
+        lash_core::RuntimeEffectInvocation::new(
             EffectAddress::new(scope.clone(), effect_id)
                 .expect("runtime-operation effect carries an admitted scope"),
             attribution,
@@ -1005,8 +1004,9 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
     let run = |scope: ExecutionScope| {
         let host = Arc::clone(&host);
         let ran = Arc::clone(&ran);
+        let session_id = session_id.clone();
         async move {
-            host.scoped(scope)
+            host.scoped(scope.clone())
                 .expect("the operation scope binds")
                 .controller()
                 .execute_effect(

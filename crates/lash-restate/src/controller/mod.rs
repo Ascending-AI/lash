@@ -23,9 +23,9 @@ use lash_core::{
     ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord, ProcessRegistry,
     QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    RuntimeInvocation, ScopedEffectController, TurnControlParticipation,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    RuntimeErrorCode, ScopedEffectController, TurnControlParticipation,
     facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
     facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
@@ -191,7 +191,7 @@ where
         })
 }
 fn restate_turn_cancel_wait_request(
-    invocation: &RuntimeInvocation,
+    invocation: &RuntimeEffectInvocation,
     turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
     let Some(turn_id) = invocation.attribution.turn_id.as_ref() else {
@@ -232,7 +232,7 @@ fn restate_turn_cancel_wait_request(
 }
 
 pub(crate) fn restate_timer_turn_cancel_wait_request(
-    invocation: &RuntimeInvocation,
+    invocation: &RuntimeEffectInvocation,
     observe_turn_cancel: bool,
     turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
@@ -243,7 +243,7 @@ pub(crate) fn restate_timer_turn_cancel_wait_request(
 }
 
 fn restate_process_turn_cancel_wait_request(
-    invocation: &RuntimeInvocation,
+    invocation: &RuntimeEffectInvocation,
     observe_turn_cancel: bool,
     turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
@@ -254,7 +254,7 @@ fn restate_process_turn_cancel_wait_request(
 }
 
 pub(crate) fn restate_await_event_turn_cancel_wait_request(
-    invocation: &RuntimeInvocation,
+    invocation: &RuntimeEffectInvocation,
     observe_turn_cancel: bool,
     turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
@@ -328,7 +328,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
 
     fn emit_trace(
         &self,
-        invocation: Option<&RuntimeInvocation>,
+        invocation: Option<&RuntimeEffectInvocation>,
         event: impl FnOnce() -> lash_trace::TraceEvent,
     ) {
         let Some(trace) = self.trace.as_ref() else {
@@ -357,7 +357,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
         }
     }
 
-    fn remember_trace_invocation(&self, invocation: &RuntimeInvocation) {
+    fn remember_trace_invocation(&self, invocation: &RuntimeEffectInvocation) {
         let Some(trace) = self.trace.as_ref() else {
             return;
         };
@@ -374,9 +374,9 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
 
 fn trace_context_for_invocation(
     trace: &RestateTraceObserver,
-    invocation: &RuntimeInvocation,
+    invocation: &RuntimeEffectInvocation,
 ) -> lash_trace::TraceContext {
-    lash_core::facade_support::trace_context_for_runtime_invocation(
+    lash_core::facade_support::trace_context_for_runtime_effect_invocation(
         trace.base_context.clone(),
         invocation,
     )
@@ -1245,9 +1245,7 @@ async fn execute_restate_journaled_effect(
     match command {
         RuntimeEffectCommand::Trigger { command } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate trigger")?;
-            local_executor
-                .execute_trigger(invocation.into_runtime_invocation(), *command)
-                .await
+            local_executor.execute_trigger(invocation, *command).await
         }
         command => {
             local_executor
@@ -1314,11 +1312,11 @@ where
 #[derive(Debug)]
 pub(crate) enum RestateEffectExecution {
     DirectProcess {
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         command: Box<ProcessCommand>,
     },
     DurableProcessCommand {
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         command: Box<ProcessCommand>,
     },
     DirectLocal {
@@ -1328,15 +1326,15 @@ pub(crate) enum RestateEffectExecution {
         envelope: RuntimeEffectEnvelope,
     },
     Timer {
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         duration_ms: u64,
     },
     AwaitEvent {
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         key: AwaitEventKey,
     },
     PeekAwaitEvent {
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         key: AwaitEventKey,
     },
     JournaledRun {
@@ -1345,7 +1343,7 @@ pub(crate) enum RestateEffectExecution {
 }
 
 impl RestateEffectExecution {
-    fn invocation(&self) -> &RuntimeInvocation {
+    fn invocation(&self) -> &RuntimeEffectInvocation {
         match self {
             Self::DirectProcess { invocation, .. }
             | Self::DurableProcessCommand { invocation, .. }
@@ -1404,14 +1402,14 @@ pub(crate) fn restate_effect_execution(
         {
             refuse_unhonored_group_membership(group.as_deref(), "restate durable process command")?;
             RestateEffectExecution::DurableProcessCommand {
-                invocation: invocation.into_runtime_invocation(),
+                invocation,
                 command,
             }
         }
         RuntimeEffectCommand::Process { command } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate direct process")?;
             RestateEffectExecution::DirectProcess {
-                invocation: invocation.into_runtime_invocation(),
+                invocation,
                 command,
             }
         }
@@ -1434,23 +1432,17 @@ pub(crate) fn restate_effect_execution(
         RuntimeEffectCommand::Sleep { duration_ms } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
             RestateEffectExecution::Timer {
-                invocation: invocation.into_runtime_invocation(),
+                invocation,
                 duration_ms,
             }
         }
         RuntimeEffectCommand::AwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;
-            RestateEffectExecution::AwaitEvent {
-                invocation: invocation.into_runtime_invocation(),
-                key,
-            }
+            RestateEffectExecution::AwaitEvent { invocation, key }
         }
         RuntimeEffectCommand::PeekAwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
-            RestateEffectExecution::PeekAwaitEvent {
-                invocation: invocation.into_runtime_invocation(),
-                key,
-            }
+            RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
         command @ (RuntimeEffectCommand::LlmCall { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
@@ -1472,21 +1464,14 @@ pub(crate) fn restate_effect_execution(
     })
 }
 
-pub(crate) fn restate_effect_name(invocation: &RuntimeInvocation) -> String {
+pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {
     // Restate consumes commands by journal ordinal before Lash can inspect the
     // recorded envelope. Keep the pre-cutover lookup label for v2 tool intents
     // so an in-flight v1 row reaches the shared validation seam and is refused
     // as a typed format cutover instead of as an opaque SDK command mismatch.
-    if let Some(replay_key) =
-        lash_core::facade_support::legacy_tool_intent_v1_lookup_key(invocation)
-            .or_else(|| invocation.replay_key().map(str::to_string))
-    {
-        format!("lash:{replay_key}")
-    } else if let Some(effect_id) = invocation.effect_id() {
-        format!("lash:effect:{effect_id}")
-    } else {
-        "lash:runtime-invocation".to_string()
-    }
+    let replay_key = lash_core::facade_support::legacy_tool_intent_v1_lookup_key(invocation)
+        .unwrap_or_else(|| invocation.replay_key().to_string());
+    format!("lash:{replay_key}")
 }
 
 pub(crate) fn validate_recorded_effect_envelope(
@@ -1504,10 +1489,10 @@ pub(crate) fn validate_recorded_effect_envelope(
     Ok(recorded.outcome)
 }
 
-fn tracing_sleep_error(invocation: &RuntimeInvocation, err: &TerminalError) {
+fn tracing_sleep_error(invocation: &RuntimeEffectInvocation, err: &TerminalError) {
     tracing::warn!(
         session_id = invocation.attribution.session_id.as_deref().unwrap_or(""),
-        effect_id = invocation.effect_id().unwrap_or(""),
+        effect_id = invocation.effect_id(),
         effect_kind = %RuntimeEffectKind::Sleep.as_str(),
         error = %err,
         "Restate durable sleep failed"

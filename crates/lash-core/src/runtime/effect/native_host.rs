@@ -586,12 +586,13 @@ impl RuntimeEffectController for NativeEffectHost {
 mod tests {
     use super::*;
     use crate::{
-        AwaitEventWaitIdentity, EffectJournalRetirement, RuntimeEffectCommand, RuntimeInvocation,
+        AwaitEventWaitIdentity, EffectJournalRetirement, RuntimeEffectCommand,
+        RuntimeEffectInvocation,
     };
 
     fn envelope(scope: &ExecutionScope, effect_id: &str) -> RuntimeEffectEnvelope {
         RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
+            RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(scope.clone(), effect_id)
                     .expect("valid native host test address"),
                 crate::RuntimeAttribution::none(),

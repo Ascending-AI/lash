@@ -344,7 +344,7 @@ impl RuntimeTurnDriver<'_> {
     pub(super) async fn invoke_turn_exec_effect(
         &mut self,
         machine: &mut TurnMachine,
-        invocation: crate::RuntimeInvocation,
+        invocation: crate::RuntimeEffectInvocation,
         language: String,
         code: String,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,

@@ -173,7 +173,7 @@ impl EffectBackedProcessService {
         }
         let effect_id = command.effect_id();
         let envelope = crate::RuntimeEffectEnvelope::new(
-            crate::RuntimeInvocation::effect(
+            crate::RuntimeEffectInvocation::new(
                 crate::EffectAddress::new(
                     crate::ExecutionScope::runtime_operation("fig790-test"),
                     effect_id.clone(),
