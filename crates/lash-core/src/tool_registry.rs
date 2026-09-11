@@ -34,6 +34,8 @@ use rebind::{
     manifest_with_compact_contract, reconcile_tool_state_entries, validate_unique_manifests,
 };
 #[cfg(test)]
+mod pinning_tests;
+#[cfg(test)]
 mod tests;
 
 /// Project every catalog member to a JSON record for host-owned discovery

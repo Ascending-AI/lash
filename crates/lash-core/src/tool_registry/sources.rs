@@ -97,16 +97,25 @@ struct ToolProviderIndex {
 
 impl ToolProviderIndex {
     fn from_providers(providers: &[Arc<dyn ToolProvider>]) -> Self {
+        Self::from_providers_with_advertisements(providers).0
+    }
+
+    fn from_providers_with_advertisements(
+        providers: &[Arc<dyn ToolProvider>],
+    ) -> (Self, Vec<Arc<[ToolManifest]>>) {
         let mut index = Self::default();
+        let mut advertisements = Vec::with_capacity(providers.len());
         for (provider_idx, provider) in providers.iter().enumerate() {
-            for manifest in provider.tool_manifests() {
+            let manifests = Arc::<[ToolManifest]>::from(provider.tool_manifests());
+            for manifest in manifests.iter().cloned() {
                 index
                     .by_id
                     .insert(manifest.id.clone(), (manifest, provider_idx));
             }
+            advertisements.push(manifests);
         }
         index.rebuild_name_index();
-        index
+        (index, advertisements)
     }
 
     fn rebuild_name_index(&mut self) {
@@ -196,14 +205,20 @@ impl ToolProviderSource {
         &self,
         known_resident_ids: &BTreeSet<ToolId>,
     ) -> Result<PinnedToolProviderSource, ReconfigureError> {
-        let mut index = ToolProviderIndex::from_providers(&self.providers);
+        let (mut index, advertisements) =
+            ToolProviderIndex::from_providers_with_advertisements(&self.providers);
         let advertised_ids = index.by_id.keys().cloned().collect();
         for id in known_resident_ids {
             if index.by_id.contains_key(id) {
                 continue;
             }
             for (provider_idx, provider) in self.providers.iter().enumerate() {
-                if let Some(manifest) = provider.resolve_manifest_by_id(id) {
+                let manifest = crate::tool_provider::with_captured_provider_manifests(
+                    provider.as_ref(),
+                    Arc::clone(&advertisements[provider_idx]),
+                    || provider.resolve_manifest_by_id(id),
+                );
+                if let Some(manifest) = manifest {
                     if manifest.id != *id {
                         return Err(ReconfigureError::Validation(format!(
                             "source `{}` resolved tool id `{id}` with mismatched manifest id `{}`",
