@@ -415,6 +415,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             }),
         );
 
+        let event_stream_shutdown = host_shutdown.clone();
+        let observation_stream_shutdown = host_shutdown.clone();
         let app = Router::new()
         .route("/", get(index))
         .route("/healthz", get(healthz))
@@ -422,8 +424,26 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{key}/approve", post(approve_wait))
         .route("/api/approvals/{key}/deny", post(deny_wait))
-        .route("/api/events", get(session_events))
-        .route("/api/observations", get(session_observations))
+        .route(
+            "/api/events",
+            get(move |state, query| {
+                session_events_with_shutdown(
+                    state,
+                    query,
+                    Some(event_stream_shutdown.subscribe()),
+                )
+            }),
+        )
+        .route(
+            "/api/observations",
+            get(move |state, query| {
+                session_observations_with_shutdown(
+                    state,
+                    query,
+                    Some(observation_stream_shutdown.subscribe()),
+                )
+            }),
+        )
         .route("/api/turn", post(send_turn))
         .route("/api/attachments", post(upload_attachment))
         .route("/api/attachments/{attachment_id}", get(retrieve_attachment))
@@ -493,7 +513,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         let restate_listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
             .await
             .context("bind Restate listener")?;
-        let restate_task = restate_host::spawn_owned_restate_endpoint(
+        let restate_task = restate::spawn_owned_restate_endpoint(
             restate_listener,
             state,
             process_deployment,

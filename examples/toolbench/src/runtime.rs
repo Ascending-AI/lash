@@ -75,16 +75,22 @@ pub(crate) async fn run_task(
         Ok::<_, anyhow::Error>((core, recorder))
     }
     .await;
+    let mut cleanup_error = None;
     let result = match prepared {
         Ok((core, recorder)) => {
-            let mut result = tokio::time::timeout(
+            let result = tokio::time::timeout(
                 std::time::Duration::from_secs(turn_wall_limit_secs),
                 run_turn(&core, task, dialect, run, channel, &telemetry),
             )
             .await;
             if let Err(shutdown_error) = core.shutdown().await.context("shut down toolbench core") {
+                cleanup_error = Some(format!("{shutdown_error:#}"));
                 match &result {
-                    Ok(Ok(_)) => result = Ok(Err(shutdown_error)),
+                    Ok(Ok(output)) if !output.0.is_success() => eprintln!(
+                        "toolbench: core shutdown failed after terminal turn outcome `{:?}`: {shutdown_error:#}",
+                        output.0.result.outcome
+                    ),
+                    Ok(Ok(_)) => {}
                     Ok(Err(primary)) => eprintln!(
                         "toolbench: core shutdown failed after turn error `{primary:#}`: {shutdown_error:#}"
                     ),
@@ -98,7 +104,8 @@ pub(crate) async fn run_task(
         }
         Err(error) => Ok(Err(error)),
     };
-    let (completed, completion_error, finish_value, decisions, turn_outcome) = match result {
+    let (mut completed, mut completion_error, finish_value, decisions, turn_outcome) = match result
+    {
         Ok(Ok((output, decisions))) => (
             output.is_success(),
             (!output.is_success()).then(|| format!("turn outcome: {:?}", output.result.outcome)),
@@ -125,6 +132,7 @@ pub(crate) async fn run_task(
             None,
         ),
     };
+    apply_cleanup_failure(&mut completed, &mut completion_error, cleanup_error);
     let activities = telemetry.activities();
     let attempts = telemetry.rows(&decisions, channel == crate::ChannelSelection::Standard);
     let retries = attempts
@@ -187,6 +195,24 @@ pub(crate) async fn run_task(
             failed_execution_errors,
         },
     )
+}
+
+fn apply_cleanup_failure(
+    completed: &mut bool,
+    completion_error: &mut Option<String>,
+    cleanup_error: Option<String>,
+) {
+    let Some(cleanup_error) = cleanup_error else {
+        return;
+    };
+    *completed = false;
+    if let Some(primary) = completion_error.as_ref() {
+        eprintln!(
+            "toolbench: preserving primary completion error `{primary}` alongside cleanup failure `{cleanup_error}`"
+        );
+    } else {
+        *completion_error = Some(format!("core_shutdown: {cleanup_error}"));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -455,6 +481,38 @@ fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cleanup_failure_preserves_primary_failed_turn_evidence() {
+        let mut completed = false;
+        let mut completion_error = Some("turn outcome: Failed(policy)".to_string());
+        super::apply_cleanup_failure(
+            &mut completed,
+            &mut completion_error,
+            Some("factory shutdown failed".to_string()),
+        );
+        assert!(!completed);
+        assert_eq!(
+            completion_error.as_deref(),
+            Some("turn outcome: Failed(policy)")
+        );
+    }
+
+    #[test]
+    fn cleanup_failure_marks_successful_turn_failed() {
+        let mut completed = true;
+        let mut completion_error = None;
+        super::apply_cleanup_failure(
+            &mut completed,
+            &mut completion_error,
+            Some("factory shutdown failed".to_string()),
+        );
+        assert!(!completed);
+        assert_eq!(
+            completion_error.as_deref(),
+            Some("core_shutdown: factory shutdown failed")
+        );
+    }
+
     #[test]
     fn reasoning_selection_is_shared_and_none_keeps_provider_default() {
         use crate::ReasoningEffort;

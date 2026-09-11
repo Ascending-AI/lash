@@ -666,19 +666,46 @@ async fn run_smoke_probes(
             .turn(TurnInput::text("Reply now."))
             .stream()
             .map_err(FailureReason::harness)?;
-        tokio::time::timeout(TURN_TIMEOUT, async move {
+        let activity_result = tokio::time::timeout(TURN_TIMEOUT, async {
             let mut activity_count = 0;
             while let Some(activity) = live_stream.next().await {
                 activity.map_err(FailureReason::harness)?;
                 activity_count += 1;
             }
-            let result = live_stream.finish().await.map_err(FailureReason::harness)?;
-            Ok::<_, FailureReason>((result, activity_count))
+            Ok::<_, FailureReason>(activity_count)
         })
-        .await
-        .map_err(|_| FailureReason::TurnTimedOut {
-            agent: "smoke-stream".to_string(),
-        })?
+        .await;
+        match activity_result {
+            Ok(Ok(activity_count)) => {
+                let result = live_stream.finish().await.map_err(FailureReason::harness)?;
+                Ok((result, activity_count))
+            }
+            Ok(Err(primary)) => {
+                stream_session.cancel_running_turns_with_origin(Some(
+                    "slack-clone-live-e2e smoke stream failure".to_string(),
+                ));
+                if let Err(join_error) = live_stream.finish().await {
+                    eprintln!(
+                        "slack-clone-live-e2e: smoke-stream completion failed after activity error {primary:?}: {join_error}"
+                    );
+                }
+                Err(primary)
+            }
+            Err(_) => {
+                let primary = FailureReason::TurnTimedOut {
+                    agent: "smoke-stream".to_string(),
+                };
+                stream_session.cancel_running_turns_with_origin(Some(
+                    "slack-clone-live-e2e smoke stream timeout".to_string(),
+                ));
+                if let Err(join_error) = live_stream.finish().await {
+                    eprintln!(
+                        "slack-clone-live-e2e: smoke-stream completion failed after timeout: {join_error}"
+                    );
+                }
+                Err(primary)
+            }
+        }
     }
     .await;
     let (stream, stream_activity_count) =

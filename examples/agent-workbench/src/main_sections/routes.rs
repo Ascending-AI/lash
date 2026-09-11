@@ -3,6 +3,10 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
+#[path = "routes/host_streams.rs"]
+mod host_streams;
+pub(crate) use host_streams::*;
+
 pub(crate) async fn healthz() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "service": "agent-workbench", "status": "ok" }))
 }
@@ -223,96 +227,6 @@ pub(crate) async fn retrieve_attachment(
         .header("x-lash-attachment-id", attachment_id)
         .body(Body::from(stored.bytes))
         .expect("valid attachment response"))
-}
-
-pub(crate) async fn session_events(
-    State(state): State<AppState>,
-    Query(query): Query<ProductEventsQuery>,
-) -> Result<Response, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(
-                &SessionQuery {
-                    session_id: query.session_id.clone(),
-                },
-                "api.events",
-            )
-            .await?,
-    );
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
-        })?;
-    let (replay, mut product_events) = state
-        .event_tx
-        .subscribe_after(&session_id, query.cursor.unwrap_or(0));
-    let event_registry = state.event_tx.clone();
-    let (tx, rx) = mpsc::channel::<ProductStreamItem>(64);
-    tokio::spawn(async move {
-        for event in replay {
-            if tx.send(ProductStreamItem::Event { event }).await.is_err() {
-                return;
-            }
-        }
-        loop {
-            match product_events.recv().await {
-                Ok(event) => {
-                    if tx.send(ProductStreamItem::Event { event }).await.is_err() {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(_count)) => {
-                    let _ = tx
-                        .send(ProductStreamItem::Resync {
-                            snapshot: event_registry.snapshot(&session_id),
-                        })
-                        .await;
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
-    Ok(ndjson_response(ReceiverStream::new(rx)))
-}
-
-pub(crate) async fn session_observations(
-    State(state): State<AppState>,
-    Query(query): Query<EventsQuery>,
-) -> Result<Response, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(
-                &SessionQuery {
-                    session_id: query.session_id.clone(),
-                },
-                "api.observations",
-            )
-            .await?,
-    );
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: session_id.clone(),
-        })?;
-    let session = state
-        .open_session_for_observation(&session_id)
-        .await
-        .map_err(|error| state.session_admission_error(&session_id, "api.observations", error))?;
-    let cursor = match query
-        .cursor
-        .as_deref()
-        .filter(|cursor| !cursor.trim().is_empty())
-    {
-        Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
-            .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
-        None => session.observe().recoverable_chat_snapshot().cursor,
-    };
-    let (tx, rx) = mpsc::channel::<ObservationStreamItem>(64);
-    tokio::spawn(async move {
-        forward_session_observations(session, cursor, tx).await;
-    });
-    Ok(ndjson_response(ReceiverStream::new(rx)))
 }
 
 pub(crate) async fn commit_and_submit_user_turn(
@@ -1228,115 +1142,6 @@ pub(crate) async fn lashlang_graph(
     )
     .await?;
     Ok(Json(graph))
-}
-
-pub(crate) async fn forward_session_observations(
-    session: lash::LashSession,
-    cursor: SessionCursor,
-    tx: mpsc::Sender<ObservationStreamItem>,
-) {
-    use lash::recoverable_chat::RecoverableChatUpdate;
-
-    if tx
-        .send(ObservationStreamItem::Cursor {
-            cursor: cursor.to_string(),
-        })
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let mut stream = session.observe().subscribe_recoverable_chat(cursor);
-    let mut sequence = 0;
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(RecoverableChatUpdate::Event { event, .. }) => {
-                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(event) => event,
-                    Err(err) => {
-                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                        break;
-                    }
-                };
-                sequence = sequence.saturating_add(1);
-                if tx
-                    .send(ObservationStreamItem::Observation {
-                        event: Box::new(Envelope::new(event)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::TerminalReplacement {
-                event, snapshot, ..
-            }) => {
-                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(event) => event,
-                    Err(err) => {
-                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                        break;
-                    }
-                };
-                sequence = sequence.saturating_add(1);
-                if tx
-                    .send(ObservationStreamItem::TerminalReplacement {
-                        cursor: snapshot.cursor.to_string(),
-                        event: Box::new(Envelope::new(event)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::ResidentReplacement {
-                event, snapshot, ..
-            }) => {
-                let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
-                    Ok(event) => event,
-                    Err(err) => {
-                        eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                        break;
-                    }
-                };
-                sequence = sequence.saturating_add(1);
-                if tx
-                    .send(ObservationStreamItem::ResidentReplacement {
-                        cursor: snapshot.cursor.to_string(),
-                        event: Box::new(Envelope::new(event)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {
-                let observation =
-                    RemoteSessionObservation::from_core(lash::observe::SessionObservation {
-                        read_view: snapshot.read_view,
-                        cursor: snapshot.cursor,
-                    });
-                let gap = RemoteLiveReplayGap::from(gap);
-                if tx
-                    .send(ObservationStreamItem::ReplayGap {
-                        observation: Box::new(Envelope::new(observation)),
-                        gap: Box::new(Envelope::new(gap)),
-                    })
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Err(err) => {
-                eprintln!("warning: workbench Lash observation stream stopped: {err}");
-                break;
-            }
-        }
-    }
 }
 
 #[derive(Default)]
