@@ -1411,6 +1411,58 @@ launcher_env "$existing_data_dir" "$existing_data_port" \
     = "$existing_data_sentinel_hash" ]] \
   || fail "exact retry did not clear records while preserving preexisting data"
 
+first_context_port=3172
+first_context_data="$test_tmp/data-first-recovery-context"
+first_context_wrong_data="$test_tmp/data-first-recovery-context-wrong"
+first_context_key="127.0.0.1_${first_context_port}"
+first_context_admin=$((19070 + (first_context_port - 3030) * 10))
+first_context_ingress=$((8080 + (first_context_port - 3030) * 10))
+first_context_admin_hash="$(printf '%s' "loopback:$first_context_admin" | sha256sum | awk '{print $1}')"
+first_context_ingress_hash="$(printf '%s' "loopback:$first_context_ingress" | sha256sum | awk '{print $1}')"
+first_context_lease="$launcher_runtime_root/restate-ingress-$first_context_ingress_hash.lease"
+first_context_owner="$first_context_data/run/.agent-workbench-dev-run-owner-$first_context_key"
+first_context_service="$first_context_data/run/restate-$first_context_key.service-retired"
+first_context_stable="$launcher_runtime_root/$lock_hash-$first_context_key-start-finalizing"
+mkdir -p "$first_context_data"
+printf 'original recovery context bytes\n' > "$first_context_data/sentinel"
+first_context_sentinel_hash="$(sha256sum "$first_context_data/sentinel" | awk '{print $1}')"
+rm -f "$mock_state/record-create-failed"
+if launcher_env "$first_context_data" "$first_context_port" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$first_context_admin_hash.lease" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$first_context_port" \
+  > "$test_tmp/first-context-first.log" 2>&1; then
+  fail "first-context startup cleanup fault unexpectedly succeeded"
+fi
+first_context_lease_record="$(<"$first_context_lease")"
+first_context_owner_record="$(<"$first_context_owner")"
+first_context_service_record="$(<"$first_context_service")"
+first_context_removals="$(wc -l < "$mock_state/docker-rm.log")"
+if launcher_env "$first_context_wrong_data" "$first_context_port" \
+  AGENT_WORKBENCH_RUN_DIR="$first_context_data/run" \
+  MOCK_PID_FILE="$first_context_data/run/workbench-$first_context_key.pid" \
+  MOCK_RESTATE_MARKER="$first_context_data/run/restate-$first_context_key.container" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$first_context_port" \
+  > "$test_tmp/first-context-wrong.log" 2>&1; then
+  fail "first public startup recovery accepted a wrong data context"
+fi
+[[ ! -e "$first_context_stable" && ! -e "$first_context_wrong_data" \
+  && "$(<"$first_context_lease")" = "$first_context_lease_record" \
+  && "$(<"$first_context_owner")" = "$first_context_owner_record" \
+  && "$(<"$first_context_service")" = "$first_context_service_record" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$first_context_removals" \
+  && "$(sha256sum "$first_context_data/sentinel" | awk '{print $1}')" \
+    = "$first_context_sentinel_hash" ]] \
+  || fail "wrong first recovery context mutated original authority, resources, or data"
+run_launcher "$first_context_data" "$first_context_port" down \
+  > "$test_tmp/first-context-correct.log" 2>&1
+[[ ! -e "$first_context_lease" && ! -e "$first_context_owner" \
+  && ! -e "$first_context_service" && ! -e "$first_context_stable" \
+  && -f "$first_context_data/sentinel" \
+  && "$(sha256sum "$first_context_data/sentinel" | awk '{print $1}')" \
+    = "$first_context_sentinel_hash" ]] \
+  || fail "correct original context did not recover after wrong-context refusal"
+
 postgres_lease_retry_port=3092
 postgres_lease_retry_service=$((55432 + (postgres_lease_retry_port - 3030) * 10))
 postgres_lease_retry_hash="$(printf '%s' "loopback:$postgres_lease_retry_service" | sha256sum | awk '{print $1}')"

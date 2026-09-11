@@ -1879,12 +1879,12 @@ finalize_orphaned_start_attempt() {
     finalize_start_finalization_receipt
     return
   fi
-  if [[ -e "$owner_file" || -L "$owner_file" ]]; then
-    owner_record="$(read_run_owner "$owner_file" 2>/dev/null || true)"
-    read -r schema owner_token owner_key owner_hash extra <<<"$owner_record"
-    [[ -n "$owner_record" && -z "$extra" && "$owner_key" = "$key" ]] || return 1
-    token="$owner_token"
-  fi
+  [[ -e "$owner_file" || -L "$owner_file" ]] || return 1
+  owner_record="$(read_run_owner "$owner_file" 2>/dev/null || true)"
+  read -r schema owner_token owner_key owner_hash extra <<<"$owner_record"
+  [[ -n "$owner_record" && -z "$extra" && "$owner_key" = "$key" \
+    && "$owner_hash" = "$data_path_hash" ]] || return 1
+  token="$owner_token"
   local component receipt marker
   for component in restate postgres; do
     if [[ "$component" = restate ]]; then
