@@ -223,6 +223,7 @@ pub enum RuntimeErrorCode {
     RuntimeEffectGroupShape,
     RuntimeEffectInvocationKind,
     RuntimeEffectInvocationSubject,
+    RuntimeEffectScopeMismatch,
     RuntimeEffectLocalExecutorMismatch,
     RuntimeEffectLocalExecutorUnavailable,
     RuntimeEffectLocalTaskClosed,
@@ -657,6 +658,7 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectGroupShape => "runtime_effect_group_shape",
             Self::RuntimeEffectInvocationKind => "runtime_effect_invocation_kind",
             Self::RuntimeEffectInvocationSubject => "runtime_effect_invocation_subject",
+            Self::RuntimeEffectScopeMismatch => "runtime_effect_scope_mismatch",
             Self::RuntimeEffectLocalExecutorMismatch => "runtime_effect_local_executor_mismatch",
             Self::RuntimeEffectLocalExecutorUnavailable => {
                 "runtime_effect_local_executor_unavailable"
@@ -860,6 +862,7 @@ impl RuntimeErrorCode {
                 | Self::RuntimeEffectGroupShape
                 | Self::RuntimeEffectInvocationKind
                 | Self::RuntimeEffectInvocationSubject
+                | Self::RuntimeEffectScopeMismatch
                 | Self::RuntimeEffectLocalExecutorMismatch
                 | Self::RuntimeEffectLocalExecutorUnavailable
                 | Self::RuntimeEffectLocalTaskClosed
@@ -1041,6 +1044,7 @@ impl RuntimeErrorCode {
             "runtime_effect_group_shape" => Self::RuntimeEffectGroupShape,
             "runtime_effect_invocation_kind" => Self::RuntimeEffectInvocationKind,
             "runtime_effect_invocation_subject" => Self::RuntimeEffectInvocationSubject,
+            "runtime_effect_scope_mismatch" => Self::RuntimeEffectScopeMismatch,
             "runtime_effect_local_executor_mismatch" => Self::RuntimeEffectLocalExecutorMismatch,
             "runtime_effect_local_executor_unavailable" => {
                 Self::RuntimeEffectLocalExecutorUnavailable
@@ -1214,6 +1218,20 @@ impl RuntimeError {
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
+impl From<lash_sansio::EffectIdentityError> for RuntimeError {
+    fn from(error: lash_sansio::EffectIdentityError) -> Self {
+        let code = match error {
+            lash_sansio::EffectIdentityError::MissingExecutionScopeId => {
+                RuntimeErrorCode::MissingExecutionScopeId
+            }
+            lash_sansio::EffectIdentityError::MissingReplayKey => {
+                RuntimeErrorCode::RuntimeEffectReplayRequired
+            }
+        };
+        Self::new(code, error.to_string())
     }
 }
 
@@ -1411,6 +1429,7 @@ mod tests {
             | RuntimeErrorCode::RuntimeEffectGroupShape
             | RuntimeErrorCode::RuntimeEffectInvocationKind
             | RuntimeErrorCode::RuntimeEffectInvocationSubject
+            | RuntimeErrorCode::RuntimeEffectScopeMismatch
             | RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch
             | RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable
             | RuntimeErrorCode::RuntimeEffectLocalTaskClosed
@@ -1592,6 +1611,7 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectGroupShape,
             RuntimeErrorCode::RuntimeEffectInvocationKind,
             RuntimeErrorCode::RuntimeEffectInvocationSubject,
+            RuntimeErrorCode::RuntimeEffectScopeMismatch,
             RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
             RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
             RuntimeErrorCode::RuntimeEffectAssistantResponseHook,

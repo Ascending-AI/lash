@@ -15,7 +15,7 @@ pub struct OperationId {
 }
 
 pub(super) const LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
 
 /// Shared backend-independent decision for an existing runtime commit receipt.
 ///
@@ -306,17 +306,17 @@ fn push_causal_ref(encoded: &mut Vec<u8>, caused_by: &crate::CausalRef) {
             push_string(encoded, session_id);
             push_string(encoded, turn_id);
         }
-        crate::CausalRef::Effect {
-            session_id,
-            turn_id,
-            effect_id,
-        } => {
+        crate::CausalRef::Effect { address } => {
             encoded.push(1);
-            push_string(encoded, session_id);
-            push_optional(encoded, turn_id.as_ref(), |encoded, value| {
-                push_string(encoded, value)
-            });
-            push_string(encoded, effect_id);
+            push_string(
+                encoded,
+                address
+                    .execution_scope
+                    .journal_identity()
+                    .expect("causal effect address contains a valid execution scope")
+                    .key(),
+            );
+            push_string(encoded, &address.replay_key);
         }
         crate::CausalRef::ToolCall {
             session_id,

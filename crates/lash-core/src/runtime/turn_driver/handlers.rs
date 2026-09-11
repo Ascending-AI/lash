@@ -731,21 +731,9 @@ fn join_observations(observations: &[crate::Observation]) -> String {
 }
 
 pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Option<String> {
-    let RuntimeSubject::Effect { effect_id, kind } = &invocation.subject else {
-        return None;
-    };
-    if *kind != RuntimeEffectKind::ExecCode {
-        return None;
-    }
-    Some(match invocation.scope.turn_id.as_deref() {
-        Some(turn_id) if !turn_id.is_empty() => {
-            format!(
-                "effect:{}:{turn_id}:{effect_id}",
-                invocation.scope.session_id
-            )
-        }
-        _ => format!("effect:{}:{effect_id}", invocation.scope.session_id),
-    })
+    invocation
+        .effect_address()
+        .map(crate::EffectAddress::graph_key)
 }
 
 #[cfg(test)]

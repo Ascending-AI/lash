@@ -237,7 +237,7 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
             }
             RuntimeEffectCommand::Trigger { command } => {
                 local_executor
-                    .execute_trigger(envelope.invocation, *command)
+                    .execute_trigger(envelope.invocation.into_runtime_invocation(), *command)
                     .await
             }
             _ => local_executor.execute(envelope).await,

@@ -83,13 +83,13 @@ impl From<RemoteProcessValueSelector> for lash_core::ProcessValueSelector {
 impl From<lash_core::RuntimeInvocation> for RemoteRuntimeInvocation {
     fn from(value: lash_core::RuntimeInvocation) -> Self {
         let lash_core::RuntimeInvocation {
-            scope,
+            attribution,
             subject,
             caused_by,
             replay,
         } = value;
         Self {
-            scope: scope.into(),
+            attribution: attribution.into(),
             subject: subject.into(),
             caused_by: caused_by.map(Into::into),
             replay: replay.map(Into::into),
@@ -100,13 +100,13 @@ impl From<lash_core::RuntimeInvocation> for RemoteRuntimeInvocation {
 impl From<RemoteRuntimeInvocation> for lash_core::RuntimeInvocation {
     fn from(value: RemoteRuntimeInvocation) -> Self {
         let RemoteRuntimeInvocation {
-            scope,
+            attribution,
             subject,
             caused_by,
             replay,
         } = value;
         Self {
-            scope: scope.into(),
+            attribution: attribution.into(),
             subject: subject.into(),
             caused_by: caused_by.map(Into::into),
             replay: replay.map(Into::into),
@@ -114,9 +114,9 @@ impl From<RemoteRuntimeInvocation> for lash_core::RuntimeInvocation {
     }
 }
 
-impl From<lash_core::runtime::RuntimeScope> for RemoteRuntimeScope {
-    fn from(value: lash_core::runtime::RuntimeScope) -> Self {
-        let lash_core::runtime::RuntimeScope {
+impl From<lash_core::runtime::RuntimeAttribution> for RemoteRuntimeAttribution {
+    fn from(value: lash_core::runtime::RuntimeAttribution) -> Self {
+        let lash_core::runtime::RuntimeAttribution {
             session_id,
             turn_id,
             turn_index,
@@ -131,9 +131,9 @@ impl From<lash_core::runtime::RuntimeScope> for RemoteRuntimeScope {
     }
 }
 
-impl From<RemoteRuntimeScope> for lash_core::runtime::RuntimeScope {
-    fn from(value: RemoteRuntimeScope) -> Self {
-        let RemoteRuntimeScope {
+impl From<RemoteRuntimeAttribution> for lash_core::runtime::RuntimeAttribution {
+    fn from(value: RemoteRuntimeAttribution) -> Self {
+        let RemoteRuntimeAttribution {
             session_id,
             turn_id,
             turn_index,
@@ -186,9 +186,18 @@ impl From<RemoteRuntimeReplay> for lash_core::runtime::RuntimeReplay {
 impl From<lash_core::runtime::RuntimeSubject> for RemoteRuntimeSubject {
     fn from(value: lash_core::runtime::RuntimeSubject) -> Self {
         match value {
-            lash_core::runtime::RuntimeSubject::Effect { effect_id, kind } => Self::Effect {
+            lash_core::runtime::RuntimeSubject::Effect {
+                address,
                 effect_id,
-                kind: kind.into(),
+                replay_attribution,
+            } => Self::Effect {
+                address,
+                effect_id,
+                replay_attribution: replay_attribution.map(|attribution| match attribution {
+                    lash_core::RuntimeReplayAttribution::ToolIntent(identity) => {
+                        RemoteRuntimeReplayAttribution::ToolIntent(identity.into())
+                    }
+                }),
             },
             lash_core::runtime::RuntimeSubject::Process { process_id } => {
                 Self::Process { process_id }
@@ -202,9 +211,17 @@ impl From<lash_core::runtime::RuntimeSubject> for RemoteRuntimeSubject {
                 sequence,
                 event_type,
             },
-            lash_core::runtime::RuntimeSubject::TriggerOccurrence { occurrence_id } => {
-                Self::TriggerOccurrence { occurrence_id }
-            }
+            lash_core::runtime::RuntimeSubject::TriggerOccurrence {
+                occurrence_id,
+                subscription_id,
+                subscription_incarnation,
+                subscription_revision,
+            } => Self::TriggerOccurrence {
+                occurrence_id,
+                subscription_id,
+                subscription_incarnation,
+                subscription_revision,
+            },
             lash_core::runtime::RuntimeSubject::SessionNode { node_id } => {
                 Self::SessionNode { node_id }
             }
@@ -215,9 +232,27 @@ impl From<lash_core::runtime::RuntimeSubject> for RemoteRuntimeSubject {
 impl From<RemoteRuntimeSubject> for lash_core::runtime::RuntimeSubject {
     fn from(value: RemoteRuntimeSubject) -> Self {
         match value {
-            RemoteRuntimeSubject::Effect { effect_id, kind } => Self::Effect {
+            RemoteRuntimeSubject::Effect {
+                address,
                 effect_id,
-                kind: kind.into(),
+                replay_attribution,
+            } => Self::Effect {
+                address,
+                effect_id,
+                replay_attribution: replay_attribution.map(|attribution| match attribution {
+                    RemoteRuntimeReplayAttribution::ToolIntent(identity) => {
+                        lash_core::RuntimeReplayAttribution::ToolIntent(
+                            lash_core::ToolIntentIdentity {
+                                session_id: identity.session_id,
+                                execution_scope_id: identity.execution_scope_id,
+                                tool_call_id: identity.tool_call_id,
+                                intent_index: identity.intent_index,
+                                replay_key: identity.replay_key,
+                                minting_emission_replay_key: identity.minting_emission_replay_key,
+                            },
+                        )
+                    }
+                }),
             },
             RemoteRuntimeSubject::Process { process_id } => Self::Process { process_id },
             RemoteRuntimeSubject::ProcessEvent {
@@ -229,9 +264,17 @@ impl From<RemoteRuntimeSubject> for lash_core::runtime::RuntimeSubject {
                 sequence,
                 event_type,
             },
-            RemoteRuntimeSubject::TriggerOccurrence { occurrence_id } => {
-                Self::TriggerOccurrence { occurrence_id }
-            }
+            RemoteRuntimeSubject::TriggerOccurrence {
+                occurrence_id,
+                subscription_id,
+                subscription_incarnation,
+                subscription_revision,
+            } => Self::TriggerOccurrence {
+                occurrence_id,
+                subscription_id,
+                subscription_incarnation,
+                subscription_revision,
+            },
             RemoteRuntimeSubject::SessionNode { node_id } => Self::SessionNode { node_id },
         }
     }

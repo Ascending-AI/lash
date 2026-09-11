@@ -1,5 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
+use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::collections::BTreeMap;
 
 use super::ToolDispatchContext;
@@ -95,18 +96,17 @@ pub(crate) async fn execute_parent_end_actions(
         let reason = "recorded start intent parent ended with cancel policy";
         let replay_key = format!("{}:parent-end", identity.replay_key);
         let parent = crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::new(&identity.session_id),
+            crate::EffectAddress::new(
+                context.effect_controller.scoped().execution_scope().clone(),
+                replay_key,
+            )
+            .expect("tool-intent parent end carries an admitted effect scope"),
+            crate::RuntimeAttribution::for_session(&identity.session_id),
             format!("tool-intent-parent-end:{}", identity.intent_index),
-            crate::RuntimeEffectKind::ToolParentEnd,
-            replay_key.clone(),
-        );
-        let mut parent = parent;
-        parent.replay = Some(crate::RuntimeReplay {
-            key: replay_key,
-            attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(
-                identity.clone(),
-            )),
-        });
+        )
+        .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        ));
         let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
             .with_parent_invocation(Some(parent))
             .with_agent_frame_id(Some(context.agent_frame_id.clone()));
@@ -337,19 +337,19 @@ async fn execute_one(
     identity: &crate::ToolIntentIdentity,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<(serde_json::Value, Option<crate::ToolIntentParentEnd>), crate::PluginError> {
-    let mut parent = context.parent_invocation.clone().unwrap_or_else(|| {
+    let parent = context.parent_invocation.clone().unwrap_or_else(|| {
         crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::new(&context.session_id),
+            crate::EffectAddress::new(
+                context.effect_controller.scoped().execution_scope().clone(),
+                identity.replay_key.clone(),
+            )
+            .expect("tool-intent execution carries an admitted effect scope"),
+            crate::RuntimeAttribution::for_session(&context.session_id),
             format!("tool-intent:{}", identity.intent_index),
-            crate::RuntimeEffectKind::ToolBatch,
-            identity.replay_key.clone(),
         )
-    });
-    parent.replay = Some(crate::RuntimeReplay {
-        key: identity.replay_key.clone(),
-        attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(
+        .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
             identity.clone(),
-        )),
+        ))
     });
     let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
         .with_parent_invocation(Some(parent))
@@ -443,10 +443,9 @@ async fn execute_one(
             })?;
             // Boxed because the drain future is already near the coordinator's
             // large-future budget and emission adds a delivery-start frame.
-            let report = Box::pin(router.emit_recorded(
-                intent.request.clone(),
-                context.effect_controller.controller(),
-            ))
+            let report = Box::pin(
+                router.emit_recorded(intent.request.clone(), &context.effect_controller.scoped()),
+            )
             .await?;
             Ok((
                 serde_json::to_value(report).unwrap_or(serde_json::Value::Null),

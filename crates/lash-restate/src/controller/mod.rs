@@ -194,7 +194,7 @@ fn restate_turn_cancel_wait_request(
     invocation: &RuntimeInvocation,
     turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
-    let Some(turn_id) = invocation.scope.turn_id.as_ref() else {
+    let Some(turn_id) = invocation.attribution.turn_id.as_ref() else {
         return Ok(None);
     };
     let Some(scope) = turn_cancel_scope else {
@@ -215,7 +215,8 @@ fn restate_turn_cancel_wait_request(
     scope
         .validate()
         .map_err(RuntimeEffectControllerError::from)?;
-    if scope.session_id() != Some(&invocation.scope.session_id) || scope.turn_id() != Some(turn_id)
+    if scope.session_id() != invocation.attribution.session_id.as_ref()
+        || scope.turn_id() != Some(turn_id)
     {
         return Err(RuntimeEffectControllerError::new(
             RuntimeErrorCode::RestateTurnCancelScopeMismatch,
@@ -375,19 +376,10 @@ fn trace_context_for_invocation(
     trace: &RestateTraceObserver,
     invocation: &RuntimeInvocation,
 ) -> lash_trace::TraceContext {
-    let mut context = trace.base_context.clone();
-    context.session_id = Some(invocation.scope.session_id.clone());
-    context.turn_id = invocation.scope.turn_id.clone();
-    context.turn_index = invocation.scope.turn_index;
-    context.protocol_iteration = invocation.scope.protocol_iteration;
-    context.effect_id = invocation.effect_id().map(str::to_string);
-    if context.parent_graph_node_id.is_none()
-        && let Some(turn_id) = context.turn_id.as_deref()
-    {
-        context.parent_graph_node_id =
-            Some(format!("turn:{}:{turn_id}", invocation.scope.session_id));
-    }
-    context
+    lash_core::facade_support::trace_context_for_runtime_invocation(
+        trace.base_context.clone(),
+        invocation,
+    )
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
@@ -1145,13 +1137,14 @@ where
                 .map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })
                 .map_err(RuntimeEffectControllerError::from),
             RestateEffectExecution::JournaledRun { envelope } => {
+                let effect_kind = envelope.command.kind();
                 let reconstructed_envelope = envelope.canonical_form()?;
                 let replay_trace = local_executor.replay_validation_trace().cloned();
                 let invocation = envelope.invocation.clone();
                 self.emit_trace(Some(&invocation), || {
                     lash_trace::TraceEvent::JournaledEffectStarted {
                         effect_name: restate_effect_name(&invocation),
-                        effect_kind: trace_effect_kind(&invocation).to_string(),
+                        effect_kind: effect_kind.as_str().to_string(),
                     }
                 });
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
@@ -1176,7 +1169,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::JournaledEffectSettled {
                                 effect_name: restate_effect_name(&invocation),
-                                effect_kind: trace_effect_kind(&invocation).to_string(),
+                                effect_kind: effect_kind.as_str().to_string(),
                                 status: lash_trace::TraceJournaledEffectStatus::Failed,
                             }
                         });
@@ -1197,7 +1190,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::JournaledEffectSettled {
                                 effect_name: restate_effect_name(&invocation),
-                                effect_kind: trace_effect_kind(&invocation).to_string(),
+                                effect_kind: effect_kind.as_str().to_string(),
                                 status: lash_trace::TraceJournaledEffectStatus::Failed,
                             }
                         });
@@ -1207,7 +1200,7 @@ where
                 self.emit_trace(Some(&invocation), || {
                     lash_trace::TraceEvent::JournaledEffectSettled {
                         effect_name: restate_effect_name(&invocation),
-                        effect_kind: trace_effect_kind(&invocation).to_string(),
+                        effect_kind: effect_kind.as_str().to_string(),
                         status: if outcome.is_ok() {
                             lash_trace::TraceJournaledEffectStatus::Completed
                         } else {
@@ -1240,11 +1233,6 @@ fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWa
     }
 }
 
-fn trace_effect_kind(invocation: &RuntimeInvocation) -> &'static str {
-    invocation
-        .effect_kind()
-        .map_or("runtime_invocation", RuntimeEffectKind::as_str)
-}
 async fn execute_restate_journaled_effect(
     envelope: RuntimeEffectEnvelope,
     local_executor: RuntimeEffectLocalExecutor<'_>,
@@ -1257,7 +1245,9 @@ async fn execute_restate_journaled_effect(
     match command {
         RuntimeEffectCommand::Trigger { command } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate trigger")?;
-            local_executor.execute_trigger(invocation, *command).await
+            local_executor
+                .execute_trigger(invocation.into_runtime_invocation(), *command)
+                .await
         }
         command => {
             local_executor
@@ -1414,14 +1404,14 @@ pub(crate) fn restate_effect_execution(
         {
             refuse_unhonored_group_membership(group.as_deref(), "restate durable process command")?;
             RestateEffectExecution::DurableProcessCommand {
-                invocation,
+                invocation: invocation.into_runtime_invocation(),
                 command,
             }
         }
         RuntimeEffectCommand::Process { command } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate direct process")?;
             RestateEffectExecution::DirectProcess {
-                invocation,
+                invocation: invocation.into_runtime_invocation(),
                 command,
             }
         }
@@ -1444,17 +1434,23 @@ pub(crate) fn restate_effect_execution(
         RuntimeEffectCommand::Sleep { duration_ms } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
             RestateEffectExecution::Timer {
-                invocation,
+                invocation: invocation.into_runtime_invocation(),
                 duration_ms,
             }
         }
         RuntimeEffectCommand::AwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;
-            RestateEffectExecution::AwaitEvent { invocation, key }
+            RestateEffectExecution::AwaitEvent {
+                invocation: invocation.into_runtime_invocation(),
+                key,
+            }
         }
         RuntimeEffectCommand::PeekAwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
-            RestateEffectExecution::PeekAwaitEvent { invocation, key }
+            RestateEffectExecution::PeekAwaitEvent {
+                invocation: invocation.into_runtime_invocation(),
+                key,
+            }
         }
         command @ (RuntimeEffectCommand::LlmCall { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
@@ -1486,9 +1482,8 @@ pub(crate) fn restate_effect_name(invocation: &RuntimeInvocation) -> String {
             .or_else(|| invocation.replay_key().map(str::to_string))
     {
         format!("lash:{replay_key}")
-    } else if let (Some(kind), Some(effect_id)) = (invocation.effect_kind(), invocation.effect_id())
-    {
-        format!("lash:{}:{effect_id}", kind.as_str())
+    } else if let Some(effect_id) = invocation.effect_id() {
+        format!("lash:effect:{effect_id}")
     } else {
         "lash:runtime-invocation".to_string()
     }
@@ -1511,7 +1506,7 @@ pub(crate) fn validate_recorded_effect_envelope(
 
 fn tracing_sleep_error(invocation: &RuntimeInvocation, err: &TerminalError) {
     tracing::warn!(
-        session_id = %invocation.scope.session_id,
+        session_id = invocation.attribution.session_id.as_deref().unwrap_or(""),
         effect_id = invocation.effect_id().unwrap_or(""),
         effect_kind = %RuntimeEffectKind::Sleep.as_str(),
         error = %err,

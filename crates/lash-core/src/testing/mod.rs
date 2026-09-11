@@ -702,11 +702,16 @@ pub fn exec_code_invocation(
     effect_id: impl Into<String>,
     replay_key: impl Into<String>,
 ) -> crate::RuntimeInvocation {
+    let session_id = session_id.into();
+    let turn_id = turn_id.into();
     crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(session_id, turn_id, turn_index, protocol_iteration),
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn(session_id.clone(), turn_id.clone()),
+            replay_key,
+        )
+        .expect("valid test effect address"),
+        crate::RuntimeAttribution::for_turn(session_id, turn_id, turn_index, protocol_iteration),
         effect_id,
-        crate::RuntimeEffectKind::ExecCode,
-        replay_key,
     )
 }
 
@@ -816,9 +821,12 @@ pub async fn coordinate_tool_provider_with_services(
     call: crate::PreparedToolCall,
 ) -> Result<crate::sansio::CompletedToolCall, String> {
     let parent_invocation = crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(session_id, scoped_effect_controller.scope_id(), 1, 0),
-        format!("tool-batch:{}", call.call_id),
-        crate::RuntimeEffectKind::ToolBatch,
+        crate::EffectAddress::new(
+            scoped_effect_controller.execution_scope().clone(),
+            format!("tool-batch:{}", call.call_id),
+        )
+        .expect("valid test effect address"),
+        crate::RuntimeAttribution::for_turn(session_id, scoped_effect_controller.scope_id(), 1, 0),
         format!("tool-batch:{}", call.call_id),
     );
     let dispatch = build_atomic_tool_dispatch(
@@ -909,9 +917,12 @@ pub async fn execute_tool_intents_with_services(
     intents: &crate::ToolIntents,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     let parent_invocation = crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::new(session_id),
-        format!("tool-intent-drain:{tool_call_id}"),
-        crate::RuntimeEffectKind::ToolBatch,
+        crate::EffectAddress::new(
+            scoped_effect_controller.execution_scope().clone(),
+            format!("tool-intent-drain:{tool_call_id}"),
+        )
+        .expect("valid test effect address"),
+        crate::RuntimeAttribution::for_session(session_id),
         format!("tool-intent-drain:{tool_call_id}"),
     );
     let dispatch = build_atomic_tool_dispatch(
@@ -979,8 +990,15 @@ impl EffectBackedProcessService {
         // the ToolContext carries (`process_effect_invocation`), so a nested
         // command inherits the attempt's replay-key lineage. Use the same
         // helper, not a lookalike.
+        let scoped = scope.effect_controller.scoped();
+        let attribution = scope
+            .parent_invocation
+            .as_ref()
+            .map(|parent| parent.attribution.clone())
+            .unwrap_or_else(|| crate::RuntimeAttribution::for_session("atomic-tool-test-session"));
         let invocation = crate::runtime::causal::process_effect_invocation(
-            &SessionId::from("atomic-tool-test-session"),
+            scoped.execution_scope(),
+            attribution,
             scope.parent_invocation.clone(),
             &effect_id,
         );
@@ -1003,6 +1021,7 @@ impl EffectBackedProcessService {
         );
         let outcome = crate::runtime::effect::drive_effect_controller_task(
             controller,
+            scoped.execution_scope().clone(),
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::process(command),

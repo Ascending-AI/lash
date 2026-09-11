@@ -1104,7 +1104,7 @@ impl RemoteProcessValueSelector {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteRuntimeInvocation {
-    pub scope: RemoteRuntimeScope,
+    pub attribution: RemoteRuntimeAttribution,
     pub subject: RemoteRuntimeSubject,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<RemoteCausalRef>,
@@ -1114,7 +1114,7 @@ pub struct RemoteRuntimeInvocation {
 
 impl RemoteRuntimeInvocation {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        self.scope.validate(type_name)?;
+        self.attribution.validate(type_name)?;
         self.subject.validate(type_name)?;
         if let Some(replay) = &self.replay {
             require_non_empty(type_name, "replay.key", &replay.key)?;
@@ -1124,8 +1124,9 @@ impl RemoteRuntimeInvocation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteRuntimeScope {
-    pub session_id: SessionId,
+pub struct RemoteRuntimeAttribution {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1134,11 +1135,13 @@ pub struct RemoteRuntimeScope {
     pub protocol_iteration: Option<usize>,
 }
 
-impl RemoteRuntimeScope {
+impl RemoteRuntimeAttribution {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "runtime_scope.session_id", &self.session_id)?;
+        if let Some(session_id) = &self.session_id {
+            require_non_empty(type_name, "runtime_attribution.session_id", session_id)?;
+        }
         if let Some(turn_id) = &self.turn_id {
-            require_non_empty(type_name, "runtime_scope.turn_id", turn_id)?;
+            require_non_empty(type_name, "runtime_attribution.turn_id", turn_id)?;
         }
         Ok(())
     }
@@ -1161,8 +1164,10 @@ pub enum RemoteRuntimeReplayAttribution {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteRuntimeSubject {
     Effect {
+        address: lash_sansio::EffectAddress,
         effect_id: String,
-        kind: RemoteRuntimeEffectKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replay_attribution: Option<RemoteRuntimeReplayAttribution>,
     },
     Process {
         process_id: ProcessId,
@@ -1174,6 +1179,12 @@ pub enum RemoteRuntimeSubject {
     },
     TriggerOccurrence {
         occurrence_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subscription_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subscription_incarnation: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subscription_revision: Option<u64>,
     },
     SessionNode {
         node_id: String,
@@ -1183,7 +1194,15 @@ pub enum RemoteRuntimeSubject {
 impl RemoteRuntimeSubject {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::Effect { effect_id, .. } => {
+            Self::Effect {
+                address, effect_id, ..
+            } => {
+                address
+                    .validate()
+                    .map_err(|error| RemoteProtocolError::InvalidEnvelope {
+                        type_name,
+                        message: format!("runtime_subject.address: {error}"),
+                    })?;
                 require_non_empty(type_name, "runtime_subject.effect_id", effect_id)
             }
             Self::Process { process_id } => {
@@ -1197,7 +1216,7 @@ impl RemoteRuntimeSubject {
                 require_non_empty(type_name, "runtime_subject.process_id", process_id)?;
                 require_non_empty(type_name, "runtime_subject.event_type", event_type)
             }
-            Self::TriggerOccurrence { occurrence_id } => {
+            Self::TriggerOccurrence { occurrence_id, .. } => {
                 require_non_empty(type_name, "runtime_subject.occurrence_id", occurrence_id)
             }
             Self::SessionNode { node_id } => {

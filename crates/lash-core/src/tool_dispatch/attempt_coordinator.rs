@@ -50,6 +50,7 @@ impl ToolAttemptEffectIdentity {
             };
             let parent_effect_id = parent.effect_id().unwrap_or(fallback);
             return crate::runtime::causal::child_effect_invocation(
+                context.effect_controller.scoped().execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
                 RuntimeEffectKind::ToolAttempt,
@@ -59,10 +60,13 @@ impl ToolAttemptEffectIdentity {
 
         let effect_id = format!("tool:{suffix}");
         RuntimeInvocation::effect(
-            crate::RuntimeScope::new(&context.session_id),
+            crate::EffectAddress::new(
+                context.effect_controller.scoped().execution_scope().clone(),
+                effect_id.clone(),
+            )
+            .expect("tool dispatch carries an admitted effect scope"),
+            crate::RuntimeAttribution::for_session(&context.session_id),
             effect_id.clone(),
-            RuntimeEffectKind::ToolAttempt,
-            effect_id,
         )
     }
 
@@ -80,6 +84,7 @@ impl ToolAttemptEffectIdentity {
             let suffix = format!("{replay_suffix}:attempt:{attempt}:sleep");
             let parent_effect_id = parent.effect_id().unwrap_or("tool-batch");
             return crate::runtime::causal::child_effect_invocation(
+                context.effect_controller.scoped().execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
                 RuntimeEffectKind::Sleep,
@@ -87,7 +92,12 @@ impl ToolAttemptEffectIdentity {
             );
         }
         if let Some(parent) = self.parent() {
-            return crate::runtime::tool_retry_sleep_invocation(parent, &call.tool_name, attempt);
+            return crate::runtime::tool_retry_sleep_invocation(
+                context.effect_controller.scoped().execution_scope(),
+                parent,
+                &call.tool_name,
+                attempt,
+            );
         }
 
         let replay_base = format!(
@@ -96,10 +106,13 @@ impl ToolAttemptEffectIdentity {
         );
         let effect_id = format!("{replay_base}:attempt:{attempt}:sleep");
         RuntimeInvocation::effect(
-            crate::RuntimeScope::new(&context.session_id),
+            crate::EffectAddress::new(
+                context.effect_controller.scoped().execution_scope().clone(),
+                effect_id.clone(),
+            )
+            .expect("tool retry carries an admitted effect scope"),
+            crate::RuntimeAttribution::for_session(&context.session_id),
             effect_id.clone(),
-            RuntimeEffectKind::Sleep,
-            effect_id,
         )
     }
 
@@ -337,7 +350,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
         let invocation = identity.attempt_invocation(context, &call, attempt);
         let outcome = context
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation.clone(),
@@ -732,7 +745,7 @@ async fn sleep_before_retry(
 ) -> Result<(), crate::RuntimeEffectControllerError> {
     let outcome = context
         .effect_controller
-        .controller()
+        .scoped()
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,

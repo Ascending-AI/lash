@@ -282,6 +282,7 @@ impl RuntimeTurnDriver<'_> {
         // and the causal edge survives a redrive that only runs phase 2.
         let phase_one = self.turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)?;
         let invocation = crate::runtime::causal::turn_phase_effect_invocation(
+            self.scoped_effect_controller.execution_scope(),
             &phase_one,
             id,
             RuntimeEffectKind::AssistantResponseHooks,

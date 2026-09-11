@@ -184,7 +184,10 @@ impl RuntimeTurnDriver<'_> {
                 let _ = runtime_event_tx.send(RuntimeStreamEvent::Turn(event)).await;
             }
         });
-        let protocol_iteration = invocation.scope.protocol_iteration.unwrap_or_default();
+        let protocol_iteration = invocation
+            .attribution
+            .protocol_iteration
+            .unwrap_or_default();
         let context = match self.execution_context(
             tool_event_tx.clone(),
             Arc::new(crate::ChronologicalProjection::default()),
@@ -236,6 +239,7 @@ impl RuntimeTurnDriver<'_> {
         let parent =
             self.turn_effect_invocation(machine, parent_effect_id, RuntimeEffectKind::ToolBatch)?;
         let invocation = crate::runtime::causal::child_effect_invocation(
+            self.scoped_effect_controller.execution_scope(),
             &parent,
             format!("{}:{call_id}:await", parent_effect_id.0),
             RuntimeEffectKind::AwaitEvent,
@@ -247,7 +251,6 @@ impl RuntimeTurnDriver<'_> {
             .deadline
             .map(|duration| self.host.core.clock.now() + duration);
         let outcome = scoped_effect_controller
-            .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
                 crate::RuntimeEffectLocalExecutor::await_event_under(

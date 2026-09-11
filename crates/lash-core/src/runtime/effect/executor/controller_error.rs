@@ -87,6 +87,12 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
     }
 }
 
+impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
+    fn from(error: lash_sansio::EffectIdentityError) -> Self {
+        RuntimeError::from(error).into()
+    }
+}
+
 impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
         match err {

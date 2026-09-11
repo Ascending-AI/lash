@@ -45,15 +45,12 @@ impl CausalColumns {
                 columns.session_id = Some(session_id.clone());
                 columns.turn_id = Some(turn_id.clone());
             }
-            Some(CausalRef::Effect {
-                session_id,
-                turn_id,
-                effect_id,
-            }) => {
-                columns.kind = Some("effect".to_string());
-                columns.session_id = Some(session_id.clone());
-                columns.turn_id = turn_id.clone();
-                columns.effect_id = Some(effect_id.clone());
+            Some(CausalRef::Effect { address }) => {
+                columns.kind = Some("effect_address".to_string());
+                columns.effect_id = Some(
+                    serde_json::to_string(address)
+                        .expect("validated effect addresses serialize infallibly"),
+                );
             }
             Some(CausalRef::ToolCall {
                 session_id,
@@ -109,11 +106,22 @@ impl CausalColumns {
                 session_id: codec.required(self.session_id, "caused_by_session_id")?,
                 turn_id: codec.required(self.turn_id, "caused_by_turn_id")?,
             },
-            "effect" => CausalRef::Effect {
-                session_id: codec.required(self.session_id, "caused_by_session_id")?,
-                turn_id: self.turn_id,
-                effect_id: codec.required(self.effect_id, "caused_by_effect_id")?,
-            },
+            "effect" => {
+                return Err(codec.corrupt(
+                    "effect_identity_format_cutover: a session relation with legacy session/effect causal identity cannot be reopened",
+                ));
+            }
+            "effect_address" => {
+                let encoded = codec.required(self.effect_id, "caused_by_effect_address")?;
+                let address: crate::EffectAddress =
+                    serde_json::from_str(&encoded).map_err(|error| {
+                        codec.corrupt(format!("invalid caused_by_effect_address: {error}"))
+                    })?;
+                address.validate().map_err(|error| {
+                    codec.corrupt(format!("invalid caused_by_effect_address: {error}"))
+                })?;
+                CausalRef::Effect { address }
+            }
             "tool_call" => CausalRef::ToolCall {
                 session_id: codec.required(self.session_id, "caused_by_session_id")?,
                 call_id: codec.required(self.call_id, "caused_by_call_id")?,

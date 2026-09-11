@@ -11,9 +11,9 @@ use crate::{ErrorEnvelope, TurnOutcome};
 
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
+    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeError, RuntimeInvocation, RuntimeScope,
+    RuntimeError, RuntimeInvocation,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl TurnAddress {
     }
 
     fn validate(&self) -> Result<(), RuntimeError> {
-        self.execution_scope().validate()
+        Ok(self.execution_scope().validate()?)
     }
 }
 
@@ -861,14 +861,19 @@ impl ActiveTurnControl {
         key: &AwaitEventKey,
     ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
         let invocation = RuntimeInvocation::effect(
-            RuntimeScope {
-                session_id: self.address.session_id.clone(),
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn(
+                    self.address.session_id.clone(),
+                    self.address.turn_id.clone(),
+                ),
+                causal_identity.clone(),
+            )?,
+            RuntimeAttribution {
+                session_id: Some(self.address.session_id.clone()),
                 turn_id: Some(self.address.turn_id.clone()),
                 turn_index: None,
                 protocol_iteration: None,
             },
-            causal_identity.clone(),
-            RuntimeEffectKind::PeekAwaitEvent,
             causal_identity.clone(),
         );
         let outcome = controller

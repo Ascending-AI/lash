@@ -134,10 +134,7 @@ pub enum RemoteCausalRef {
         turn_id: TurnId,
     },
     Effect {
-        session_id: SessionId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        turn_id: Option<TurnId>,
-        effect_id: String,
+        address: lash_sansio::EffectAddress,
     },
     ToolCall {
         session_id: SessionId,

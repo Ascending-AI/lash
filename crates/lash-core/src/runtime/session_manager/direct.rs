@@ -43,6 +43,7 @@ pub struct DirectCompletionClient<'run> {
     /// controller already owns one entry for the whole attempt. Boxed because
     /// this client is captured by the deep tool-dispatch futures.
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
+    inside_tool_attempt: bool,
 }
 
 impl<'run> DirectCompletionClient<'run> {
@@ -58,6 +59,7 @@ impl<'run> DirectCompletionClient<'run> {
                 turn_id,
             }),
             parent_invocation: None,
+            inside_tool_attempt: false,
         }
     }
 
@@ -93,6 +95,7 @@ impl<'run> DirectCompletionClient<'run> {
         Some(DirectCompletionClient {
             source,
             parent_invocation: self.parent_invocation.clone(),
+            inside_tool_attempt: self.inside_tool_attempt,
         })
     }
 
@@ -104,18 +107,22 @@ impl<'run> DirectCompletionClient<'run> {
     /// replays without re-entering its body.
     fn position(
         &self,
-        parent_invocation: Option<&crate::RuntimeInvocation>,
+        _parent_invocation: Option<&crate::RuntimeInvocation>,
     ) -> DirectExecutionPosition {
-        let is_attempt = |invocation: &crate::RuntimeInvocation| {
-            invocation.effect_kind() == Some(crate::RuntimeEffectKind::ToolAttempt)
-        };
-        if parent_invocation.is_some_and(is_attempt)
-            || self.parent_invocation.as_deref().is_some_and(is_attempt)
-        {
+        if self.inside_tool_attempt {
             DirectExecutionPosition::ToolAttempt
         } else {
             DirectExecutionPosition::Independent
         }
+    }
+
+    pub(crate) fn with_tool_attempt_parent_invocation(
+        mut self,
+        parent_invocation: crate::RuntimeInvocation,
+    ) -> Self {
+        self.parent_invocation = Some(Box::new(parent_invocation));
+        self.inside_tool_attempt = true;
+        self
     }
 
     pub async fn direct_completion(
@@ -208,6 +215,7 @@ impl<'run> DirectCompletionClient<'run> {
         Self {
             source: DirectCompletionSource::Unavailable(message.into()),
             parent_invocation: None,
+            inside_tool_attempt: false,
         }
     }
 
@@ -222,6 +230,7 @@ impl<'run> DirectCompletionClient<'run> {
         Self {
             source: DirectCompletionSource::TestFn(Arc::new(invoke)),
             parent_invocation: None,
+            inside_tool_attempt: false,
         }
     }
 }
@@ -231,7 +240,7 @@ impl<'run> RuntimeDirectSource<'run> {
         DirectInvocationContext {
             current: &self.manager.current,
             usage_capability: &self.manager.usage,
-            effect_controller: self.effect_controller.controller(),
+            effect_controller: self.effect_controller.scoped(),
             turn_id: self.turn_id.as_ref(),
             position,
             replay_ordinals: self.manager.direct_replay_ordinals.as_ref(),
@@ -243,7 +252,7 @@ impl<'run> RuntimeDirectSource<'run> {
 pub(in crate::runtime::session_manager) struct DirectInvocationContext<'a> {
     current: &'a CurrentSessionCapability,
     usage_capability: &'a UsageCapability,
-    effect_controller: &'a dyn crate::RuntimeEffectController,
+    effect_controller: crate::ScopedEffectController<'a>,
     turn_id: Option<&'a TurnId>,
     position: DirectExecutionPosition,
     replay_ordinals: &'a std::sync::Mutex<BTreeMap<String, u64>>,
@@ -364,6 +373,7 @@ impl DirectCompletionCapability {
         let discriminator =
             crate::runtime::causal::direct_request_discriminator(replay, caused_by, ordinal);
         let invocation = crate::runtime::causal::direct_effect_invocation(
+            context.effect_controller.execution_scope(),
             &current.session_id,
             &usage_source,
             discriminator,

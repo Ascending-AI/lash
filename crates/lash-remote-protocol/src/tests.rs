@@ -2478,8 +2478,8 @@ fn remote_process_event() -> RemoteProcessEvent {
         event_type: "process.completed".to_string(),
         payload: serde_json::json!({ "await_output": { "type": "success", "value": true } }),
         invocation: Some(RemoteRuntimeInvocation {
-            scope: RemoteRuntimeScope {
-                session_id: SessionId::from("session"),
+            attribution: RemoteRuntimeAttribution {
+                session_id: Some(SessionId::from("session")),
                 turn_id: Some(TurnId::from("turn")),
                 turn_index: Some(1),
                 protocol_iteration: Some(0),

@@ -13,11 +13,11 @@ mod validation;
 
 pub use envelope::{
     AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
-    ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
-    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeScope, RuntimeSubject, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolBatchEffectOutcome, ToolCallLaunch,
+    ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome,
+    RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
@@ -39,7 +39,7 @@ pub use group::{
 pub use group_drain::{
     ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
 };
-pub use lash_sansio::CausalRef;
+pub use lash_sansio::{CausalRef, EffectAddress};
 pub use native_host::NativeEffectHost;
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,

@@ -172,16 +172,22 @@ impl<'run> RuntimeExecutionContext<'run> {
         effect_id: String,
         operation: String,
     ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
-        let scope = self
+        let attribution = self
             .parent_invocation
             .as_ref()
-            .map(|invocation| invocation.scope.clone())
-            .unwrap_or_else(|| crate::RuntimeScope::new(self.session_id.clone()));
+            .map(|invocation| invocation.attribution.clone())
+            .unwrap_or_else(|| crate::RuntimeAttribution::for_session(self.session_id.clone()));
+        let execution_scope = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .execution_scope()
+            .clone();
         let invocation = crate::RuntimeInvocation::effect(
-            scope,
+            crate::EffectAddress::new(execution_scope, effect_id.clone())
+                .expect("runtime context carries an admitted effect scope"),
+            attribution,
             effect_id.clone(),
-            crate::RuntimeEffectKind::LanguageRuntimeValue,
-            effect_id,
         )
         .with_caused_by(
             self.parent_invocation
@@ -190,7 +196,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         );
         self.dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -711,7 +717,11 @@ impl<'run> RuntimeExecutionContext<'run> {
             )
             .await?;
         let invocation = crate::runtime::causal::process_await_event_invocation(
-            &self.session_id,
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.parent_invocation
+                .as_ref()
+                .map(|parent| parent.attribution.clone())
+                .unwrap_or_else(|| crate::RuntimeAttribution::none()),
             self.parent_invocation.as_ref(),
             process_id,
             signal_name,
@@ -720,7 +730,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -786,7 +796,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         };
         let effect_id = command.effect_id();
         let invocation = crate::runtime::causal::process_effect_invocation(
-            &self.session_id,
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.parent_invocation
+                .as_ref()
+                .map(|parent| parent.attribution.clone())
+                .unwrap_or_else(|| crate::RuntimeAttribution::none()),
             self.parent_invocation.clone(),
             &effect_id,
         );
@@ -833,6 +847,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = if let Some(task_requests) = task_requests {
             crate::runtime::effect::drive_effect_controller_task(
                 controller,
+                scoped.execution_scope().clone(),
                 envelope,
                 local_executor,
                 task_requests,
@@ -860,7 +875,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let cancellation = self.cancellation_token.clone().unwrap_or_default();
         let invocation = crate::runtime::causal::process_sleep_invocation(
-            &self.session_id,
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.parent_invocation
+                .as_ref()
+                .map(|parent| parent.attribution.clone())
+                .unwrap_or_else(|| crate::RuntimeAttribution::none()),
             self.parent_invocation.as_ref(),
             scope,
             sequence,
@@ -868,7 +887,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -948,16 +967,23 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "trigger store is unavailable in this runtime",
             )
         })?;
-        let scope = self
+        let attribution = self
             .parent_invocation
             .as_ref()
-            .map(|invocation| invocation.scope.clone())
-            .unwrap_or_else(|| crate::RuntimeScope::new(self.session_id.clone()));
+            .map(|invocation| invocation.attribution.clone())
+            .unwrap_or_else(|| crate::RuntimeAttribution::for_session(self.session_id.clone()));
         let invocation = crate::RuntimeInvocation::effect(
-            scope,
+            crate::EffectAddress::new(
+                self.dispatch
+                    .effect_controller
+                    .scoped()
+                    .execution_scope()
+                    .clone(),
+                effect_id.clone(),
+            )
+            .expect("runtime context carries an admitted effect scope"),
+            attribution,
             effect_id.clone(),
-            crate::RuntimeEffectKind::Trigger,
-            effect_id,
         )
         .with_caused_by(
             self.parent_invocation
@@ -966,7 +992,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         );
         self.dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,

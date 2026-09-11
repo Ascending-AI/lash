@@ -3,7 +3,8 @@ use crate::SessionId;
 use crate::TurnId;
 use crate::sansio::EffectId;
 use crate::{
-    CausalRef, RuntimeEffectKind, RuntimeInvocation, RuntimeReplay, RuntimeScope, RuntimeSubject,
+    CausalRef, EffectAddress, ExecutionScope, RuntimeAttribution, RuntimeEffectKind,
+    RuntimeInvocation, RuntimeReplay, RuntimeSubject,
 };
 
 pub(crate) fn turn_effect_invocation(
@@ -14,18 +15,19 @@ pub(crate) fn turn_effect_invocation(
     effect_id: EffectId,
     effect_kind: RuntimeEffectKind,
 ) -> RuntimeInvocation {
-    RuntimeInvocation::effect(
-        RuntimeScope::for_turn(session_id, turn_id, turn_index, protocol_iteration),
-        effect_id.0.to_string(),
+    let replay_key = turn_effect_replay_key(
+        session_id,
+        turn_id,
+        turn_index,
+        protocol_iteration,
         effect_kind,
-        turn_effect_replay_key(
-            session_id,
-            turn_id,
-            turn_index,
-            protocol_iteration,
-            effect_kind,
-            effect_id,
-        ),
+        effect_id,
+    );
+    RuntimeInvocation::effect(
+        EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
+            .expect("turn effect identity is admitted from validated session and turn ids"),
+        RuntimeAttribution::for_turn(session_id, turn_id, turn_index, protocol_iteration),
+        effect_id.0.to_string(),
     )
 }
 
@@ -41,14 +43,15 @@ pub(crate) fn turn_acceptance_effect_invocation(
     turn_id: &TurnId,
     turn_index: usize,
 ) -> RuntimeInvocation {
+    let replay_key = format!(
+        "{session_id}:{turn_id}:{}",
+        RuntimeEffectKind::AcceptTurnInput.as_str()
+    );
     RuntimeInvocation::effect(
-        RuntimeScope::for_turn(session_id, turn_id, turn_index, 0),
+        EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
+            .expect("turn acceptance identity is admitted from validated session and turn ids"),
+        RuntimeAttribution::for_turn(session_id, turn_id, turn_index, 0),
         format!("{turn_id}.accept"),
-        RuntimeEffectKind::AcceptTurnInput,
-        format!(
-            "{session_id}:{turn_id}:{}",
-            RuntimeEffectKind::AcceptTurnInput.as_str()
-        ),
     )
 }
 
@@ -64,11 +67,13 @@ pub(crate) fn turn_acceptance_effect_invocation(
 /// invocation would leave that edge inferable only from the shared effect-id
 /// prefix, which is a naming coincidence, not a recorded fact.
 pub(crate) fn turn_phase_effect_invocation(
+    execution_scope: &ExecutionScope,
     parent: &RuntimeInvocation,
     effect_id: EffectId,
     phase_kind: RuntimeEffectKind,
 ) -> RuntimeInvocation {
     child_effect_invocation(
+        execution_scope,
         parent,
         format!("{}.{}", effect_id.0, phase_kind.as_str()),
         phase_kind,
@@ -92,9 +97,10 @@ fn turn_effect_replay_key(
 }
 
 pub(crate) fn child_effect_invocation(
+    execution_scope: &ExecutionScope,
     parent: &RuntimeInvocation,
     effect_id: impl Into<String>,
-    kind: RuntimeEffectKind,
+    _kind: RuntimeEffectKind,
     replay_suffix: impl AsRef<str>,
 ) -> RuntimeInvocation {
     let replay_base = parent
@@ -102,29 +108,30 @@ pub(crate) fn child_effect_invocation(
         .or_else(|| parent.effect_id())
         .unwrap_or("effect");
     RuntimeInvocation {
-        scope: parent.scope.clone(),
+        attribution: parent.attribution.clone(),
         subject: RuntimeSubject::Effect {
+            address: EffectAddress::new(
+                execution_scope.clone(),
+                format!("{replay_base}:{}", replay_suffix.as_ref()),
+            )
+            .expect("child effect uses the already admitted controller scope"),
             effect_id: effect_id.into(),
-            kind,
+            replay_attribution: parent.replay_attribution().cloned(),
         },
         caused_by: parent.causal_ref(),
-        replay: Some(RuntimeReplay {
-            key: format!("{replay_base}:{}", replay_suffix.as_ref()),
-            attribution: parent
-                .replay
-                .as_ref()
-                .and_then(|replay| replay.attribution.clone()),
-        }),
+        replay: None,
     }
 }
 
 pub(crate) fn tool_retry_sleep_invocation(
+    execution_scope: &ExecutionScope,
     parent: &RuntimeInvocation,
     tool_name: &str,
     attempt: u32,
 ) -> RuntimeInvocation {
     let parent_effect_id = parent.effect_id().unwrap_or("effect");
     child_effect_invocation(
+        execution_scope,
         parent,
         format!("{parent_effect_id}:{tool_name}:attempt:{attempt}:sleep"),
         RuntimeEffectKind::Sleep,
@@ -133,7 +140,8 @@ pub(crate) fn tool_retry_sleep_invocation(
 }
 
 pub(crate) fn process_sleep_invocation(
-    session_id: &SessionId,
+    execution_scope: &ExecutionScope,
+    attribution: RuntimeAttribution,
     parent: Option<&RuntimeInvocation>,
     scope: &str,
     sequence: u64,
@@ -142,6 +150,7 @@ pub(crate) fn process_sleep_invocation(
     if let Some(parent) = parent {
         let parent_effect_id = parent.effect_id().unwrap_or("effect");
         return child_effect_invocation(
+            execution_scope,
             parent,
             format!("{parent_effect_id}:{suffix}"),
             RuntimeEffectKind::Sleep,
@@ -149,15 +158,16 @@ pub(crate) fn process_sleep_invocation(
         );
     }
     RuntimeInvocation::effect(
-        RuntimeScope::new(session_id),
+        EffectAddress::new(execution_scope.clone(), suffix.clone())
+            .expect("process sleep uses the already admitted controller scope"),
+        attribution,
         suffix.clone(),
-        RuntimeEffectKind::Sleep,
-        suffix,
     )
 }
 
 pub(crate) fn process_await_event_invocation(
-    session_id: &SessionId,
+    execution_scope: &ExecutionScope,
+    attribution: RuntimeAttribution,
     parent: Option<&RuntimeInvocation>,
     process_id: &ProcessId,
     signal_name: &str,
@@ -167,6 +177,7 @@ pub(crate) fn process_await_event_invocation(
     if let Some(parent) = parent {
         let parent_effect_id = parent.effect_id().unwrap_or("effect");
         return child_effect_invocation(
+            execution_scope,
             parent,
             format!("{parent_effect_id}:{suffix}"),
             RuntimeEffectKind::AwaitEvent,
@@ -174,51 +185,41 @@ pub(crate) fn process_await_event_invocation(
         );
     }
     RuntimeInvocation::effect(
-        RuntimeScope::new(session_id),
+        EffectAddress::new(execution_scope.clone(), suffix.clone())
+            .expect("process await uses the already admitted controller scope"),
+        attribution,
         suffix.clone(),
-        RuntimeEffectKind::AwaitEvent,
-        suffix,
     )
 }
 
 pub(crate) fn process_effect_invocation(
-    session_id: &SessionId,
+    execution_scope: &ExecutionScope,
+    attribution: RuntimeAttribution,
     parent: Option<RuntimeInvocation>,
     effect_id: &str,
 ) -> RuntimeInvocation {
     if let Some(parent) = parent {
-        let scope = if let Some(turn_id) = parent.scope.turn_id.clone() {
-            RuntimeScope {
-                session_id: SessionId::from(session_id.to_string()),
-                turn_id: Some(turn_id),
-                turn_index: parent.scope.turn_index,
-                protocol_iteration: parent.scope.protocol_iteration,
-            }
-        } else {
-            RuntimeScope::new(session_id)
-        };
         let replay_base = parent.replay_key().unwrap_or("process");
         return RuntimeInvocation {
-            scope,
+            attribution,
             subject: RuntimeSubject::Effect {
+                address: EffectAddress::new(
+                    execution_scope.clone(),
+                    format!("{replay_base}:{effect_id}"),
+                )
+                .expect("process effect uses the already admitted controller scope"),
                 effect_id: effect_id.to_string(),
-                kind: RuntimeEffectKind::Process,
+                replay_attribution: parent.replay_attribution().cloned(),
             },
             caused_by: parent.causal_ref(),
-            replay: Some(RuntimeReplay {
-                key: format!("{replay_base}:{effect_id}"),
-                attribution: parent
-                    .replay
-                    .as_ref()
-                    .and_then(|replay| replay.attribution.clone()),
-            }),
+            replay: None,
         };
     }
     RuntimeInvocation::effect(
-        RuntimeScope::new(session_id),
+        EffectAddress::new(execution_scope.clone(), effect_id.to_string())
+            .expect("process effect uses the already admitted controller scope"),
+        attribution,
         effect_id.to_string(),
-        RuntimeEffectKind::Process,
-        format!("{session_id}:{effect_id}"),
     )
 }
 
@@ -229,7 +230,7 @@ pub fn process_event_invocation(
     replay: Option<RuntimeReplay>,
 ) -> RuntimeInvocation {
     RuntimeInvocation {
-        scope: RuntimeScope::new("runtime"),
+        attribution: RuntimeAttribution::none(),
         subject: RuntimeSubject::ProcessEvent {
             process_id: ProcessId::from(process_id.to_string()),
             sequence,
@@ -243,13 +244,25 @@ pub fn process_event_invocation(
 }
 
 pub(crate) fn trigger_occurrence_invocation(
-    session_id: &SessionId,
-    occurrence_id: &str,
+    attribution: RuntimeAttribution,
+    cause: &CausalRef,
 ) -> RuntimeInvocation {
+    let CausalRef::TriggerOccurrence {
+        occurrence_id,
+        subscription_id,
+        subscription_incarnation,
+        subscription_revision,
+    } = cause
+    else {
+        unreachable!("trigger occurrence invocation requires a trigger cause")
+    };
     RuntimeInvocation {
-        scope: RuntimeScope::new(session_id),
+        attribution,
         subject: RuntimeSubject::TriggerOccurrence {
             occurrence_id: occurrence_id.to_string(),
+            subscription_id: subscription_id.clone(),
+            subscription_incarnation: subscription_incarnation.clone(),
+            subscription_revision: *subscription_revision,
         },
         caused_by: None,
         replay: Some(RuntimeReplay {
@@ -260,6 +273,7 @@ pub(crate) fn trigger_occurrence_invocation(
 }
 
 pub(crate) fn direct_effect_invocation(
+    execution_scope: &ExecutionScope,
     session_id: &SessionId,
     usage_source: &str,
     replay_discriminator: String,
@@ -278,20 +292,20 @@ pub(crate) fn direct_effect_invocation(
         &replay_preimage,
     );
     RuntimeInvocation::effect(
-        RuntimeScope {
-            session_id: SessionId::from(session_id.to_string()),
+        EffectAddress::new(execution_scope.clone(), replay_key)
+            .expect("direct effect uses the already admitted controller scope"),
+        RuntimeAttribution {
+            session_id: Some(SessionId::from(session_id.to_string())),
             turn_id: turn_id.cloned(),
             turn_index: None,
             protocol_iteration: None,
         },
         replay_discriminator,
-        RuntimeEffectKind::Direct,
-        replay_key,
     )
     .with_caused_by(caused_by)
 }
 
-const DIRECT_EFFECT_FAMILY_VERSION: u8 = 2;
+const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
 
 fn direct_effect_replay_preimage(
     session_id: &SessionId,
@@ -350,17 +364,9 @@ fn project_direct_causal_ref(
             identity.string(session_id);
             identity.string(turn_id);
         }
-        CausalRef::Effect {
-            session_id,
-            turn_id,
-            effect_id,
-        } => {
+        CausalRef::Effect { address } => {
             identity.tag(2);
-            identity.string(session_id);
-            identity.optional(turn_id.as_deref(), |identity, turn_id| {
-                identity.string(turn_id)
-            });
-            identity.string(effect_id);
+            project_effect_address(identity, address);
         }
         CausalRef::ToolCall {
             session_id,
@@ -412,6 +418,43 @@ fn project_direct_causal_ref(
     }
 }
 
+pub(crate) fn project_effect_address(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    address: &EffectAddress,
+) {
+    match &address.execution_scope {
+        ExecutionScope::Turn {
+            session_id,
+            turn_id,
+        } => {
+            identity.tag(1);
+            identity.string(session_id);
+            identity.string(turn_id);
+        }
+        ExecutionScope::Process { process_id } => {
+            identity.tag(2);
+            identity.string(process_id);
+        }
+        ExecutionScope::QueueDrain {
+            session_id,
+            drain_id,
+        } => {
+            identity.tag(3);
+            identity.string(session_id);
+            identity.string(drain_id);
+        }
+        ExecutionScope::SessionDelete { session_id } => {
+            identity.tag(4);
+            identity.string(session_id);
+        }
+        ExecutionScope::RuntimeOperation { operation_id } => {
+            identity.tag(5);
+            identity.string(operation_id);
+        }
+    }
+    identity.string(&address.replay_key);
+}
+
 pub(super) fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
     fn field(value: &str) -> String {
         format!("{}:{value}", value.len())
@@ -425,18 +468,17 @@ pub(super) fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
             session_id,
             turn_id,
         } => format!("cause:1:{}:{}:", field(session_id), field(turn_id)),
-        CausalRef::Effect {
-            session_id,
-            turn_id,
-            effect_id,
-        } => {
-            format!(
-                "cause:2:{}:{}:{}:",
-                field(session_id),
-                optional_field(turn_id.as_deref()),
-                field(effect_id)
-            )
-        }
+        CausalRef::Effect { address } => format!(
+            "cause:2:{}:{}:",
+            field(
+                address
+                    .execution_scope
+                    .journal_identity()
+                    .expect("causal effect address contains a valid scope")
+                    .key()
+            ),
+            field(&address.replay_key)
+        ),
         CausalRef::ToolCall {
             session_id,
             call_id,

@@ -255,16 +255,17 @@ fn causal_node_id(caused_by: &crate::CausalRef) -> String {
             session_id,
             turn_id,
         } => format!("turn:{session_id}:{turn_id}"),
-        crate::CausalRef::Effect { effect_id, .. } => format!("effect:{effect_id}"),
+        crate::CausalRef::Effect { address } => address.graph_key(),
         crate::CausalRef::ToolCall { call_id, .. } => format!("tool:{call_id}"),
         crate::CausalRef::Process { process_id } => format!("process:{process_id}"),
         crate::CausalRef::ProcessEvent {
             process_id,
             sequence,
         } => format!("process:{process_id}:{sequence}"),
-        crate::CausalRef::TriggerOccurrence { occurrence_id, .. } => {
-            format!("trigger:{occurrence_id}")
-        }
+        crate::CausalRef::TriggerOccurrence { .. } => format!(
+            "trigger:{}",
+            serde_json::to_string(caused_by).expect("causal references serialize")
+        ),
         crate::CausalRef::SessionNode {
             session_id,
             node_id,
@@ -273,29 +274,46 @@ fn causal_node_id(caused_by: &crate::CausalRef) -> String {
 }
 
 pub(crate) fn trace_context_from_invocation(invocation: &crate::RuntimeInvocation) -> TraceContext {
-    let mut context = TraceContext::default().for_session(invocation.scope.session_id.clone());
-    if let Some(turn_id) = invocation.scope.turn_id.as_ref() {
+    trace_context_for_invocation(TraceContext::default(), invocation)
+}
+
+pub(crate) fn trace_context_for_invocation(
+    mut context: TraceContext,
+    invocation: &crate::RuntimeInvocation,
+) -> TraceContext {
+    if let Some(session_id) = invocation.attribution.session_id.as_ref() {
+        context = context.for_session(session_id.clone());
+    }
+    if let Some(turn_id) = invocation.attribution.turn_id.as_ref() {
         context = context.for_turn(turn_id.clone());
     }
-    if let Some(turn_index) = invocation.scope.turn_index {
+    if let Some(turn_index) = invocation.attribution.turn_index {
         context = context.for_turn_index(turn_index);
     }
-    if let Some(protocol_iteration) = invocation.scope.protocol_iteration {
+    if let Some(protocol_iteration) = invocation.attribution.protocol_iteration {
         context = context.for_protocol_iteration(protocol_iteration);
     }
     if let Some(effect_id) = invocation.effect_id() {
         context.effect_id = Some(effect_id.to_string());
     }
-    if let Some(replay) = invocation.replay.as_ref() {
+    if let Some(replay_key) = invocation.replay_key() {
         context
             .metadata
-            .insert("replay_key".to_string(), serde_json::json!(replay.key));
+            .insert("replay_key".to_string(), serde_json::json!(replay_key));
     }
     if let Some(caused_by) = invocation.caused_by.as_ref() {
         context = trace_context_with_causal_ref(context, caused_by);
         if context.parent_graph_node_id.is_none() {
             context.parent_graph_node_id = Some(causal_node_id(caused_by));
         }
+    }
+    if context.parent_graph_node_id.is_none()
+        && let (Some(session_id), Some(turn_id)) = (
+            invocation.attribution.session_id.as_ref(),
+            invocation.attribution.turn_id.as_ref(),
+        )
+    {
+        context.parent_graph_node_id = Some(format!("turn:{session_id}:{turn_id}"));
     }
     context
 }

@@ -165,12 +165,22 @@ impl RuntimeSessionServices {
                     parent
                 } else {
                     fallback = crate::RuntimeInvocation::effect(
-                        crate::RuntimeScope::new(&self.current.session_id),
-                        format!(
-                            "process:{}:tool:{}:await",
-                            registration.id, pending.tool_name
-                        ),
-                        crate::RuntimeEffectKind::AwaitEvent,
+                        crate::EffectAddress::new(
+                            dispatch
+                                .effect_controller
+                                .scoped()
+                                .execution_scope()
+                                .clone(),
+                            format!(
+                                "process:{}:tool:{}:await",
+                                registration.id, pending.tool_name
+                            ),
+                        )
+                        .expect("process tool dispatch carries an admitted effect scope"),
+                        await_parent_invocation
+                            .as_ref()
+                            .map(|parent| parent.attribution.clone())
+                            .unwrap_or_else(crate::RuntimeAttribution::none),
                         format!(
                             "process:{}:tool:{}:await",
                             registration.id, pending.tool_name
@@ -179,6 +189,7 @@ impl RuntimeSessionServices {
                     &fallback
                 };
                 let invocation = crate::runtime::causal::child_effect_invocation(
+                    dispatch.effect_controller.scoped().execution_scope(),
                     parent,
                     format!(
                         "process:{}:tool:{}:await",

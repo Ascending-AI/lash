@@ -911,7 +911,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     group.as_deref(),
                     "trigger",
                 )?;
-                self.execute_trigger(invocation, *command).await
+                self.execute_trigger(invocation.into_runtime_invocation(), *command)
+                    .await
             }
             command => {
                 self.execute(RuntimeEffectEnvelope {
@@ -1064,7 +1065,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
             RuntimeEffectCommand::ToolBatch { batch } => {
                 let outcome = Box::pin(self.context.execute_prepared_tool_batch_launches(
                     batch,
-                    envelope.invocation,
+                    envelope.invocation.into_runtime_invocation(),
                     self.child_trace_hooks,
                 ))
                 .await?;
@@ -1086,7 +1087,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                     execution_grant,
                     attempt,
                     max_attempts,
-                    envelope.invocation,
+                    envelope.invocation.into_runtime_invocation(),
                     child_execution_trace_hook,
                     self.completion_key,
                 ))
@@ -1130,15 +1131,18 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             ));
         };
         let mut dispatch = (*self.dispatch).clone();
-        dispatch.parent_invocation = Some(envelope.invocation.clone());
+        dispatch.parent_invocation = Some(envelope.invocation.clone().into_runtime_invocation());
         dispatch.direct_completions = dispatch
             .direct_completions
-            .with_parent_invocation(Some(envelope.invocation.clone()));
+            .with_tool_attempt_parent_invocation(
+                envelope.invocation.clone().into_runtime_invocation(),
+            );
         dispatch.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         let dispatch = Arc::new(dispatch);
-        let tool_context = self
-            .tool_context
-            .with_attempt_dispatch(Arc::clone(&dispatch), envelope.invocation);
+        let tool_context = self.tool_context.with_attempt_dispatch(
+            Arc::clone(&dispatch),
+            envelope.invocation.into_runtime_invocation(),
+        );
         tool_context.install_prederived_completion_key(self.completion_key);
         let outcome = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             dispatch.as_ref(),
@@ -1180,7 +1184,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .run_llm_call(
                         Arc::new((*request).into_request(None, None)),
                         runner.protocol_iteration,
-                        envelope.invocation,
+                        envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,
                         &runner.cancellation,
                     )
@@ -1203,7 +1207,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 ),
             RuntimeEffectCommand::ToolBatch { batch } => Box::pin(runner.driver.run_tool_batch(
                 batch,
-                envelope.invocation,
+                envelope.invocation.into_runtime_invocation(),
                 &runner.event_tx,
                 &runner.cancellation,
             ))
@@ -1221,7 +1225,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         &code,
                         runner.messages.clone(),
                         runner.protocol_iteration,
-                        envelope.invocation,
+                        envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,
                         &runner.cancellation,
                     )

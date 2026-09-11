@@ -511,7 +511,7 @@ impl RuntimeExecutionContext<'_> {
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
         attempt_dispatch.direct_completions = attempt_dispatch
             .direct_completions
-            .with_parent_invocation(Some(attempt_invocation.clone()));
+            .with_tool_attempt_parent_invocation(attempt_invocation.clone());
         attempt_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         let attempt_dispatch = std::sync::Arc::new(attempt_dispatch);
@@ -720,15 +720,23 @@ impl RuntimeExecutionContext<'_> {
             parent
         } else {
             fallback = crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::new(&self.dispatch.session_id),
-                format!("tool:{call_id}:await"),
-                crate::RuntimeEffectKind::AwaitEvent,
+                crate::EffectAddress::new(
+                    self.dispatch
+                        .effect_controller
+                        .scoped()
+                        .execution_scope()
+                        .clone(),
+                    format!("tool:{call_id}:await"),
+                )
+                .expect("tool await carries an admitted effect scope"),
+                crate::RuntimeAttribution::for_session(&self.dispatch.session_id),
                 format!("tool:{call_id}:await"),
             );
             &fallback
         };
         let parent_effect_id = parent.effect_id().unwrap_or("tool");
         let invocation = crate::runtime::causal::child_effect_invocation(
+            self.dispatch.effect_controller.scoped().execution_scope(),
             parent,
             format!("{parent_effect_id}:{replay_suffix}"),
             crate::RuntimeEffectKind::AwaitEvent,
@@ -742,7 +750,7 @@ impl RuntimeExecutionContext<'_> {
         let outcome = self
             .dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -939,9 +947,18 @@ impl RuntimeExecutionContext<'_> {
                             .runtime_execution_context(self.clone().with_parent_invocation(
                                 parent_invocation.clone().unwrap_or_else(|| {
                                     crate::RuntimeInvocation::effect(
-                                        crate::RuntimeScope::new(&dispatch.session_id),
-                                        format!("orchestration:{call_id}"),
-                                        crate::RuntimeEffectKind::Direct,
+                                        crate::EffectAddress::new(
+                                            dispatch
+                                                .effect_controller
+                                                .scoped()
+                                                .execution_scope()
+                                                .clone(),
+                                            format!("orchestration:{call_id}"),
+                                        )
+                                        .expect("orchestration carries an admitted effect scope"),
+                                        crate::RuntimeAttribution::for_session(
+                                            &dispatch.session_id,
+                                        ),
                                         format!("orchestration:{call_id}"),
                                     )
                                 }),

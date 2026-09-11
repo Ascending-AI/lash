@@ -107,7 +107,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             effect_controller.clone_scoped(),
             self.causal_invocation
                 .as_ref()
-                .and_then(|invocation| invocation.scope.turn_id.clone()),
+                .and_then(|invocation| invocation.attribution.turn_id.clone()),
         );
         let state = self.services.current.snapshot.to_runtime_state();
         let execution_env_spec = state.process_execution_env_spec(&self.services.current.policy);

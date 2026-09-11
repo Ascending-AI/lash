@@ -37,7 +37,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 task_controller,
             );
             let outcome = scoped_effect_controller
-                .controller()
                 .execute_effect(envelope, local_executor)
                 .await;
             self.apply_turn_effect_update(&update);
@@ -58,6 +57,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             );
             let outcome = crate::runtime::effect::drive_effect_controller_task(
                 scoped_effect_controller.controller(),
+                scoped_effect_controller.execution_scope().clone(),
                 envelope,
                 local_executor,
                 task_requests,

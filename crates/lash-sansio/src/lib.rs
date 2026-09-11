@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod causal;
 #[doc(hidden)]
 pub mod core_support;
+mod effect_identity;
 mod frame_key;
 pub mod identity;
 pub mod llm;
@@ -29,6 +30,9 @@ pub use attachment::{
     InvalidAttachmentId, InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
+pub use effect_identity::{
+    EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
+};
 pub use frame_key::{FrameKey, FrameKeyError};
 pub use identity::{BatchId, InputId, NodeId, ProcessId, SessionId, TurnId};
 pub use llm::capability::{
