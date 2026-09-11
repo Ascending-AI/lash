@@ -1351,9 +1351,25 @@ pub(crate) fn success(value: Value) -> Value {
     Value::Record(Arc::new(record))
 }
 
-pub(crate) fn error_value(message: String) -> Value {
+pub(crate) fn execution_host_error_value(error: ExecutionHostError, operation: &str) -> Value {
     let result_names = result_wrapper_names();
-    let mut record = record_with_capacity(2);
+    let mut details = record_with_capacity(2);
+    details.insert("kind".to_string(), Value::String("effect".into()));
+    details.insert(
+        "operation".to_string(),
+        Value::String(operation.to_string().into()),
+    );
+    let mut cause = tool_failure_fields(&error).unwrap_or_else(|| {
+        let mut cause = record_with_capacity(1);
+        cause.insert(
+            "code".to_string(),
+            Value::String("ResourceOperationFailed".into()),
+        );
+        cause
+    });
+    cause.insert("details".to_string(), Value::Record(Arc::new(details)));
+
+    let mut record = record_with_capacity(3);
     record.insert_symbolized(
         result_names.ok.symbol,
         result_names.ok.text.clone(),
@@ -1362,9 +1378,68 @@ pub(crate) fn error_value(message: String) -> Value {
     record.insert_symbolized(
         result_names.error.symbol,
         result_names.error.text.clone(),
-        Value::String(message.into()),
+        Value::String(error.message().into()),
     );
+    record.insert("cause".to_string(), Value::Record(Arc::new(cause)));
     Value::Record(Arc::new(record))
+}
+
+pub(crate) fn tool_failure_fields(error: &ExecutionHostError) -> Option<Record> {
+    let class = match error.tool_failure_class()? {
+        lash_sansio::ToolFailureClass::InvalidRequest => "invalid_request",
+        lash_sansio::ToolFailureClass::Io => "io",
+        lash_sansio::ToolFailureClass::Unavailable => "unavailable",
+        lash_sansio::ToolFailureClass::PermissionDenied => "permission_denied",
+        lash_sansio::ToolFailureClass::Timeout => "timeout",
+        lash_sansio::ToolFailureClass::Execution => "execution",
+        lash_sansio::ToolFailureClass::External => "external",
+        lash_sansio::ToolFailureClass::ResourceLimit => "resource_limit",
+        lash_sansio::ToolFailureClass::Internal => "internal",
+    };
+    let source = match error.tool_failure_source()? {
+        lash_sansio::ToolFailureSource::Runtime => "runtime",
+        lash_sansio::ToolFailureSource::Tool => "tool",
+        lash_sansio::ToolFailureSource::Plugin => "plugin",
+        lash_sansio::ToolFailureSource::Policy => "policy",
+        lash_sansio::ToolFailureSource::Cancellation => "cancellation",
+        lash_sansio::ToolFailureSource::UnknownLegacy => "unknown_legacy",
+    };
+    let retry = match error.tool_failure_retry()? {
+        lash_sansio::ToolRetryStatus::Never => {
+            let mut retry = record_with_capacity(1);
+            retry.insert("type".to_string(), Value::String("never".into()));
+            retry
+        }
+        lash_sansio::ToolRetryStatus::Safe { after_ms } => {
+            let mut retry = record_with_capacity(2);
+            retry.insert("type".to_string(), Value::String("safe".into()));
+            if let Some(after_ms) = after_ms {
+                retry.insert("after_ms".to_string(), Value::Number(*after_ms as f64));
+            }
+            retry
+        }
+        lash_sansio::ToolRetryStatus::Exhausted { attempts } => {
+            let mut retry = record_with_capacity(2);
+            retry.insert("type".to_string(), Value::String("exhausted".into()));
+            retry.insert("attempts".to_string(), Value::Number((*attempts).into()));
+            retry
+        }
+        lash_sansio::ToolRetryStatus::UnknownLegacy => {
+            let mut retry = record_with_capacity(1);
+            retry.insert("type".to_string(), Value::String("unknown_legacy".into()));
+            retry
+        }
+    };
+
+    let mut fields = record_with_capacity(4);
+    fields.insert(
+        "code".to_string(),
+        Value::String(error.tool_failure_code()?.into()),
+    );
+    fields.insert("class".to_string(), Value::String(class.into()));
+    fields.insert("source".to_string(), Value::String(source.into()));
+    fields.insert("retry".to_string(), Value::Record(Arc::new(retry)));
+    Some(fields)
 }
 
 /// Fails loudly in debug builds when a heap reference reaches a boundary that

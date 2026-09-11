@@ -11,6 +11,7 @@ import unittest.mock
 
 
 SCRIPT = Path(__file__).with_name("check_version_bumps.py")
+REAL_CONFIG = SCRIPT.with_name("versioned-surfaces.toml")
 SPEC = importlib.util.spec_from_file_location("check_version_bumps", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -64,6 +65,41 @@ description = "incident 3 trace event surface"
 kind = "rust_serde_shapes"
 paths = ["src/trace.rs"]
 must_cover = ["TraceEvent"]
+"""
+
+CONTINUATION_TOOL_FAILURE_CONFIG = """
+[[surface]]
+constant = "VM_CONTINUATION_FORMAT_VERSION"
+constant_path = "src/continuation.rs"
+description = "fixture continuation tool-failure leaves"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/tool_output.rs"]
+symbols = ["ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"]
+"""
+
+CONTINUATION_TOOL_FAILURE_LEAVES = """
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolFailureClass {
+    InvalidRequest,
+    PermissionDenied,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolFailureSource {
+    Runtime,
+    Policy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolRetryStatus {
+    Never,
+    Exhausted { attempts: u32 },
+}
 """
 
 UNRELATED_SURFACE_ENTRY = """
@@ -335,6 +371,59 @@ class VersionBumpFixtureTest(unittest.TestCase):
         self.assertEqual(result.failures[0].surface.constant, "WIRE_VERSION")
         self.assertEqual(result.failures[0].base_version, 1)
         self.assertEqual(result.failures[0].head_version, 1)
+
+    def test_continuation_registry_guards_all_tool_failure_leaves(self) -> None:
+        continuation = next(
+            surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant == "VM_CONTINUATION_FORMAT_VERSION"
+        )
+        leaf_guard = next(
+            guard
+            for guard in continuation.guards
+            if guard.paths == ("crates/lash-sansio/src/tool_output.rs",)
+        )
+
+        self.assertEqual(leaf_guard.kind, "rust_items")
+        self.assertEqual(
+            leaf_guard.symbols,
+            ("ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"),
+        )
+
+    def test_each_continuation_tool_failure_leaf_change_demands_a_bump(self) -> None:
+        mutations = {
+            "class vocabulary": ("InvalidRequest", "InvalidRequestV2"),
+            "source vocabulary": ("Policy", "PolicyV2"),
+            "retry shape": ("attempts: u32", "attempts: u64"),
+        }
+        for name, (before, after) in mutations.items():
+            with self.subTest(name=name):
+                fixture = FixtureRepository(CONTINUATION_TOOL_FAILURE_CONFIG)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/continuation.rs",
+                    "pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 10;\n",
+                )
+                fixture.write_file(
+                    "src/tool_output.rs", CONTINUATION_TOOL_FAILURE_LEAVES
+                )
+                base = fixture.commit("base")
+                fixture.write_file(
+                    "src/tool_output.rs",
+                    CONTINUATION_TOOL_FAILURE_LEAVES.replace(before, after),
+                )
+                head = fixture.commit(f"change {name} without bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(
+                    result.failures[0].surface.constant,
+                    "VM_CONTINUATION_FORMAT_VERSION",
+                )
+                self.assertEqual(result.failures[0].base_version, 10)
+                self.assertEqual(result.failures[0].head_version, 10)
 
     def test_wire_variant_with_bump_passes(self) -> None:
         fixture = self.fixture()

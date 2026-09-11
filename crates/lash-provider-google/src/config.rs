@@ -90,30 +90,6 @@ impl CredentialRefresher<GoogleCredential> for GoogleCredentialRefresher {
     }
 }
 
-pub(crate) fn credential_transport_error(error: CredentialError) -> LlmTransportError {
-    let code = match error.kind {
-        CredentialErrorKind::InvalidGrant => "credential_invalid_grant",
-        CredentialErrorKind::Transient => "credential_refresh_transient",
-        CredentialErrorKind::Other => "credential_refresh_failed",
-        // Future credential kinds retain the generic failure code and explicit retry policy.
-        _ => "credential_refresh_failed",
-    };
-    let retry_verdict = if error.retryable {
-        TransportRetryVerdict::RetryableTransient
-    } else {
-        TransportRetryVerdict::Forbidden
-    };
-    let failure_kind = if error.retryable {
-        lash_core::ProviderFailureKind::Transport
-    } else {
-        lash_core::ProviderFailureKind::Auth
-    };
-    LlmTransportError::new(error.to_string())
-        .with_kind(failure_kind)
-        .with_code(code)
-        .with_retry_verdict(retry_verdict)
-}
-
 /// Google OAuth (Gemini via Code Assist) provider.
 #[derive(Clone, Debug)]
 pub struct GoogleOAuthProvider {
@@ -245,29 +221,6 @@ impl GoogleOAuthProvider {
 #[cfg(test)]
 mod credential_tests {
     use super::*;
-    use lash_core::provider::{DefaultProviderFailureClassifier, ProviderFailureClassifier};
-
-    #[test]
-    fn credential_failures_preserve_transient_and_permission_retry_verdicts() {
-        let transient = DefaultProviderFailureClassifier
-            .classify(credential_transport_error(CredentialError::transient()));
-        assert_eq!(transient.kind, lash_core::ProviderFailureKind::Transport);
-        assert_eq!(
-            transient.code.as_deref(),
-            Some("credential_refresh_transient")
-        );
-        assert_eq!(
-            transient.retry_verdict,
-            TransportRetryVerdict::RetryableTransient
-        );
-
-        let permission = DefaultProviderFailureClassifier
-            .classify(credential_transport_error(CredentialError::invalid_grant()));
-        assert_eq!(permission.kind, lash_core::ProviderFailureKind::Auth);
-        assert_eq!(permission.code.as_deref(), Some("credential_invalid_grant"));
-        assert_eq!(permission.retry_verdict, TransportRetryVerdict::Forbidden);
-        assert!(permission.message.contains("sign in again"));
-    }
 
     #[test]
     fn google_endpoint_and_api_version_default_and_override_explicitly() {

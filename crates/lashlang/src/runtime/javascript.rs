@@ -197,21 +197,9 @@ pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
             debug_assert_exported_value("scalar JavaScript primitive coercion");
             Value::String("[object Object]".into())
         }
-        // The ECMA opcodes resolve a projected *operand* before they run, so what
-        // reaches here is the container case: a projected value the guest stored
-        // inside a list or record, met while coercing the container.
-        //
-        // How the read happens is a live constraint, not a detail.
-        // `ProjectedValue::materialize` drives the host read with
-        // `futures_executor::block_on`, and every coercion in this file is
-        // synchronous with no `.await` to spend, so the read runs on whatever
-        // thread is stepping the VM. That is safe for the descriptors this repo
-        // has — all of them answer from memory and never pend — but a
-        // store-backed `ProjectedHostDescriptor` would block that worker, and
-        // would deadlock a current-thread runtime. Moving this seam onto the
-        // async projected path is FIG-1481. Reading is still the right answer
-        // until then: the alternative is not laziness, it is `"[object Object]"`
-        // for a value the host is holding.
+        // JavaScript VM opcodes discover projections reachable through coercion
+        // and use the async heap path before calling this synchronous fallback.
+        // Other synchronous value helpers still materialize projected values.
         Value::Projected(projected) => {
             javascript_to_primitive_string_or_number(&projected.materialize())
         }

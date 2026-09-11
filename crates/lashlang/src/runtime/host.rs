@@ -1,8 +1,13 @@
 use crate::{HostRequirementsRef, LashlangExecutionCallSite, ModuleRef, ProcessRef};
 
-use super::{ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeFailure, Value};
+use super::{
+    ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeFailure, Value,
+    error::ExecutionHostToolFailure,
+};
 use crate::LashlangExecutionObservation;
-use lash_sansio::sync::MutexExt;
+use lash_sansio::{
+    ToolFailure, ToolFailureClass, ToolFailureSource, ToolRetryStatus, sync::MutexExt,
+};
 use std::future::Future;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -602,13 +607,61 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
 #[error("{message}")]
 pub struct ExecutionHostError {
     message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_failure: Option<ExecutionHostToolFailure>,
 }
 
 impl ExecutionHostError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            tool_failure: None,
         }
+    }
+
+    /// Preserves the guest-observable classification of a failed tool call.
+    ///
+    /// The optional raw tool payload is deliberately not promoted into the
+    /// execution-host error contract. Callers can inspect the stable failure
+    /// classification without treating foreign JSON as structured control
+    /// data.
+    pub fn from_tool_failure(failure: &ToolFailure) -> Self {
+        Self {
+            message: failure.message.clone(),
+            tool_failure: Some(ExecutionHostToolFailure {
+                class: failure.class.clone(),
+                code: failure.code.clone(),
+                source: failure.source.clone(),
+                retry: failure.retry.clone(),
+            }),
+        }
+    }
+
+    /// Returns the human-readable host failure message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Returns the tool failure class when this error crossed a tool bridge.
+    pub fn tool_failure_class(&self) -> Option<&ToolFailureClass> {
+        self.tool_failure.as_ref().map(|failure| &failure.class)
+    }
+
+    /// Returns the stable tool failure code when this error crossed a tool bridge.
+    pub fn tool_failure_code(&self) -> Option<&str> {
+        self.tool_failure
+            .as_ref()
+            .map(|failure| failure.code.as_str())
+    }
+
+    /// Returns the tool failure provenance when this error crossed a tool bridge.
+    pub fn tool_failure_source(&self) -> Option<&ToolFailureSource> {
+        self.tool_failure.as_ref().map(|failure| &failure.source)
+    }
+
+    /// Returns the tool retry disposition when this error crossed a tool bridge.
+    pub fn tool_failure_retry(&self) -> Option<&ToolRetryStatus> {
+        self.tool_failure.as_ref().map(|failure| &failure.retry)
     }
 }
 
@@ -648,5 +701,26 @@ mod tests {
             ExecutionBounds::unbounded().memory_limit,
             ExecutionBound::Unbounded
         ));
+    }
+
+    #[test]
+    fn plain_execution_host_errors_keep_the_message_only_contract() {
+        let error = ExecutionHostError::new("plain host failure");
+        assert_eq!(error.message(), "plain host failure");
+        assert_eq!(error.tool_failure_class(), None);
+        assert_eq!(error.tool_failure_code(), None);
+        assert_eq!(error.tool_failure_source(), None);
+        assert_eq!(error.tool_failure_retry(), None);
+        assert_eq!(
+            serde_json::to_value(&error).unwrap(),
+            serde_json::json!({ "message": "plain host failure" })
+        );
+        assert_eq!(
+            serde_json::from_value::<ExecutionHostError>(serde_json::json!({
+                "message": "plain host failure"
+            }))
+            .unwrap(),
+            error
+        );
     }
 }

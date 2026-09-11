@@ -295,6 +295,12 @@ pub(crate) struct ResolvedTable {
     oid: i64,
 }
 
+impl ResolvedTable {
+    pub(crate) fn oid(&self) -> i64 {
+        self.oid
+    }
+}
+
 /// Reports every lash-named relation that the search path resolves outside the
 /// anchored namespace.
 ///

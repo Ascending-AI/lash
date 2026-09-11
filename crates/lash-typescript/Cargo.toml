@@ -33,6 +33,7 @@ swc_ecma_parser = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
+lash-sansio = { workspace = true }
 lash-typescript = { package = "lash-internal-typescript", path = ".", features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"

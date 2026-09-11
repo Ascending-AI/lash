@@ -119,7 +119,7 @@ pub fn classify_oauth_refresh_error(error: OAuthError) -> CredentialError {
     ) {
         CredentialError::transient()
     } else {
-        CredentialError::new(CredentialErrorKind::Other, false)
+        CredentialError::new(CredentialErrorKind::Other)
     }
 }
 
@@ -298,7 +298,7 @@ mod tests {
         let error = classify_oauth_refresh_error(error);
 
         assert_eq!(error.kind, CredentialErrorKind::InvalidGrant);
-        assert!(!error.retryable);
+        assert!(!error.is_retryable());
         assert!(error.to_string().contains("sign in again"));
     }
 
@@ -316,7 +316,7 @@ mod tests {
         ));
         let error = classify_oauth_refresh_error(error);
         assert_eq!(error.kind, CredentialErrorKind::Other);
-        assert!(!error.retryable);
+        assert!(!error.is_retryable());
     }
 
     #[test]
@@ -335,7 +335,7 @@ mod tests {
             ));
 
             assert_eq!(error.kind, CredentialErrorKind::Other);
-            assert!(!error.retryable);
+            assert!(!error.is_retryable());
         }
     }
 
@@ -349,7 +349,7 @@ mod tests {
             ));
 
             assert_eq!(error.kind, CredentialErrorKind::Transient);
-            assert!(error.retryable);
+            assert!(error.is_retryable());
         }
     }
 
@@ -375,7 +375,7 @@ mod tests {
         let error = classify_oauth_refresh_error(OAuthError::Http(request_error));
 
         assert_eq!(error.kind, CredentialErrorKind::Transient);
-        assert!(error.retryable);
+        assert!(error.is_retryable());
     }
 
     #[tokio::test]
@@ -401,7 +401,7 @@ mod tests {
         let error = classify_oauth_refresh_error(OAuthError::Http(request_error));
 
         assert_eq!(error.kind, CredentialErrorKind::Transient);
-        assert!(error.retryable);
+        assert!(error.is_retryable());
     }
 }
 

@@ -6,6 +6,8 @@ mod graph_sequence_cutover;
 mod process_event_time_cutover;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
+#[path = "required_constraints.rs"]
+mod required_constraints;
 #[path = "session_meta.rs"]
 mod session_meta;
 #[path = "session_read_view.rs"]

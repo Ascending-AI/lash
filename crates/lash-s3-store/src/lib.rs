@@ -7,7 +7,8 @@
 use futures_util::TryStreamExt;
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
-    AttachmentStorePersistence, StoredAttachment, StoredBlobRef, facade_support::AttachmentMeta,
+    AttachmentStoreFailureClass, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
+    facade_support::AttachmentMeta,
 };
 use lash_sansio::Redacted;
 use object_store::aws::AmazonS3Builder;
@@ -131,9 +132,9 @@ impl S3AttachmentStore {
             builder = builder.with_secret_access_key(secret_access_key.into_inner());
         }
 
-        let store = builder.build().map_err(|err| {
-            AttachmentStoreError::Backend(format!("failed to build S3 store: {err}"))
-        })?;
+        let store = builder
+            .build()
+            .map_err(|err| terminal_backend_error("build", err))?;
 
         Ok(Self {
             store: Arc::new(store),
@@ -162,9 +163,7 @@ impl S3AttachmentStore {
         path.push_str(first);
         path.push('/');
         path.push_str(hash);
-        Path::parse(path).map_err(|err| {
-            AttachmentStoreError::Backend(format!("invalid S3 attachment path for `{hash}`: {err}"))
-        })
+        Path::parse(path).map_err(|err| terminal_backend_error("path", err))
     }
 
     /// Key prefix under which all content-addressed blobs live.
@@ -175,9 +174,7 @@ impl S3AttachmentStore {
             path.push('/');
         }
         path.push_str("blake3");
-        Path::parse(path).map_err(|err| {
-            AttachmentStoreError::Backend(format!("invalid S3 attachment list prefix: {err}"))
-        })
+        Path::parse(path).map_err(|err| terminal_backend_error("path", err))
     }
 
     /// Read concrete object keys and bytes without using the
@@ -193,22 +190,28 @@ impl S3AttachmentStore {
             .list(Some(&prefix))
             .try_collect()
             .await
-            .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
+            .map_err(|err| backend_error("list", err))?;
         let mut rows = Vec::with_capacity(metas.len());
         for meta in metas {
             let segment = meta.location.parts().next_back().ok_or_else(|| {
-                AttachmentStoreError::Backend("missing attachment key component".into())
+                AttachmentStoreError::Contract(
+                    "stored attachment key has no final path component".into(),
+                )
             })?;
-            let id = AttachmentId::parse(segment.as_ref())
-                .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
+            let id = AttachmentId::parse(segment.as_ref()).map_err(|err| {
+                AttachmentStoreError::Contract(format!(
+                    "stored attachment key `{}` is not a valid id: {err}",
+                    segment.as_ref()
+                ))
+            })?;
             let bytes = self
                 .store
                 .get(&meta.location)
                 .await
-                .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?
+                .map_err(|err| backend_error("read", err))?
                 .bytes()
                 .await
-                .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?
+                .map_err(|err| backend_error("read", err))?
                 .to_vec();
             rows.push((id, bytes));
         }
@@ -254,9 +257,7 @@ impl AttachmentStore for S3AttachmentStore {
                 last_modified_epoch_ms: u64::try_from(meta.last_modified.timestamp_millis()).ok(),
             })),
             Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(err) => Err(AttachmentStoreError::Backend(format!(
-                "failed to head S3 attachment `{id}`: {err}"
-            ))),
+            Err(err) => Err(backend_error("head", err)),
         }
     }
 
@@ -267,17 +268,21 @@ impl AttachmentStore for S3AttachmentStore {
             .list(Some(&prefix))
             .try_collect()
             .await
-            .map_err(|err| {
-                AttachmentStoreError::Backend(format!("failed to list S3 attachments: {err}"))
-            })?;
+            .map_err(|err| backend_error("list", err))?;
         metas
             .into_iter()
             .map(|meta| {
                 let segment = meta.location.parts().next_back().ok_or_else(|| {
-                    AttachmentStoreError::Backend("missing attachment key component".into())
+                    AttachmentStoreError::Contract(
+                        "stored attachment key has no final path component".into(),
+                    )
                 })?;
-                let id = AttachmentId::parse(segment.as_ref())
-                    .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
+                let id = AttachmentId::parse(segment.as_ref()).map_err(|err| {
+                    AttachmentStoreError::Contract(format!(
+                        "stored attachment key `{}` is not a valid id: {err}",
+                        segment.as_ref()
+                    ))
+                })?;
                 let last_modified_epoch_ms =
                     u64::try_from(meta.last_modified.timestamp_millis()).ok();
                 Ok(StoredBlobRef {
@@ -303,9 +308,7 @@ async fn put_at_path(
     store
         .put(&content_path, bytes.into())
         .await
-        .map_err(|err| {
-            AttachmentStoreError::Backend(format!("failed to write `{content_path}`: {err}"))
-        })?;
+        .map_err(|err| backend_error("put", err))?;
 
     Ok(reference)
 }
@@ -321,9 +324,7 @@ async fn get_at_path(
         .map_err(|err| map_object_store_get_error(err, id))?
         .bytes()
         .await
-        .map_err(|err| {
-            AttachmentStoreError::Backend(format!("failed to read `{content_path}`: {err}"))
-        })?
+        .map_err(|err| backend_error("read", err))?
         .to_vec();
 
     Ok(StoredAttachment { bytes })
@@ -333,19 +334,65 @@ async fn delete_at_path(store: &dyn ObjectStore, path: Path) -> Result<(), Attac
     match store.delete(&path).await {
         Ok(()) => {}
         Err(object_store::Error::NotFound { .. }) => {}
-        Err(err) => {
-            return Err(AttachmentStoreError::Backend(format!(
-                "failed to delete `{path}`: {err}"
-            )));
-        }
+        Err(err) => return Err(backend_error("delete", err)),
     }
     Ok(())
+}
+
+/// Wraps a backend operation failure with its actionable class, preserving the
+/// underlying cause and the failed operation for operator diagnosis.
+fn backend_error(operation: &'static str, err: object_store::Error) -> AttachmentStoreError {
+    AttachmentStoreError::Backend {
+        operation,
+        class: classify_object_store_error(&err),
+        source: Box::new(err),
+    }
+}
+
+/// Classifies an object-store failure by what a caller should do next.
+///
+/// `object_store::Error` is `#[non_exhaustive]`, so a fallback arm is required.
+/// `NotFound` is a definitive miss and `JoinError` a cancelled/panicked task:
+/// neither heals on retry. The remaining fallback covers `Generic` — the common
+/// S3 5xx/throttling shape — and any unknown future variant, both treated as
+/// transient because every attachment operation is idempotent and a
+/// permanently-failing retry costs one attempt.
+fn classify_object_store_error(err: &object_store::Error) -> AttachmentStoreFailureClass {
+    use object_store::Error;
+    match err {
+        Error::PermissionDenied { .. } | Error::Unauthenticated { .. } => {
+            AttachmentStoreFailureClass::Credentials
+        }
+        Error::InvalidPath { .. }
+        | Error::NotSupported { .. }
+        | Error::NotImplemented { .. }
+        | Error::Precondition { .. }
+        | Error::AlreadyExists { .. }
+        | Error::NotModified { .. }
+        | Error::UnknownConfigurationKey { .. }
+        | Error::NotFound { .. }
+        | Error::JoinError { .. } => AttachmentStoreFailureClass::Terminal,
+        _ => AttachmentStoreFailureClass::Transient,
+    }
+}
+
+/// Wraps a non-operation failure (store construction, key derivation) that a
+/// retry cannot fix, preserving the failed operation and underlying cause.
+fn terminal_backend_error(
+    operation: &'static str,
+    err: impl std::error::Error + Send + Sync + 'static,
+) -> AttachmentStoreError {
+    AttachmentStoreError::Backend {
+        operation,
+        class: AttachmentStoreFailureClass::Terminal,
+        source: Box::new(err),
+    }
 }
 
 fn map_object_store_get_error(err: object_store::Error, id: &AttachmentId) -> AttachmentStoreError {
     match err {
         object_store::Error::NotFound { .. } => AttachmentStoreError::NotFound(id.clone()),
-        err => AttachmentStoreError::Backend(err.to_string()),
+        err => backend_error("get", err),
     }
 }
 
@@ -419,8 +466,133 @@ mod tests {
             .list()
             .await
             .expect_err("malformed id must fail listing");
-        assert!(matches!(error, AttachmentStoreError::Backend(_)));
+        assert!(matches!(error, AttachmentStoreError::Contract(_)));
         assert!(store.raw_blobs_for_testing().await.is_err());
+    }
+
+    /// One row per actionable class: every object-store failure the adapter can
+    /// see maps to the verdict a caller acts on, and the cause is preserved.
+    #[test]
+    fn object_store_errors_classify_by_actionable_class() {
+        use object_store::path::Error as PathError;
+
+        let cause = || -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::other("backend cause"))
+        };
+        let cases = [
+            (
+                object_store::Error::PermissionDenied {
+                    path: "blake3/x".into(),
+                    source: cause(),
+                },
+                AttachmentStoreFailureClass::Credentials,
+                false,
+                true,
+            ),
+            (
+                object_store::Error::Unauthenticated {
+                    path: "blake3/x".into(),
+                    source: cause(),
+                },
+                AttachmentStoreFailureClass::Credentials,
+                false,
+                true,
+            ),
+            (
+                object_store::Error::InvalidPath {
+                    source: PathError::EmptySegment {
+                        path: "/a//b".into(),
+                    },
+                },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::NotSupported { source: cause() },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::NotImplemented {
+                    operation: "put".into(),
+                    implementer: "test".into(),
+                },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::AlreadyExists {
+                    path: "blake3/x".into(),
+                    source: cause(),
+                },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::Precondition {
+                    path: "blake3/x".into(),
+                    source: cause(),
+                },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::NotModified {
+                    path: "blake3/x".into(),
+                    source: cause(),
+                },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::UnknownConfigurationKey {
+                    store: "test",
+                    key: "bogus".into(),
+                },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::NotFound {
+                    path: "blake3/x".into(),
+                    source: cause(),
+                },
+                AttachmentStoreFailureClass::Terminal,
+                false,
+                false,
+            ),
+            (
+                object_store::Error::Generic {
+                    store: "test",
+                    source: cause(),
+                },
+                AttachmentStoreFailureClass::Transient,
+                true,
+                false,
+            ),
+        ];
+
+        for (err, class, retryable, operator_actionable) in cases {
+            let error = backend_error("test", err);
+            assert_eq!(error.failure_class(), Some(class), "{error}");
+            assert_eq!(error.is_retryable(), retryable, "{error}");
+            assert_eq!(
+                error.is_operator_actionable(),
+                operator_actionable,
+                "{error}"
+            );
+            assert!(
+                std::error::Error::source(&error).is_some(),
+                "cause must be preserved: {error}"
+            );
+        }
     }
 
     #[test]
