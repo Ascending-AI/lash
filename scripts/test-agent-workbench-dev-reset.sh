@@ -27,6 +27,10 @@ cleanup_fixture_runtime_resources() {
     [[ -f "$file" && ! -L "$file" ]] || continue
     grep -Fq "$fixture_root" "$file" && rm -f "$file"
   done
+  for file in "$runtime_root"/*-reset-finalizing; do
+    [[ -f "$file" && ! -L "$file" ]] || continue
+    grep -Fq "$fixture_root" "$file" && rm -f "$file"
+  done
 }
 
 cleanup() {
@@ -39,6 +43,12 @@ cleanup() {
     fi
   done < <(find "$test_tmp" -type f -name 'workbench-*.pid' -print 2>/dev/null)
   cleanup_fixture_runtime_resources "$launcher_runtime_root" "$test_tmp" "$mock_state"
+  if [[ -n "${legacy_reservation_file:-}" \
+    && -f "$legacy_reservation_file" && ! -L "$legacy_reservation_file" \
+    && "$(<"$legacy_reservation_file")" \
+      = '1 restate 00000000-0000-0000-0000-000000000000 0000000000000000000000000000000000000000000000000000000000000000' ]]; then
+    rm -f "$legacy_reservation_file"
+  fi
   rm -rf -- "$test_tmp"
 }
 trap cleanup EXIT
@@ -300,6 +310,12 @@ cat > "$mock_bin/python3" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 target="${@: -1}"
+if [[ -n "${MOCK_RECORD_CREATE_FAIL_MATCH:-}" \
+  && "$target" = *"$MOCK_RECORD_CREATE_FAIL_MATCH"* \
+  && ! -e "$MOCK_STATE/record-create-failed" ]]; then
+  : > "$MOCK_STATE/record-create-failed"
+  exit 1
+fi
 if [[ -n "${MOCK_RECORD_PUBLISH_FAIL_MATCH:-}" \
   && "$target" = *"$MOCK_RECORD_PUBLISH_FAIL_MATCH"* \
   && -f "$target" \
@@ -859,7 +875,7 @@ fi
   || fail "nested data refusal mutated the existing stack"
 
 shared_reset_file="$data_shared/run/reset-127.0.0.1_${port_shared_owner}.meta"
-sed -i 's/^reset_schema=5$/reset_schema=4/' "$shared_reset_file"
+sed -i 's/^reset_schema=6$/reset_schema=5/' "$shared_reset_file"
 if run_launcher "$data_shared" "$port_shared_owner" restart --reset-dev-state \
   > "$test_tmp/legacy-exclusive-lease-refusal.log" 2>&1; then
   fail "pre-exclusivity reset record unexpectedly authorized deletion"
@@ -1004,9 +1020,97 @@ fi
   && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_rm_before" \
   && "$(<"$mock_state/build-count")" = "$service_builds_before" ]] \
   || fail "shared Restate refusal changed the owner, engine, deployment, or candidate state"
-grep -Fq 'Restate service is reserved by another launcher-owned disposable stack' \
+grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
   "$test_tmp/shared-engine-refusal.log" \
   || fail "shared Restate refusal did not identify the exclusive service lease"
+
+split_ingress_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-split-ingress-consumer" 3080 \
+  RESTATE_INGRESS_URL=http://localhost:8560 \
+  RESTATE_ADMIN_URL=http://127.0.0.1:19110/v2 \
+  AGENT_WORKBENCH_RESTATE_NODE_PORT=19111 \
+  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-split-ingress-engine \
+  MOCK_EXTERNAL_PORTS=19110 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3080 \
+  > "$test_tmp/split-ingress-refusal.log" 2>&1; then
+  fail "second launcher unexpectedly shared one owned Restate ingress endpoint"
+fi
+[[ ! -e "$test_tmp/data-split-ingress-consumer" \
+  && "$(<"$mock_state/build-count")" = "$split_ingress_builds_before" \
+  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" ]] \
+  || fail "split-ingress refusal mutated the owner or candidate"
+grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/split-ingress-refusal.log" \
+  || fail "split-ingress refusal did not identify the individual endpoint reservation"
+
+split_admin_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-split-admin-consumer" 3081 \
+  RESTATE_INGRESS_URL=http://127.0.0.1:8111 \
+  RESTATE_ADMIN_URL=http://localhost:19550/v2 \
+  AGENT_WORKBENCH_RESTATE_NODE_PORT=19112 \
+  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-split-admin-engine \
+  MOCK_EXTERNAL_PORTS=8111 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3081 \
+  > "$test_tmp/split-admin-refusal.log" 2>&1; then
+  fail "second launcher unexpectedly shared one owned Restate admin endpoint"
+fi
+[[ ! -e "$test_tmp/data-split-admin-consumer" \
+  && "$(<"$mock_state/build-count")" = "$split_admin_builds_before" \
+  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" ]] \
+  || fail "split-admin refusal mutated the owner or candidate"
+grep -Fq 'Restate admin service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/split-admin-refusal.log" \
+  || fail "split-admin refusal did not identify the individual endpoint reservation"
+
+lease_rollback_port=3083
+lease_rollback_ingress=$((8080 + (lease_rollback_port - 3030) * 10))
+lease_rollback_admin=$((19070 + (lease_rollback_port - 3030) * 10))
+lease_rollback_ingress_hash="$(printf '%s' "loopback:$lease_rollback_ingress" | sha256sum | awk '{print $1}')"
+lease_rollback_admin_hash="$(printf '%s' "loopback:$lease_rollback_admin" | sha256sum | awk '{print $1}')"
+lease_rollback_ingress_file="$launcher_runtime_root/restate-ingress-$lease_rollback_ingress_hash.lease"
+lease_rollback_admin_file="$launcher_runtime_root/restate-admin-$lease_rollback_admin_hash.lease"
+rm -f "$mock_state/record-create-failed"
+if launcher_env "$test_tmp/data-lease-publication-rollback" "$lease_rollback_port" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$lease_rollback_admin_hash.lease" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$lease_rollback_port" \
+  > "$test_tmp/lease-publication-rollback.log" 2>&1; then
+  fail "startup ignored failure to publish its second endpoint reservation"
+fi
+[[ ! -e "$lease_rollback_ingress_file" && ! -e "$lease_rollback_admin_file" \
+  && ! -e "$test_tmp/data-lease-publication-rollback" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$lease_rollback_port" ]] \
+  || fail "partial endpoint-reservation publication did not roll back exact attempt resources"
+service_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
+
+partial_ready_port=3085
+partial_ready_admin=$((19070 + (partial_ready_port - 3030) * 10))
+partial_ready_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-partial-ready" "$partial_ready_port" \
+  MOCK_EXTERNAL_PORTS="$partial_ready_admin" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$partial_ready_port" \
+  > "$test_tmp/partial-ready-refusal.log" 2>&1; then
+  fail "launcher treated one ready Restate endpoint as a coherent external service"
+fi
+[[ ! -e "$test_tmp/data-partial-ready" \
+  && "$(<"$mock_state/build-count")" = "$partial_ready_builds_before" ]] \
+  || fail "partial external endpoint refusal mutated candidate state"
+
+legacy_reservation_port=3087
+legacy_reservation_ingress=$((8080 + (legacy_reservation_port - 3030) * 10))
+legacy_reservation_admin=$((19070 + (legacy_reservation_port - 3030) * 10))
+legacy_reservation_hash="$(printf '%s' "loopback:$legacy_reservation_ingress|loopback:$legacy_reservation_admin" | sha256sum | awk '{print $1}')"
+legacy_reservation_file="$launcher_runtime_root/restate-$legacy_reservation_hash.lease"
+printf '1 restate 00000000-0000-0000-0000-000000000000 %064d\n' 0 \
+  > "$legacy_reservation_file"
+chmod 600 "$legacy_reservation_file"
+if launcher_env "$test_tmp/data-legacy-reservation" "$legacy_reservation_port" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$legacy_reservation_port" \
+  > "$test_tmp/legacy-reservation-refusal.log" 2>&1; then
+  fail "launcher accepted a legacy composite endpoint reservation"
+fi
+rm -f "$legacy_reservation_file"
+[[ ! -e "$test_tmp/data-legacy-reservation" ]] \
+  || fail "legacy reservation refusal mutated candidate state"
 
 if launcher_env "$test_tmp/data-other-runtime-consumer" 3081 \
   XDG_RUNTIME_DIR="$test_tmp/other-runtime" \
@@ -1024,7 +1128,7 @@ fi
   && "$(<"$mock_state/deployments")" = "$service_deployments_before" \
   && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_rm_before" ]] \
   || fail "alternate-runtime refusal changed the owner, registry, or candidate state"
-grep -Fq 'Restate service is reserved by another launcher-owned disposable stack' \
+grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
   "$test_tmp/other-runtime-engine-refusal.log" \
   || fail "alternate-runtime refusal did not use the stable same-user lease namespace"
 
@@ -1070,7 +1174,7 @@ fi
   && ! -e "$test_tmp/data-nonreset-service-consumer" \
   && "$(<"$mock_state/build-count")" = "$nonreset_service_builds_before" ]] \
   || fail "non-resettable service refusal changed the owner or candidate state"
-grep -Fq 'Restate service is reserved by another launcher-owned disposable stack' \
+grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
   "$test_tmp/nonreset-shared-engine-refusal.log" \
   || fail "non-resettable service refusal did not identify the persistent service lease"
 
@@ -1124,8 +1228,8 @@ grep -Fq 'Postgres service lease does not prove exclusive ownership' \
   "$test_tmp/missing-database-lease-refusal.log" \
   || fail "missing Postgres lease refusal did not explain the exclusivity proof failure"
 
-service_lease_hash="$(printf '%s' 'loopback:8560|loopback:19550' | sha256sum | awk '{print $1}')"
-service_lease_file="$launcher_runtime_root/restate-$service_lease_hash.lease"
+service_lease_hash="$(printf '%s' 'loopback:8560' | sha256sum | awk '{print $1}')"
+service_lease_file="$launcher_runtime_root/restate-ingress-$service_lease_hash.lease"
 rm -f "$service_lease_file"
 service_reset_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
 if run_launcher "$data_service_owner" "$port_service_owner" restart --reset-dev-state \
@@ -1280,13 +1384,16 @@ run_launcher "$data_down_success" "$port_down_success" up \
   > "$test_tmp/down-success-up.log" 2>&1
 down_success_ingress=$((8080 + (port_down_success - 3030) * 10))
 down_success_admin=$((19070 + (port_down_success - 3030) * 10))
-down_success_lease_hash="$(printf '%s' "loopback:$down_success_ingress|loopback:$down_success_admin" | sha256sum | awk '{print $1}')"
-down_success_lease="$launcher_runtime_root/restate-$down_success_lease_hash.lease"
-[[ -f "$down_success_lease" ]] || fail "successful-down fixture did not create its service lease"
+down_success_ingress_lease_hash="$(printf '%s' "loopback:$down_success_ingress" | sha256sum | awk '{print $1}')"
+down_success_admin_lease_hash="$(printf '%s' "loopback:$down_success_admin" | sha256sum | awk '{print $1}')"
+down_success_ingress_lease="$launcher_runtime_root/restate-ingress-$down_success_ingress_lease_hash.lease"
+down_success_admin_lease="$launcher_runtime_root/restate-admin-$down_success_admin_lease_hash.lease"
+[[ -f "$down_success_ingress_lease" && -f "$down_success_admin_lease" ]] \
+  || fail "successful-down fixture did not create both endpoint service leases"
 launcher_env "$data_down_success" "$port_down_success" \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down \
   > "$test_tmp/down-success.log" 2>&1
-[[ ! -e "$down_success_lease" \
+[[ ! -e "$down_success_ingress_lease" && ! -e "$down_success_admin_lease" \
   && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_success" ]] \
   || fail "successful down-all stranded its retired Restate service lease"
 data_down_reuse="$test_tmp/data-down-reuse"
@@ -1847,5 +1954,171 @@ launcher_env "$data_reset_retry" "$port_reset_retry" AGENT_WORKBENCH_POSTGRES=1 
   && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_reset_retry" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_reset_retry" ]] \
   || fail "fault-free reset retry did not complete retirement and start a fresh stack"
+
+data_delete_retry="$test_tmp/data-delete-retry"
+port_delete_retry=3150
+run_launcher "$data_delete_retry" "$port_delete_retry" up \
+  > "$test_tmp/data-delete-retry-up.log" 2>&1
+printf 'old application state\n' > "$data_delete_retry/old-reset-state"
+delete_retry_key="127.0.0.1_${port_delete_retry}"
+delete_retry_finalization="$launcher_runtime_root/$lock_hash-$delete_retry_key-reset-finalizing"
+if launcher_env "$data_delete_retry" "$port_delete_retry" \
+  MOCK_FS_DELETE_TARGET="$data_delete_retry" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $MOCK_FS_DELETE_TARGET" && ! -e "$MOCK_STATE/fs-delete-failed" ]]; then command rm -f "$MOCK_FS_DELETE_TARGET/.agent-workbench-dev-reset-owner"; command rm -rf -- "$MOCK_FS_DELETE_TARGET/run"; : > "$MOCK_STATE/fs-delete-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_delete_retry" > "$test_tmp/data-delete-retry-first.log" 2>&1; then
+  fail "reset ignored a partial application-data deletion failure"
+fi
+[[ -f "$data_delete_retry/old-reset-state" \
+  && ! -e "$data_delete_retry/.agent-workbench-dev-reset-owner" \
+  && ! -e "$data_delete_retry/run" && -f "$delete_retry_finalization" ]] \
+  || fail "partial data deletion did not retain stable reset finalization authority"
+grep -Fq 'reset retry command saved at ' "$test_tmp/data-delete-retry-first.log" \
+  || fail "partial data deletion did not advertise its retry command"
+delete_retry_recovery="$(sed -n 's/^\[agent-workbench\] stack is stopped; reset retry command saved at //p' "$test_tmp/data-delete-retry-first.log")"
+[[ -f "$delete_retry_recovery" ]] \
+  || fail "partial data deletion did not publish the executable recovery script"
+grep -Fq 'restart --reset-dev-state --addr 127.0.0.1:3150' "$delete_retry_recovery" \
+  || fail "partial data deletion recovery did not retry the destructive transaction"
+delete_retry_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$data_delete_retry" 3151 \
+  AGENT_WORKBENCH_RUN_DIR="$test_tmp/delete-retry-borrower-run" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3151 \
+  > "$test_tmp/data-delete-borrower-refusal.log" 2>&1; then
+  fail "fresh launcher ignored stable authority for a partially deleted reset"
+fi
+[[ ! -e "$test_tmp/delete-retry-borrower-run" \
+  && "$(<"$mock_state/build-count")" = "$delete_retry_builds_before" ]] \
+  || fail "stable reset-finalization refusal mutated borrower state"
+launcher_env "$data_delete_retry" "$port_delete_retry" \
+  bash "$delete_retry_recovery" > "$test_tmp/data-delete-retry-second.log" 2>&1
+[[ ! -e "$data_delete_retry/old-reset-state" && ! -e "$delete_retry_finalization" \
+  && ! -e "$delete_retry_recovery" ]] \
+  || fail "generated reset retry did not finish data deletion and clear finalization authority"
+pid_identity "$data_delete_retry/run/workbench-$delete_retry_key.pid" \
+  || fail "generated reset retry did not start the replacement stack"
+
+data_delete_suppressed="$test_tmp/data-delete-suppressed"
+port_delete_suppressed=3152
+run_launcher "$data_delete_suppressed" "$port_delete_suppressed" up \
+  > "$test_tmp/data-delete-suppressed-up.log" 2>&1
+printf 'suppressed deletion sentinel\n' > "$data_delete_suppressed/old-reset-state"
+if launcher_env "$data_delete_suppressed" "$port_delete_suppressed" \
+  MOCK_FS_DELETE_TARGET="$data_delete_suppressed" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $MOCK_FS_DELETE_TARGET" && ! -e "$MOCK_STATE/fs-delete-suppressed" ]]; then : > "$MOCK_STATE/fs-delete-suppressed"; return 0; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_delete_suppressed" > "$test_tmp/data-delete-suppressed-first.log" 2>&1; then
+  fail "reset trusted a successful rm status without observing data-path absence"
+fi
+[[ -f "$data_delete_suppressed/old-reset-state" ]] \
+  || fail "suppressed deletion oracle did not preserve its old-state sentinel"
+run_launcher "$data_delete_suppressed" "$port_delete_suppressed" restart --reset-dev-state \
+  > "$test_tmp/data-delete-suppressed-second.log" 2>&1
+[[ ! -e "$data_delete_suppressed/old-reset-state" ]] \
+  || fail "explicit reset retry did not complete after suppressed deletion cleared"
+
+data_finalize_retry="$test_tmp/data-finalize-retry"
+port_finalize_retry=3154
+run_launcher "$data_finalize_retry" "$port_finalize_retry" up \
+  > "$test_tmp/finalize-retry-up.log" 2>&1
+finalize_retry_key="127.0.0.1_${port_finalize_retry}"
+finalize_retry_receipt="$launcher_runtime_root/$lock_hash-$finalize_retry_key-reset-finalizing"
+if launcher_env "$data_finalize_retry" "$port_finalize_retry" \
+  MOCK_FINALIZE_RECEIPT="$finalize_retry_receipt" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_FINALIZE_RECEIPT" && ! -e "$MOCK_STATE/finalize-clear-failed" ]]; then : > "$MOCK_STATE/finalize-clear-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_finalize_retry" > "$test_tmp/finalize-retry-first.log" 2>&1; then
+  fail "reset ignored final authority-removal failure"
+fi
+[[ ! -e "$data_finalize_retry" && -f "$finalize_retry_receipt" ]] \
+  || fail "final authority-removal failure did not retain a data-removed receipt"
+grep -Fq 'reset_finalization_phase=data-removed' "$finalize_retry_receipt" \
+  || fail "final authority-removal failure lost its completed data stage"
+finalize_retry_recovery="$(sed -n 's/^\[agent-workbench\] stack is stopped; reset retry command saved at //p' "$test_tmp/finalize-retry-first.log")"
+[[ -f "$finalize_retry_recovery" ]] \
+  || fail "final authority-removal failure did not retain executable recovery"
+launcher_env "$data_finalize_retry" "$port_finalize_retry" \
+  bash "$finalize_retry_recovery" > "$test_tmp/finalize-retry-second.log" 2>&1
+[[ ! -e "$finalize_retry_receipt" && ! -e "$finalize_retry_recovery" ]] \
+  || fail "fault-free finalization retry retained stale authority"
+pid_identity "$data_finalize_retry/run/workbench-$finalize_retry_key.pid" \
+  || fail "fault-free finalization retry did not start a replacement"
+
+data_finalize_postclear="$test_tmp/data-finalize-postclear"
+port_finalize_postclear=3155
+run_launcher "$data_finalize_postclear" "$port_finalize_postclear" up \
+  > "$test_tmp/finalize-postclear-up.log" 2>&1
+finalize_postclear_key="127.0.0.1_${port_finalize_postclear}"
+finalize_postclear_receipt="$launcher_runtime_root/$lock_hash-$finalize_postclear_key-reset-finalizing"
+if launcher_env "$data_finalize_postclear" "$port_finalize_postclear" \
+  MOCK_FINALIZE_RECEIPT="$finalize_postclear_receipt" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_FINALIZE_RECEIPT" && ! -e "$MOCK_STATE/finalize-postclear-failed" ]]; then command rm -f -- "$MOCK_FINALIZE_RECEIPT"; : > "$MOCK_STATE/finalize-postclear-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_finalize_postclear" > "$test_tmp/finalize-postclear-first.log" 2>&1; then
+  fail "reset suppressed a final unlink error after the receipt disappeared"
+fi
+[[ ! -e "$data_finalize_postclear" && ! -e "$finalize_postclear_receipt" ]] \
+  || fail "post-unlink error did not leave a completely cleared old stack"
+finalize_postclear_recovery="$(sed -n 's/^\[agent-workbench\] stack is stopped; recovery command saved at //p' "$test_tmp/finalize-postclear-first.log")"
+[[ -f "$finalize_postclear_recovery" ]] \
+  || fail "post-unlink error did not publish replacement recovery"
+grep -Fq 'agent-workbench-dev.sh up --addr 127.0.0.1:3155' "$finalize_postclear_recovery" \
+  || fail "post-unlink error advertised destructive retry without retained authority"
+launcher_env "$data_finalize_postclear" "$port_finalize_postclear" \
+  bash "$finalize_postclear_recovery" > "$test_tmp/finalize-postclear-second.log" 2>&1
+pid_identity "$data_finalize_postclear/run/workbench-$finalize_postclear_key.pid" \
+  || fail "post-unlink recovery did not start a replacement"
+
+data_receipt_release="$test_tmp/data-receipt-release"
+port_receipt_release=3156
+if launcher_env "$data_receipt_release" "$port_receipt_release" \
+  MOCK_RELEASE_RECEIPT="$data_receipt_release/.agent-workbench-dev-attempt-owner" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f $MOCK_RELEASE_RECEIPT" && ! -e "$MOCK_STATE/release-clear-failed" ]]; then : > "$MOCK_STATE/release-clear-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_receipt_release" \
+  > "$test_tmp/receipt-release-failure.log" 2>&1; then
+  fail "up suppressed application-data receipt removal failure"
+fi
+grep -Fq 'could not retire application data creation metadata' \
+  "$test_tmp/receipt-release-failure.log" \
+  || fail "receipt removal failure did not propagate through the real up caller"
+
+data_meta_release="$test_tmp/data-meta-release"
+port_meta_release=3157
+meta_release_key="127.0.0.1_${port_meta_release}"
+meta_release_file="$data_meta_release/run/workbench-$meta_release_key.meta"
+if launcher_env "$data_meta_release" "$port_meta_release" \
+  MOCK_POST_KILL=1 MOCK_META_RELEASE="$meta_release_file" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f $MOCK_META_RELEASE" && ! -e "$MOCK_STATE/meta-clear-failed" ]]; then : > "$MOCK_STATE/meta-clear-failed"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_meta_release" \
+  > "$test_tmp/meta-release-failure.log" 2>&1; then
+  fail "post-registration failure unexpectedly succeeded"
+fi
+grep -Fq 'startup cleanup did not complete; retrying only the same verified attempt resources' \
+  "$test_tmp/meta-release-failure.log" \
+  || fail "run-metadata removal failure was suppressed under the cleanup caller"
+[[ ! -e "$data_meta_release" ]] \
+  || fail "fault-free cleanup retry did not finish after run-metadata removal recovered"
+
+data_external_finalize="$test_tmp/data-external-finalize"
+run_external_finalize="$test_tmp/run-external-finalize"
+port_external_finalize=3158
+external_finalize_key="127.0.0.1_${port_external_finalize}"
+launcher_env "$data_external_finalize" "$port_external_finalize" \
+  AGENT_WORKBENCH_RUN_DIR="$run_external_finalize" \
+  MOCK_PID_FILE="$run_external_finalize/workbench-$external_finalize_key.pid" \
+  MOCK_RESTATE_MARKER="$run_external_finalize/restate-$external_finalize_key.container" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_external_finalize" \
+  > "$test_tmp/external-finalize-up.log" 2>&1
+printf 'external-run old state\n' > "$data_external_finalize/old-reset-state"
+launcher_env "$data_external_finalize" "$port_external_finalize" \
+  AGENT_WORKBENCH_RUN_DIR="$run_external_finalize" \
+  MOCK_PID_FILE="$run_external_finalize/workbench-$external_finalize_key.pid" \
+  MOCK_RESTATE_MARKER="$run_external_finalize/restate-$external_finalize_key.container" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_external_finalize" > "$test_tmp/external-finalize-reset.log" 2>&1
+[[ ! -e "$data_external_finalize/old-reset-state" ]] \
+  || fail "external run-directory reset did not delete old application state"
+pid_identity "$run_external_finalize/workbench-$external_finalize_key.pid" \
+  || fail "external run-directory reset did not start its replacement"
 
 printf '%s\n' 'agent-workbench explicit reset lifecycle checks passed'
