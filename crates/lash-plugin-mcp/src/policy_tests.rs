@@ -2221,6 +2221,62 @@ async fn probe_loop_observes_healthy_dwell_and_resets_reconnect_backoff() {
     pool.shutdown_all().await;
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn matching_timeout_after_entry_drop_still_cancels_and_reaps_connection() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
+    let root = tempfile::tempdir().unwrap();
+    let current_entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "ignore_eof",
+                policy: TimeoutDisconnectPolicy::ConsecutiveTimeouts,
+                threshold: 1,
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    );
+    lifecycle.observe(&current_entry);
+    current_entry.establish().await.expect("connected entry");
+    let pid = current_entry.active_pid.load(Ordering::SeqCst);
+    let active_pid = Arc::clone(&current_entry.active_pid);
+    let actor_tx = current_entry.actor_tx.clone();
+    let actor = current_entry
+        .actor_handle
+        .lock_recover()
+        .take()
+        .expect("lifecycle actor handle");
+    drop(current_entry);
+
+    let (reply, result) = tokio::sync::oneshot::channel();
+    actor_tx
+        .send(LifecycleCommand::CallTimedOut {
+            generation: 1,
+            reply,
+        })
+        .expect("send matching timeout after dropping the entry");
+    assert_eq!(result.await.expect("timeout observation reply"), None);
+    let (reaping, deadline) = lifecycle.grace_armed().await;
+    assert_eq!(reaping, pid);
+    assert!(
+        alive(pid),
+        "the detached actor still owns its child while bounded cleanup runs"
+    );
+
+    clock.expire(deadline).await;
+    lifecycle.kill_issued(pid).await;
+    lifecycle.reaped(pid).await;
+    actor
+        .await
+        .expect("lifecycle actor exits after consuming cleanup");
+    assert_eq!(active_pid.load(Ordering::SeqCst), 0);
+    assert_eq!(process_state(pid), None);
+}
+
 #[tokio::test]
 async fn interval_probe_marks_unresponsive_peer_disconnected() {
     let root = tempfile::tempdir().unwrap();
