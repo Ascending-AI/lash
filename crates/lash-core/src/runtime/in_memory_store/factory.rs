@@ -801,7 +801,10 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             // Another sweeper owns this digest. Skip on contention.
             return Ok(crate::AttachmentCondemnation::AlreadyCondemned);
         }
-        condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Condemned);
+        condemnations.insert(
+            id.clone(),
+            super::AttachmentCondemnationPhase::Condemned { write_claim: None },
+        );
         Ok(crate::AttachmentCondemnation::Condemned)
     }
 
@@ -818,10 +821,11 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             // matching the SQL backends' `WHERE phase = 'condemned'`.
             None
             | Some(super::AttachmentCondemnationPhase::Deleting)
-            | Some(super::AttachmentCondemnationPhase::Reclaimed) => {
-                Ok(crate::AttachmentDeleteArming::Revoked)
-            }
-            Some(super::AttachmentCondemnationPhase::Condemned) => {
+            | Some(super::AttachmentCondemnationPhase::Reclaimed { .. })
+            | Some(super::AttachmentCondemnationPhase::Condemned {
+                write_claim: Some(_),
+            }) => Ok(crate::AttachmentDeleteArming::Revoked),
+            Some(super::AttachmentCondemnationPhase::Condemned { write_claim: None }) => {
                 condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Deleting);
                 Ok(crate::AttachmentDeleteArming::Armed)
             }
@@ -837,11 +841,55 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         if matches!(
             condemnations.get(id),
             Some(
-                super::AttachmentCondemnationPhase::Condemned
+                super::AttachmentCondemnationPhase::Condemned { write_claim: None }
                     | super::AttachmentCondemnationPhase::Deleting
             )
         ) {
             condemnations.remove(id);
+        }
+        Ok(())
+    }
+
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &crate::AttachmentId,
+    ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let mut condemnations = self.attachment_condemnations.lock_recover();
+        let (session_id, recovered) = match condemnations.get(id).cloned() {
+            Some(super::AttachmentCondemnationPhase::Condemned {
+                write_claim: Some(claim),
+            }) => (
+                claim.session_id,
+                super::AttachmentCondemnationPhase::Condemned { write_claim: None },
+            ),
+            Some(super::AttachmentCondemnationPhase::Reclaimed {
+                write_claim: Some(claim),
+            }) => (
+                claim.session_id,
+                super::AttachmentCondemnationPhase::Reclaimed { write_claim: None },
+            ),
+            _ => return Ok(()),
+        };
+        let key = (session_id, id.clone());
+        let mut manifest = self.attachment_manifest.lock_recover();
+        let committed = match manifest.get(&key) {
+            Some(entry) if entry.committed_at_epoch_ms.is_none() => {
+                manifest.remove(&key);
+                false
+            }
+            Some(_) => true,
+            None => false,
+        };
+        if committed
+            && matches!(
+                &recovered,
+                super::AttachmentCondemnationPhase::Condemned { .. }
+            )
+        {
+            condemnations.remove(id);
+        } else {
+            condemnations.insert(id.clone(), recovered);
         }
         Ok(())
     }
@@ -856,7 +904,10 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             condemnations.get(id),
             Some(super::AttachmentCondemnationPhase::Deleting)
         ) {
-            condemnations.insert(id.clone(), super::AttachmentCondemnationPhase::Reclaimed);
+            condemnations.insert(
+                id.clone(),
+                super::AttachmentCondemnationPhase::Reclaimed { write_claim: None },
+            );
         }
         Ok(())
     }

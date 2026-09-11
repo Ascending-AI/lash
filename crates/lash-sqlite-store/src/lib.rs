@@ -1216,6 +1216,16 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         store.release_attachment_condemnation(id).await
     }
 
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        let store = self
+            .open_catalog_for_maintenance("abandoned attachment write recovery")
+            .await?;
+        store.recover_abandoned_attachment_write(id).await
+    }
+
     async fn reclaim_attachment_condemnation(
         &self,
         id: &lash_core::AttachmentId,

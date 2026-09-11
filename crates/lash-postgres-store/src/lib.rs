@@ -320,10 +320,15 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // (FIG-2512); component-82 stores must be recreated so successful physical
 // deletion remains durable byte-absence evidence. There is no migration into this
 // generation.
-// Version 84 requires pending-input claim identity and token to be either both
-// NULL or both populated. Component-83 stores are recreated; there is
-// no migration into this generation.
-const SCHEMA_VERSION: i32 = 84;
+// Version 84 adds the attachment-condemnation write token and its manifest
+// session association. The prior phase now remains durable until a restoring
+// backend put settles, and explicit recovery can remove exactly that attempt's
+// intent, so component-83 stores are rejected rather than running the old unsafe
+// re-put lifecycle.
+// Version 85 requires pending-input claim identity and token to be either both
+// NULL or both populated. Component-84 stores are recreated; there is no
+// migration into this generation.
+const SCHEMA_VERSION: i32 = 85;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

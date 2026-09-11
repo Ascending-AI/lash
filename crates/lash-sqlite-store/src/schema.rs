@@ -364,7 +364,11 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
 -- `lash_core::AttachmentCondemnation`), never an expiry.
 CREATE TABLE IF NOT EXISTS attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
-    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))
+    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed')),
+    write_token   TEXT,
+    write_session_id TEXT,
+    CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
+    CHECK (write_token IS NULL OR phase IN ('condemned', 'reclaimed'))
 );
 
 CREATE TABLE IF NOT EXISTS artifact_refs (
@@ -545,9 +549,12 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// existing catalogs are rejected rather than migrated with a defaulted column.
 /// Version 54 preserves successful attachment deletion as the terminal
 /// `reclaimed` phase so adoption can refuse roots whose bytes are absent.
-/// Version 55 requires pending-input claim identity and token to be either both
-/// NULL or both populated; version 54 catalogs are recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 55;
+/// Version 55 keeps that phase present under an opaque write token associated
+/// with its manifest session until a restoring backend put succeeds, so failed
+/// re-puts and explicit host recovery can restore it exactly.
+/// Version 56 requires pending-input claim identity and token to be either both
+/// NULL or both populated; version 55 catalogs are recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 56;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

@@ -16,6 +16,8 @@ async fn postgres_cross_owner_attachment_adoption_conformance() {
 use std::future::Future;
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
+#[path = "conformance/attachment_recovery.rs"]
+mod attachment_recovery;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 #[path = "conformance/occurrence_listing.rs"]

@@ -25,7 +25,10 @@ pub use lash_core::testing::coordinate_tool_provider_with_services;
 use lash_sansio::SessionId;
 
 mod attachment_adoption;
-pub use attachment_adoption::cross_owner_attachment_adoption_conformance;
+pub use attachment_adoption::{
+    abandoned_attachment_write_recovery_after_cold_reopen,
+    cross_owner_attachment_adoption_conformance,
+};
 
 mod artifact_store;
 mod attachment_owner;
