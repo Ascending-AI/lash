@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     source_node_id                    TEXT,
     observer_inheritance_kind         TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
-    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only'))
 );
 
@@ -1386,6 +1386,17 @@ mod check_constraint_tests {
             &core,
             "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
              VALUES ('bad-cause', 'child', 'timer')",
+            "ck_session_meta_caused_by_kind",
+        );
+        core.execute_batch(
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
+             VALUES ('effect-address-cause', 'child', 'effect_address')",
+        )
+        .expect("current effect-address discriminator is admitted");
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
+             VALUES ('legacy-effect-cause', 'child', 'effect')",
             "ck_session_meta_caused_by_kind",
         );
         assert_check_rejects(

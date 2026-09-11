@@ -1388,6 +1388,36 @@ async fn session_store_factory_round_trips_every_relation_shape(
             })),
         ),
         (
+            "child-effect-process",
+            child(Some(crate::CausalRef::Effect {
+                address: EffectAddress::new(
+                    ExecutionScope::process("cause-process"),
+                    "cause-effect",
+                )
+                .expect("valid process effect cause"),
+            })),
+        ),
+        (
+            "child-effect-queue-drain",
+            child(Some(crate::CausalRef::Effect {
+                address: EffectAddress::new(
+                    ExecutionScope::queue_drain("cause-session", "cause-drain"),
+                    "cause-effect",
+                )
+                .expect("valid queue-drain effect cause"),
+            })),
+        ),
+        (
+            "child-effect-session-delete",
+            child(Some(crate::CausalRef::Effect {
+                address: EffectAddress::new(
+                    ExecutionScope::session_delete("cause-session"),
+                    "cause-effect",
+                )
+                .expect("valid session-delete effect cause"),
+            })),
+        ),
+        (
             "child-tool-call",
             child(Some(crate::CausalRef::ToolCall {
                 session_id: SessionId::from("cause-session"),

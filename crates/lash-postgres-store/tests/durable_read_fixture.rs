@@ -241,7 +241,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          ALTER TABLE lash_turn_cancel_requests
              ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
          UPDATE lash_schema_versions
-            SET version = 83
+            SET version = 84
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)

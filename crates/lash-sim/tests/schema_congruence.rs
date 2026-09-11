@@ -82,7 +82,7 @@ const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         "session_meta",
         "ck_session_meta_caused_by_kind",
-        "caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+        "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
     ),
     expected_constraint(
         "session_meta",
@@ -160,7 +160,7 @@ const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         "lash_session_meta",
         "ck_session_meta_caused_by_kind",
-        "caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+        "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
     ),
     expected_constraint(
         "lash_session_meta",
