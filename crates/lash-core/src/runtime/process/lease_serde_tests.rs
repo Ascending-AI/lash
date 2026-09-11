@@ -488,6 +488,41 @@ fn process_lease_messagepack_owner_numeric_identifiers_match_derived_serde() {
 #[test]
 fn process_lease_messagepack_owner_numeric_identifier_edges_match_derived_serde() {
     for version_first in [true, false] {
+        let owner_with_unknown_byte_identifier = messagepack_raw_map(vec![
+            (messagepack_string("owner_id"), messagepack_string("worker")),
+            (vec![0xc4, 1, 0xff], vec![0xc0]),
+            (
+                messagepack_string("incarnation_id"),
+                messagepack_string("boot"),
+            ),
+        ]);
+        let lease = messagepack_lease(
+            owner_with_unknown_byte_identifier,
+            messagepack_string("tok"),
+            PROCESS_LEASE_SCHEMA_VERSION as u8,
+            version_first,
+            false,
+        );
+        assert_messagepack_fixture_decodes(&lease, u64::MAX);
+        for encoded in [
+            messagepack_map(vec![("Acquired", lease.clone())]),
+            messagepack_map(vec![(
+                "Busy",
+                messagepack_map(vec![("holder", lease.clone())]),
+            )]),
+        ] {
+            let decoded: ProcessLeaseClaimOutcome = rmp_serde::from_slice(&encoded)
+                .expect("unknown invalid-UTF8 owner key must remain ignored in nested leases");
+            let decoded = match decoded {
+                ProcessLeaseClaimOutcome::Acquired(lease)
+                | ProcessLeaseClaimOutcome::Busy { holder: lease } => lease,
+            };
+            assert_eq!(
+                decoded.owner,
+                crate::LeaseOwnerIdentity::opaque("worker", "boot")
+            );
+        }
+
         let owner_with_ignored_index = messagepack_raw_map(vec![
             (vec![0], messagepack_string("worker")),
             (vec![2], vec![0xc4, 1, 0xff]),
@@ -511,6 +546,14 @@ fn process_lease_messagepack_owner_numeric_identifier_edges_match_derived_serde(
             messagepack_raw_map(vec![
                 (vec![0], messagepack_string("first")),
                 (vec![0], messagepack_string("last")),
+                (vec![1], messagepack_string("boot")),
+            ]),
+            messagepack_raw_map(vec![
+                (
+                    vec![0xc4, 8, b'o', b'w', b'n', b'e', b'r', b'_', b'i', b'd'],
+                    messagepack_string("first"),
+                ),
+                (messagepack_string("owner_id"), messagepack_string("last")),
                 (vec![1], messagepack_string("boot")),
             ]),
         ] {
@@ -553,18 +596,45 @@ fn process_lease_messagepack_owner_numeric_identifier_edges_match_derived_serde(
     }
 
     let future = PROCESS_LEASE_SCHEMA_VERSION + 1;
-    let lease = messagepack_lease(
-        messagepack_indexed_owner(vec![0], vec![1]),
-        messagepack_string("tok"),
-        future as u8,
-        false,
-        false,
-    );
-    assert_version_error(
-        rmp_serde::from_slice::<ProcessLease>(&lease)
-            .expect_err("future version must precede numeric owner replay"),
-        future,
-    );
+    for version_first in [true, false] {
+        for owner in [
+            messagepack_indexed_owner(vec![0], vec![1]),
+            messagepack_raw_map(vec![
+                (messagepack_string("owner_id"), messagepack_string("worker")),
+                (vec![0xc4, 1, 0xff], vec![0xc0]),
+                (
+                    messagepack_string("incarnation_id"),
+                    messagepack_string("boot"),
+                ),
+            ]),
+        ] {
+            let lease = messagepack_lease(
+                owner,
+                messagepack_string("tok"),
+                future as u8,
+                version_first,
+                false,
+            );
+            assert_version_error(
+                rmp_serde::from_slice::<ProcessLease>(&lease)
+                    .expect_err("future version must precede owner replay"),
+                future,
+            );
+            for encoded in [
+                messagepack_map(vec![("Acquired", lease.clone())]),
+                messagepack_map(vec![(
+                    "Busy",
+                    messagepack_map(vec![("holder", lease.clone())]),
+                )]),
+            ] {
+                assert_version_error(
+                    rmp_serde::from_slice::<ProcessLeaseClaimOutcome>(&encoded)
+                        .expect_err("nested future version must precede owner replay"),
+                    future,
+                );
+            }
+        }
+    }
 }
 
 #[test]

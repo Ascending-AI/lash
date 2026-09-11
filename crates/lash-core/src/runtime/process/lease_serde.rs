@@ -233,6 +233,13 @@ fn normalize_lease_owner_identifiers(value: Value<'static>) -> Value<'static> {
                 // Serde's derived struct visitor treats other unsigned indexes
                 // exactly like unknown named fields and ignores their values.
                 Some(_) => None,
+                // The derived visitor treats invalid-UTF8 byte keys as unknown
+                // identifiers, not invalid owner syntax, so ignore their values.
+                None
+                    if matches!(&key, Value::Bytes(bytes) if std::str::from_utf8(bytes.as_ref()).is_err()) =>
+                {
+                    None
+                }
                 // Signed and u128 identifiers remain untouched so replay keeps
                 // rejecting them instead of turning invalid keys into fields.
                 None => Some((key, value)),
