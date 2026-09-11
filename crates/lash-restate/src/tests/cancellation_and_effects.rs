@@ -1166,7 +1166,11 @@ pub(super) async fn fig1293_seed_control_target(
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "fig1293"}),
                 },
-                lash_core::RecoveryContract::Rerunnable,
+                // Fixture-owned external process: `ExternallyOwned` keeps the
+                // installed worker from racing cancellation by trying to
+                // recover an input it does not own. Mirrors the PostgreSQL
+                // fixture.
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
