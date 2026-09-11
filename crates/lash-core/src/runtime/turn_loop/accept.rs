@@ -62,33 +62,16 @@ impl LashRuntime {
                 .is_some()
             {}
         }
-        if let Some(input_turn_id) = input.trace_turn_id.as_deref()
-            && scoped_effect_controller
-                .execution_scope()
-                .validates_turn_trace_id()
-            && input_turn_id != scoped_effect_controller.scope_id()
-        {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-                format!(
-                    "input trace_turn_id `{input_turn_id}` does not match execution scope id `{}`",
-                    scoped_effect_controller.scope_id()
-                ),
-            ));
-        }
         let turn_id = input
             .trace_turn_id
             .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()))
             .clone();
-        // A process-backed child turn executes as part of the process that
-        // admitted it, even though it also has session/turn routing and trace
-        // identity. Preserve that Process authority through the turn. Other
-        // turn entry points continue to acquire the runtime's canonical Turn
-        // scope exactly as before.
-        let scoped_effect_controller = match scoped_effect_controller.execution_scope() {
-            ExecutionScope::Process { .. } => scoped_effect_controller,
-            _ => scoped_effect_controller.rescope(self.state.turn_scope(&turn_id))?,
-        };
+        // The scope identifies the authority that admitted this run. Physical
+        // turn ids remain separate routing and trace attribution, including for
+        // queued drains, runtime operations, processes, and follow-on frames.
+        // Re-scoping a borrowed or shared controller would change only the
+        // outer address while leaving the host's inner fence on the admitted
+        // scope, so preserve the controller unchanged for the complete run.
         // The stable execution-scope turn id is attached to every write-ahead
         // intent before ingress, tools, plugins, or envelope normalization can
         // put bytes. Replays bind the same id; no live pending-id state is used.

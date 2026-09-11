@@ -119,7 +119,8 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
 
 #[tokio::test]
 pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()> {
-    let effect_host = DurableNoopEffectHost::default();
+    let recorder = Arc::new(RecordingNativeEffectController::default());
+    let effect_host = lash_core::facade_support::NativeEffectHost::new(recorder.clone());
     let custom_scope = lash_core::ExecutionScope::runtime_operation("custom-foreground-scope");
     let scoped_effect_controller = effect_host.scoped(custom_scope.clone())?;
     let core = standard_core();
@@ -132,7 +133,51 @@ pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()
         .await?;
 
     assert_eq!(output.assistant_message(), Some("echo: custom"));
-    assert_eq!(effect_host.selected_scopes(), vec![custom_scope]);
+    let llm = recorder
+        .invocations()
+        .into_iter()
+        .find(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
+        .expect("llm effect");
+    assert_eq!(llm.execution_scope, custom_scope);
+    Ok(())
+}
+
+#[tokio::test]
+pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identity() -> Result<()> {
+    let recorder = Arc::new(RecordingNativeEffectController::default());
+    let effect_host = lash_core::facade_support::NativeEffectHost::new(recorder.clone());
+    let scoped_effect_controller = effect_host.scoped(lash_core::ExecutionScope::turn(
+        "mismatched-turn-scope",
+        "admitted-turn",
+    ))?;
+    let core = standard_core();
+    let session = core.session("mismatched-turn-scope").open().await?;
+
+    let error = session
+        .turn(TurnInput::text("must refuse"))
+        .turn_id("input-turn")
+        .advanced()
+        .run_with_scope(scoped_effect_controller)
+        .await
+        .expect_err("a foreground Turn scope must match the admitted trace identity");
+
+    let EmbedError::Runtime(error) = error else {
+        panic!("expected a runtime error, got {error}");
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::ExecutionScopeTurnIdMismatch
+    );
+    assert_eq!(
+        error.message,
+        "input trace_turn_id `input-turn` does not match execution scope id `admitted-turn`"
+    );
+    assert!(
+        recorder
+            .invocations()
+            .into_iter()
+            .all(|record| record.kind != lash_core::RuntimeEffectKind::LlmCall)
+    );
     Ok(())
 }
 

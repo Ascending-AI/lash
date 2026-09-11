@@ -370,6 +370,7 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
 #[derive(Clone, Debug)]
 struct DurableEffectInvocation {
     kind: lash_core::RuntimeEffectKind,
+    execution_scope: lash_core::ExecutionScope,
     turn_id: Option<TurnId>,
     replay_key: Option<String>,
 }
@@ -431,6 +432,7 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
             .lock_recover()
             .push(DurableEffectInvocation {
                 kind: envelope.command.kind(),
+                execution_scope: envelope.invocation.execution_scope().clone(),
                 turn_id: envelope.invocation.attribution.turn_id.clone(),
                 replay_key: Some(envelope.invocation.replay_key().to_owned()),
             });
@@ -531,6 +533,7 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
             .lock_recover()
             .push(DurableEffectInvocation {
                 kind: envelope.command.kind(),
+                execution_scope: envelope.invocation.execution_scope().clone(),
                 turn_id: envelope.invocation.attribution.turn_id.clone(),
                 replay_key: Some(envelope.invocation.replay_key().to_owned()),
             });

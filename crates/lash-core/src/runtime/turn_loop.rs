@@ -217,21 +217,6 @@ fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
     TurnId::from(format!("{parent_turn_id}:{phase}"))
 }
 
-fn scoped_child_turn_controller<'run>(
-    scoped_effect_controller: &ScopedEffectController<'run>,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> Result<ScopedEffectController<'run>, RuntimeError> {
-    if matches!(
-        scoped_effect_controller.execution_scope(),
-        ExecutionScope::Process { .. }
-    ) {
-        return Ok(scoped_effect_controller.clone());
-    }
-    let scope = ExecutionScope::turn(session_id, turn_id);
-    scoped_effect_controller.rescope(scope)
-}
-
 async fn turn_control_binding<'a>(
     effect_host: &'a dyn EffectHost,
     scoped_effect_controller: &'a ScopedEffectController<'_>,

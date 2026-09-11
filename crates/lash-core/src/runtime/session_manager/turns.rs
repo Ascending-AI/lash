@@ -74,6 +74,7 @@ impl ManagedSessionCapability {
                             input,
                             cancel,
                             scoped_effect_controller,
+                            admission_class,
                             sink.clone(),
                         ),
                     ),
@@ -99,6 +100,7 @@ impl ManagedSessionCapability {
                     input,
                     cancel,
                     scoped_effect_controller,
+                    admission_class,
                     sink.clone(),
                 )
                 .await
@@ -479,23 +481,35 @@ async fn run_managed_session_turn(
     input: crate::TurnInput,
     cancel: CancellationToken,
     scoped_effect_controller: crate::ScopedEffectController<'_>,
+    admission_class: crate::plugin::runtime_host::ManagedTurnAdmissionClass,
     sink: ChannelEventSink,
 ) -> Result<AssembledTurn, crate::PluginError> {
     // This mutex is the managed runtime's single-writer boundary. Hold it for
     // the complete turn and publish from the guarded post-turn state before
     // releasing it, exactly as the former native path did.
     let mut runtime_guard = runtime.runtime.lock().await;
-    let scoped_effect_controller = match scoped_effect_controller.execution_scope() {
-        crate::ExecutionScope::Turn { turn_id, .. } => scoped_effect_controller
-            .rescope(runtime_guard.state.turn_scope(turn_id.clone()))
-            .map_err(crate::PluginError::Runtime)?,
-        crate::ExecutionScope::Process { .. } => scoped_effect_controller,
-        scope => {
-            return Err(crate::PluginError::Session(format!(
-                "managed session turns require a turn or process execution scope, got {scope:?}"
-            )));
-        }
-    };
+    let scoped_effect_controller =
+        match (admission_class, scoped_effect_controller.execution_scope()) {
+            (
+                crate::plugin::runtime_host::ManagedTurnAdmissionClass::RuntimeInternalCompaction,
+                _,
+            ) => scoped_effect_controller,
+            (
+                crate::plugin::runtime_host::ManagedTurnAdmissionClass::Normal,
+                crate::ExecutionScope::Turn { turn_id, .. },
+            ) => scoped_effect_controller
+                .rescope(runtime_guard.state.turn_scope(turn_id.clone()))
+                .map_err(crate::PluginError::Runtime)?,
+            (
+                crate::plugin::runtime_host::ManagedTurnAdmissionClass::Normal,
+                crate::ExecutionScope::Process { .. },
+            ) => scoped_effect_controller,
+            (crate::plugin::runtime_host::ManagedTurnAdmissionClass::Normal, scope) => {
+                return Err(crate::PluginError::Session(format!(
+                    "managed session turns require a turn or process execution scope, got {scope:?}"
+                )));
+            }
+        };
     let result = runtime_guard
         .stream_turn_with_agent_frames(
             input,
@@ -1061,5 +1075,57 @@ mod tests {
         );
         let (_, scoped_effect_controller) = request.into_parts();
         assert_eq!(scoped_effect_controller.execution_scope(), &process_scope);
+    }
+
+    #[test]
+    fn runtime_internal_compaction_preserves_parent_authority_and_child_trace_identity() {
+        let controller = crate::NativeRuntimeEffectController::default();
+        let parent_scope = crate::ExecutionScope::runtime_operation("rolling-history-parent");
+        let scoped_effect_controller =
+            crate::ScopedEffectController::borrowed(&controller, parent_scope.clone())
+                .expect("runtime-operation scope");
+        let request = crate::SessionTurnRequest::new_runtime_internal_compaction(
+            "root-compaction",
+            "parent-turn:rolling-history-compaction",
+            crate::TurnInput::text("summarize"),
+            scoped_effect_controller,
+        )
+        .expect("valid runtime-owned compaction request");
+
+        assert_eq!(
+            request.admission_class(),
+            crate::plugin::runtime_host::ManagedTurnAdmissionClass::RuntimeInternalCompaction
+        );
+        assert_eq!(
+            request.input().trace_turn_id.as_deref(),
+            Some("parent-turn:rolling-history-compaction")
+        );
+        let (_, scoped_effect_controller) = request.into_parts();
+        assert_eq!(scoped_effect_controller.execution_scope(), &parent_scope);
+    }
+
+    #[test]
+    fn runtime_internal_compaction_refuses_session_delete_authority() {
+        let controller = crate::NativeRuntimeEffectController::default();
+        let scoped_effect_controller = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::ExecutionScope::session_delete("root"),
+        )
+        .expect("session-delete scope");
+        let error = match crate::SessionTurnRequest::new_runtime_internal_compaction(
+            "root-compaction",
+            "parent-turn:rolling-history-compaction",
+            crate::TurnInput::text("summarize"),
+            scoped_effect_controller,
+        ) {
+            Ok(_) => panic!("session deletion cannot authorize compaction"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .to_string()
+                .contains("requires a turn-bearing execution scope")
+        );
     }
 }
