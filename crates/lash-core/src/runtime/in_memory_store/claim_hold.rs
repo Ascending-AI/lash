@@ -11,8 +11,9 @@ pub(super) struct ClaimHold {
 #[derive(Clone)]
 enum HoldState {
     Unheld {
-        // Abandon metadata is not live ownership. Both optional values must
-        // round-trip independently, exactly as the SQL backends preserve them.
+        // Abandon metadata is not live ownership. The predecessor identity is
+        // all-or-none, mirroring the SQL backends' all-or-none constraint on
+        // the claim id/token pair.
         prior_claim_id: Option<String>,
         prior_token: Option<String>,
     },
@@ -166,13 +167,8 @@ mod tests {
         assert_eq!(hold.fencing_token, 2);
     }
     #[test]
-    fn abandon_preserves_each_optional_predecessor_field_without_live_ownership() {
-        for (id, token) in [
-            (None, None),
-            (Some("prior"), None),
-            (None, Some("token")),
-            (Some("prior"), Some("token")),
-        ] {
+    fn abandon_preserves_paired_predecessor_identity_without_live_ownership() {
+        for (id, token) in [(None, None), (Some("prior"), Some("token"))] {
             let mut hold = ClaimHold::with_fencing_token(9);
             hold.restore(id.map(str::to_string), token.map(str::to_string));
             assert_eq!(hold.id().as_deref(), id);
