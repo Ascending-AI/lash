@@ -30,6 +30,7 @@ created_run_owner_this_attempt=0
 restate_service_lease_record=""
 postgres_service_lease_record=""
 run_owner_record=""
+registered_deployment_id=""
 
 log() {
   printf '[agent-workbench] %s\n' "$*" >&2
@@ -63,6 +64,8 @@ Defaults:
   Managed-service ports use a 10-port stride for each workbench-port step from
   3030 for workbench ports 2223 through 7676. Outside that range, set the
   managed-service endpoint environment variables explicitly.
+  Restate ingress/admin and PostgreSQL service hosts must use numeric loopback
+  addresses or localhost so managed-service identity remains unambiguous.
   Without --port/--addr, AGENT_WORKBENCH_ADDR is used, then 127.0.0.1:3030.
   AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS sets the model context window; it
   defaults to 200000 and must be at least twice the plugin's compaction buffer
@@ -87,6 +90,40 @@ if url.scheme not in {"http", "https", "postgres", "postgresql"} or not host or 
 print(f"{host} {port}")
 ' "$1")" || die "expected URL with explicit host and port"
   printf '%s\n' "$parsed"
+}
+
+canonical_service_host() {
+  local host="$1"
+  python3 -c '
+import ipaddress
+import socket
+import sys
+
+host = sys.argv[1]
+try:
+    address = ipaddress.ip_address(host)
+except ValueError:
+    address = None
+if address is not None:
+    mapped = getattr(address, "ipv4_mapped", None)
+    if address.is_loopback or (mapped is not None and mapped.is_loopback):
+        print("loopback")
+        raise SystemExit(0)
+    raise SystemExit(1)
+if host.rstrip(".").lower() != "localhost":
+    raise SystemExit(1)
+try:
+    addresses = [
+        ipaddress.ip_address(item[4][0])
+        for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    ]
+except (OSError, ValueError):
+    raise SystemExit(1)
+if addresses and all(address.is_loopback for address in addresses):
+    print("loopback")
+else:
+    raise SystemExit(1)
+' "$host" || die "service host must be a numeric loopback address or localhost"
 }
 
 url_is_diagnostic_safe() {
@@ -171,37 +208,69 @@ register_deployment() {
     sleep 1
   done
   require_workbench_alive "after Restate deployment registration"
+  registered_deployment_id="$(printf '%s' "$last_response" | python3 -c '
+import json
+import re
+import sys
+
+try:
+    document = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(1)
+deployment_id = document.get("id") if isinstance(document, dict) else None
+if not isinstance(deployment_id, str) or not re.fullmatch(r"dp_[A-Za-z0-9]+", deployment_id):
+    raise SystemExit(1)
+print(deployment_id)
+')" || return 1
+}
+
+deployment_registry_records() {
+  local admin_url="$1"
+  local response
+  response="$(
+    curl --http2-prior-knowledge -fsS \
+      "${admin_url%/}/deployments"
+  )" || return 1
+  printf '%s' "$response" | python3 -c '
+import json
+import re
+import sys
+
+try:
+    document = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(1)
+if not isinstance(document, dict) or not isinstance(document.get("deployments"), list):
+    raise SystemExit(1)
+records = []
+for deployment in document["deployments"]:
+    if not isinstance(deployment, dict):
+        raise SystemExit(1)
+    deployment_id = deployment.get("id")
+    uri = deployment.get("uri")
+    if not isinstance(deployment_id, str) or not re.fullmatch(r"dp_[A-Za-z0-9]+", deployment_id):
+        raise SystemExit(1)
+    if isinstance(uri, str):
+        identity = uri.rstrip("/")
+    elif isinstance(deployment.get("arn"), str):
+        identity = "<lambda>"
+    else:
+        raise SystemExit(1)
+    records.append((deployment_id, identity))
+for deployment_id, uri in sorted(records):
+    print(f"{deployment_id}\t{uri}")
+'
 }
 
 deployment_uri_registered() {
   local admin_url="$1"
   local endpoint_url="$2"
   local response
-  response="$(
-    curl --http2-prior-knowledge -fsS \
-      "${admin_url%/}/deployments"
-  )" || return 2
-  printf '%s' "$response" | python3 -c '
-import json
-import sys
-
-target = sys.argv[1]
-normalized_target = target.rstrip("/")
-
-try:
-    document = json.load(sys.stdin)
-except (json.JSONDecodeError, UnicodeDecodeError):
-    raise SystemExit(2)
-if not isinstance(document, dict) or not isinstance(document.get("deployments"), list):
-    raise SystemExit(2)
-for deployment in document["deployments"]:
-    if not isinstance(deployment, dict):
-        raise SystemExit(2)
-    uri = deployment.get("uri")
-    if isinstance(uri, str) and uri.rstrip("/") == normalized_target:
-        raise SystemExit(0)
-raise SystemExit(1)
-' "$endpoint_url"
+  response="$(deployment_registry_records "$admin_url")" || return 2
+  printf '%s\n' "$response" | awk -F '\t' -v target="${endpoint_url%/}" '
+    $2 == target { found = 1 }
+    END { exit(found ? 0 : 1) }
+  '
 }
 
 require_unused_deployment_uri() {
@@ -317,6 +386,15 @@ private_owned_directory() {
   mode="$(stat -c '%a' "$directory" 2>/dev/null || true)"
   [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
   (( (8#$mode & 0022) == 0 ))
+}
+
+stable_launcher_runtime_root() {
+  local user_runtime="/run/user/$UID"
+  if private_owned_directory "$user_runtime"; then
+    printf '%s/lash-agent-workbench-%s\n' "$user_runtime" "$UID"
+  else
+    printf '/tmp/lash-agent-workbench-%s\n' "$UID"
+  fi
 }
 
 path_has_symlink_component() {
@@ -976,7 +1054,7 @@ write_reset_metadata() {
   [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$run_owner_record" ]] \
     || return 1
   {
-    printf 'reset_schema=3\n'
+    printf 'reset_schema=4\n'
     printf 'owned_token=%q\n' "$ownership_token"
     printf 'owned_state_key=%q\n' "$state_key"
     printf 'owned_workbench_addr=%q\n' "$workbench_addr"
@@ -998,7 +1076,7 @@ write_reset_metadata() {
   } > "$reset_file"
   chmod 600 "$reset_file"
   {
-    printf 'data_owner_schema=3\n'
+    printf 'data_owner_schema=4\n'
     printf 'data_owner_token=%q\n' "$ownership_token"
     printf 'data_owner_state_key=%q\n' "$state_key"
     printf 'data_owner_path=%q\n' "$data_dir"
@@ -1014,12 +1092,29 @@ data_owner_matches() {
     data_owner_state_dir=""
     # shellcheck disable=SC1090
     source "$data_owner_file"
-    [[ "$data_owner_schema" = 3 \
+    [[ "$data_owner_schema" = 4 \
       && "$data_owner_token" = "$owned_token" \
       && "$data_owner_state_key" = "$state_key" \
       && "$data_owner_path" = "$owned_data_dir" \
       && "$data_owner_state_dir" = "$state_dir" ]]
   )
+}
+
+finalize_reset_ownership() {
+  (( created_reset_ownership_this_attempt )) || return 0
+  local registry_records registry_hash expected_record
+  registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
+  expected_record="$registered_deployment_id"$'\t'"$(endpoint_url)"
+  if [[ -z "$registered_deployment_id" || "$registry_records" != "$expected_record" ]]; then
+    log "reset unavailable: Restate deployment registry is not exclusively owned by this launcher stack"
+    remove_attempt_reset_ownership
+    return 0
+  fi
+  registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
+  {
+    printf 'owned_restate_deployment_id=%q\n' "$registered_deployment_id"
+    printf 'owned_restate_registry_hash=%q\n' "$registry_hash"
+  } >> "$reset_file"
 }
 
 prepare_reset_ownership() {
@@ -1082,9 +1177,10 @@ validate_reset_ownership() {
   owned_restate_record="" owned_postgres_record=""
   owned_restate_service_lease="" owned_postgres_service_lease=""
   owned_run_owner=""
+  owned_restate_deployment_id="" owned_restate_registry_hash=""
   # shellcheck disable=SC1090
   source "$reset_file"
-  [[ "$reset_schema" = 3 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
+  [[ "$reset_schema" = 4 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
     || die "reset refused: invalid ownership record $reset_file"
   [[ "$owned_state_key" = "$state_key" \
     && "$owned_workbench_addr" = "$workbench_addr" \
@@ -1113,7 +1209,6 @@ validate_reset_ownership() {
   [[ "$owned_run_owner" = "1 $owned_token $state_key $data_path_hash" \
     && "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$owned_run_owner" ]] \
     || die "reset refused: run-footprint ownership does not match launcher metadata"
-
   local name id token component
   read -r name id token component <<<"$owned_restate_record"
   [[ "$name" = "$restate_container" \
@@ -1142,6 +1237,15 @@ validate_reset_ownership() {
   elif [[ "$owned_store_backend" != sqlite || -n "$agent_workbench_database_url" ]]; then
     die "reset refused: application database ownership is external or ambiguous"
   fi
+
+  local registry_records registry_hash expected_registry_record
+  registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
+  registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
+  expected_registry_record="$owned_restate_deployment_id"$'\t'"${owned_deployment_url%/}"
+  [[ -n "$owned_restate_deployment_id" \
+    && "$owned_restate_registry_hash" = "$registry_hash" \
+    && "$registry_records" = "$expected_registry_record" ]] \
+    || die "reset refused: Restate deployment registry does not prove exclusive ownership"
 }
 
 start_detached() {
@@ -1243,6 +1347,7 @@ run_up() {
     cleanup_start_attempt || true
     die "failed to register Restate deployment $deployment_url through $restate_admin_url"
   fi
+  finalize_reset_ownership
   require_workbench_alive "before reporting ready"
   start_attempt_active=0
   rm -f "$reset_recovery_file"
@@ -1648,12 +1753,17 @@ restate_container="${AGENT_WORKBENCH_RESTATE_CONTAINER:-lash-agent-workbench-dev
 read -r endpoint_host endpoint_port < <(addr_host_port "$restate_endpoint_addr")
 read -r ingress_host ingress_port < <(url_host_port "$restate_ingress_url")
 read -r admin_host admin_port < <(url_host_port "$restate_admin_url")
+canonical_ingress_host="$(canonical_service_host "$ingress_host")"
+canonical_admin_host="$(canonical_service_host "$admin_host")"
 validate_port "Restate endpoint" "$endpoint_port"
 validate_port "Restate ingress" "$ingress_port"
 validate_port "Restate admin" "$admin_port"
 validate_port "Restate node" "$restate_node_port"
 if (( postgres_enabled )); then
   validate_port "Postgres" "$postgres_port"
+  canonical_postgres_host="$(canonical_service_host "$postgres_host")"
+else
+  canonical_postgres_host=""
 fi
 store_backend="sqlite"
 if (( postgres_enabled )); then
@@ -1692,7 +1802,7 @@ case "$action" in
   up|start|foreground|run|restart|down|stop)
     command -v flock >/dev/null 2>&1 || die "flock is required for launcher lifecycle operations"
     launcher_lock_hash="$(printf '%s' "$repo_root" | sha256sum | awk '{print $1}')"
-    launcher_lock_root="$(realpath -m -- "${XDG_RUNTIME_DIR:-/tmp}/lash-agent-workbench-$UID")"
+    launcher_lock_root="$(stable_launcher_runtime_root)"
     if path_contains_path "$data_dir" "$launcher_lock_root"; then
       die "application data path encloses launcher private runtime state"
     fi
@@ -1706,8 +1816,8 @@ case "$action" in
       || die "unsafe launcher lock directory $launcher_lock_root"
     launcher_lock_file="$launcher_lock_root/$launcher_lock_hash.lock"
     launcher_data_lock_file="$launcher_lock_root/data-ownership.lock"
-    restate_service_hash="$(printf '%s' "$ingress_host:$ingress_port|$admin_host:$admin_port" | sha256sum | awk '{print $1}')"
-    postgres_service_hash="$(printf '%s' "$postgres_host:$postgres_port" | sha256sum | awk '{print $1}')"
+    restate_service_hash="$(printf '%s' "$canonical_ingress_host:$ingress_port|$canonical_admin_host:$admin_port" | sha256sum | awk '{print $1}')"
+    postgres_service_hash="$(printf '%s' "$canonical_postgres_host:$postgres_port" | sha256sum | awk '{print $1}')"
     restate_service_lease_file="$launcher_lock_root/restate-$restate_service_hash.lease"
     postgres_service_lease_file="$launcher_lock_root/postgres-$postgres_service_hash.lease"
     reset_recovery_file="$launcher_lock_root/$launcher_lock_hash-$state_key-recover.sh"

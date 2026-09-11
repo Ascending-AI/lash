@@ -6,9 +6,25 @@ test_tmp="$(mktemp -d)"
 mock_bin="$test_tmp/bin"
 mock_state="$test_tmp/mock-state"
 mkdir -p "$mock_bin" "$mock_state" "$test_tmp/runtime"
+user_runtime_mode="$(stat -c '%a' "/run/user/$UID" 2>/dev/null || true)"
+if [[ -d "/run/user/$UID" && ! -L "/run/user/$UID" \
+  && "$(stat -c '%u' "/run/user/$UID")" = "$UID" \
+  && "$user_runtime_mode" =~ ^[0-7]{3,4}$ \
+  && $((8#$user_runtime_mode & 0022)) = 0 ]]; then
+  launcher_runtime_root="/run/user/$UID/lash-agent-workbench-$UID"
+else
+  launcher_runtime_root="/tmp/lash-agent-workbench-$UID"
+fi
+runtime_preexisting_entries="$test_tmp/runtime-preexisting-entries"
+if [[ -d "$launcher_runtime_root" ]]; then
+  find "$launcher_runtime_root" -maxdepth 1 -mindepth 1 -printf '%f\n' \
+    | sort > "$runtime_preexisting_entries"
+else
+  : > "$runtime_preexisting_entries"
+fi
 
 cleanup() {
-  local file pid start current
+  local file pid start current id token component lease entry
   while IFS= read -r file; do
     read -r pid start < "$file" || continue
     current="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)"
@@ -16,6 +32,28 @@ cleanup() {
       kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
     fi
   done < <(find "$test_tmp" -type f -name 'workbench-*.pid' -print 2>/dev/null)
+  if [[ -d "$launcher_runtime_root" ]]; then
+    for file in "$mock_state"/container-*; do
+      [[ -f "$file" && "$file" != *container-counter && "$file" != *container-ports-* ]] \
+        || continue
+      read -r id token component < "$file" || continue
+      for lease in "$launcher_runtime_root"/"$component"-*.lease; do
+        [[ -f "$lease" && ! -L "$lease" ]] || continue
+        if [[ "$(<"$lease")" = "1 $component $token $id" ]]; then
+          rm -f "$lease"
+        fi
+      done
+    done
+    for file in "$launcher_runtime_root"/*-recover.sh; do
+      [[ -f "$file" && ! -L "$file" ]] || continue
+      grep -Fq "$test_tmp" "$file" && rm -f "$file"
+    done
+    for file in "$launcher_runtime_root"/*.lock; do
+      [[ -f "$file" && ! -L "$file" && ! -s "$file" ]] || continue
+      entry="${file##*/}"
+      grep -Fxq "$entry" "$runtime_preexisting_entries" || rm -f "$file"
+    done
+  fi
   rm -rf -- "$test_tmp"
 }
 trap cleanup EXIT
@@ -123,12 +161,16 @@ case "$command" in
         printf 'rm %s %s\n' "$id" "$component" >> "$MOCK_STATE/docker-rm.log"
         rm -f "$file" "$MOCK_STATE/journal-$id"
         name="${file##*/container-}"
+        service_port=""
         while IFS= read -r port; do
+          service_port="$port"
           [[ -n "$port" ]] && rm -f "$MOCK_STATE/tcp-$port"
         done < "$MOCK_STATE/container-ports-$name"
         rm -f "$MOCK_STATE/container-ports-$name"
         if [[ "$component" = restate ]]; then
-          : > "$MOCK_STATE/deployments"
+          awk -F '\t' -v port="$service_port" '$1 != port' "$MOCK_STATE/deployments" \
+            > "$MOCK_STATE/deployments.next"
+          mv "$MOCK_STATE/deployments.next" "$MOCK_STATE/deployments"
         fi
         break
       fi
@@ -186,18 +228,30 @@ if [[ "$url" = */healthz ]]; then
   [[ "$current" = "$start" ]] || exit 1
   printf '{"service":"agent-workbench"}\n'
 elif [[ "$url" = */deployments && -z "$payload" ]]; then
+  admin_address="${url%/deployments}"
+  admin_address="${admin_address%/}"
+  admin_address="${admin_address#*://}"
+  admin_address="${admin_address%%/*}"
+  admin_port="${admin_address##*:}"
   printf '{"deployments":['
   separator=""
-  while IFS= read -r uri; do
-    [[ -n "$uri" ]] || continue
-    printf '%s{"uri":"%s"}' "$separator" "$uri"
+  while IFS=$'\t' read -r record_port deployment_id uri; do
+    [[ "$record_port" = "$admin_port" && -n "$deployment_id" && -n "$uri" ]] || continue
+    printf '%s{"id":"%s","uri":"%s"}' "$separator" "$deployment_id" "$uri"
     separator=,
   done < "$MOCK_STATE/deployments"
   printf ']}\n'
 elif [[ "$url" = */deployments ]]; then
   printf '%s\n' "$payload" >> "$MOCK_STATE/registration-payloads"
   uri="$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin)["uri"])')"
-  printf '%s\n' "$uri" >> "$MOCK_STATE/deployments"
+  deployment_number="$(( $(wc -l < "$MOCK_STATE/registration-payloads") ))"
+  deployment_id="dp_mock$deployment_number"
+  admin_address="${url%/deployments}"
+  admin_address="${admin_address%/}"
+  admin_address="${admin_address#*://}"
+  admin_address="${admin_address%%/*}"
+  admin_port="${admin_address##*:}"
+  printf '%s\t%s\t%s\n' "$admin_port" "$deployment_id" "$uri" >> "$MOCK_STATE/deployments"
   if [[ "${MOCK_POST_REMOVE_PID:-0}" = 1 && -f "$MOCK_PID_FILE" ]]; then
     cp "$MOCK_PID_FILE" "$MOCK_STATE/removed-pid-record"
     rm -f "$MOCK_PID_FILE" "${MOCK_PID_FILE%.pid}.meta"
@@ -209,7 +263,7 @@ elif [[ "$url" = */deployments ]]; then
       sleep 0.01
     done
   fi
-  printf '{}\n'
+  printf '{"id":"%s"}\n' "$deployment_id"
 else
   exit 2
 fi
@@ -264,6 +318,10 @@ pid_file="$data_sqlite/run/workbench-127.0.0.1_${port_sqlite}.pid"
 reset_file="$data_sqlite/run/reset-127.0.0.1_${port_sqlite}.meta"
 [[ -f "$reset_file" && -f "$data_sqlite/.agent-workbench-dev-reset-owner" ]] \
   || fail "fresh owned SQLite stack did not record reset ownership"
+grep -Eq '^owned_restate_deployment_id=dp_mock[0-9]+$' "$reset_file" \
+  || fail "fresh owned SQLite stack did not record its Restate deployment id"
+grep -Eq '^owned_restate_registry_hash=[0-9a-f]{64}$' "$reset_file" \
+  || fail "fresh owned SQLite stack did not record its exact Restate registry snapshot"
 pid_identity "$pid_file" || fail "fresh SQLite workbench is not alive"
 [[ "$(<"$mock_state/registration-payloads")" = '{"uri":"http://127.0.0.1:9101","force":false,"breaking":false}' ]] \
   || fail "fresh registration did not disable replacement on a v2 admin URL"
@@ -370,7 +428,7 @@ fi
   || fail "symlink refusal changed the live stack"
 
 lock_hash="$(printf '%s' "$repo_root" | sha256sum | awk '{print $1}')"
-lock_file="$test_tmp/runtime/lash-agent-workbench-$UID/$lock_hash.lock"
+lock_file="$launcher_runtime_root/$lock_hash.lock"
 exec 9> "$lock_file"
 flock 9
 if run_launcher "$data_sqlite" "$port_sqlite" down \
@@ -466,7 +524,7 @@ pid_identity "$postgres_pid_file" || fail "replacement managed-Postgres workbenc
 
 data_existing="$test_tmp/data-existing-uri"
 port_existing=3036
-printf 'http://127.0.0.1:9141/\n' > "$mock_state/deployments"
+printf '19130\tdp_existing\thttp://127.0.0.1:9141/\n' > "$mock_state/deployments"
 builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$data_existing" "$port_existing" MOCK_EXTERNAL_PORTS='8140 19130' \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_existing" \
@@ -505,6 +563,21 @@ if launcher_env "$test_tmp/data-secret-url" 3040 \
 fi
 ! grep -Fq 'diagnostic-secret' "$test_tmp/secret-url-refusal.log" \
   || fail "credential-bearing URL was exposed in diagnostics"
+
+nonloopback_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-nonloopback-service" 3040 \
+  RESTATE_INGRESS_URL=http://192.0.2.10:8180 \
+  RESTATE_ADMIN_URL=http://192.0.2.10:19170/v2 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3040 \
+  > "$test_tmp/nonloopback-service-refusal.log" 2>&1; then
+  fail "ambiguous non-loopback service identity unexpectedly succeeded"
+fi
+[[ ! -e "$test_tmp/data-nonloopback-service" \
+  && "$(<"$mock_state/build-count")" = "$nonloopback_builds_before" ]] \
+  || fail "non-loopback service refusal mutated candidate state"
+grep -Fq 'service host must be a numeric loopback address or localhost' \
+  "$test_tmp/nonloopback-service-refusal.log" \
+  || fail "non-loopback service refusal did not state the supported identity boundary"
 
 data_missing_pid="$test_tmp/data-missing-pid"
 port_missing_pid=3042
@@ -657,7 +730,7 @@ external_sqlite_state_key="127.0.0.1_${port_external_sqlite}"
 [[ -f "$data_external_sqlite/attempt-app-state" \
   && -f "$data_external_sqlite/run/workbench-$external_sqlite_state_key.meta" ]] \
   || fail "external Restate failure deleted SQLite application state or private run metadata"
-grep -Fxq 'http://127.0.0.1:9301' "$mock_state/deployments" \
+grep -Fq $'\thttp://127.0.0.1:9301' "$mock_state/deployments" \
   || fail "external Restate failure did not retain its registered deployment"
 [[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$external_sqlite_rm_before" ]] \
   || fail "external Restate failure attempted to remove an engine"
@@ -679,7 +752,7 @@ external_postgres_state_key="127.0.0.1_${port_external_postgres}"
   && -f "$data_external_postgres/run/postgres-$external_postgres_state_key.container" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_external_postgres" ]] \
   || fail "external Restate failure deleted managed Postgres or its ownership evidence"
-grep -Fxq 'http://127.0.0.1:9321' "$mock_state/deployments" \
+grep -Fq $'\thttp://127.0.0.1:9321' "$mock_state/deployments" \
   || fail "external Restate managed-Postgres failure lost its registered deployment"
 [[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$external_postgres_rm_before" ]] \
   || fail "external Restate failure attempted dependent managed-Postgres removal"
@@ -699,7 +772,7 @@ external_foreground_state_key="127.0.0.1_${port_external_foreground}"
   && -f "$data_external_foreground/run/postgres-$external_foreground_state_key.container" \
   && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_external_foreground" ]] \
   || fail "foreground external-engine failure deleted application or managed-Postgres state"
-grep -Fxq 'http://127.0.0.1:9341' "$mock_state/deployments" \
+grep -Fq $'\thttp://127.0.0.1:9341' "$mock_state/deployments" \
   || fail "foreground external-engine failure lost its registered deployment"
 [[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$foreground_rm_before" ]] \
   || fail "foreground external-engine failure attempted dependent store removal"
@@ -742,7 +815,7 @@ fi
   || fail "nested data refusal mutated the existing stack"
 
 shared_reset_file="$data_shared/run/reset-127.0.0.1_${port_shared_owner}.meta"
-sed -i 's/^reset_schema=3$/reset_schema=2/' "$shared_reset_file"
+sed -i 's/^reset_schema=4$/reset_schema=3/' "$shared_reset_file"
 if run_launcher "$data_shared" "$port_shared_owner" restart --reset-dev-state \
   > "$test_tmp/legacy-exclusive-lease-refusal.log" 2>&1; then
   fail "pre-exclusivity reset record unexpectedly authorized deletion"
@@ -794,37 +867,6 @@ fi
 grep -Fq 'run path overlaps another launcher-owned disposable stack' \
   "$test_tmp/shared-run-refusal.log" \
   || fail "shared-run refusal did not identify the complete-footprint conflict"
-
-foreign_runtime_dir="$data_run_owner/private-runtime"
-if launcher_env "$test_tmp/data-runtime-consumer" 3072 \
-  XDG_RUNTIME_DIR="$foreign_runtime_dir" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3072 \
-  > "$test_tmp/shared-runtime-refusal.log" 2>&1; then
-  fail "launcher private runtime unexpectedly started inside owned data"
-fi
-[[ ! -e "$foreign_runtime_dir" && ! -e "$test_tmp/data-runtime-consumer" \
-  && "$(<"$run_owner_pid_file")" = "$run_owner_pid_record" \
-  && -f "$data_run_owner/run-owner-state" ]] \
-  || fail "private-runtime overlap refusal changed the owner or candidate footprint"
-grep -Fq 'private runtime path overlaps another launcher-owned disposable stack' \
-  "$test_tmp/shared-runtime-refusal.log" \
-  || fail "private-runtime refusal did not identify the recovery/lease footprint conflict"
-
-enclosing_runtime_data="$test_tmp/data-enclosing-private-runtime"
-if launcher_env "$enclosing_runtime_data" 3072 \
-  XDG_RUNTIME_DIR="$enclosing_runtime_data" \
-  AGENT_WORKBENCH_RUN_DIR="$test_tmp/enclosing-runtime-run" \
-  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3072 \
-  > "$test_tmp/enclosing-runtime-refusal.log" 2>&1; then
-  fail "application data unexpectedly enclosed its launcher private runtime"
-fi
-[[ ! -e "$enclosing_runtime_data" && ! -e "$test_tmp/enclosing-runtime-run" \
-  && "$(<"$run_owner_pid_file")" = "$run_owner_pid_record" \
-  && -f "$data_run_owner/run-owner-state" ]] \
-  || fail "enclosing-runtime refusal changed the owner or candidate footprint"
-grep -Fq 'application data path encloses launcher private runtime state' \
-  "$test_tmp/enclosing-runtime-refusal.log" \
-  || fail "enclosing-runtime refusal did not identify the recursive deletion risk"
 
 run_footprint_parent="$test_tmp/run-footprint-parent"
 run_footprint_dir="$run_footprint_parent/owner-run"
@@ -902,8 +944,8 @@ service_deployments_before="$(<"$mock_state/deployments")"
 service_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
 service_builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$test_tmp/data-shared-engine-consumer" 3080 \
-  RESTATE_INGRESS_URL=http://127.0.0.1:8560 \
-  RESTATE_ADMIN_URL=http://127.0.0.1:19550/v2 \
+  RESTATE_INGRESS_URL=http://localhost:8560 \
+  RESTATE_ADMIN_URL=http://localhost:19550/v2 \
   AGENT_WORKBENCH_RESTATE_NODE_PORT=19551 \
   AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-shared-engine-name \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3080 \
@@ -921,6 +963,45 @@ fi
 grep -Fq 'Restate service is reserved by another launcher-owned disposable stack' \
   "$test_tmp/shared-engine-refusal.log" \
   || fail "shared Restate refusal did not identify the exclusive service lease"
+
+if launcher_env "$test_tmp/data-other-runtime-consumer" 3081 \
+  XDG_RUNTIME_DIR="$test_tmp/other-runtime" \
+  TMPDIR="$test_tmp/other-tmp" \
+  RESTATE_INGRESS_URL=http://127.0.0.1:8560 \
+  RESTATE_ADMIN_URL=http://127.0.0.1:19550/v2 \
+  AGENT_WORKBENCH_RESTATE_NODE_PORT=19551 \
+  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-runtime-engine-name \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3081 \
+  > "$test_tmp/other-runtime-engine-refusal.log" 2>&1; then
+  fail "caller-selected XDG runtime unexpectedly hid the managed Restate lease"
+fi
+[[ ! -e "$test_tmp/data-other-runtime-consumer" \
+  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
+  && "$(<"$mock_state/deployments")" = "$service_deployments_before" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_rm_before" ]] \
+  || fail "alternate-runtime refusal changed the owner, registry, or candidate state"
+grep -Fq 'Restate service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/other-runtime-engine-refusal.log" \
+  || fail "alternate-runtime refusal did not use the stable same-user lease namespace"
+
+printf '19550\tdp_unexpected\thttp://127.0.0.1:9999\n' >> "$mock_state/deployments"
+mixed_registry_snapshot="$(<"$mock_state/deployments")"
+mixed_registry_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
+if run_launcher "$data_service_owner" "$port_service_owner" restart --reset-dev-state \
+  > "$test_tmp/mixed-registry-reset-refusal.log" 2>&1; then
+  fail "reset ignored an unexpected deployment on its managed Restate engine"
+fi
+[[ "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
+  && -f "$data_service_owner/service-owner-state" \
+  && "$(<"$mock_state/deployments")" = "$mixed_registry_snapshot" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$mixed_registry_rm_before" ]] \
+  || fail "mixed-registry reset refusal changed a process, deployment, or engine"
+grep -Fq 'deployment registry does not prove exclusive ownership' \
+  "$test_tmp/mixed-registry-reset-refusal.log" \
+  || fail "mixed-registry reset refusal did not report the exclusive registry proof"
+awk -F '\t' '$2 != "dp_unexpected"' "$mock_state/deployments" \
+  > "$mock_state/deployments.next"
+mv "$mock_state/deployments.next" "$mock_state/deployments"
 
 data_nonreset_service_owner="$test_tmp/data-nonreset-service-owner"
 mkdir -p "$data_nonreset_service_owner"
@@ -961,7 +1042,8 @@ read -r _ database_owner_postgres_id _ _ < "$database_owner_postgres_marker"
 printf 'database owner state\n' > "$data_database_owner/database-owner-state"
 database_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
 if launcher_env "$test_tmp/data-shared-database-consumer" 3084 \
-  AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_PORT=15952 \
+  AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_HOST=localhost \
+  AGENT_WORKBENCH_POSTGRES_PORT=15952 \
   AGENT_WORKBENCH_POSTGRES_CONTAINER=alternate-shared-database-name \
   bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3084 \
   > "$test_tmp/shared-database-refusal.log" 2>&1; then
@@ -979,8 +1061,8 @@ grep -Fq 'Postgres service is reserved by another launcher-owned disposable stac
   "$test_tmp/shared-database-refusal.log" \
   || fail "shared Postgres refusal did not identify the exclusive service lease"
 
-database_lease_hash="$(printf '%s' '127.0.0.1:15952' | sha256sum | awk '{print $1}')"
-database_lease_file="$test_tmp/runtime/lash-agent-workbench-$UID/postgres-$database_lease_hash.lease"
+database_lease_hash="$(printf '%s' 'loopback:15952' | sha256sum | awk '{print $1}')"
+database_lease_file="$launcher_runtime_root/postgres-$database_lease_hash.lease"
 rm -f "$database_lease_file"
 database_reset_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
 if launcher_env "$data_database_owner" "$port_database_owner" AGENT_WORKBENCH_POSTGRES=1 \
@@ -998,8 +1080,8 @@ grep -Fq 'Postgres service lease does not prove exclusive ownership' \
   "$test_tmp/missing-database-lease-refusal.log" \
   || fail "missing Postgres lease refusal did not explain the exclusivity proof failure"
 
-service_lease_hash="$(printf '%s' '127.0.0.1:8560|127.0.0.1:19550' | sha256sum | awk '{print $1}')"
-service_lease_file="$test_tmp/runtime/lash-agent-workbench-$UID/restate-$service_lease_hash.lease"
+service_lease_hash="$(printf '%s' 'loopback:8560|loopback:19550' | sha256sum | awk '{print $1}')"
+service_lease_file="$launcher_runtime_root/restate-$service_lease_hash.lease"
 rm -f "$service_lease_file"
 service_reset_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
 if run_launcher "$data_service_owner" "$port_service_owner" restart --reset-dev-state \
@@ -1015,7 +1097,7 @@ grep -Fq 'service lease does not prove exclusive ownership' \
   "$test_tmp/missing-service-lease-refusal.log" \
   || fail "missing service-lease refusal did not explain the exclusivity proof failure"
 
-data_ownership_lock="$test_tmp/runtime/lash-agent-workbench-$UID/data-ownership.lock"
+data_ownership_lock="$launcher_runtime_root/data-ownership.lock"
 exec 10> "$data_ownership_lock"
 flock 10
 if run_launcher "$test_tmp/data-locked-ownership" 3068 up \
