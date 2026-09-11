@@ -66,19 +66,25 @@ run_agent_workbench_cases() {
 
   spawn_owned_sleep
   printf '%s %s\n' "$SPAWNED_PID" "$SPAWNED_START" > "$pid_file"
-  AGENT_WORKBENCH_RUN_DIR="$run_dir" \
+  if AGENT_WORKBENCH_RUN_DIR="$run_dir" \
     bash "$repo_root/scripts/agent-workbench-dev.sh" down --addr "$address" \
-    > "$output" 2>&1
+    > "$output" 2>&1; then
+    fail "agent-workbench down without stack metadata unexpectedly reported complete teardown"
+  fi
   [[ ! -e "$pid_file" ]] || fail "agent-workbench happy-path PID file survived down"
   assert_identity_gone "$SPAWNED_PID" "$SPAWNED_START"
   grep -Fq "stopping process $SPAWNED_PID" "$output" \
     || fail "agent-workbench happy path did not report the stopped PID"
+  grep -Fq 'refusing service teardown: stack metadata is missing' "$output" \
+    || fail "agent-workbench did not report the missing service ownership proof"
 
   spawn_owned_sleep
   printf '%s %s\n' "$SPAWNED_PID" "$((SPAWNED_START + 1))" > "$pid_file"
-  AGENT_WORKBENCH_RUN_DIR="$run_dir" \
+  if AGENT_WORKBENCH_RUN_DIR="$run_dir" \
     bash "$repo_root/scripts/agent-workbench-dev.sh" down --addr "$address" \
-    >> "$output" 2>&1
+    >> "$output" 2>&1; then
+    fail "agent-workbench mismatched PID teardown unexpectedly reported complete service retirement"
+  fi
   [[ ! -e "$pid_file" ]] || fail "agent-workbench mismatched PID file was not removed"
   assert_identity_alive "$SPAWNED_PID" "$SPAWNED_START"
   grep -Fq "removing stale or mismatched PID file $pid_file" "$output" \
