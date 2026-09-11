@@ -165,7 +165,7 @@ impl RuntimeScenarioContext {
             assert!(
                 reads.iter().all(|read| {
                     read.status
-                        == crate::PendingTurnInputReadStatus::Held {
+                        == lash_core::PendingTurnInputReadStatus::Held {
                             lease_expires_at_ms: lease.expires_at_epoch_ms,
                         }
                 }),

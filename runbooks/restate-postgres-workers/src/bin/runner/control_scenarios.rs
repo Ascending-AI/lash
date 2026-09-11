@@ -409,7 +409,7 @@ async fn assert_late_cancel_is_noop(
         .await
         .context("list active inputs before late request")?
         .into_iter()
-        .filter(|input| input.ingress.active_turn_id() == Some(&address.turn_id))
+        .filter(|input| input.input.ingress.active_turn_id() == Some(&address.turn_id))
         .count();
     anyhow::ensure!(
         active_before == 0,
@@ -450,7 +450,7 @@ async fn assert_late_cancel_is_noop(
         .await
         .context("list active inputs after late request")?
         .into_iter()
-        .filter(|input| input.ingress.active_turn_id() == Some(&address.turn_id))
+        .filter(|input| input.input.ingress.active_turn_id() == Some(&address.turn_id))
         .count();
     anyhow::ensure!(
         active_after == 0,

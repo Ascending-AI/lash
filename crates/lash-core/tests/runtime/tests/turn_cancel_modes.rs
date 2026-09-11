@@ -599,7 +599,7 @@ async fn native_takeover_settles_unresolved_cancel_authorization_before_fresh_wo
             .await
             .expect("list post-cancellation input")
             .into_iter()
-            .all(|input| input.input_id != retained_input.input_id),
+            .all(|input| input.input.input_id != retained_input.input_id),
         "the exact Drop proposal applies to the retained same-turn input"
     );
 

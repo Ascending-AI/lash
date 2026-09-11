@@ -118,6 +118,7 @@ mod attachments_and_queue;
 mod checkpoint_claims;
 mod leases;
 mod queue_redrive;
+mod reopen_and_commit;
 mod suite_and_receipts;
 mod turn_inputs_and_reopen;
 
@@ -128,6 +129,7 @@ pub mod runtime_persistence_macro_support {
     pub use super::checkpoint_claims::*;
     pub use super::leases::*;
     pub use super::queue_redrive::*;
+    pub use super::reopen_and_commit::*;
     pub use super::suite_and_receipts::*;
     pub use super::turn_inputs_and_reopen::*;
     pub use crate::conformance::durable_queued_drain_wait::*;

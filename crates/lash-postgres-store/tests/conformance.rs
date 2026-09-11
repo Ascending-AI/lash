@@ -504,9 +504,6 @@ async fn postgres_held_turn_input_visibility_survives_claim_holder_crash_when_co
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_complete_runtime_checkpoint_component_set_survives_cold_reopens_when_configured()
-{
 lash_conformance::checkpoint_component_reopen_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(

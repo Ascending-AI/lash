@@ -727,6 +727,215 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 }
 
 #[async_trait]
+impl lash_core::StoreMaintenance for SnapshotStore {
+    async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
+        Ok(lash_core::VacuumReport::default())
+    }
+
+    async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<lash_core::GcReport> {
+        Ok(lash_core::GcReport::default())
+    }
+}
+
+#[derive(Clone)]
+struct ReusableStoreFactory {
+    store: Arc<dyn lash_core::RuntimePersistence>,
+}
+
+// The reusable mock store uses a no-op attachment manifest; this fixture
+// explicitly owns no attachment roots.
+#[async_trait::async_trait]
+impl lash_core::AttachmentRootSet for ReusableStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<
+        std::collections::BTreeSet<lash_core::AttachmentId>,
+        lash_core::StoreError,
+    > {
+        Ok(std::collections::BTreeSet::new())
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        _id: &lash_core::AttachmentId,
+        _intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        Ok(false)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::SessionStoreFactory for ReusableStoreFactory {
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
+    async fn create_store(
+        &self,
+        _request: &lash_core::SessionStoreCreateRequest,
+    ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
+        Ok(Arc::clone(&self.store))
+    }
+
+    // The single reused store is never dropped and no tombstone is recorded.
+    async fn session_was_deleted(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
+        Ok(false)
+    }
+
+    async fn delete_session(
+        &self,
+        _session_id: &SessionId,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        Ok(lash_core::SessionBlobReclaimReport::default())
+    }
+}
+
+struct BoundSessionStore {
+    turn_cancellation_authority: std::sync::OnceLock<lash_core::TurnCancellationAuthority>,
+    session_id: SessionId,
+}
+
+lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
+
+#[async_trait]
+impl lash_core::SessionCommitStore for BoundSessionStore {
+    async fn admit_and_bind_session(
+        &self,
+        binding: &lash_core::SessionBinding,
+    ) -> std::result::Result<lash_core::SessionAdmission, lash_core::store::StoreError> {
+        let meta = self
+            .load_session_meta()
+            .await?
+            .expect("bound test store metadata");
+        if meta.session_id != binding.session_id {
+            return Err(lash_core::store::StoreError::SessionBindingMismatch {
+                bound_session_id: meta.session_id,
+                attempted_session_id: binding.session_id.clone(),
+            });
+        }
+        lash_core::store_backend_support::guard_rebind_lineage(
+            &binding.session_id,
+            &lash_core::SessionLineage::of(&meta.relation),
+            &binding.relation,
+        )?;
+        Ok(lash_core::SessionAdmission::Rebound)
+    }
+
+    async fn load_session(
+        &self,
+    ) -> std::result::Result<
+        Option<lash_core::store::PersistedSessionRead>,
+        lash_core::store::StoreError,
+    > {
+        Ok(None)
+    }
+
+    async fn load_session_head_meta(
+        &self,
+    ) -> std::result::Result<Option<lash_core::store::SessionHeadMeta>, lash_core::store::StoreError>
+    {
+        Ok(None)
+    }
+
+    async fn load_node(
+        &self,
+        _node_id: &str,
+    ) -> std::result::Result<Option<lash_core::SessionNodeRecord>, lash_core::store::StoreError>
+    {
+        Ok(None)
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        _commit: lash_core::store::RuntimeCommit,
+    ) -> std::result::Result<lash_core::store::RuntimeCommitReceipt, lash_core::store::StoreError>
+    {
+        unreachable!("test should fail before committing to the reused child store")
+    }
+
+    async fn save_session_meta(
+        &self,
+        _meta: lash_core::SessionMeta,
+    ) -> std::result::Result<(), lash_core::store::StoreError> {
+        Ok(())
+    }
+
+    async fn load_session_meta(
+        &self,
+    ) -> std::result::Result<Option<lash_core::SessionMeta>, lash_core::store::StoreError> {
+        Ok(Some(lash_core::SessionMeta {
+            pending_observer_intents: Vec::new(),
+            session_id: self.session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+        }))
+    }
+}
+
+#[async_trait]
+impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
+    async fn try_claim_session_execution_lease_with_token(
+        &self,
+        session_id: &SessionId,
+        owner: &lash_core::LeaseOwnerIdentity,
+        executor_id: &str,
+        claim_nonce: &lash_core::LeaseClaimNonce,
+        lease_ttl_ms: u64,
+    ) -> std::result::Result<
+        lash_core::SessionExecutionLeaseClaimOutcome,
+        lash_core::store::StoreError,
+    > {
+        let mut lease =
+            test_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms, 1);
+        lease.lease_token = claim_nonce.as_str().to_string();
+        Ok(lash_core::SessionExecutionLeaseClaimOutcome::Acquired(
+            lash_core::SessionExecutionLeaseAcquisition::fresh(lease),
+        ))
+    }
+
+    async fn renew_session_execution_lease(
+        &self,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
+        lease_ttl_ms: u64,
+    ) -> std::result::Result<lash_core::SessionExecutionLease, lash_core::store::StoreError> {
+        Ok(test_session_execution_lease(
+            &fence.session_id,
+            &fence.owner,
+            &fence.executor_id,
+            lease_ttl_ms,
+            fence.fencing_token,
+        ))
+    }
+
+    async fn release_session_execution_lease(
+        &self,
+        _completion: &lash_core::SessionExecutionLeaseAuthority,
+    ) -> std::result::Result<(), lash_core::store::StoreError> {
+        Ok(())
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<SessionExecutionLeaseObservation, StoreError> {
+        Ok(SessionExecutionLeaseObservation {
+            observed_at_epoch_ms: now_epoch_ms(),
+            lease: None,
+        })
+    }
+}
+
+// The reuse test fails before any turn runs, so this double serves neither
+// pending turn input nor queued work.
+
+#[async_trait]
 impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn enqueue_queued_work_with_outcome(
         &self,

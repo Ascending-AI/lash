@@ -138,9 +138,9 @@ pub(crate) use turn_control_vocabulary::{
 };
 pub(crate) use turn_input_vocabulary::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    TurnInputApplication, TurnInputClaimData, TurnInputCompletion, TurnInputIngress,
-    TurnInputState,
+    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputSuffixCancelOutcome, TurnInputApplication, TurnInputClaimData,
+    TurnInputCompletion, TurnInputIngress, TurnInputState,
 };
 
 pub(crate) use await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};

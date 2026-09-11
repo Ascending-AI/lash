@@ -1220,7 +1220,10 @@ pub trait TurnInputStore: Send + Sync {
     /// [`PendingTurnInputReadStatus::Held`](crate::PendingTurnInputReadStatus::Held)
     /// with that lease's exact expiry. Expired, released, and mismatched
     /// generations are returned as pending under ADR 0029; this read never
-    /// infers whether a holder process is alive.
+    /// infers whether a holder process is alive. Resubmitting the same input
+    /// while its row is held creates a duplicate admission once the held row's
+    /// original claim returns; hosts must wait out the reported expiry or
+    /// reuse the same source key.
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
