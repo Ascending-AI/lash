@@ -2,9 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{EffectAddress, ProcessId, SessionId, TurnId};
 
-use super::RuntimeEffectControllerError;
-
-const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
+use super::{RuntimeEffectControllerError, envelope::PROCESS_TRANSFER_FAMILY_VERSION};
 
 pub(super) fn process_transfer_set_preimage(process_ids: &[ProcessId]) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(

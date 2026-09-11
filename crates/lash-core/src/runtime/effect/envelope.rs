@@ -26,6 +26,8 @@ use super::identity_types::{
     process_transfer_set_identity,
 };
 
+pub(super) const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
+
 /// Canonical lineage for a runtime-side invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeInvocation {

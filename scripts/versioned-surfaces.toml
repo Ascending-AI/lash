@@ -361,7 +361,7 @@ symbols = [
 
 [[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/runtime/effect/identity_types.rs"
+constant_path = "crates/lash-core/src/runtime/effect/envelope.rs"
 description = "stable process-transfer set identity"
 
 [[surface.guard]]

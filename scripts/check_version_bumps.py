@@ -277,8 +277,12 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-core/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
         "sha256:d3a77b92196da92208db28436247f96f29491dcc6e4012511649cfbb38e8c993"
     ),
+    # FIG-2828: the process-transfer preimage helper moved into the extracted
+    # effect identity module. Its version constant stays at the original
+    # envelope path so the checker retains merge-base identity; emitted bytes
+    # remain pinned by the unchanged v1 golden.
     "crates/lash-core/src/runtime/effect/envelope.rs:PROCESS_TRANSFER_FAMILY_VERSION": (
-        "sha256:9895021a91c5fc12b52d2dc9baf215e33078b50d3a5ad3032c8cad5e237fad4e"
+        "sha256:d3b31f3bbd8eb783fca3d671c69fc55a2baefb988b37f5c1b546b91e43299b77"
     ),
     "crates/lash-core/src/runtime/process/events.rs:PROCESS_CANCELLATION_FAMILY_VERSION": (
         "sha256:55328d292629d8021ac81b8998697dcff2a998b9d9bc7842a0333ee31db2d7e8"
