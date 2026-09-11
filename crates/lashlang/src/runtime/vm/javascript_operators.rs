@@ -26,22 +26,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if self.stack.len() < 2 {
             return Ok(true);
         }
-        let operands = &self.stack[self.stack.len() - 2..];
-        let strict = matches!(
-            op,
-            JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual
-        );
-        Ok(operands
-            .iter()
-            .any(|value| matches!(value, Value::Projected(_)))
-            || !strict
-                && operands.iter().try_fold(false, |contains, value| {
-                    if contains {
-                        Ok(true)
-                    } else {
-                        self.heap.javascript_coercion_contains_projected(value)
-                    }
-                })?)
+        let left = &self.stack[self.stack.len() - 2];
+        let right = &self.stack[self.stack.len() - 1];
+        if matches!(left, Value::Projected(_)) || matches!(right, Value::Projected(_)) {
+            return Ok(true);
+        }
+        let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, left, right);
+        Ok(
+            (coerce_left && self.heap.javascript_coercion_contains_projected(left)?)
+                || (coerce_right && self.heap.javascript_coercion_contains_projected(right)?),
+        )
     }
 
     pub(super) fn execute_javascript_unary(
@@ -101,33 +95,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut left = self.pop_stack()?;
         debug_assert!(!matches!(left, Value::Projected(_)));
         debug_assert!(!matches!(right, Value::Projected(_)));
-        let strict = matches!(
-            op,
-            JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual
-        );
-        let loose = matches!(
-            op,
-            JavaScriptBinaryOp::LooseEqual | JavaScriptBinaryOp::LooseNotEqual
-        );
-        if op == JavaScriptBinaryOp::Add
-            && [&left, &right].into_iter().any(
-                |value| matches!(value, Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::Date(_)))),
-            )
-        {
-            return Err(js_stdlib_error(
-                "TS_DATE_STRING_COERCION_PENDING: Date addition requires unavailable host-local string semantics; use .toISOString()",
-            ));
+        self.validate_javascript_binary_operands(op, &left, &right)?;
+        let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
+        if coerce_left && matches!(left, Value::Ref(_)) {
+            left = self.heap.javascript_to_primitive_string_or_number(&left)?;
         }
-        if !strict {
-            let both_objects = matches!(left, Value::Ref(_)) && matches!(right, Value::Ref(_));
-            if !loose || !both_objects {
-                if matches!(left, Value::Ref(_)) {
-                    left = self.heap.javascript_to_primitive_string_or_number(&left)?;
-                }
-                if matches!(right, Value::Ref(_)) {
-                    right = self.heap.javascript_to_primitive_string_or_number(&right)?;
-                }
-            }
+        if coerce_right && matches!(right, Value::Ref(_)) {
+            right = self.heap.javascript_to_primitive_string_or_number(&right)?;
         }
         if op == JavaScriptBinaryOp::Add {
             let left_primitive = self.heap.javascript_to_primitive_string_or_number(&left)?;
@@ -159,66 +133,39 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<(Value, Value), RuntimeError> {
         let mut left = materialize_javascript_operand(left).await;
         let mut right = materialize_javascript_operand(right).await;
-        let strict = matches!(
-            op,
-            JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual
-        );
-        let loose = matches!(
-            op,
-            JavaScriptBinaryOp::LooseEqual | JavaScriptBinaryOp::LooseNotEqual
-        );
-        if !strict {
-            let both_references = matches!(left, Value::Ref(_)) && matches!(right, Value::Ref(_));
-            if !loose || !both_references {
-                if matches!(left, Value::Ref(_)) {
-                    left = self
-                        .heap
-                        .javascript_to_primitive_string_or_number_async(&left)
-                        .await?;
-                }
-                if matches!(right, Value::Ref(_)) {
-                    right = self
-                        .heap
-                        .javascript_to_primitive_string_or_number_async(&right)
-                        .await?;
-                }
-            }
-        }
-        if matches!(
-            op,
-            JavaScriptBinaryOp::Add
-                | JavaScriptBinaryOp::Subtract
-                | JavaScriptBinaryOp::Multiply
-                | JavaScriptBinaryOp::Divide
-                | JavaScriptBinaryOp::Remainder
-                | JavaScriptBinaryOp::Less
-                | JavaScriptBinaryOp::LessEqual
-                | JavaScriptBinaryOp::Greater
-                | JavaScriptBinaryOp::GreaterEqual
-        ) {
+        self.validate_javascript_binary_operands(op, &left, &right)?;
+        let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
+        if coerce_left {
             left = self
                 .heap
                 .javascript_to_primitive_string_or_number_async(&left)
                 .await?;
+        }
+        if coerce_right {
             right = self
                 .heap
                 .javascript_to_primitive_string_or_number_async(&right)
                 .await?;
-        } else if loose {
-            if javascript_is_object(&left) && javascript_loose_equality_coerces_object(&right) {
-                left = self
-                    .heap
-                    .javascript_to_primitive_string_or_number_async(&left)
-                    .await?;
-            }
-            if javascript_is_object(&right) && javascript_loose_equality_coerces_object(&left) {
-                right = self
-                    .heap
-                    .javascript_to_primitive_string_or_number_async(&right)
-                    .await?;
-            }
         }
         Ok((left, right))
+    }
+
+    fn validate_javascript_binary_operands(
+        &self,
+        op: JavaScriptBinaryOp,
+        left: &Value,
+        right: &Value,
+    ) -> Result<(), RuntimeError> {
+        if op == JavaScriptBinaryOp::Add
+            && [left, right].into_iter().any(
+                |value| matches!(value, Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::Date(_)))),
+            )
+        {
+            return Err(js_stdlib_error(
+                "TS_DATE_STRING_COERCION_PENDING: Date addition requires unavailable host-local string semantics; use .toISOString()",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -243,4 +190,19 @@ fn javascript_is_object(value: &Value) -> bool {
 
 fn javascript_loose_equality_coerces_object(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::Number(_) | Value::String(_))
+}
+
+fn javascript_binary_operand_coercions(
+    op: JavaScriptBinaryOp,
+    left: &Value,
+    right: &Value,
+) -> (bool, bool) {
+    match op {
+        JavaScriptBinaryOp::StrictEqual | JavaScriptBinaryOp::StrictNotEqual => (false, false),
+        JavaScriptBinaryOp::LooseEqual | JavaScriptBinaryOp::LooseNotEqual => (
+            javascript_is_object(left) && javascript_loose_equality_coerces_object(right),
+            javascript_is_object(right) && javascript_loose_equality_coerces_object(left),
+        ),
+        _ => (javascript_is_object(left), javascript_is_object(right)),
+    }
 }

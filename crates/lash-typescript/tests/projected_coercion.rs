@@ -229,7 +229,10 @@ async fn execute_pending(
     lashlang::execute(&program, &mut runtime_state, &PendingHost { projected }).await
 }
 
-fn assert_pending_projection_completes(source: &'static str, value: Value, expected: Value) {
+fn run_pending_projection(
+    source: &'static str,
+    value: Value,
+) -> (Result<ExecutionOutcome, RuntimeError>, usize) {
     let state = Arc::new(PendingReadState::default());
     let worker_state = state.clone();
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -251,14 +254,46 @@ fn assert_pending_projection_completes(source: &'static str, value: Value, expec
         }
     };
     worker.join().expect("worker exits cleanly");
+    (result, state.pending_polls.load(Ordering::Relaxed))
+}
+
+fn assert_pending_projection_completes(source: &'static str, value: Value, expected: Value) {
+    let (result, pending_polls) = run_pending_projection(source, value);
     assert!(
-        state.pending_polls.load(Ordering::Relaxed) > 0,
+        pending_polls > 0,
         "`{source}` must observe a deliberately pending materialization"
     );
     assert_eq!(
         result.unwrap_or_else(|error| panic!("`{source}` should execute: {error}")),
         ExecutionOutcome::Finished(expected),
         "{source}"
+    );
+}
+
+fn assert_pending_projection_is_not_read(source: &'static str, expected: Value) {
+    let (result, pending_polls) =
+        run_pending_projection(source, Value::String("must stay unread".into()));
+    assert_eq!(
+        pending_polls, 0,
+        "`{source}` must not read an object member that equality or truthiness does not coerce"
+    );
+    assert_eq!(
+        result.unwrap_or_else(|error| panic!("`{source}` should execute: {error}")),
+        ExecutionOutcome::Finished(expected),
+        "{source}"
+    );
+}
+
+fn assert_pending_projection_fails(source: &'static str, expected_error: &str) {
+    let (result, pending_polls) = run_pending_projection(source, Value::String("hello".into()));
+    assert!(
+        pending_polls > 0,
+        "`{source}` must observe a deliberately pending materialization"
+    );
+    let error = result.expect_err("Date addition should be rejected");
+    assert!(
+        error.to_string().contains(expected_error),
+        "`{source}` returned the wrong error: {error}"
     );
 }
 
@@ -287,6 +322,41 @@ async fn pending_projected_operands_redispatch_without_blocking_the_runtime() {
         ),
     ] {
         assert_pending_projection_completes(source, value, expected);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pending_projected_object_comparisons_preserve_identity_without_reading_members() {
+    for (source, expected) in [
+        (r#"const a = [pending]; finish(a == a);"#, true),
+        (r#"const a = [pending]; finish(a != a);"#, false),
+        (
+            r#"const a = [pending]; const b = [pending]; finish(a == b);"#,
+            false,
+        ),
+        (
+            r#"const a = [pending]; const b = [pending]; finish(a != b);"#,
+            true,
+        ),
+        (r#"const a = [pending]; finish(a == null);"#, false),
+        (r#"const a = [pending]; finish(a != null);"#, true),
+        (r#"const a = [pending]; finish(a == undefined);"#, false),
+        (r#"const a = [pending]; finish(a != undefined);"#, true),
+        (r#"const a = [pending]; finish(a === a);"#, true),
+        (r#"const a = [pending]; finish(a !== a);"#, false),
+        (r#"const a = [pending]; finish(!a);"#, false),
+    ] {
+        assert_pending_projection_is_not_read(source, Value::Bool(expected));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pending_projected_date_addition_preserves_rejection_in_both_operand_positions() {
+    for source in [
+        r#"finish(new Date(0) + pending);"#,
+        r#"finish(pending + new Date(0));"#,
+    ] {
+        assert_pending_projection_fails(source, "TS_DATE_STRING_COERCION_PENDING");
     }
 }
 
