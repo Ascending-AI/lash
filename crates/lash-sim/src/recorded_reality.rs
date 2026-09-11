@@ -252,12 +252,12 @@ async fn classify_oauth_fixture(script: &str) -> CredentialError {
 async fn oauth_error_bodies_drive_the_structured_refresh_classifier() {
     let invalid_grant = classify_oauth_fixture(OAUTH_INVALID_GRANT).await;
     assert_eq!(invalid_grant.kind, CredentialErrorKind::InvalidGrant);
-    assert!(!invalid_grant.retryable);
+    assert!(!invalid_grant.is_retryable());
 
     for sibling in [OAUTH_INVALID_CLIENT, OAUTH_INVALID_SCOPE] {
         let classified = classify_oauth_fixture(sibling).await;
         assert_eq!(classified.kind, CredentialErrorKind::Other);
-        assert!(!classified.retryable);
+        assert!(!classified.is_retryable());
     }
 }
 

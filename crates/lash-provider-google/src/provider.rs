@@ -509,7 +509,7 @@ impl Provider for GoogleOAuthProvider {
                 })
                 .await
                 .map_err(|error| match error {
-                    CredentialExecuteError::Credential(error) => credential_transport_error(error),
+                    CredentialExecuteError::Credential(error) => error.into_transport_error(),
                     CredentialExecuteError::Call(error) => error,
                     // Unknown failures cannot establish that replay is safe.
                     _ => LlmTransportError::new(error.to_string())

@@ -7,10 +7,8 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_provider_auth::{
-    Credential, CredentialError, CredentialErrorKind, CredentialRefresher, RefreshCause,
-    classify_oauth_refresh_error,
+    Credential, CredentialError, CredentialRefresher, RefreshCause, classify_oauth_refresh_error,
 };
 
 use lash_sansio::Redacted;
@@ -58,58 +56,5 @@ impl CredentialRefresher<CodexCredential> for CodexCredentialRefresher {
             expires_at: tokens.expires_at,
             account_id: tokens.account_id.or_else(|| current.account_id.clone()),
         })
-    }
-}
-
-pub(super) fn credential_transport_error(error: CredentialError) -> LlmTransportError {
-    let code = match error.kind {
-        CredentialErrorKind::InvalidGrant => "credential_invalid_grant",
-        CredentialErrorKind::Transient => "credential_refresh_transient",
-        CredentialErrorKind::Other => "credential_refresh_failed",
-        // Future credential kinds retain the generic failure code and explicit retry policy.
-        _ => "credential_refresh_failed",
-    };
-    let retry_verdict = if error.retryable {
-        TransportRetryVerdict::RetryableTransient
-    } else {
-        TransportRetryVerdict::Forbidden
-    };
-    let failure_kind = if error.retryable {
-        ProviderFailureKind::Transport
-    } else {
-        ProviderFailureKind::Auth
-    };
-    LlmTransportError::new(error.to_string())
-        .with_kind(failure_kind)
-        .with_code(code)
-        .with_retry_verdict(retry_verdict)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::codex::failure::CodexFailureClassifier;
-    use lash_core::provider::ProviderFailureClassifier;
-
-    #[test]
-    fn credential_failures_preserve_transient_and_permission_retry_verdicts() {
-        let transient = CodexFailureClassifier
-            .classify(credential_transport_error(CredentialError::transient()));
-        assert_eq!(transient.kind, ProviderFailureKind::Transport);
-        assert_eq!(
-            transient.code.as_deref(),
-            Some("credential_refresh_transient")
-        );
-        assert_eq!(
-            transient.retry_verdict,
-            TransportRetryVerdict::RetryableTransient
-        );
-
-        let permission = CodexFailureClassifier
-            .classify(credential_transport_error(CredentialError::invalid_grant()));
-        assert_eq!(permission.kind, ProviderFailureKind::Auth);
-        assert_eq!(permission.code.as_deref(), Some("credential_invalid_grant"));
-        assert_eq!(permission.retry_verdict, TransportRetryVerdict::Forbidden);
-        assert!(permission.message.contains("sign in again"));
     }
 }

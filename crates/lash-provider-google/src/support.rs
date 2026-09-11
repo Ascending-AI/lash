@@ -34,7 +34,7 @@ pub(crate) use lash_llm_transport::{
     first_header_value, read_http_body_text,
 };
 pub(crate) use lash_provider_auth::{
-    CredentialCallError, CredentialError, CredentialErrorKind, CredentialExecuteError, Lease,
+    CredentialCallError, CredentialError, CredentialExecuteError, Lease,
 };
 pub(crate) use lash_sansio::Redacted;
 

@@ -36,7 +36,7 @@ use crate::responses_shared as shared;
 use super::continuation::{
     CodexContinuation, CodexWebsocketContextPlan, CodexWebsocketRequestPlan,
 };
-use super::credential::{CodexCredential, credential_transport_error};
+use super::credential::CodexCredential;
 use super::session::{CodexAttemptProgress, CodexWebSocketAttemptError, CodexWebsocketLease};
 use super::{CodexProvider, CodexTransport, PROVIDER};
 
@@ -660,7 +660,7 @@ impl Provider for CodexProvider {
                 })
                 .await
                 .map_err(|error| match error {
-                    CredentialExecuteError::Credential(error) => credential_transport_error(error),
+                    CredentialExecuteError::Credential(error) => error.into_transport_error(),
                     CredentialExecuteError::Call(error) => error,
                     // Unknown failures cannot establish that replay is safe.
                     _ => LlmTransportError::new(error.to_string())
