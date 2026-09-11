@@ -1,6 +1,7 @@
 use super::{
-    CronSessionDisposition, WorkbenchCronRequest, classified_embed_handler_error,
-    cron_occurrence_key, cron_session_disposition, emit_cron_occurrence_with_effect_controller,
+    CronRegistrationDisposition, CronSessionDisposition, CronTickBasis, WorkbenchCronRequest,
+    classified_embed_handler_error, cron_occurrence_key, cron_session_disposition,
+    emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
 use lash::ProcessId;
@@ -37,14 +38,24 @@ impl lash::runtime::RuntimeEffectController for CountingProcessEffectController 
 
 struct OccurrenceFailureTriggerStore {
     inner: lash::triggers::InMemoryTriggerStore,
-    failure: lash::plugins::PluginError,
+    occurrence_failure: Option<lash::plugins::PluginError>,
+    list_subscriptions_failure: Option<lash::plugins::PluginError>,
 }
 
 impl OccurrenceFailureTriggerStore {
     fn new(failure: lash::plugins::PluginError) -> Self {
         Self {
             inner: lash::triggers::InMemoryTriggerStore::new(),
-            failure,
+            occurrence_failure: Some(failure),
+            list_subscriptions_failure: None,
+        }
+    }
+
+    fn for_subscription_list(failure: lash::plugins::PluginError) -> Self {
+        Self {
+            inner: lash::triggers::InMemoryTriggerStore::new(),
+            occurrence_failure: None,
+            list_subscriptions_failure: Some(failure),
         }
     }
 }
@@ -63,6 +74,9 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
         &self,
         filter: lash::triggers::TriggerSubscriptionFilter,
     ) -> Result<Vec<lash::triggers::TriggerSubscriptionRecord>, lash::plugins::PluginError> {
+        if let Some(failure) = &self.list_subscriptions_failure {
+            return Err(failure.clone());
+        }
         self.inner.list_subscriptions(filter).await
     }
 
@@ -75,9 +89,12 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
 
     async fn ingest_occurrence(
         &self,
-        _request: lash::triggers::TriggerOccurrenceRequest,
+        request: lash::triggers::TriggerOccurrenceRequest,
     ) -> Result<lash::triggers::TriggerIngressReceipt, lash::plugins::PluginError> {
-        Err(self.failure.clone())
+        if let Some(failure) = &self.occurrence_failure {
+            return Err(failure.clone());
+        }
+        self.inner.ingest_occurrence(request).await
     }
 
     async fn list_occurrences(
