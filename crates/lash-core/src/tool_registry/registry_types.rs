@@ -160,6 +160,15 @@ pub(super) struct ToolRegistryState {
     pub(super) next_live_source_id: u64,
 }
 
+#[derive(Clone)]
+pub(super) struct ToolRegistryInner {
+    /// Changes whenever the live source map changes, even when the admitted
+    /// surface is byte-equivalent and its generation therefore stays stable.
+    pub(super) source_revision: u64,
+    pub(super) sources: BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
+    pub(super) state: ToolRegistryState,
+}
+
 /// Outcome of `ToolRegistry::restore_state`: the adopted generation plus the
 /// ids of persisted tools that no registered source currently resolves.
 /// Hosts should surface a non-empty `orphaned` list to the user — the session
@@ -190,6 +199,7 @@ pub enum ReconfigureError {
 
 #[derive(Clone)]
 pub struct ToolRegistry {
-    pub(super) sources: Arc<RwLock<BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>>>,
-    pub(super) state: Arc<RwLock<ToolRegistryState>>,
+    /// The source map and admitted surface share one lock so readers cannot
+    /// observe a source/surface half-commit.
+    pub(super) inner: Arc<RwLock<ToolRegistryInner>>,
 }
