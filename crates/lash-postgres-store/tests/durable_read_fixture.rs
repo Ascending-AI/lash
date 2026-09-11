@@ -202,6 +202,14 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("create the effect-scope retirement fence from the authoritative DDL");
+    sqlx::query("DROP TABLE lash_attachment_condemnations")
+        .execute(&pool)
+        .await
+        .expect("discard the pre-write-token attachment condemnation table");
+    sqlx::raw_sql(schema_table_ddl("lash_attachment_condemnations"))
+        .execute(&pool)
+        .await
+        .expect("recreate the attachment condemnation table from the authoritative DDL");
     sqlx::raw_sql(
         "DROP TABLE lash_process_parent_end_plans;
          DROP TABLE lash_process_segment_handovers;
