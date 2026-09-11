@@ -2707,10 +2707,14 @@ test("pending ingress receipts survive transcript replay until their turn commit
     appendReasoning() {},
     appendCodeBlock() {},
   };
-  const pending = (inputId, ingress, text) => ({
-    input_id: inputId,
-    ingress,
-    input: { items: [{ Text: { text } }] },
+  const pending = (inputId, ingress, text, status) => ({
+    input: {
+      input_id: inputId,
+      ingress,
+      state: ingress === "active_turn" ? "pending_active" : "deferred_next_turn",
+      input: { items: [{ type: "text", text }] },
+    },
+    status,
   });
 
   vm.runInNewContext(
@@ -2720,12 +2724,14 @@ test("pending ingress receipts survive transcript replay until their turn commit
      renderStateTranscript({
        transcript: [],
        pending_turn_inputs: [
-         ${JSON.stringify(pending("input-now", "active_turn", "injected now"))},
-         ${JSON.stringify(pending("input-next", "next_turn", "queued next"))}
+         ${JSON.stringify(pending("input-now", "active_turn", "injected now", { kind: "held", lease_expires_at_ms: 1735689600123 }))},
+         ${JSON.stringify(pending("input-next", "next_turn", "queued next", { kind: "pending" }))}
        ]
      });
      this.initial = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
+       status: row.dataset.status,
+       leaseExpiresAtMs: row.dataset.leaseExpiresAtMs,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -2735,16 +2741,20 @@ test("pending ingress receipts survive transcript replay until their turn commit
      }]);
      this.applied = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
+       status: row.dataset.status,
+       leaseExpiresAtMs: row.dataset.leaseExpiresAtMs,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
      clearTranscript();
      renderStateTranscript({
        transcript: [],
-       pending_turn_inputs: [${JSON.stringify(pending("input-next", "next_turn", "queued next"))}]
+       pending_turn_inputs: [${JSON.stringify(pending("input-next", "next_turn", "queued next", { kind: "pending" }))}]
      });
      this.afterFirstSettle = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
+       status: row.dataset.status,
+       leaseExpiresAtMs: row.dataset.leaseExpiresAtMs,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -2755,15 +2765,27 @@ test("pending ingress receipts survive transcript replay until their turn commit
   );
 
   assert.deepEqual(JSON.parse(JSON.stringify(context.initial)), [
-    { inputId: "input-now", kind: "injected now", text: "injected now" },
-    { inputId: "input-next", kind: "queued next", text: "queued next" },
+    {
+      inputId: "input-now",
+      status: "held",
+      leaseExpiresAtMs: "1735689600123",
+      kind: "injected now · held until 1735689600123 ms",
+      text: "injected now",
+    },
+    { inputId: "input-next", status: "pending", kind: "queued next", text: "queued next" },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(context.applied)), [
-    { inputId: "input-now", kind: "applied to turn", text: "injected now" },
-    { inputId: "input-next", kind: "queued next", text: "queued next" },
+    {
+      inputId: "input-now",
+      status: "held",
+      leaseExpiresAtMs: "1735689600123",
+      kind: "applied to turn",
+      text: "injected now",
+    },
+    { inputId: "input-next", status: "pending", kind: "queued next", text: "queued next" },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(context.afterFirstSettle)), [
-    { inputId: "input-next", kind: "queued next", text: "queued next" },
+    { inputId: "input-next", status: "pending", kind: "queued next", text: "queued next" },
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(context.afterSecondSettle)), []);
 });

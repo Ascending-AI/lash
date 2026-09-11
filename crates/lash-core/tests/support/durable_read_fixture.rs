@@ -1067,7 +1067,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     assert!(pending[0].input.state.is_next_turn_pending());
     assert_eq!(
-        serde_json::to_value(&pending[0].input).expect("encode fixture pending input"),
+        serde_json::to_value(&pending[0].input.input).expect("encode fixture pending input"),
         serde_json::to_value(TurnInput::text("durable read pending input"))
             .expect("encode expected pending input"),
         "durable fixture semantic drift: pending-input payload changed"

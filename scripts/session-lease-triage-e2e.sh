@@ -253,7 +253,7 @@ for backend, record in livelock_records.items():
 
 # Phase 4: the killed-worker recovery, run against a turn that entered through
 # `TurnBuilder::run`. Acceptance-before-drive is what makes it recoverable: the
-# request is a pending row while the provider is still parked, and the peer that
+# request is a visible held row while the provider is still parked, and the peer that
 # takes the lane finds it through the ordinary queued drain.
 direct_turn_records = checkpoints("direct_turn_recovery", "08-direct-turn-recovery.jsonl")
 for backend, record in direct_turn_records.items():
@@ -265,11 +265,24 @@ for backend, record in direct_turn_records.items():
         )
     if not record["seed_acceptance_settled"]:
         fail(f"{backend}: the reported acceptance is not the input that settled: {record}")
-    if record["claimable_while_parked"] != 0:
+    pending_reads = record["pending_reads_while_parked"]
+    if len(pending_reads) != 1:
         fail(
-            f"{backend}: the input a parked direct turn is driving is held by its own claim, so "
-            f"nothing may be claimable while it runs: {record}"
+            f"{backend}: the parked direct turn must expose exactly one held input: {record}"
         )
+    parked = pending_reads[0]
+    parked_input = parked.get("input", {})
+    parked_status = parked.get("status", {})
+    parked_input_id = parked_input.get("input_id")
+    if not (parked_input_id or "").startswith("ti:"):
+        fail(f"{backend}: the parked read lost pending-input identity: {parked}")
+    if parked_input.get("session_id") != record["session_id"]:
+        fail(f"{backend}: the parked read names the wrong session: {parked}")
+    if parked_status.get("kind") != "held":
+        fail(f"{backend}: the parked direct-turn input is not projected held: {parked}")
+    parked_expiry = parked_status.get("lease_expires_at_ms")
+    if not isinstance(parked_expiry, int) or isinstance(parked_expiry, bool) or parked_expiry <= 0:
+        fail(f"{backend}: the held projection lacks an exact lease expiry: {parked}")
     if not record["drain_ran"]:
         fail(
             f"{backend}: an orphaned direct-turn input must be claimable by an unrelated worker; "
@@ -281,6 +294,8 @@ for backend, record in direct_turn_records.items():
         fail(f"{backend}: the recovered input never settled as canonical input: {record}")
     if not (record["recovered_input_id"] or "").startswith("ti:"):
         fail(f"{backend}: the recovered row is not a pending turn input: {record}")
+    if record["recovered_input_id"] != parked_input_id:
+        fail(f"{backend}: recovery settled a different input than the parked held row: {record}")
     if record["recovered_application_turn_id"] == record["abandoned_turn_id"]:
         fail(
             f"{backend}: the successor must commit its own turn, not the abandoned driver's: "
@@ -325,7 +340,26 @@ for backend in backends:
             "rejected_lease_lost": [event["lease_lost"] for event in busy["commit_cas_rejected"]],
         },
         "direct_turn_recovery": {
-            "claimable_while_parked": direct["claimable_while_parked"],
+            "pending_reads_while_parked": len(direct["pending_reads_while_parked"]),
+            "parked_status": direct["pending_reads_while_parked"][0]["status"]["kind"],
+            "parked_has_exact_expiry": (
+                isinstance(
+                    direct["pending_reads_while_parked"][0]["status"].get(
+                        "lease_expires_at_ms"
+                    ),
+                    int,
+                )
+                and not isinstance(
+                    direct["pending_reads_while_parked"][0]["status"].get(
+                        "lease_expires_at_ms"
+                    ),
+                    bool,
+                )
+                and direct["pending_reads_while_parked"][0]["status"][
+                    "lease_expires_at_ms"
+                ]
+                > 0
+            ),
             "drain_ran": direct["drain_ran"],
             "recovered_turn_committed": direct["recovered_turn_committed"],
             "pending_after_recovery": direct["pending_after_recovery"],

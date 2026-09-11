@@ -192,24 +192,26 @@ cancellation of the accepted row ever runs. A separate core under a different ow
 drains the session, told nothing about the abandoned request.
 
 **Action.** Read `seed_acceptance_input_id`/`seed_acceptance_source_key` and
-`seed_acceptance_settled`, `claimable_while_parked`, then `drain_ran`,
+`seed_acceptance_settled`, the `pending_reads_while_parked` envelope, then `drain_ran`,
 `recovered_input_id`, `recovered_application_turn_id`, and `pending_after_recovery`.
 
 **Expected observable evidence.** The seeded direct turn reports an acceptance whose
 `input_id` is what settled, and no `source_key`: direct ingress admits, it does not
 deduplicate. While the second turn's provider is parked, the session offers *nothing*
-claimable: the accepted row is held by the parked turn's own claim, and the pending listing
-deliberately hides rows a live claim owns. The row's durability is proved by what happens
-after the kill — the peer's ordinary queued drain, told nothing about the request, runs a
-turn, commits it, and settles a `ti:`-prefixed input under a turn id that is *not* the
-abandoned driver's; no pending row survives.
+claimable: the pending listing exposes exactly one envelope whose nested input preserves the
+accepted `ti:` identity and session, and whose status is `held` with the matching lease's
+exact `lease_expires_at_ms`. This is a factual lease projection, not evidence that the holder
+process is alive. The row's durability is proved by what happens after the kill — the peer's
+ordinary queued drain, told nothing about the request, runs a turn, commits it, and settles
+that same input identity under a turn id that is *not* the abandoned driver's; no pending row
+survives.
 
 **Judgment — FAIL if:** the drain finds nothing claimable after the kill (then the turn was
 driven before it was admitted, or post-acceptance recovery is not unified and direct turns
-need a repair path of their own), an input is claimable *while* the drive is parked (then a
-peer could double-drive the running turn's own input), the successor re-commits under the
-abandoned turn id, a `source_key` appears, or the row is still pending after a committed
-recovery.
+need a repair path of their own), the parked read is absent, duplicated, loses the nested
+input identity/session, is not `held`, or lacks an exact lease expiry, the successor settles
+a different input or re-commits under the abandoned turn id, a `source_key` appears, or the
+row is still pending after a committed recovery.
 
 ## Phase 4 — Judge the triage procedure from observed behavior
 
@@ -230,7 +232,7 @@ collision from recurrence across all three rounds.
 | One rejection is contention; repeated rejections with `lease_lost = false` and `lane_held = true` are a livelock shape | every per-round record in `04-commit-cas-livelock.jsonl` |
 | Recurrence directs the operator to inspect host routing and identity configuration, without prescribing an unproved repair | distinct per-open executors under one host identity in every livelock round |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
-| A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`claimable_while_parked`, `drain_ran`, `recovered_application_turn_id`) |
+| A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`pending_reads_while_parked` identity, held status and exact expiry; `drain_ran`; matching `recovered_input_id`; `recovered_application_turn_id`) |
 
 Missing fields, inconsistent identities, or a conclusion that requires facts outside the
 artifact bundle are failures. Preserve the bundle and report the unsupported claim.
