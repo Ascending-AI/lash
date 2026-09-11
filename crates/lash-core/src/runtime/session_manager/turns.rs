@@ -71,6 +71,7 @@ impl ManagedSessionCapability {
                     crate::runtime::process_worker::inherit_process_execution_permit(
                         run_managed_session_turn(
                             runtime,
+                            turn_id.clone(),
                             input,
                             cancel,
                             scoped_effect_controller,
@@ -97,6 +98,7 @@ impl ManagedSessionCapability {
                 // retaining the scoped controller on the calling task.
                 run_managed_session_turn(
                     runtime,
+                    turn_id.clone(),
                     input,
                     cancel,
                     scoped_effect_controller,
@@ -478,6 +480,7 @@ pub(in crate::runtime::session_manager) fn lock_turns(
 
 async fn run_managed_session_turn(
     runtime: RuntimeHandle,
+    turn_id: TurnId,
     input: crate::TurnInput,
     cancel: CancellationToken,
     scoped_effect_controller: crate::ScopedEffectController<'_>,
@@ -510,11 +513,15 @@ async fn run_managed_session_turn(
                 )));
             }
         };
+    let mut options =
+        crate::runtime::TurnOptions::new(cancel, scoped_effect_controller).with_events(&sink);
+    if admission_class
+        == crate::plugin::runtime_host::ManagedTurnAdmissionClass::RuntimeInternalCompaction
+    {
+        options = options.with_runtime_internal_trace_turn_id(turn_id);
+    }
     let result = runtime_guard
-        .stream_turn_with_agent_frames(
-            input,
-            crate::runtime::TurnOptions::new(cancel, scoped_effect_controller).with_events(&sink),
-        )
+        .stream_turn_with_agent_frames(input, options)
         .await
         .map_err(crate::PluginError::Runtime)
         .and_then(|run| {

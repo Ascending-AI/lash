@@ -1226,6 +1226,7 @@ pub struct TurnOptions<'a> {
     scoped_effect_controller: ScopedEffectController<'a>,
     cancel: CancellationToken,
     local_cancel_origin: Option<TurnCancelOriginHint>,
+    runtime_internal_trace_turn_id: Option<TurnId>,
 }
 
 impl<'a> TurnOptions<'a> {
@@ -1239,6 +1240,7 @@ impl<'a> TurnOptions<'a> {
             scoped_effect_controller,
             cancel,
             local_cancel_origin: None,
+            runtime_internal_trace_turn_id: None,
         }
     }
 
@@ -1260,6 +1262,15 @@ impl<'a> TurnOptions<'a> {
 
     pub(crate) fn local_cancel_origin_hint(&self) -> Option<TurnCancelOriginHint> {
         self.local_cancel_origin.clone()
+    }
+
+    pub(crate) fn with_runtime_internal_trace_turn_id(mut self, turn_id: TurnId) -> Self {
+        self.runtime_internal_trace_turn_id = Some(turn_id);
+        self
+    }
+
+    pub(crate) fn runtime_internal_trace_turn_id(&self) -> Option<&TurnId> {
+        self.runtime_internal_trace_turn_id.as_ref()
     }
 
     pub(crate) fn events_or_noop(&self) -> &'a dyn EventSink {

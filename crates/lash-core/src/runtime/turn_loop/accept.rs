@@ -194,11 +194,13 @@ impl LashRuntime {
         else {
             *session_execution_lease = self.claim_session_execution_lease().await?;
             let scoped_effect_controller = opts.scoped_effect_controller();
+            let runtime_internal_trace_turn_id = opts.runtime_internal_trace_turn_id().cloned();
             let result = Box::pin(self.drive_logical_turn(
                 LogicalTurnStart::Input(input),
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 scoped_effect_controller,
+                runtime_internal_trace_turn_id,
                 cancel,
                 LogicalTurnClaims::new(Vec::new(), Vec::new()),
                 session_execution_lease,
@@ -514,11 +516,13 @@ impl LashRuntime {
 
         let claim_for_abandon = drive.clone();
         let scoped_effect_controller = opts.scoped_effect_controller();
+        let runtime_internal_trace_turn_id = opts.runtime_internal_trace_turn_id().cloned();
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(driven),
             opts.events_or_noop(),
             opts.turn_events_or_noop(),
             scoped_effect_controller,
+            runtime_internal_trace_turn_id,
             cancel,
             LogicalTurnClaims::new(Vec::new(), vec![drive]),
             session_execution_lease,
@@ -598,6 +602,7 @@ impl LashRuntime {
                 events,
                 turn_events,
                 scoped_effect_controller,
+                None,
                 cancel,
                 LogicalTurnClaims::new(
                     initial_queue_claim.into_iter().collect(),

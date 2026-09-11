@@ -205,8 +205,49 @@ fn compaction_threshold(max_context_tokens: usize) -> usize {
         .saturating_sub(ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
 }
 
-fn compaction_turn_id(parent_turn_id: &TurnId) -> TurnId {
-    TurnId::from(format!("{parent_turn_id}:rolling-history-compaction"))
+fn append_identity_field(identity: &mut Vec<u8>, value: &str) {
+    identity.extend_from_slice(&(value.len() as u64).to_be_bytes());
+    identity.extend_from_slice(value.as_bytes());
+}
+
+fn latest_physical_turn_id(state: &SessionSnapshot) -> Option<TurnId> {
+    let read_view = state.read_view();
+    read_view
+        .messages()
+        .iter()
+        .rev()
+        .find_map(|message| match message.origin.as_ref() {
+            Some(MessageOrigin::TurnInput { turn_id, .. })
+            | Some(MessageOrigin::TurnOutput { turn_id, .. }) => Some(turn_id.clone()),
+            _ => None,
+        })
+}
+
+fn compaction_child_ids(
+    parent_session_id: &SessionId,
+    state: &SessionSnapshot,
+    execution_scope: &lash_core::ExecutionScope,
+) -> Result<(SessionId, TurnId), ContextError> {
+    let physical_parent_turn_id = latest_physical_turn_id(state)
+        .or_else(|| execution_scope.turn_id().cloned())
+        .unwrap_or_else(|| TurnId::from(execution_scope.id()));
+    let journal_scope = execution_scope
+        .journal_identity()
+        .map_err(|error| ContextError::Session(error.to_string()))?;
+    let mut identity = Vec::new();
+    append_identity_field(&mut identity, parent_session_id);
+    append_identity_field(&mut identity, &physical_parent_turn_id);
+    append_identity_field(&mut identity, journal_scope.key());
+    let discriminator = lash_sansio::core_support::blake3_domain_hash_hex(
+        "lash-rolling-history-compaction/v1",
+        identity,
+    );
+    Ok((
+        SessionId::from(format!("{parent_session_id}-compaction:{discriminator}")),
+        TurnId::from(format!(
+            "{physical_parent_turn_id}:rolling-history-compaction:{discriminator}"
+        )),
+    ))
 }
 
 fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
@@ -247,7 +288,11 @@ async fn summarize_compaction_prefix(
     let previous_summary = extract_previous_summary(&messages);
     snapshot.replace_active_read_state(&messages);
 
-    let compaction_session_id = SessionId::from(format!("{session_id}-compaction"));
+    let (compaction_session_id, turn_id) = compaction_child_ids(
+        session_id,
+        state,
+        scoped_effect_controller.execution_scope(),
+    )?;
     let mut policy = snapshot.policy.clone();
     policy.turn_budget = lash_core::TurnBudget::bounded(1);
     let request = SessionCreateRequest::child(
@@ -276,7 +321,6 @@ async fn summarize_compaction_prefix(
     };
     let prompt_text = with_instructions(&base_prompt, instructions);
 
-    let turn_id = compaction_turn_id(&TurnId::from(scoped_effect_controller.scope_id()));
     let request = lash_core::facade_support::SessionTurnRequest::new_runtime_internal_compaction(
         &handle.session_id,
         &turn_id,
@@ -1029,6 +1073,17 @@ mod tests {
             session_graph: SessionGraph::from_active_read_state(&messages),
             ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
         };
+        let compaction_scope =
+            lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test");
+        let expected_child_ids =
+            compaction_child_ids(&SessionId::from("root"), &state, &compaction_scope)
+                .expect("derive compaction child identity");
+        assert_eq!(
+            expected_child_ids,
+            compaction_child_ids(&SessionId::from("root"), &state, &compaction_scope)
+                .expect("rederive compaction child identity"),
+            "retrying the same physical compaction must preserve child identity"
+        );
         let ctx = build_compaction_ctx_with_graph(
             &SessionId::from("root"),
             state,
@@ -1063,22 +1118,31 @@ mod tests {
 
         let created = manager.created_snapshot();
         assert_eq!(created.len(), 1);
+        let expected_discriminator =
+            "dce066be4e685dc5d274bb054ed0273da532c4444936cc79920641c93c904c4b";
+        let expected_child_session_id = format!("root-compaction:{expected_discriminator}");
+        let expected_child_turn_id = format!(
+            "rolling-history-compact-test:rolling-history-compaction:{expected_discriminator}"
+        );
+        assert_eq!(
+            expected_child_ids,
+            (
+                SessionId::from(expected_child_session_id.clone()),
+                TurnId::from(expected_child_turn_id.clone())
+            )
+        );
+        assert_eq!(
+            created[0].session_id.as_deref(),
+            Some(expected_child_session_id.as_str())
+        );
         let turns = manager.turns.lock_recover().clone();
         assert_eq!(turns.len(), 1);
-        assert_eq!(
-            turns[0].1,
-            "rolling-history-compact-test:rolling-history-compaction"
-        );
-        assert_eq!(
-            turns[0].2.as_deref(),
-            Some("rolling-history-compact-test:rolling-history-compaction")
-        );
+        assert_eq!(turns[0].0, expected_child_session_id);
+        assert_eq!(turns[0].1, expected_child_turn_id);
+        assert_eq!(turns[0].2.as_deref(), Some(expected_child_turn_id.as_str()));
         assert_eq!(
             turns[0].3,
-            lash_core::ExecutionScope::turn(
-                "root-compaction",
-                "rolling-history-compact-test:rolling-history-compaction"
-            )
+            lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test")
         );
 
         let events = trace.events();

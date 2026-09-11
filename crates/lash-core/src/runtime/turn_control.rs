@@ -69,26 +69,32 @@ impl TurnCancelPeekIdentity {
     }
 }
 
-const PROCESS_TURN_CANCEL_PEEK_FAMILY_VERSION: u8 = 1;
+const PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION: u8 = 1;
 
 fn turn_cancel_peek_replay_key(
     execution_scope: &ExecutionScope,
     address: &TurnAddress,
     causal_identity: &str,
 ) -> String {
-    if !matches!(execution_scope, ExecutionScope::Process { .. }) {
+    if matches!(
+        execution_scope,
+        ExecutionScope::Turn {
+            session_id,
+            turn_id,
+        } if session_id == &address.session_id && turn_id == &address.turn_id
+    ) {
         return causal_identity.to_string();
     }
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.turn-cancel-peek",
-        PROCESS_TURN_CANCEL_PEEK_FAMILY_VERSION,
+        PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION,
     );
     identity.string(&address.session_id);
     identity.string(&address.turn_id);
     identity.string(causal_identity);
     crate::stable_identity::rendered_hash(
         "turn-cancel-peek",
-        PROCESS_TURN_CANCEL_PEEK_FAMILY_VERSION,
+        PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION,
         &identity.finish(),
     )
 }
@@ -885,9 +891,10 @@ impl ActiveTurnControl {
     ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
         // TurnAddress continues to route the cancellation promise in `key`;
         // the journaled observation belongs to the controller's admitted scope.
-        // One Process can carry several physical turns, so only that scope
-        // folds the captured TurnAddress into the replay key. A foreground
-        // Turn already has its physical identity in the scope itself.
+        // Keep the shipped foreground key only when the admitted Turn exactly
+        // names this physical turn. Process, queue-drain, runtime-operation,
+        // and follow-on Turn scopes can span physical turns, so their keys
+        // fold in the captured address as well as the gate identity.
         let replay_key = turn_cancel_peek_replay_key(
             controller.execution_scope(),
             &self.address,

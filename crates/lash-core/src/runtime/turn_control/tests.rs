@@ -179,6 +179,65 @@ fn process_turn_cancel_peek_replay_keys_cover_physical_turn_and_gate() {
     assert_eq!(keys.len(), 16);
 }
 
+#[test]
+fn every_shared_scope_cancel_peek_key_covers_physical_turn_and_gate() {
+    let cases = [
+        (
+            ExecutionScope::turn("turn-session", "turn-root"),
+            TurnAddress::new("turn-session", "turn-root"),
+            TurnAddress::new("turn-session", "turn-root:agent-frame:1"),
+        ),
+        (
+            ExecutionScope::queue_drain("queue-session", "queue-drain"),
+            TurnAddress::new("queue-session", "queue-root"),
+            TurnAddress::new("queue-session", "queue-follow-on"),
+        ),
+        (
+            ExecutionScope::runtime_operation("runtime-operation"),
+            TurnAddress::new("runtime-session", "runtime-root"),
+            TurnAddress::new("runtime-session", "runtime-follow-on"),
+        ),
+    ];
+
+    for (scope, root, follow_on) in cases {
+        let mut keys = BTreeSet::new();
+        for address in [&root, &follow_on] {
+            for identity in [
+                TurnCancelPeekIdentity::StartGate,
+                TurnCancelPeekIdentity::PostAbortGate,
+                TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: 7,
+                },
+                TurnCancelPeekIdentity::AfterStep {
+                    protocol_iteration: 7,
+                },
+            ] {
+                for causal_identity in [
+                    identity.causal_identity(),
+                    identity.escalation_causal_identity(),
+                ] {
+                    let key = turn_cancel_peek_replay_key(&scope, address, &causal_identity);
+                    assert!(keys.insert(key), "shared-scope peek identity collided");
+                }
+            }
+        }
+        assert_eq!(keys.len(), 16);
+        assert_eq!(
+            turn_cancel_peek_replay_key(
+                &scope,
+                &root,
+                &TurnCancelPeekIdentity::StartGate.causal_identity(),
+            ),
+            turn_cancel_peek_replay_key(
+                &scope,
+                &root,
+                &TurnCancelPeekIdentity::StartGate.causal_identity(),
+            ),
+            "same-frame replay must reconstruct the same key"
+        );
+    }
+}
+
 #[tokio::test]
 async fn process_scoped_turn_control_peek_uses_admitted_effect_scope() {
     let host = NativeEffectHost::default();
