@@ -201,6 +201,9 @@ impl<'de> Deserialize<'de> for ToolState {
 #[async_trait::async_trait]
 pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     fn id(&self) -> &str;
+    /// Enumerate this source once and capture immutable resident execution
+    /// routes for the resulting advertisement.
+    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor>;
     fn source_key(&self) -> ToolSourceKey {
         ToolSourceKey::Leaf(self.id().to_string())
     }

@@ -169,6 +169,9 @@ pub(super) struct ToolRegistryInner {
     /// that intentionally preserve or adopt the public generation.
     pub(super) state_revision: u64,
     pub(super) sources: BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
+    /// Original live sources retained only by a pinned registry for explicit
+    /// replay-grant routing. Resident dispatch uses `sources` exclusively.
+    pub(super) granted_sources: Option<BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>>,
     pub(super) state: ToolRegistryState,
 }
 

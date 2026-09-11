@@ -97,7 +97,14 @@ impl ToolRegistry {
                 "Granted tool id `{tool_id}` is missing an explicit tool source"
             )));
         };
-        let sources = self.inner.read_recover().sources.clone();
+        let sources = {
+            let authority = self.inner.read_recover();
+            authority
+                .granted_sources
+                .as_ref()
+                .unwrap_or(&authority.sources)
+                .clone()
+        };
         let leaf_source_key = ToolSourceKey::Leaf(source_id.to_string());
         let source = match sources.get(&leaf_source_key) {
             Some(source) => Arc::clone(source),

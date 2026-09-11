@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 struct MockTool;
 struct MixedEnabledTool;
 struct ExternalMockSource;
+#[derive(Clone)]
 struct ExactResolvingSource {
     manifest_resolutions: Arc<AtomicUsize>,
     contract_resolutions: Arc<AtomicUsize>,
@@ -178,6 +179,10 @@ impl ToolProvider for LazyLeafBatchTool {
 impl ToolSourceExecutor for LazyOrchestratingBatchSource {
     fn id(&self) -> &str {
         "lazy-orchestrating"
+    }
+
+    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+        Arc::new(Self)
     }
 
     fn source_key(&self) -> ToolSourceKey {
@@ -483,6 +488,10 @@ impl ToolSourceExecutor for ExternalMockSource {
         "external"
     }
 
+    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+        Arc::new(Self)
+    }
+
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         manifests(vec![ToolDefinition::raw(
             "tool:mcp__demo__search",
@@ -539,6 +548,10 @@ impl ToolSourceExecutor for ExactResolvingSource {
         "exact"
     }
 
+    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+        Arc::new(self.clone())
+    }
+
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         Vec::new()
     }
@@ -584,6 +597,10 @@ impl ToolSourceExecutor for ExactResolvingSource {
 impl ToolSourceExecutor for NamedExactSource {
     fn id(&self) -> &str {
         self.id
+    }
+
+    fn snapshot_execution_source(&self) -> Arc<dyn ToolSourceExecutor> {
+        Arc::new(Self { id: self.id })
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -1447,6 +1464,9 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         }),
     ])
     .expect("registry");
+    let registry = registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("resident snapshot keeps hidden providers out of its admitted source");
     let grant = crate::ToolExecutionGrant::from_definition(ToolDefinition::raw(
         "tool:hidden_zeta",
         "shared_hidden_name",

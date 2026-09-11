@@ -60,6 +60,7 @@ impl ToolRegistry {
                 source_revision: 0,
                 state_revision: 0,
                 sources: BTreeMap::new(),
+                granted_sources: None,
                 state: ToolRegistryState {
                     generation: 0,
                     surface: ToolSurface::default(),
@@ -237,10 +238,9 @@ impl ToolRegistry {
         context_providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
         let registry = if include_base_tools {
-            self.refresh_sources()?;
-            self.pin_current_surface()
+            self.refresh_and_pin_sources()?
         } else {
-            Self::empty()
+            Self::empty().refresh_and_pin_sources()?
         };
         registry.upsert_overlay_source(Arc::new(ToolProviderSource::new(
             "context",
@@ -256,8 +256,7 @@ impl ToolRegistry {
         include_base_tools: bool,
         context_providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
-        let registry = self.compose_session_catalog(include_base_tools, context_providers)?;
-        Ok(registry.pin_current_surface())
+        self.compose_session_catalog(include_base_tools, context_providers)
     }
 
     pub(crate) fn upsert_source(
@@ -295,6 +294,10 @@ impl ToolRegistry {
             .transpose()?;
 
         let retired = authority.sources.remove(&source_key);
+        let retired_granted = authority
+            .granted_sources
+            .as_mut()
+            .and_then(|sources| sources.remove(&source_key));
         authority.source_revision = source_revision;
         if let Some(state_revision) = state_revision {
             authority.state.surface = surface;
@@ -303,6 +306,7 @@ impl ToolRegistry {
         }
         drop(authority);
         drop(retired);
+        drop(retired_granted);
         Ok(generation)
     }
 
@@ -310,7 +314,10 @@ impl ToolRegistry {
         &self,
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
+        let live_source = Arc::clone(&source);
+        let source = source.snapshot_execution_source(&BTreeSet::new());
         let source_key = source.source_key();
+        debug_assert_eq!(live_source.source_key(), source_key);
         let manifests = source
             .advertised_tools()
             .into_iter()
@@ -386,6 +393,9 @@ impl ToolRegistry {
             let retired = authority
                 .sources
                 .insert(source_key.clone(), Arc::clone(&source));
+            let retired_granted = authority.granted_sources.as_mut().and_then(|sources| {
+                sources.insert(source_key.clone(), Arc::clone(&live_source))
+            });
             authority.source_revision = next_source_revision;
             if let Some(next_state_revision) = next_state_revision {
                 authority.state.surface = next_state.surface;
@@ -394,6 +404,7 @@ impl ToolRegistry {
             }
             drop(authority);
             drop(retired);
+            drop(retired_granted);
             return Ok(generation);
         }
     }
@@ -481,22 +492,40 @@ impl ToolRegistry {
     }
 
     pub(crate) fn refresh_sources(&self) -> Result<u64, ReconfigureError> {
+        Ok(self.refresh_and_pin_sources()?.generation())
+    }
+
+    fn refresh_and_pin_sources(&self) -> Result<Self, ReconfigureError> {
         // This is the explicit admission seam for live surface changes. Source
-        // advertisements are enumerated and reconciled here; dispatch lookup
-        // only reads the admitted surface.
+        // advertisements and their resident routes are captured together;
+        // dispatch lookup on the returned registry reads only that snapshot.
         loop {
-            let (source_revision, state_revision, sources, snapshot) = {
+            let (source_revision, state_revision, live_sources, snapshot) = {
                 let authority = self.inner.read_recover();
                 (
                     authority.source_revision,
                     authority.state_revision,
-                    authority.sources.clone(),
+                    authority
+                        .granted_sources
+                        .as_ref()
+                        .unwrap_or(&authority.sources)
+                        .clone(),
                     ToolState::new(
                         authority.state.generation,
                         export_tool_state_entries(&authority.state.surface),
                     ),
                 )
             };
+            let known_resident_ids = snapshot.entries().keys().cloned().collect::<BTreeSet<_>>();
+            let sources = live_sources
+                .iter()
+                .map(|(key, source)| {
+                    (
+                        key.clone(),
+                        source.snapshot_execution_source(&known_resident_ids),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
             let reconciled = match reconcile_tool_state_entries(
                 snapshot.entries(),
                 &sources,
@@ -533,14 +562,19 @@ impl ToolRegistry {
                 authority.state.generation = generation;
                 authority.state_revision = next_state_revision;
             }
-            return Ok(generation);
-        }
-    }
-
-    fn pin_current_surface(&self) -> Self {
-        let authority = self.inner.read_recover().clone();
-        Self {
-            inner: Arc::new(RwLock::new(authority)),
+            let pinned_source_revision = authority.source_revision;
+            let pinned_state_revision = authority.state_revision;
+            let pinned_state = authority.state.clone();
+            drop(authority);
+            return Ok(Self {
+                inner: Arc::new(RwLock::new(ToolRegistryInner {
+                    source_revision: pinned_source_revision,
+                    state_revision: pinned_state_revision,
+                    sources,
+                    granted_sources: Some(live_sources),
+                    state: pinned_state,
+                })),
+            });
         }
     }
 
@@ -570,6 +604,7 @@ impl ToolRegistry {
                 source_revision: 0,
                 state_revision: 0,
                 sources,
+                granted_sources: None,
                 state: ToolRegistryState {
                     generation,
                     surface: rebound.surface,
