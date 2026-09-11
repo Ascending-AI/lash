@@ -22,6 +22,7 @@ mod javascript_array;
 mod javascript_codec;
 mod javascript_date;
 mod javascript_json;
+mod javascript_operators;
 pub(crate) mod javascript_regexp;
 mod javascript_stdlib;
 mod javascript_substrate;
@@ -586,8 +587,18 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 };
                 self.stack.push(value);
             }
-            Instruction::JavaScriptUnary(op) => self.execute_javascript_unary(op)?,
-            Instruction::JavaScriptBinary(op) => self.execute_javascript_binary(op)?,
+            Instruction::JavaScriptUnary(op) => {
+                if self.javascript_unary_needs_async(op)? {
+                    return Ok(None);
+                }
+                self.execute_javascript_unary(op)?;
+            }
+            Instruction::JavaScriptBinary(op) => {
+                if self.javascript_binary_needs_async(op)? {
+                    return Ok(None);
+                }
+                self.execute_javascript_binary(op)?;
+            }
             // `a ?? b` asks whether the *value* is absent, and a projected handle
             // is a host-side view of one, so testing the wrapper made every
             // projected binding look present. `ProjectedValue::is_nullish` settles
@@ -946,6 +957,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     ) -> Result<VmStep, RuntimeError> {
         let right = materialize_projected_async(self.pop_stack()?).await;
         let left = materialize_projected_async(self.pop_stack()?).await;
+        let (left, right) = if let Instruction::JavaScriptBinary(op) = &instruction {
+            self.prepare_javascript_binary_operands(*op, left, right)
+                .await?
+        } else {
+            (left, right)
+        };
         self.stack.push(left);
         self.stack.push(right);
         self.redispatch_fast(instruction)
@@ -1097,6 +1114,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             Instruction::Binary(_) => {
+                return self
+                    .redispatch_with_materialized_stack_pair(instruction)
+                    .await;
+            }
+            Instruction::JavaScriptUnary(op) => {
+                return self.redispatch_javascript_unary(op).await;
+            }
+            Instruction::JavaScriptBinary(_) => {
                 return self
                     .redispatch_with_materialized_stack_pair(instruction)
                     .await;
@@ -1326,8 +1351,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::PopHandler
             | Instruction::EnterFinally { .. }
             | Instruction::EndFinally
-            | Instruction::JavaScriptUnary(_)
-            | Instruction::JavaScriptBinary(_)
             | Instruction::IsNullish
             | Instruction::AbandonFinally
             | Instruction::AbandonFinallyKeepValue
