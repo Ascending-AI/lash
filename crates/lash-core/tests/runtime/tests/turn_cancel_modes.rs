@@ -711,7 +711,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             .await
             .expect("pending inputs")
             .into_iter()
-            .map(|input| input.input_id)
+            .map(|input| input.input.input_id)
             .collect();
             let expected = match disposition {
                 lash_core::TurnCancelDisposition::Defer => vec![undelivered.input_id.clone()],
@@ -804,7 +804,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
                 .await
                 .expect("pending inputs")
                 .into_iter()
-                .map(|input| input.input_id)
+                .map(|input| input.input.input_id)
                 .collect();
         assert_eq!(
             pending,

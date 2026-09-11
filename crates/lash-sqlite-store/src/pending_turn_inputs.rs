@@ -67,6 +67,17 @@ pub(crate) fn pending_turn_input_row_from_sql(
     })
 }
 
+pub(crate) fn pending_turn_input_read_row_from_sql(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(PendingTurnInputRow, Option<u64>)> {
+    let input = pending_turn_input_row_from_sql(row)?;
+    let lease_expires_at_ms = row
+        .get::<_, Option<i64>>(14)?
+        .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
+        .transpose()?;
+    Ok((input, lease_expires_at_ms))
+}
+
 pub(crate) fn pending_turn_input_from_row(
     row: PendingTurnInputRow,
 ) -> Result<lash_core::PendingTurnInput, StoreError> {
@@ -79,6 +90,19 @@ pub(crate) fn pending_turn_input_from_row(
         state: decode_turn_input_state(row.state)?,
         enqueued_at_ms: row.enqueued_at_ms,
         input: decode_turn_input(row.input_json)?,
+    })
+}
+
+pub(crate) fn pending_turn_input_read_from_row(
+    row: PendingTurnInputRow,
+    lease_expires_at_ms: Option<u64>,
+) -> Result<lash_core::PendingTurnInputRead, StoreError> {
+    let input = pending_turn_input_from_row(row)?;
+    Ok(match lease_expires_at_ms {
+        Some(lease_expires_at_ms) => {
+            lash_core::PendingTurnInputRead::held(input, lease_expires_at_ms)
+        }
+        None => lash_core::PendingTurnInputRead::pending(input),
     })
 }
 

@@ -350,10 +350,11 @@ pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt,
-    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
-    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs,
+    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
+    QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
+    TurnInputState, UnclaimedTurnInputs,
 };
 pub use turn_loop::ensure_durable_effect_input;
 #[cfg(feature = "testing")]
@@ -1008,7 +1009,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
                 .list_pending_turn_inputs(&request.session_id)
                 .await?
                 .into_iter()
-                .any(|input| input.state == crate::TurnInputState::DeferredNextTurn),
+                .any(|read| read.input.state == crate::TurnInputState::DeferredNextTurn),
         ))
     }
 

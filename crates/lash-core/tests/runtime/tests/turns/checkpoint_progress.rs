@@ -1092,7 +1092,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         .await
         .expect("list pending input after rejected checkpoint")
         .iter()
-        .any(|input| input.input_id == admitted.input_id),
+        .any(|input| input.input.input_id == admitted.input_id),
         "a rejected checkpoint input must remain claimable"
     );
     assert!(
@@ -1251,7 +1251,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         .await
         .expect("list pending input after attachment failure")
         .iter()
-        .any(|input| input.input_id == admitted.input_id),
+        .any(|input| input.input.input_id == admitted.input_id),
         "an attachment-failed checkpoint input must remain claimable"
     );
     assert!(
@@ -1725,11 +1725,11 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     .expect("deferred late input");
     assert_eq!(pending.len(), 1);
     assert!(matches!(
-        pending[0].ingress,
+        pending[0].input.ingress,
         lash_core::TurnInputIngress::NextTurn
     ));
     assert_eq!(
-        pending[0].state,
+        pending[0].input.state,
         lash_core::TurnInputState::DeferredNextTurn
     );
 
@@ -2056,7 +2056,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
     assert_eq!(
         pending_inputs
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![queued_input.input_id.as_str()],
         "selected queued-work drains must not also claim pending user input"
