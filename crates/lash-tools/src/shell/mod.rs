@@ -105,10 +105,15 @@ impl StandardShell {
     /// The returned future owns this shell clone, `args`, and
     /// `cancellation_token`, so it is `Send + 'static` and may be moved into a
     /// host-owned task. The host owns task admission and must retain and join
-    /// that task. Cancelling the token cooperatively stops a launched command
-    /// and returns a terminal cancellation outcome. Dropping the future after
-    /// launch signals Lash's retained child wait owner, which terminates the
-    /// owned process group and reaps the direct child.
+    /// that task. Dropping the future is abandonment and does not guarantee
+    /// process cleanup; cancel with the supplied token and keep polling the
+    /// future to its terminal outcome instead.
+    ///
+    /// On Unix, cancellation and timeout use Lash's existing process-group
+    /// termination before waiting for the direct child. The existing non-Unix
+    /// pipe runner does not provide a descendant-group termination guarantee.
+    /// Normal process exit retains the existing `exec_command` semantics and
+    /// does not promise cleanup of independently surviving descendants.
     ///
     /// ```no_run
     /// # async fn example() {

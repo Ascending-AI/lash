@@ -893,53 +893,6 @@ async fn exec_command_timeout_kills_process_group_children() {
     let _ = fs::remove_file(marker);
 }
 
-#[cfg(unix)]
-#[tokio::test]
-async fn dropping_owned_exec_after_launch_kills_process_group() {
-    let dir = tempfile::tempdir().expect("future-drop marker directory");
-    let marker = dir.path().join("survived-future-drop");
-    let gate = Arc::new(tokio::sync::Barrier::new(2));
-    let runtime = ShellRuntime::new()
-        .with_cwd("/")
-        .with_pipe_loop_gate(Arc::clone(&gate));
-    let wait_owner_probe = runtime.clone();
-    let shell = StandardShell { runtime };
-    let command = format!(
-        "sh -c 'sleep 0.4; printf survived > {}' & wait",
-        marker.display()
-    );
-    let task = tokio::spawn(shell.exec_command_owned(
-        json!({ "cmd": command, "timeout_ms": 5_000 }),
-        CancellationToken::new(),
-    ));
-
-    // The pipe-loop gate is reached only after the real child, readers, wait
-    // owner, and drop guard exist. Abort while execution is suspended there.
-    gate.wait().await;
-    let wait_owner = wait_owner_probe
-        .pipe_wait_handle_probe()
-        .expect("pipe wait owner probe");
-    task.abort();
-    assert!(
-        task.await
-            .expect_err("owned execution must be aborted")
-            .is_cancelled()
-    );
-
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !wait_owner.is_finished() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("future-drop cleanup must terminate and reap the direct child");
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert!(
-        !marker.exists(),
-        "a process-group descendant survived owned execution future drop"
-    );
-}
-
 #[tokio::test]
 async fn start_command_registers_process_handle() {
     let shell = shell_provider(StandardShell::new().with_cwd("/"));

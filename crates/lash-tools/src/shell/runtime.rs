@@ -91,66 +91,11 @@ enum PollFinish {
 }
 
 struct PipeProcessState {
-    execution_guard: PipeExecutionGuard,
+    child_pid: Option<u32>,
     wait_handle: tokio::task::JoinHandle<std::io::Result<ExitStatus>>,
     reader_handles: Vec<tokio::task::JoinHandle<()>>,
     buffer: Arc<StdMutex<ShellOutputBuffer>>,
     reader_died: Arc<AtomicBool>,
-}
-
-struct PipeExecutionGuard {
-    terminate: CancellationToken,
-    armed: bool,
-}
-
-impl PipeExecutionGuard {
-    fn new(terminate: CancellationToken) -> Self {
-        Self {
-            terminate,
-            armed: true,
-        }
-    }
-
-    fn disarm_after_exit(&mut self) {
-        self.armed = false;
-    }
-
-    fn terminate(&mut self) {
-        self.terminate.cancel();
-        self.armed = false;
-    }
-}
-
-impl Drop for PipeExecutionGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            self.terminate.cancel();
-        }
-    }
-}
-
-struct PipeProcessGroupGuard {
-    child_pid: Option<u32>,
-}
-
-impl PipeProcessGroupGuard {
-    fn new(child_pid: Option<u32>) -> Self {
-        Self { child_pid }
-    }
-
-    fn disarm_after_exit(&mut self) {
-        self.child_pid = None;
-    }
-
-    fn terminate(&mut self) {
-        terminate_pipe_process(self.child_pid.take());
-    }
-}
-
-impl Drop for PipeProcessGroupGuard {
-    fn drop(&mut self) {
-        self.terminate();
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -851,8 +796,7 @@ impl ShellRuntime {
         cmd.current_dir(workdir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
+            .stderr(Stdio::piped());
 
         #[cfg(unix)]
         unsafe {
@@ -910,10 +854,9 @@ impl ShellRuntime {
         }
 
         let deadline = timeout.map(|value| tokio::time::Instant::now() + value);
-        let terminate = CancellationToken::new();
         let mut process = PipeProcessState {
-            execution_guard: PipeExecutionGuard::new(terminate.clone()),
-            wait_handle: tokio::spawn(wait_for_pipe_child(child, child_pid, terminate)),
+            child_pid,
+            wait_handle: tokio::spawn(async move { child.wait().await }),
             reader_handles,
             buffer,
             reader_died,
@@ -949,7 +892,6 @@ impl ShellRuntime {
 
             if process.wait_handle.is_finished() {
                 let exit_code = pipe_exit_code((&mut process.wait_handle).await)?;
-                process.execution_guard.disarm_after_exit();
                 return finish_pipe_process(
                     id,
                     &mut process,
@@ -974,7 +916,6 @@ impl ShellRuntime {
             tokio::select! {
                 status = &mut process.wait_handle => {
                     let exit_code = pipe_exit_code(status)?;
-                    process.execution_guard.disarm_after_exit();
                     return finish_pipe_process(
                         id,
                         &mut process,
@@ -986,34 +927,6 @@ impl ShellRuntime {
                 _ = sleep_until(deadline), if deadline.is_some() => {}
                 _ = cancel.cancelled() => {}
             }
-        }
-    }
-}
-
-async fn wait_for_pipe_child(
-    mut child: tokio::process::Child,
-    child_pid: Option<u32>,
-    terminate: CancellationToken,
-) -> std::io::Result<ExitStatus> {
-    // This task is the only child wait owner. The outer execution guard asks
-    // it to terminate on future drop; this inner guard is the final fallback
-    // if the wait owner itself is dropped. Termination wins a simultaneous
-    // exit so descendants cannot escape when the caller abandons execution.
-    // Because this task alone reaps the direct child, its PID cannot be
-    // recycled before either termination takes ownership or `wait` returns.
-    let mut process_group = PipeProcessGroupGuard::new(child_pid);
-    tokio::select! {
-        biased;
-        _ = terminate.cancelled() => {
-            process_group.terminate();
-            let _ = child.start_kill();
-            child.wait().await
-        }
-        status = child.wait() => {
-            if status.is_ok() {
-                process_group.disarm_after_exit();
-            }
-            status
         }
     }
 }
@@ -1038,10 +951,8 @@ async fn finish_pipe_process(
     if matches!(finish, PollFinish::Cancelled | PollFinish::Running)
         || (matches!(finish, PollFinish::ReaderDied) && !process.wait_handle.is_finished())
     {
-        process.execution_guard.terminate();
+        terminate_pipe_process(process.child_pid);
         let _ = tokio::time::timeout(Duration::from_millis(500), &mut process.wait_handle).await;
-    } else if process.wait_handle.is_finished() {
-        process.execution_guard.disarm_after_exit();
     }
     wait_for_pipe_readers(&mut process.reader_handles).await;
     if process.reader_died.load(Ordering::SeqCst) && !matches!(finish, PollFinish::ReaderDied) {
@@ -1125,9 +1036,8 @@ mod finish_pipe_process_tests {
     use super::*;
 
     fn test_process(reader_died: bool) -> PipeProcessState {
-        let terminate = CancellationToken::new();
         PipeProcessState {
-            execution_guard: PipeExecutionGuard::new(terminate),
+            child_pid: None,
             wait_handle: tokio::spawn(async {
                 Err::<ExitStatus, std::io::Error>(std::io::Error::other(
                     "test wait task already completed",

@@ -1,5 +1,7 @@
 use std::future::Future;
 #[cfg(unix)]
+use std::path::Path;
+#[cfg(unix)]
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -43,51 +45,86 @@ async fn owned_exec_is_send_static_and_reaches_terminal_output() {
 async fn provider_owned_exec_drains_after_consumer_abandons_before_publication() {
     let dir = tempfile::tempdir().expect("provider-owned marker directory");
     let pid_path = dir.path().join("shell-pid");
+    let started_path = dir.path().join("shell-started");
+    let release_path = dir.path().join("release-shell");
     let shell = StandardShell::new().with_cwd("/");
     let cancellation = CancellationToken::new();
     let (terminal_tx, terminal_rx) = oneshot::channel();
-    let terminal_received = Arc::new(Notify::new());
+    let consumer_waiting = Arc::new(Notify::new());
+    let shell_terminal = Arc::new(Notify::new());
     let publication_gate = Arc::new(Barrier::new(2));
     let published = Arc::new(AtomicBool::new(false));
 
     let provider_task = {
         let cancellation = cancellation.clone();
+        let shell_terminal = Arc::clone(&shell_terminal);
+        let publication_gate = Arc::clone(&publication_gate);
+        let published = Arc::clone(&published);
         tokio::spawn(async move {
             let outcome = shell
                 .exec_command_owned(
                     json!({
-                        "cmd": format!("printf $$ > {}; exit 0", pid_path.display()),
+                        "cmd": format!(
+                            "printf $$ > '{}'; : > '{}'; i=0; while [ ! -e '{}' ] && [ \"$i\" -lt 500 ]; do i=$((i + 1)); sleep 0.01; done; test -e '{}'",
+                            pid_path.display(),
+                            started_path.display(),
+                            release_path.display(),
+                            release_path.display(),
+                        ),
+                        "timeout_ms": 5_000,
                     }),
                     cancellation,
                 )
                 .await;
-            let _ = terminal_tx.send(outcome.clone());
+            shell_terminal.notify_one();
+            publication_gate.wait().await;
+            if terminal_tx.send(outcome.clone()).is_ok() {
+                published.store(true, Ordering::Release);
+            }
             outcome
         })
     };
 
     let consumer_task = {
-        let terminal_received = Arc::clone(&terminal_received);
-        let publication_gate = Arc::clone(&publication_gate);
-        let published = Arc::clone(&published);
+        let consumer_waiting = Arc::clone(&consumer_waiting);
         tokio::spawn(async move {
-            let outcome = terminal_rx.await.expect("provider terminal output");
-            terminal_received.notify_one();
-            publication_gate.wait().await;
-            published.store(true, Ordering::Release);
-            outcome
+            consumer_waiting.notify_one();
+            terminal_rx.await.expect("provider terminal output")
         })
     };
 
-    terminal_received.notified().await;
+    tokio::time::timeout(Duration::from_secs(5), consumer_waiting.notified())
+        .await
+        .expect("consumer did not begin awaiting terminal output");
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        wait_for_path(dir.path().join("shell-started")),
+    )
+    .await
+    .expect("real shell did not reach its release barrier");
+
+    // Abandon the transient consumer while the real shell is still running
+    // and before any terminal value has been published.
     consumer_task.abort();
     assert!(
-        consumer_task
+        tokio::time::timeout(Duration::from_secs(5), consumer_task)
             .await
+            .expect("consumer abort did not settle")
             .expect_err("consumer must be abandoned before publication")
             .is_cancelled()
     );
     assert!(!published.load(Ordering::Acquire));
+
+    // Let the real shell exit. The provider-owned task reaches terminal output
+    // independently, then pauses before its explicit publication step.
+    std::fs::write(dir.path().join("release-shell"), b"").expect("release the real shell process");
+    tokio::time::timeout(Duration::from_secs(5), shell_terminal.notified())
+        .await
+        .expect("provider-owned execution did not observe shell termination");
+    assert!(!published.load(Ordering::Acquire));
+    tokio::time::timeout(Duration::from_secs(5), publication_gate.wait())
+        .await
+        .expect("provider did not reach its publication barrier");
 
     cancellation.cancel();
     let outcome = tokio::time::timeout(Duration::from_secs(5), provider_task)
@@ -107,4 +144,11 @@ async fn provider_owned_exec_drains_after_consumer_abandons_before_publication()
         "completed child is still live"
     );
     assert!(!published.load(Ordering::Acquire));
+}
+
+#[cfg(unix)]
+async fn wait_for_path(path: impl AsRef<Path>) {
+    while !path.as_ref().exists() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
 }
