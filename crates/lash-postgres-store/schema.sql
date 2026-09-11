@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 83.
+-- lash-postgres-store schema, component version 85.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -268,6 +268,7 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
+    CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
     UNIQUE (session_id, source_key)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_session
@@ -298,7 +299,11 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_owner
 -- timestampless: the protocol is CAS transitions only, never an expiry.
 CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
-    phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))
+    phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed')),
+    write_token TEXT,
+    write_session_id TEXT,
+    CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
+    CHECK (write_token IS NULL OR phase IN ('condemned', 'reclaimed'))
 );
 
 CREATE TABLE IF NOT EXISTS lash_process_change_clock (
@@ -608,7 +613,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 83)
+VALUES ('lash-postgres-store', 85)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

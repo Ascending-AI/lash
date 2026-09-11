@@ -195,10 +195,12 @@ committing session, including references first put by another session. The
 boundary transaction owns this acquisition and its attachment GC fence, so
 successful adoption cannot be separated from publication of its receiver root.
 FIG-2512 amends the fence with a terminal `Reclaimed` phase after a successful
-physical delete. Adoption that observes it fails atomically with
-`AttachmentBytesReclaimed`; a fresh put clears the phase with its write intent
-before restoring bytes, after which adoption may succeed. This is a pure store
-fact and never calls host blob code from the transaction.
+physical delete or a fenced final `HEAD` that proves bytes absent. Adoption that
+observes it fails atomically with `AttachmentBytesReclaimed`; a fresh put claims
+the phase with an opaque token while recording its write intent, restores the
+bytes, and only then clears the token-matched phase. Failure preserves the
+original phase. This is a pure store fact and never calls host blob code from
+the transaction.
 
 Committed attachment manifest rows survive owner deletion while any of that
 owner's graph nodes remain retained. The graph's existing head/child/pin
@@ -207,6 +209,6 @@ uncommitted intents are removed, and GC reconciles committed roots after the
 last retained node disappears, including after unpin. No schema bump is needed.
 This deliberately retains all of the owner's committed attachments while any
 prefix survives: the manifest has no exact node-to-attachment edge. The
-`Reclaimed` phase requires the PostgreSQL component-83 and SQLite session-54
+write-token lifecycle requires the PostgreSQL component-84 and SQLite session-55
 reject-and-recreate schema boundaries; the reachability retention rule itself
 does not change.

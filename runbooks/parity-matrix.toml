@@ -100,4 +100,5 @@ agent-service-effect-group-retirement = { tier = "deterministic", model = "scrip
 agent-service-effect-groups = { tier = "deterministic", model = "scripted-provider" }
 example-core-shutdown = { tier = "deterministic", model = "scripted-provider" }
 mcp-naming-refresh = { tier = "deterministic", model = "scripted-provider" }
+resident-tool-authority = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-deterministic = { tier = "deterministic", model = "scripted-provider" }

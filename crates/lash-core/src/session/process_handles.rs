@@ -368,6 +368,20 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    fn catalog_for<T: ToolProvider + ?Sized>(provider: &Arc<T>) -> crate::ToolCatalog {
+        let manifests = provider.tool_manifests();
+        let contracts = manifests
+            .iter()
+            .filter_map(|manifest| {
+                provider
+                    .resolve_contract(&manifest.name)
+                    .map(|contract| (manifest.id.clone(), contract))
+            })
+            .collect();
+        crate::ToolCatalog::from_tools(manifests, contracts)
+            .expect("test provider exposes complete resident definitions")
+    }
+
     struct PrepareRecordingTool {
         prepares: Arc<AtomicUsize>,
     }
@@ -430,10 +444,7 @@ mod tests {
             .build_session("root")
             .expect("plugin session");
         let tools = Arc::clone(&provider);
-        let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
-            provider.tool_manifests(),
-            BTreeMap::new(),
-        ));
+        let tool_catalog = Arc::new(catalog_for(&provider));
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
@@ -558,10 +569,7 @@ mod tests {
         let plugins = PluginHost::empty()
             .build_session("root")
             .expect("plugin session");
-        let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
-            provider.tool_manifests(),
-            BTreeMap::new(),
-        ));
+        let tool_catalog = Arc::new(catalog_for(&provider));
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let target_process = host
             .process_registry
@@ -676,10 +684,7 @@ mod tests {
         let plugins = PluginHost::empty()
             .build_session("root")
             .expect("plugin session");
-        let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
-            provider.tool_manifests(),
-            BTreeMap::new(),
-        ));
+        let tool_catalog = Arc::new(catalog_for(&provider));
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let hidden_process = host
             .process_registry

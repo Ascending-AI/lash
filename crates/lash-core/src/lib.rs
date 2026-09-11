@@ -58,6 +58,7 @@ pub mod store_backend_support {
     use lash_sansio::SessionId;
 
     mod append_identity;
+    pub mod required_constraints;
     mod session_meta;
 
     pub use append_identity::decode_append_request_identity;
@@ -87,17 +88,18 @@ pub mod store_backend_support {
         batches: Vec<crate::runtime::QueuedWorkBatch>,
         abandon_restore_claim_id: Option<String>,
         abandon_restore_claim_token: Option<String>,
-    ) -> crate::runtime::QueuedWorkClaimData {
-        assert_eq!(
-            abandon_restore_claim_id.is_some(),
-            abandon_restore_claim_token.is_some(),
-            "queued-work predecessor claim identity and token must be paired"
-        );
-        crate::runtime::QueuedWorkClaimData {
+    ) -> Result<crate::runtime::QueuedWorkClaimData, crate::StoreError> {
+        if abandon_restore_claim_id.is_some() != abandon_restore_claim_token.is_some() {
+            return Err(crate::StoreError::QueuedWorkPredecessorClaimCorrupt {
+                claim_id_present: abandon_restore_claim_id.is_some(),
+                claim_token_present: abandon_restore_claim_token.is_some(),
+            });
+        }
+        Ok(crate::runtime::QueuedWorkClaimData {
             batches,
             abandon_restore_claim_id,
             abandon_restore_claim_token: abandon_restore_claim_token.map(String::into_boxed_str),
-        }
+        })
     }
 
     /// Return the interrupted predecessor identity an abandoning queued-work
@@ -585,6 +587,7 @@ pub mod facade_support {
     pub use lash_sansio::SchemaResolutionError;
     pub use lash_sansio::SchemaResolutionRequest;
     pub use lash_sansio::SessionStreamEvent;
+    pub use lash_sansio::ToolCatalogBuildError;
     pub use lash_sansio::TurnFinish;
     pub use lash_sansio::TurnOutcome;
     pub use lash_sansio::TurnStop;
@@ -687,8 +690,8 @@ pub mod sansio {
 // Re-exports
 pub use attachments::{
     AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
-    AttachmentStoreError, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
-    StoredBlobRef,
+    AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
+    EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
@@ -710,9 +713,9 @@ pub use lash_sansio::{
     PruneState, SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy,
     SessionAppendNode, TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
     ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
-    ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
-    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
+    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
+    ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
+    ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
     ToolIntentParentEndAction, ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest,
     ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause, TurnId,
     TurnOutputSource,
@@ -1219,22 +1222,23 @@ pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AppendRequestIdentity, AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent,
     AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence,
-    BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget,
-    CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-    GcReport, HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseClaimNonce,
-    LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
-    MaintenanceResult, MaintenanceStop, MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION,
-    OperationId, OrphanedTurnInputScope, QueuedWorkClaimOutcome, QueuedWorkClaimRefusal,
-    QueuedWorkStore, RetentionBound, RetentionReport, RuntimeCommit, RuntimePersistence,
-    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity, ScanCoverage,
-    SelectedQueuedWorkClaimOutcome, SemanticBoundaryOperation, SessionAdmission, SessionBinding,
-    SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
-    SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
-    SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreError,
-    StoreMaintenance, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+    AttachmentWritePermit, AttachmentWriteToken, BlobRef, CURRENT_SESSION_STATE_VERSION,
+    CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload,
+    DurableScan, DurableScanPage, DurableSurface, GcReport, HydratedCheckpointComponent,
+    HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
+    MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+    OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
+    QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore, RetentionBound,
+    RetentionReport, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
+    RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome,
+    SemanticBoundaryOperation, SessionAdmission, SessionBinding, SessionBlobReclaimReport,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseObservation,
+    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
+    SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance, StorePreflight,
+    StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnInputStore,
+    VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

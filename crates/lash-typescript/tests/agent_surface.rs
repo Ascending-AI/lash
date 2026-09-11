@@ -305,6 +305,114 @@ fn start_and_await_process_execute_through_shared_process_effects() {
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(6.0)));
 }
 
+enum ProcessAwaitFailureHost {
+    Typed,
+    MessageOnly,
+}
+
+impl ExecutionHost for ProcessAwaitFailureHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(process_handle("rejected-run"))),
+            AbilityOp::Await(handle) if handle == process_handle("rejected-run") => match self {
+                Self::Typed => Err(ExecutionHostError::from_tool_failure(
+                    &lash_sansio::ToolFailure {
+                        class: lash_sansio::ToolFailureClass::PermissionDenied,
+                        code: "approval_denied".to_string(),
+                        message: "approval was denied".to_string(),
+                        source: lash_sansio::ToolFailureSource::Policy,
+                        retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
+                        raw: None,
+                    },
+                )),
+                Self::MessageOnly => Err(ExecutionHostError::new("plain await failure")),
+            },
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new(
+                "unexpected process-await rejection ability",
+            )),
+        }
+    }
+}
+
+fn caught_process_await(host: &ProcessAwaitFailureHost, probe: &str) -> Value {
+    let source = format!(
+        r#"
+        const worker = defineProcess({{
+          name: "worker", signals: {{}},
+          run: async () => {{ return null; }}
+        }});
+        const handle = start(worker);
+        try {{
+          await handle;
+          finish("the process await did not fail");
+        }} catch (error) {{
+          finish({probe});
+        }}
+        "#
+    );
+    let environment = lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        lashlang::LashlangAbilities::default().with_processes(),
+    );
+    let linked = lash_typescript::link(&source, &environment).expect("process await should link");
+    match futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        host,
+    ))
+    .expect("the process-await failure is catchable")
+    {
+        ExecutionOutcome::Finished(value) => value,
+        other => panic!("expected caught process await to finish, got {other:?}"),
+    }
+}
+
+#[test]
+fn direct_process_handle_await_preserves_typed_tool_failure_fields() {
+    assert_eq!(
+        caught_process_await(
+            &ProcessAwaitFailureHost::Typed,
+            r#"{
+              caught: error instanceof Error,
+              name: error.name,
+              code: error.cause.code,
+              message: error.message,
+              class: error.cause.class,
+              source: error.cause.source,
+              retry: error.cause.retry.type,
+              attempts: error.cause.retry.attempts
+            }"#,
+        ),
+        lashlang::from_json(serde_json::json!({
+            "caught": true,
+            "name": "EffectError",
+            "code": "approval_denied",
+            "message": "approval was denied",
+            "class": "permission_denied",
+            "source": "policy",
+            "retry": "exhausted",
+            "attempts": 3
+        }))
+    );
+}
+
+#[test]
+fn direct_process_handle_await_keeps_message_only_error_shape() {
+    assert_eq!(
+        caught_process_await(
+            &ProcessAwaitFailureHost::MessageOnly,
+            "[error.message, error.cause.code, error.cause.details.kind, error.cause.details.operation]",
+        ),
+        lashlang::from_json(serde_json::json!([
+            "`?` unwrapped failed tool result: plain await failure",
+            "UnwrappedToolResultFailed",
+            "effect",
+            "await"
+        ]))
+    );
+}
+
 #[derive(Default)]
 struct ProcessHandleIdInspectionHost {
     status_checked_process_id: std::sync::Mutex<Option<String>>,

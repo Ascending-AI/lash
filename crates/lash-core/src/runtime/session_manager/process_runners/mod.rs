@@ -17,7 +17,7 @@ impl<'run> ProcessRunContext<'run> {
     ) -> ProcessRunContextBuilder<'_, 'run> {
         ProcessRunContextBuilder {
             services,
-            tool_catalog: None,
+            tool_surface: None,
             scoped_effect_controller: None,
             causal_invocation: None,
             dispatch_parent_invocation: None,
@@ -38,7 +38,7 @@ impl<'run> ProcessRunContext<'run> {
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContextBuilder<'a, 'run> {
     services: &'a RuntimeSessionServices,
-    tool_catalog: Option<Arc<crate::ToolCatalog>>,
+    tool_surface: Option<crate::plugin::ResolvedToolSurface>,
     scoped_effect_controller: Option<crate::ScopedEffectController<'run>>,
     causal_invocation: Option<crate::RuntimeInvocation>,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
@@ -54,11 +54,11 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallR
 }
 
 impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
-    pub(in crate::runtime::session_manager::process_runners) fn tool_catalog(
+    pub(in crate::runtime::session_manager::process_runners) fn tool_surface(
         mut self,
-        tool_catalog: Arc<crate::ToolCatalog>,
+        tool_surface: crate::plugin::ResolvedToolSurface,
     ) -> Self {
-        self.tool_catalog = Some(tool_catalog);
+        self.tool_surface = Some(tool_surface);
         self
     }
 
@@ -89,8 +89,8 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
     pub(in crate::runtime::session_manager::process_runners) fn build(
         self,
     ) -> Result<ProcessRunContext<'run>, crate::PluginError> {
-        let tool_catalog = self.tool_catalog.ok_or_else(|| {
-            crate::PluginError::Session("process run context requires a tool catalog".to_string())
+        let tool_surface = self.tool_surface.ok_or_else(|| {
+            crate::PluginError::Session("process run context requires a tool surface".to_string())
         })?;
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<crate::SessionStreamEvent>(64);
         let event_drain =
@@ -113,9 +113,9 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         let execution_env_spec = state.process_execution_env_spec(&self.services.current.policy);
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
             plugins: Arc::clone(&self.services.current.plugins),
-            tools: self.services.current.plugins.tools(),
-            tool_registry: Some(self.services.current.plugins.tool_registry()),
-            tool_catalog,
+            tools: Arc::clone(&tool_surface.registry) as Arc<dyn crate::ToolProvider>,
+            tool_registry: Some(Arc::clone(&tool_surface.registry)),
+            tool_catalog: tool_surface.catalog,
             sessions: services.state_service(),
             session_lifecycle: services.lifecycle_service(),
             session_graph: services.graph_service(),

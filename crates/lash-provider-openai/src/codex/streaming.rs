@@ -36,7 +36,7 @@ use crate::responses_shared as shared;
 use super::continuation::{
     CodexContinuation, CodexWebsocketContextPlan, CodexWebsocketRequestPlan,
 };
-use super::credential::{CodexCredential, credential_transport_error};
+use super::credential::CodexCredential;
 use super::session::{CodexAttemptProgress, CodexWebSocketAttemptError, CodexWebsocketLease};
 use super::{CodexProvider, CodexTransport, PROVIDER};
 
@@ -330,6 +330,7 @@ impl CodexProvider {
             };
             if !events_seen && let Some(tx) = &stream_events {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    response_started: true,
                     request_body: Some(request_body.clone()),
                     http_summary: Some(self.websocket_http_summary(&diagnostics)),
                     generation_disposition: Some(Self::generation_disposition(
@@ -659,7 +660,7 @@ impl Provider for CodexProvider {
                 })
                 .await
                 .map_err(|error| match error {
-                    CredentialExecuteError::Credential(error) => credential_transport_error(error),
+                    CredentialExecuteError::Credential(error) => error.into_transport_error(),
                     CredentialExecuteError::Call(error) => error,
                     // Unknown failures cannot establish that replay is safe.
                     _ => LlmTransportError::new(error.to_string())
@@ -828,6 +829,7 @@ impl Provider for CodexProvider {
             ResponseMetadataCapture::from_response(&self.options, &response_headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                response_started: true,
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
                 execution_evidence: provider_request_id.clone().map(|provider_request_id| {

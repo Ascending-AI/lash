@@ -279,7 +279,7 @@ pub(super) fn claim_queued_work_rows_sqlite(
             selected_batches,
             candidates[0].prior_claim_id.clone(),
             candidates[0].prior_claim_token.clone(),
-        ),
+        )?,
     })))
 }
 

@@ -9,6 +9,7 @@ use super::*;
 
 mod directives;
 mod tools;
+pub(crate) use tools::ResolvedToolSurface;
 
 async fn collect_owned_async<C, O, H, F>(
     hooks: &[RegisteredHook<H>],

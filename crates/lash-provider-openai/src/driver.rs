@@ -466,6 +466,7 @@ pub(crate) async fn complete(
         && let Some(tx) = &stream_events
     {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+            response_started: true,
             request_body: Some(request_body_text(request_body.clone(), blocking).await?),
             http_summary: Some(http_summary.clone()),
             execution_evidence: provider_request_id.clone().map(|provider_request_id| {

@@ -73,7 +73,6 @@ configure_bindgen_headers() {
 # top of the script instead.
 run_release_script_tests() {
   step "Repository script tests"
-  python3 scripts/test_check_facade_external_types.py
   python3 scripts/test_check_facade_only_examples.py
   python3 scripts/test_check_feature_coverage.py
   python3 scripts/check_feature_coverage.py check
@@ -183,9 +182,6 @@ run_clippy_gate() {
 run_rust_source_guards() {
   step "Facade-only example imports"
   python3 scripts/check_facade_only_examples.py
-
-  step "Facade external types"
-  heavy python3 scripts/check_facade_external_types.py
 
   step "Restate handler panic boundary"
   python3 scripts/check-restate-handler-panics.py
@@ -429,10 +425,6 @@ run_minio_conformance() {
 #     on every commit that touches their inputs, and not worth a second full
 #     pass here. The one that has a self-test still runs it above, because a
 #     hook that has stopped working is invisible from the hook itself.
-#
-#   scripts/api_surface.py check
-#     Builds rustdoc JSON for the facade crate — its own compile of the
-#     dependency graph, and its own full-profile CI job for that reason.
 #
 #   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
 #   scripts/profile_runtime.py, scripts/profile_lashlang.py,

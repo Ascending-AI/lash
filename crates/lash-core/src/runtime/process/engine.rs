@@ -307,6 +307,7 @@ pub struct ProcessEngineRunContext<'run> {
     processes: ProcessEngineProcessContext,
     session_id: SessionId,
     plugins: Arc<crate::PluginSession>,
+    tool_catalog: Arc<crate::ToolCatalog>,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
@@ -326,6 +327,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         process_work: crate::ProcessWorkWiring,
         session_id: SessionId,
         plugins: Arc<crate::PluginSession>,
+        tool_catalog: Arc<crate::ToolCatalog>,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
         queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
@@ -358,6 +360,7 @@ impl<'run> ProcessEngineRunContext<'run> {
             processes,
             session_id,
             plugins,
+            tool_catalog,
             store,
             session_store_factory,
             queued_work,
@@ -456,14 +459,18 @@ impl<'run> ProcessEngineRunContext<'run> {
         self.turn_phase_probe.clone()
     }
 
-    /// Exposes resolved tool catalog to protocol and process-engine implementors while running a
-    /// durable process.
+    /// Exposes the tool catalog captured with this process execution's resident routes.
+    ///
+    /// Process-engine implementors must pass this `Arc` (or an `Arc::clone` of it) to
+    /// [`Self::into_runtime_context`].
     pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
-        self.plugins.resolved_tool_catalog(&self.session_id)
+        Ok(Arc::clone(&self.tool_catalog))
     }
 
-    /// Extracts the runtime context outcome for protocol and process-engine implementors while
-    /// running a durable process.
+    /// Extracts the runtime context using the catalog captured for this process execution.
+    ///
+    /// `tool_catalog` must be the `Arc` returned by [`Self::resolved_tool_catalog`]; this keeps
+    /// definitions and execution routes on the same immutable resident snapshot.
     pub fn into_runtime_context(
         mut self,
         tool_catalog: Arc<crate::ToolCatalog>,

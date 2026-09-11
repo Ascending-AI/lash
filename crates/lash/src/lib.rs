@@ -323,8 +323,9 @@ pub mod persistence {
     };
     pub use lash_core::{
         AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,
-        AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStorePersistence,
-        AttachmentWriteFence, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,
+        AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
+        AttachmentStorePersistence, AttachmentWriteFence, AttachmentWritePermit,
+        AttachmentWriteToken, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,
         StoredBlobRef, attachments::AttachmentReclamationFailure,
         facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
         facade_support::InMemoryAttachmentStore, facade_support::InMemoryProcessExecutionEnvStore,

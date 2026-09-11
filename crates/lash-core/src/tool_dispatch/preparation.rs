@@ -74,7 +74,7 @@ pub(crate) async fn prepare_tool_call_with_context(
     tool_call_id: Option<String>,
 ) -> ToolPreparationOutcome {
     let tool_name = pending.tool_name.clone();
-    let Some(manifest) = resolve_callable_manifest(context, &tool_name) else {
+    let Some(definition) = resolve_callable_definition(context, &tool_name) else {
         return completed_preparation(outcome(
             tool_name,
             pending.args,
@@ -86,27 +86,25 @@ pub(crate) async fn prepare_tool_call_with_context(
             0,
         ));
     };
-    let Some(contract) = context.tools.resolve_contract(&tool_name) else {
-        return completed_preparation(outcome(
-            tool_name,
-            pending.args,
-            runtime_failure(
-                ToolFailureClass::Unavailable,
-                "tool_contract_unavailable",
-                "Tool contract is unavailable in this session",
-            ),
-            0,
-        ));
-    };
     prepare_authorized_tool_call_with_context(
         context,
-        manifest,
-        contract,
+        definition.manifest.clone(),
+        Arc::clone(&definition.contract),
         pending,
         tool_call_id,
         None,
     )
     .await
+}
+
+fn resolve_callable_definition<'a>(
+    context: &'a ToolDispatchContext<'_>,
+    tool_name: &str,
+) -> Option<&'a crate::ToolCatalogEntry> {
+    context.tool_catalog.tools.iter().find(|tool| {
+        tool.manifest.name == tool_name
+            && tool.manifest.activation != crate::ToolActivation::Internal
+    })
 }
 
 pub(crate) async fn prepare_granted_tool_call_with_context(
@@ -230,13 +228,7 @@ pub(crate) fn resolve_callable_manifest(
     tool_name: &str,
 ) -> Option<ToolManifest> {
     // Tool Catalog membership is callability: a catalog member is callable.
-    if let Some(entry) = context.tool_catalog.tools.iter().find(|tool| {
-        tool.manifest.name == tool_name
-            && tool.manifest.activation != crate::ToolActivation::Internal
-    }) {
-        return Some(entry.manifest.clone());
-    }
-    None
+    resolve_callable_definition(context, tool_name).map(|entry| entry.manifest.clone())
 }
 
 pub(crate) fn resolve_callable_manifest_by_id(

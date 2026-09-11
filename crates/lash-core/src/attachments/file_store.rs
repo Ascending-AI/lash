@@ -164,14 +164,19 @@ impl AttachmentStore for FileAttachmentStore {
                 })?;
                 let file_name = entry.file_name();
                 let name = file_name.to_str().ok_or_else(|| {
-                    AttachmentStoreError::Backend("invalid attachment filename encoding".into())
+                    AttachmentStoreError::Contract(
+                        "stored attachment filename is not valid UTF-8".into(),
+                    )
                 })?;
                 // Skip any in-flight staging files.
                 if name.contains(".staging.") {
                     continue;
                 }
-                let id = AttachmentId::parse(name)
-                    .map_err(|err| AttachmentStoreError::Backend(err.to_string()))?;
+                let id = AttachmentId::parse(name).map_err(|err| {
+                    AttachmentStoreError::Contract(format!(
+                        "stored attachment file name `{name}` is not a valid id: {err}"
+                    ))
+                })?;
                 let last_modified_epoch_ms = entry
                     .metadata()
                     .ok()
@@ -380,7 +385,7 @@ mod tests {
             .list()
             .await
             .expect_err("malformed id must fail listing");
-        assert!(matches!(error, AttachmentStoreError::Backend(_)));
+        assert!(matches!(error, AttachmentStoreError::Contract(_)));
     }
 
     // A stale staging file left by a crashed prior write must not block a

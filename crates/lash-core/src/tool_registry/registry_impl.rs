@@ -56,62 +56,103 @@ impl ToolRegistry {
 
     pub(crate) fn empty() -> Self {
         Self {
-            sources: Arc::new(RwLock::new(BTreeMap::new())),
-            state: Arc::new(RwLock::new(ToolRegistryState {
-                generation: 0,
-                surface: ToolSurface::default(),
-                next_live_source_id: 0,
+            inner: Arc::new(RwLock::new(ToolRegistryInner {
+                source_revision: 0,
+                state_revision: 0,
+                sources: BTreeMap::new(),
+                granted_sources: None,
+                state: ToolRegistryState {
+                    generation: 0,
+                    surface: ToolSurface::default(),
+                    next_live_source_id: 0,
+                },
             })),
         }
     }
 
     pub(crate) fn generation(&self) -> u64 {
-        self.state.read_recover().generation
+        self.inner.read_recover().state.generation
     }
 
     pub(crate) fn is_orchestrating_tool(&self, tool_id: &ToolId) -> bool {
-        self.state
+        self.inner
             .read_recover()
+            .state
             .surface
             .get(tool_id)
             .is_some_and(|entry| entry.registration_kind() == ToolRegistrationKind::Orchestrating)
     }
 
     pub(crate) fn export_state(&self) -> ToolState {
-        let state = self.state.read_recover();
-        ToolState::new(state.generation, export_tool_state_entries(&state.surface))
+        let authority = self.inner.read_recover();
+        ToolState::new(
+            authority.state.generation,
+            export_tool_state_entries(&authority.state.surface),
+        )
     }
 
     pub(crate) fn apply_state(&self, next: ToolState) -> Result<u64, ReconfigureError> {
-        let current_generation = self.generation();
-        if next.generation != current_generation {
-            return Err(ReconfigureError::GenerationMismatch {
-                expected: next.generation,
-                actual: current_generation,
-            });
-        }
+        loop {
+            let (source_revision, state_revision, current_generation, sources) = {
+                let authority = self.inner.read_recover();
+                (
+                    authority.source_revision,
+                    authority.state_revision,
+                    authority.state.generation,
+                    authority.sources.clone(),
+                )
+            };
+            if next.generation != current_generation {
+                return Err(ReconfigureError::GenerationMismatch {
+                    expected: next.generation,
+                    actual: current_generation,
+                });
+            }
 
-        let rebound = {
-            let sources = self.sources.read_recover();
-            reconcile_tool_state_entries(
+            let rebound = match reconcile_tool_state_entries(
                 next.entries(),
                 &sources,
                 ReconcileMode::SnapshotSurface,
                 None,
-            )?
-        };
+            ) {
+                Ok(rebound) => rebound,
+                Err(error) => {
+                    let inner = self.inner.read_recover();
+                    if inner.source_revision != source_revision
+                        || inner.state_revision != state_revision
+                    {
+                        continue;
+                    }
+                    if inner.state.generation != next.generation {
+                        return Err(ReconfigureError::GenerationMismatch {
+                            expected: next.generation,
+                            actual: inner.state.generation,
+                        });
+                    }
+                    return Err(error);
+                }
+            };
 
-        let mut state = self.state.write_recover();
-        if state.generation != next.generation {
-            return Err(ReconfigureError::GenerationMismatch {
-                expected: next.generation,
-                actual: state.generation,
-            });
+            let mut authority = self.inner.write_recover();
+            if authority.source_revision != source_revision
+                || authority.state_revision != state_revision
+            {
+                continue;
+            }
+            if authority.state.generation != next.generation {
+                return Err(ReconfigureError::GenerationMismatch {
+                    expected: next.generation,
+                    actual: authority.state.generation,
+                });
+            }
+            let generation = reconciled_generation(authority.state.generation, true)?;
+            let next_state_revision = checked_state_revision(authority.state_revision)?;
+            authority.state.surface = rebound.surface;
+            authority.state.surface.debug_assert_invariant();
+            authority.state.generation = generation;
+            authority.state_revision = next_state_revision;
+            return Ok(generation);
         }
-        state.surface = rebound.surface;
-        state.surface.debug_assert_invariant();
-        state.generation += 1;
-        Ok(state.generation)
     }
 
     /// Restore a persisted [`ToolState`] snapshot onto a freshly-built registry.
@@ -142,24 +183,53 @@ impl ToolRegistry {
         &self,
         snapshot: ToolState,
     ) -> Result<ToolRestoreReport, ReconfigureError> {
-        let rebound = {
-            let sources = self.sources.read_recover();
-            reconcile_tool_state_entries(
+        loop {
+            let (source_revision, state_revision, state_generation, sources) = {
+                let authority = self.inner.read_recover();
+                (
+                    authority.source_revision,
+                    authority.state_revision,
+                    authority.state.generation,
+                    authority.sources.clone(),
+                )
+            };
+            let rebound = match reconcile_tool_state_entries(
                 snapshot.entries(),
                 &sources,
                 ReconcileMode::LiveSurface,
                 None,
-            )?
-        };
+            ) {
+                Ok(rebound) => rebound,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        state_generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
 
-        let mut state = self.state.write_recover();
-        state.surface = rebound.surface;
-        state.surface.debug_assert_invariant();
-        state.generation = reconciled_generation(snapshot.generation(), rebound.changed)?;
-        Ok(ToolRestoreReport {
-            generation: state.generation,
-            orphaned: rebound.orphaned,
-        })
+            let mut authority = self.inner.write_recover();
+            if authority.source_revision != source_revision
+                || authority.state_revision != state_revision
+                || authority.state.generation != state_generation
+            {
+                continue;
+            }
+            let generation = reconciled_generation(snapshot.generation(), rebound.changed)?;
+            let next_state_revision = checked_state_revision(authority.state_revision)?;
+            authority.state.surface = rebound.surface;
+            authority.state.surface.debug_assert_invariant();
+            authority.state.generation = generation;
+            authority.state_revision = next_state_revision;
+            return Ok(ToolRestoreReport {
+                generation,
+                orphaned: rebound.orphaned,
+            });
+        }
     }
 
     pub(crate) fn compose_session_catalog(
@@ -168,10 +238,9 @@ impl ToolRegistry {
         context_providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
         let registry = if include_base_tools {
-            self.refresh_sources()?;
-            self.pin_current_surface()
+            self.refresh_and_pin_sources()?
         } else {
-            Self::empty()
+            Self::empty().refresh_and_pin_sources()?
         };
         registry.upsert_overlay_source(Arc::new(ToolProviderSource::new(
             "context",
@@ -187,8 +256,7 @@ impl ToolRegistry {
         include_base_tools: bool,
         context_providers: Vec<Arc<dyn ToolProvider>>,
     ) -> Result<Self, ReconfigureError> {
-        let registry = self.compose_session_catalog(include_base_tools, context_providers)?;
-        Ok(registry.pin_current_surface())
+        self.compose_session_catalog(include_base_tools, context_providers)
     }
 
     pub(crate) fn upsert_source(
@@ -200,33 +268,58 @@ impl ToolRegistry {
 
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
         let source_key = ToolSourceKey::Leaf(source_id.to_string());
-        {
-            let mut sources = self.sources.write_recover();
-            if sources.remove(&source_key).is_none() {
-                return Err(ReconfigureError::UnknownSource(source_id.to_string()));
-            }
+        let mut authority = self.inner.write_recover();
+        if !authority.sources.contains_key(&source_key) {
+            return Err(ReconfigureError::UnknownSource(source_id.to_string()));
         }
-        let mut state = self.state.write_recover();
-        let removed_ids = state
-            .surface
+        let source_revision = checked_source_revision(authority.source_revision)?;
+        let mut surface = authority.state.surface.clone();
+        let previous = export_tool_state_entries(&surface);
+        let removed_ids = surface
             .by_id
             .iter()
             .filter(|(_, entry)| entry.binding.source_key() == Some(&source_key))
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
         for id in removed_ids {
-            state.surface.remove(&id);
+            surface.remove(&id);
         }
-        state.surface.debug_assert_invariant();
-        state.generation += 1;
-        Ok(state.generation)
+        surface.debug_assert_invariant();
+        let public_changed = export_tool_state_entries(&surface) != previous;
+        let private_changed = surface != authority.state.surface;
+        debug_assert!(!public_changed || private_changed);
+        let generation = reconciled_generation(authority.state.generation, public_changed)?;
+        let state_revision = private_changed
+            .then(|| checked_state_revision(authority.state_revision))
+            .transpose()?;
+
+        let retired = authority.sources.remove(&source_key);
+        let retired_granted = authority
+            .granted_sources
+            .as_mut()
+            .and_then(|sources| sources.remove(&source_key));
+        authority.source_revision = source_revision;
+        if let Some(state_revision) = state_revision {
+            authority.state.surface = surface;
+            authority.state.generation = generation;
+            authority.state_revision = state_revision;
+        }
+        drop(authority);
+        drop(retired);
+        drop(retired_granted);
+        Ok(generation)
     }
 
     fn upsert_overlay_source(
         &self,
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
+        let live_source = Arc::clone(&source);
+        let source = source
+            .capture_execution_source()?
+            .freeze(&BTreeSet::new())?;
         let source_key = source.source_key();
+        debug_assert_eq!(live_source.source_key(), source_key);
         let manifests = source
             .advertised_tools()
             .into_iter()
@@ -234,38 +327,89 @@ impl ToolRegistry {
             .collect::<Vec<_>>();
         validate_unique_manifests(&manifests)?;
 
-        let mut next_state = self.state.read_recover().clone();
-        let curated = next_state
-            .surface
-            .by_id
-            .iter()
-            .map(|(id, entry)| (id.clone(), entry.member))
-            .collect::<BTreeMap<_, _>>();
-        let previous = export_tool_state_entries(&next_state.surface);
-        for manifest in manifests {
-            let id = manifest.id.clone();
-            insert_advertised_entry(
-                &mut next_state.surface,
-                &source_key,
-                source.registration_kind(),
-                manifest,
-                Some(&source_key),
-            )?;
-            if let Some(member) = curated.get(&id)
-                && let Some(entry) = next_state.surface.get_mut(&id)
-            {
-                entry.member = *member;
-            }
-        }
-        next_state.surface.debug_assert_invariant();
-        if export_tool_state_entries(&next_state.surface) != previous {
-            next_state.generation = reconciled_generation(next_state.generation, true)?;
-        }
+        loop {
+            let (source_revision, state_revision, mut next_state) = {
+                let authority = self.inner.read_recover();
+                (
+                    authority.source_revision,
+                    authority.state_revision,
+                    authority.state.clone(),
+                )
+            };
+            let rebuilt = (|| {
+                let curated = next_state
+                    .surface
+                    .by_id
+                    .iter()
+                    .map(|(id, entry)| (id.clone(), entry.member))
+                    .collect::<BTreeMap<_, _>>();
+                let previous = export_tool_state_entries(&next_state.surface);
+                for manifest in manifests.iter().cloned() {
+                    let id = manifest.id.clone();
+                    insert_advertised_entry(
+                        &mut next_state.surface,
+                        &source_key,
+                        source.registration_kind(),
+                        manifest,
+                        Some(&source_key),
+                    )?;
+                    if let Some(member) = curated.get(&id)
+                        && let Some(entry) = next_state.surface.get_mut(&id)
+                    {
+                        entry.member = *member;
+                    }
+                }
+                next_state.surface.debug_assert_invariant();
+                Ok::<_, ReconfigureError>(
+                    export_tool_state_entries(&next_state.surface) != previous,
+                )
+            })();
+            let public_changed = match rebuilt {
+                Ok(changed) => changed,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        next_state.generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
 
-        self.sources.write_recover().insert(source_key, source);
-        let generation = next_state.generation;
-        *self.state.write_recover() = next_state;
-        Ok(generation)
+            let mut authority = self.inner.write_recover();
+            if authority.source_revision != source_revision
+                || authority.state_revision != state_revision
+                || authority.state.generation != next_state.generation
+            {
+                continue;
+            }
+            let next_source_revision = checked_source_revision(authority.source_revision)?;
+            let private_changed = authority.state.surface != next_state.surface;
+            debug_assert!(!public_changed || private_changed);
+            let generation = reconciled_generation(authority.state.generation, public_changed)?;
+            let next_state_revision = private_changed
+                .then(|| checked_state_revision(authority.state_revision))
+                .transpose()?;
+            let retired = authority
+                .sources
+                .insert(source_key.clone(), Arc::clone(&source));
+            let retired_granted = authority
+                .granted_sources
+                .as_mut()
+                .and_then(|sources| sources.insert(source_key.clone(), Arc::clone(&live_source)));
+            authority.source_revision = next_source_revision;
+            if let Some(next_state_revision) = next_state_revision {
+                authority.state.surface = next_state.surface;
+                authority.state.generation = generation;
+                authority.state_revision = next_state_revision;
+            }
+            drop(authority);
+            drop(retired);
+            drop(retired_granted);
+            return Ok(generation);
+        }
     }
 
     fn reconcile_source(
@@ -273,85 +417,219 @@ impl ToolRegistry {
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
         let source_key = source.source_key();
-        let mut sources = self
-            .sources
-            .read_recover()
-            .iter()
-            .map(|(id, source)| (id.clone(), Arc::clone(source)))
-            .collect::<BTreeMap<_, _>>();
-        if matches!(source_key, ToolSourceKey::Orchestrating(_))
-            && sources.contains_key(&source_key)
-        {
-            return Err(ReconfigureError::Validation(format!(
-                "duplicate orchestrating tool source `{source_key}`"
-            )));
-        }
-        sources.insert(source_key.clone(), Arc::clone(&source));
-        let snapshot = self.export_state();
-        let reconciled = reconcile_tool_state_entries(
-            snapshot.entries(),
-            &sources,
-            ReconcileMode::LiveSurface,
-            None,
-        )?;
+        loop {
+            let (source_revision, state_revision, mut sources, snapshot) = {
+                let authority = self.inner.read_recover();
+                (
+                    authority.source_revision,
+                    authority.state_revision,
+                    authority.sources.clone(),
+                    ToolState::new(
+                        authority.state.generation,
+                        export_tool_state_entries(&authority.state.surface),
+                    ),
+                )
+            };
+            if matches!(source_key, ToolSourceKey::Orchestrating(_))
+                && sources.contains_key(&source_key)
+            {
+                if self.reconciliation_inputs_changed(
+                    source_revision,
+                    state_revision,
+                    snapshot.generation,
+                ) {
+                    continue;
+                }
+                return Err(ReconfigureError::Validation(format!(
+                    "duplicate orchestrating tool source `{source_key}`"
+                )));
+            }
+            sources.insert(source_key.clone(), Arc::clone(&source));
+            let reconciled = match reconcile_tool_state_entries(
+                snapshot.entries(),
+                &sources,
+                ReconcileMode::LiveSurface,
+                None,
+            ) {
+                Ok(reconciled) => reconciled,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        snapshot.generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
 
-        self.sources.write_recover().insert(source_key, source);
-        let mut state = self.state.write_recover();
-        state.surface = reconciled.surface;
-        state.surface.debug_assert_invariant();
-        if reconciled.changed {
-            state.generation = reconciled_generation(state.generation, true)?;
+            let mut authority = self.inner.write_recover();
+            if authority.source_revision != source_revision
+                || authority.state_revision != state_revision
+                || authority.state.generation != snapshot.generation
+            {
+                continue;
+            }
+            let next_source_revision = checked_source_revision(authority.source_revision)?;
+            let private_changed = authority.state.surface != reconciled.surface;
+            debug_assert!(!reconciled.changed || private_changed);
+            let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
+            let next_state_revision = private_changed
+                .then(|| checked_state_revision(authority.state_revision))
+                .transpose()?;
+            let retired = authority
+                .sources
+                .insert(source_key.clone(), Arc::clone(&source));
+            authority.source_revision = next_source_revision;
+            if let Some(next_state_revision) = next_state_revision {
+                authority.state.surface = reconciled.surface;
+                authority.state.surface.debug_assert_invariant();
+                authority.state.generation = generation;
+                authority.state_revision = next_state_revision;
+            }
+            drop(authority);
+            drop(retired);
+            return Ok(generation);
         }
-        Ok(state.generation)
     }
 
     pub(crate) fn refresh_sources(&self) -> Result<u64, ReconfigureError> {
-        // This is the explicit admission seam for live surface changes. Source
-        // advertisements are enumerated and reconciled here; dispatch lookup
-        // only reads the admitted surface.
-        let sources = self
-            .sources
-            .read_recover()
-            .iter()
-            .map(|(id, source)| (id.clone(), Arc::clone(source)))
-            .collect::<BTreeMap<_, _>>();
-        let snapshot = self.export_state();
-        let reconciled = reconcile_tool_state_entries(
-            snapshot.entries(),
-            &sources,
-            ReconcileMode::LiveSurface,
-            None,
-        )?;
-        let mut state = self.state.write_recover();
-        state.surface = reconciled.surface;
-        state.surface.debug_assert_invariant();
-        if reconciled.changed {
-            state.generation = reconciled_generation(state.generation, true)?;
-        }
-        Ok(state.generation)
+        Ok(self.refresh_and_pin_sources()?.generation())
     }
 
-    fn pin_current_surface(&self) -> Self {
-        let sources = self
-            .sources
-            .read_recover()
-            .iter()
-            .map(|(key, source)| (key.clone(), Arc::clone(source)))
-            .collect();
-        let state = self.state.read_recover().clone();
-        Self {
-            sources: Arc::new(RwLock::new(sources)),
-            state: Arc::new(RwLock::new(state)),
+    fn refresh_and_pin_sources(&self) -> Result<Self, ReconfigureError> {
+        // This is the explicit admission seam for live surface changes. Source
+        // advertisements and their resident routes are captured together;
+        // dispatch lookup on the returned registry reads only that snapshot.
+        loop {
+            let (source_revision, state_revision, live_sources, snapshot) = {
+                let authority = self.inner.read_recover();
+                (
+                    authority.source_revision,
+                    authority.state_revision,
+                    authority
+                        .granted_sources
+                        .as_ref()
+                        .unwrap_or(&authority.sources)
+                        .clone(),
+                    ToolState::new(
+                        authority.state.generation,
+                        export_tool_state_entries(&authority.state.surface),
+                    ),
+                )
+            };
+            let captures = live_sources
+                .iter()
+                .map(|(key, source)| Ok((key.clone(), source.capture_execution_source()?)))
+                .collect::<Result<BTreeMap<_, _>, ReconfigureError>>();
+            let captures = match captures {
+                Ok(captures) => captures,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        snapshot.generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+            let advertised_ids = captures
+                .values()
+                .flat_map(|capture| capture.advertised_tools())
+                .map(|manifest| manifest.id)
+                .collect::<BTreeSet<_>>();
+            let unresolved_known_ids = snapshot
+                .entries()
+                .keys()
+                .filter(|id| !advertised_ids.contains(*id))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let sources = captures
+                .into_iter()
+                .map(|(key, capture)| Ok((key, capture.freeze(&unresolved_known_ids)?)))
+                .collect::<Result<BTreeMap<_, _>, ReconfigureError>>();
+            let sources = match sources {
+                Ok(sources) => sources,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        snapshot.generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+            let reconciled = match reconcile_tool_state_entries(
+                snapshot.entries(),
+                &sources,
+                ReconcileMode::LiveSurface,
+                None,
+            ) {
+                Ok(reconciled) => reconciled,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        snapshot.generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
+
+            let mut authority = self.inner.write_recover();
+            if authority.source_revision != source_revision
+                || authority.state_revision != state_revision
+                || authority.state.generation != snapshot.generation
+            {
+                continue;
+            }
+            let private_changed = authority.state.surface != reconciled.surface;
+            debug_assert!(!reconciled.changed || private_changed);
+            let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
+            if private_changed {
+                let next_state_revision = checked_state_revision(authority.state_revision)?;
+                authority.state.surface = reconciled.surface;
+                authority.state.surface.debug_assert_invariant();
+                authority.state.generation = generation;
+                authority.state_revision = next_state_revision;
+            }
+            let pinned_source_revision = authority.source_revision;
+            let pinned_state_revision = authority.state_revision;
+            let pinned_state = authority.state.clone();
+            drop(authority);
+            return Ok(Self {
+                inner: Arc::new(RwLock::new(ToolRegistryInner {
+                    source_revision: pinned_source_revision,
+                    state_revision: pinned_state_revision,
+                    sources,
+                    granted_sources: Some(live_sources),
+                    state: pinned_state,
+                })),
+            });
         }
+    }
+
+    fn reconciliation_inputs_changed(
+        &self,
+        source_revision: u64,
+        state_revision: u64,
+        generation: u64,
+    ) -> bool {
+        let inner = self.inner.read_recover();
+        inner.source_revision != source_revision
+            || inner.state_revision != state_revision
+            || inner.state.generation != generation
     }
 
     pub(crate) fn fork_with_state(&self, snapshot: ToolState) -> Result<Self, ReconfigureError> {
-        let sources = self
-            .sources
-            .read_recover()
-            .iter()
-            .map(|(k, v)| (k.clone(), Arc::clone(v)))
-            .collect::<BTreeMap<_, _>>();
+        let sources = self.inner.read_recover().sources.clone();
         let rebound = reconcile_tool_state_entries(
             snapshot.entries(),
             &sources,
@@ -360,14 +638,31 @@ impl ToolRegistry {
         )?;
         let generation = reconciled_generation(snapshot.generation.max(1), rebound.changed)?;
         Ok(Self {
-            sources: Arc::new(RwLock::new(sources)),
-            state: Arc::new(RwLock::new(ToolRegistryState {
-                generation,
-                surface: rebound.surface,
-                next_live_source_id: 0,
+            inner: Arc::new(RwLock::new(ToolRegistryInner {
+                source_revision: 0,
+                state_revision: 0,
+                sources,
+                granted_sources: None,
+                state: ToolRegistryState {
+                    generation,
+                    surface: rebound.surface,
+                    next_live_source_id: 0,
+                },
             })),
         })
     }
+}
+
+fn checked_source_revision(source_revision: u64) -> Result<u64, ReconfigureError> {
+    source_revision.checked_add(1).ok_or_else(|| {
+        ReconfigureError::Validation("tool registry source revision overflow".to_string())
+    })
+}
+
+pub(super) fn checked_state_revision(state_revision: u64) -> Result<u64, ReconfigureError> {
+    state_revision.checked_add(1).ok_or_else(|| {
+        ReconfigureError::Validation("tool registry state revision overflow".to_string())
+    })
 }
 
 fn reconciled_generation(generation: u64, changed: bool) -> Result<u64, ReconfigureError> {
@@ -378,3 +673,7 @@ fn reconciled_generation(generation: u64, changed: bool) -> Result<u64, Reconfig
         ReconfigureError::Validation("tool registry generation overflow".to_string())
     })
 }
+
+#[cfg(test)]
+#[path = "admission_tests.rs"]
+mod admission_tests;

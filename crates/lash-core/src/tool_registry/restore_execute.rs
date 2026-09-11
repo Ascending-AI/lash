@@ -1,17 +1,56 @@
 use super::*;
 
 impl ToolRegistry {
+    /// Verify that every effective resident definition retains an executable
+    /// route in this pinned registry. This inspects only the admitted surface
+    /// and its captured source arcs; it never prepares or executes a call.
+    pub(crate) fn validate_resident_catalog_routes(
+        &self,
+        catalog: &crate::ToolCatalog,
+    ) -> Result<(), crate::PluginError> {
+        for definition in &catalog.tools {
+            let tool_id = &definition.manifest.id;
+            let name = &definition.manifest.name;
+            let unavailable = |reason: String| crate::PluginError::ResidentToolRouteUnavailable {
+                tool_id: tool_id.clone(),
+                name: name.clone(),
+                reason,
+            };
+            let authority = self.inner.read_recover();
+            let source_key = {
+                let entry = authority.state.surface.get(tool_id).ok_or_else(|| {
+                    unavailable("the id is absent from the pinned surface".into())
+                })?;
+                if !entry.is_member() {
+                    return Err(unavailable(
+                        "the pinned surface does not admit the id as a member".into(),
+                    ));
+                }
+                entry.binding.source_key().cloned().ok_or_else(|| {
+                    unavailable("the pinned entry is not bound to a live source".into())
+                })?
+            };
+            if !authority.sources.contains_key(&source_key) {
+                return Err(unavailable(format!(
+                    "bound source `{source_key}` is absent from the pinned registry"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn resolve_catalog_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        let manifest = self.resolve_manifest(name)?;
-        let is_member = self
-            .state
-            .read_recover()
-            .surface
-            .get(&manifest.id)
-            .is_some_and(ToolRegistryEntry::is_member);
-        is_member
-            .then(|| self.resolve_contract_by_id(&manifest.id))
-            .flatten()
+        let (manifest, source) = {
+            let authority = self.inner.read_recover();
+            let (_, entry) = authority.state.surface.get_by_name(name)?;
+            if !entry.is_member() {
+                return None;
+            }
+            let source_key = entry.binding.source_key()?;
+            let source = Arc::clone(authority.sources.get(source_key)?);
+            (entry.view_manifest(), source)
+        };
+        source.resolve_contract_by_id(&manifest.id)
     }
 
     /// Resolve the source for a registry entry, distinguishing "unknown tool"
@@ -20,49 +59,32 @@ impl ToolRegistry {
         &self,
         tool_id: &ToolId,
     ) -> Result<(Arc<dyn ToolSourceExecutor>, ToolManifest), ToolOutcome> {
-        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
+        let authority = self.inner.read_recover();
+        let Some(entry) = authority.state.surface.get(tool_id) else {
             return Err(ToolOutcome::err_fmt(format_args!(
                 "Unknown tool id: {tool_id}"
             )));
         };
-        let is_member = {
-            let state = self.state.read_recover();
-            state
-                .surface
-                .get(tool_id)
-                .map(ToolRegistryEntry::is_member)
-                .unwrap_or(true)
-        };
-        if !is_member {
+        if !entry.is_member() {
             return Err(ToolOutcome::err_fmt(format_args!(
                 "Tool id `{tool_id}` is unavailable"
             )));
         }
-        let binding = {
-            let state = self.state.read_recover();
-            state
-                .surface
-                .get(tool_id)
-                .map(|entry| entry.binding.clone())
-        };
-        let source_key = match binding {
-            Some(ToolBinding::Bound { source_key }) => source_key,
-            Some(ToolBinding::Orphaned) => {
+        let source_key = match &entry.binding {
+            ToolBinding::Bound { source_key } => source_key,
+            ToolBinding::Orphaned => {
                 return Err(ToolOutcome::err_fmt(format_args!(
                     "Tool id `{tool_id}` is unavailable: it was restored from a persisted session \
                      but its source is not currently registered"
                 )));
             }
-            None => {
-                return Err(ToolOutcome::err_fmt(format_args!(
-                    "Unknown tool id: {tool_id}"
-                )));
-            }
         };
-        let source = { self.sources.read_recover().get(&source_key).cloned() };
-        source.map(|source| (source, manifest)).ok_or_else(|| {
-            ToolOutcome::err_fmt(format_args!("Tool source missing for tool id `{tool_id}`"))
-        })
+        let source = authority.sources.get(source_key).cloned();
+        source
+            .map(|source| (source, entry.view_manifest()))
+            .ok_or_else(|| {
+                ToolOutcome::err_fmt(format_args!("Tool source missing for tool id `{tool_id}`"))
+            })
     }
 
     fn resolve_granted_execution_source(
@@ -75,7 +97,14 @@ impl ToolRegistry {
                 "Granted tool id `{tool_id}` is missing an explicit tool source"
             )));
         };
-        let sources = self.sources.read_recover();
+        let sources = {
+            let authority = self.inner.read_recover();
+            authority
+                .granted_sources
+                .as_ref()
+                .unwrap_or(&authority.sources)
+                .clone()
+        };
         let leaf_source_key = ToolSourceKey::Leaf(source_id.to_string());
         let source = match sources.get(&leaf_source_key) {
             Some(source) => Arc::clone(source),
@@ -133,8 +162,9 @@ impl ToolRegistry {
 #[async_trait::async_trait]
 impl ToolProvider for ToolRegistry {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
-        let state = self.state.read_recover();
-        state
+        let authority = self.inner.read_recover();
+        authority
+            .state
             .surface
             .by_id
             .values()
@@ -144,16 +174,18 @@ impl ToolProvider for ToolRegistry {
     }
 
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        self.state
+        self.inner
             .read_recover()
+            .state
             .surface
             .get_by_name(name)
             .map(|(_, entry)| entry.view_manifest())
     }
 
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        self.state
+        self.inner
             .read_recover()
+            .state
             .surface
             .get(id)
             .map(ToolRegistryEntry::view_manifest)
@@ -165,18 +197,14 @@ impl ToolProvider for ToolRegistry {
     }
 
     fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
-        let manifest = self.resolve_manifest_by_id(id)?;
-        let source_key = {
-            let state = self.state.read_recover();
-            state
-                .surface
-                .get(id)
-                .and_then(|entry| entry.binding.source_key().cloned())
-        }?;
-        self.sources
-            .read_recover()
-            .get(&source_key)?
-            .resolve_contract_by_id(&manifest.id)
+        let (manifest, source) = {
+            let authority = self.inner.read_recover();
+            let entry = authority.state.surface.get(id)?;
+            let source_key = entry.binding.source_key()?;
+            let source = Arc::clone(authority.sources.get(source_key)?);
+            (entry.view_manifest(), source)
+        };
+        source.resolve_contract_by_id(&manifest.id)
     }
 
     async fn prepare_tool_call(

@@ -512,9 +512,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         }
         for job in trunk_only:
             needs[job] = {"result": "skipped", "outputs": {}}
-        # Full-profile jobs skip everywhere except workflow_dispatch.
-        self.assertEqual(plan["FULL_PROFILE_JOBS"], {"facade-gates"})
-        needs["facade-gates"] = {"result": "skipped", "outputs": {}}
         for job in queue_required:
             needs[job] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
@@ -541,24 +538,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn(
             "ungated job restate-postgres-workers ended with 'skipped', expected success",
             plan["evaluate_conclusion"](needs, "push", "refs/heads/main"),
-        )
-        needs["facade-gates"] = {"result": "success", "outputs": {}}
-        self.assertIn(
-            "full-profile job facade-gates ended with 'success' on a "
-            "pull_request event, expected skipped",
-            evaluate(needs, "pull_request"),
-        )
-        self.assertEqual(
-            [p for p in evaluate(needs, "workflow_dispatch") if "facade-gates" in p],
-            [],
-        )
-        needs["facade-gates"] = {"result": "skipped", "outputs": {}}
-
-        facade_gates = workflow_job_block(workflow, "facade-gates")
-        self.assertIn(
-            "if: github.event_name == 'workflow_dispatch' "
-            "&& needs.plan.outputs.rust == 'true'",
-            facade_gates,
         )
 
         # Workers E2E is neutral on plain branch pushes, but runs on PRs,
@@ -610,7 +589,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         }
         for job in trunk_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
-        pr_needs["facade-gates"] = {"result": "skipped", "outputs": {}}
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             pr_needs[job] = {"result": "success", "outputs": {}}
         pr_needs["postgres-store"] = {"result": "skipped", "outputs": {}}
@@ -1972,10 +1950,6 @@ derive_mutation_jobs() {{
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
             ),
-            "facade-gates": (
-                "python3 scripts/check_facade_external_types.py",
-                "python3 scripts/api_surface.py check",
-            ),
             "package-feature-checks": (
                 "python3 scripts/check_feature_coverage.py run protocol-rlm-testing",
                 "python3 scripts/check_feature_coverage.py run host-features",
@@ -2228,7 +2202,6 @@ derive_mutation_jobs() {{
         for job_id in (
             "test-doc",
             "workspace-tests",
-            "facade-gates",
             "package-feature-checks",
             "runtime-feature-boundary",
             "lint",

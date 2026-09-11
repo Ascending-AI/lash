@@ -62,9 +62,11 @@ impl lash::persistence::AttachmentStore for DeleteFailingWorkbenchAttachmentStor
         &self,
         id: &lash::attachments::AttachmentId,
     ) -> Result<(), lash::persistence::AttachmentStoreError> {
-        Err(lash::persistence::AttachmentStoreError::Backend(format!(
-            "scripted workbench delete failure for {id}"
-        )))
+        Err(lash::persistence::AttachmentStoreError::Backend {
+            operation: "delete",
+            class: lash::persistence::AttachmentStoreFailureClass::Transient,
+            source: format!("scripted workbench delete failure for {id}").into(),
+        })
     }
 
     async fn list(

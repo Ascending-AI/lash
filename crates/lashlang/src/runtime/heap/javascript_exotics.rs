@@ -1,5 +1,5 @@
 use super::*;
-use crate::runtime::{javascript_to_number, javascript_to_string};
+use crate::runtime::{ProjectedFuture, javascript_to_number, javascript_to_string};
 
 pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
 
@@ -653,6 +653,130 @@ impl Heap {
         value: &Value,
     ) -> Result<Value, RuntimeError> {
         self.javascript_to_primitive_inner(value, &mut BTreeSet::new(), 1)
+    }
+
+    pub(crate) fn javascript_coercion_contains_projected(
+        &self,
+        value: &Value,
+    ) -> Result<bool, RuntimeError> {
+        self.javascript_coercion_contains_projected_inner(value, &mut BTreeSet::new(), 1)
+    }
+
+    fn javascript_coercion_contains_projected_inner(
+        &self,
+        value: &Value,
+        active: &mut BTreeSet<HeapId>,
+        depth: usize,
+    ) -> Result<bool, RuntimeError> {
+        super::ensure_value_depth(depth)?;
+        let values = match value {
+            Value::Projected(_) => return Ok(true),
+            Value::Tuple(values) | Value::List(values) => values.as_ref(),
+            Value::Ref(id) if active.insert(*id) => match self.get(*id)? {
+                HeapObject::Tuple(values) | HeapObject::List(values) => values.as_slice(),
+                HeapObject::RegExpMatch(result) => result.items.as_slice(),
+                _ => {
+                    active.remove(id);
+                    return Ok(false);
+                }
+            },
+            Value::Ref(_) => return Ok(false),
+            _ => return Ok(false),
+        };
+        let contains = values.iter().try_fold(false, |contains, value| {
+            if contains {
+                Ok(true)
+            } else {
+                self.javascript_coercion_contains_projected_inner(value, active, depth + 1)
+            }
+        })?;
+        if let Value::Ref(id) = value {
+            active.remove(id);
+        }
+        Ok(contains)
+    }
+
+    pub(crate) fn javascript_to_primitive_string_or_number_async<'a>(
+        &'a self,
+        value: &'a Value,
+    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
+        Box::pin(async move {
+            self.javascript_to_primitive_inner_async(value, &mut BTreeSet::new(), 1)
+                .await
+        })
+    }
+
+    fn javascript_to_primitive_inner_async<'a>(
+        &'a self,
+        value: &'a Value,
+        active: &'a mut BTreeSet<HeapId>,
+        depth: usize,
+    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
+        Box::pin(async move {
+            super::ensure_value_depth(depth)?;
+            match value {
+                Value::Projected(projected) => {
+                    let materialized = projected.materialize_async().await;
+                    self.javascript_to_primitive_inner_async(&materialized, active, depth)
+                        .await
+                }
+                Value::Tuple(values) | Value::List(values) => Ok(Value::String(
+                    self.javascript_sequence_string_async(values, active, depth)
+                        .await?
+                        .into(),
+                )),
+                Value::Ref(id) => {
+                    let values = match self.get(*id)? {
+                        HeapObject::Tuple(values) | HeapObject::List(values) => values.as_slice(),
+                        HeapObject::RegExpMatch(result) => result.items.as_slice(),
+                        _ => return self.javascript_to_primitive_inner(value, active, depth),
+                    };
+                    if !active.insert(*id) {
+                        return Err(RuntimeError::ValidationFailed {
+                            reason: "TS_CYCLIC_COERCION_UNSUPPORTED: cyclic object coercion"
+                                .to_string(),
+                        });
+                    }
+                    let result = self
+                        .javascript_sequence_string_async(values, active, depth)
+                        .await
+                        .map(|value| Value::String(value.into()));
+                    active.remove(id);
+                    result
+                }
+                _ => self.javascript_to_primitive_inner(value, active, depth),
+            }
+        })
+    }
+
+    fn javascript_sequence_string_async<'a>(
+        &'a self,
+        values: &'a [Value],
+        active: &'a mut BTreeSet<HeapId>,
+        depth: usize,
+    ) -> ProjectedFuture<'a, Result<String, RuntimeError>> {
+        Box::pin(async move {
+            let mut strings = Vec::with_capacity(values.len());
+            for value in values {
+                let string = match value {
+                    Value::Null | Value::Undefined => String::new(),
+                    Value::Ref(id) if matches!(self.get(*id)?, HeapObject::Date(_)) => {
+                        return Err(RuntimeError::ValidationFailed {
+                            reason: "TS_DATE_STRING_COERCION_PENDING: Date string coercion inside a container is unavailable; use .toISOString()"
+                                .to_string(),
+                        });
+                    }
+                    other => {
+                        let primitive = self
+                            .javascript_to_primitive_inner_async(other, active, depth + 1)
+                            .await?;
+                        javascript_to_string(&primitive)
+                    }
+                };
+                strings.push(string);
+            }
+            Ok(strings.join(","))
+        })
     }
 
     pub(crate) fn javascript_to_number(&self, value: &Value) -> Result<f64, RuntimeError> {

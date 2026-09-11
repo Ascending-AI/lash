@@ -849,32 +849,46 @@ pub(crate) async fn commit_attachment_refs_tx(
         .collect::<std::collections::BTreeSet<_>>();
     for id in ids {
         crate::attachments::lock_attachment_fence_tx(tx, id.as_str()).await?;
-        let phase = sqlx::query_scalar::<_, String>(
-            "SELECT phase FROM lash_attachment_condemnations
+        let condemnation = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT phase, write_token FROM lash_attachment_condemnations
              WHERE attachment_id = $1",
         )
         .bind(id.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        match phase.as_deref() {
-            Some("deleting") => {
+        match condemnation
+            .as_ref()
+            .map(|(phase, token)| (phase.as_str(), token.is_some()))
+        {
+            Some(("deleting", _)) => {
                 return Err(StoreError::Backend(format!(
                     "cannot adopt attachment `{id}` while physical deletion is in flight"
                 )));
             }
-            Some("reclaimed") => {
+            Some(("reclaimed", _)) => {
                 return Err(StoreError::AttachmentBytesReclaimed { digest: id.clone() });
             }
-            None | Some("condemned") => {}
-            Some(phase) => {
+            Some(("condemned", true)) => {
+                return Err(StoreError::Backend(format!(
+                    "cannot adopt attachment `{id}` while its bytes are being restored"
+                )));
+            }
+            None | Some(("condemned", false)) => {}
+            Some((phase, _)) => {
                 return Err(StoreError::Backend(format!(
                     "attachment `{id}` has unknown condemnation phase `{phase}`"
                 )));
             }
         }
-        sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1 AND phase = 'condemned'")
-            .bind(id.as_str()).execute(&mut **tx).await.map_err(store_sqlx_error)?;
+        sqlx::query(
+            "DELETE FROM lash_attachment_condemnations
+             WHERE attachment_id = $1 AND phase = 'condemned' AND write_token IS NULL",
+        )
+        .bind(id.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
         sqlx::query(
             "INSERT INTO lash_attachment_manifest
              (attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms)

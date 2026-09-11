@@ -665,7 +665,7 @@ finish result"#,
         root         exec      cell.start              lang="lashlang"
         root         tool      tool.start              name="spawn_agent" call=call-001
         root         tool      tool.result             name="spawn_agent" outcome=failure call=call-001
-        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: {"class":"execution","code":"tool…"
+        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: background session turn failed --…"
         root         provider  model.request           iteration=1
         root         exec      cell.start              lang="lashlang"
         root         exec      cell.failed             calls=0 failure="program" error="unknown name `task` --> line 1, column 7 await task.fail({ reason: "pare…"
@@ -691,6 +691,28 @@ finish result"#,
 
         assert_failed_code_block_present(&run.streamed_events);
         assert_no_forbidden_error_text(&run.streamed_events);
+        let spawn_failure = run
+            .streamed_events
+            .iter()
+            .find_map(|activity| match &activity.event {
+                TurnEvent::ToolCallCompleted { name, output, .. } if name == "spawn_agent" => {
+                    match &output.outcome {
+                        lash_core::ToolCallOutcome::Failure(failure) => Some(failure),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("the failed spawn keeps its typed tool projection");
+        assert_eq!(spawn_failure.class, lash_core::ToolFailureClass::Execution);
+        assert_eq!(spawn_failure.code, "tool_error");
+        assert!(
+            spawn_failure
+                .message
+                .contains("background session turn failed")
+        );
+        assert_eq!(spawn_failure.source, lash_core::ToolFailureSource::Tool);
+        assert_eq!(spawn_failure.retry, lash_core::ToolRetryStatus::Never);
         assert!(
             !format!("{:#?}", run.streamed_events)
                 .contains("scripted agent scenario provider exhausted"),

@@ -118,6 +118,7 @@ mod process_registry;
 mod process_registry_change;
 mod process_registry_completion;
 mod queued_work;
+mod required_constraints;
 mod schema;
 mod scope_fence;
 mod session_meta;
@@ -139,7 +140,11 @@ use conn::TxOutcome;
 pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
+pub use lash_core::store_backend_support::required_constraints::{
+    RequiredConstraintFinding, RequiredConstraintReport,
+};
 pub use preflight::{SqliteStorePreflight, verify_schema_at};
+pub use required_constraints::inspect_required_constraints_at;
 pub use schema::SqliteDatabase;
 
 use forks::*;
@@ -1209,6 +1214,16 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
             .open_catalog_for_maintenance("condemnation release")
             .await?;
         store.release_attachment_condemnation(id).await
+    }
+
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &lash_core::AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        let store = self
+            .open_catalog_for_maintenance("abandoned attachment write recovery")
+            .await?;
+        store.recover_abandoned_attachment_write(id).await
     }
 
     async fn reclaim_attachment_condemnation(

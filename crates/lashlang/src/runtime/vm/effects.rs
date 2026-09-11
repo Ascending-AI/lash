@@ -12,9 +12,9 @@ use super::super::host::{
 use super::super::ops::value_type_name;
 use super::super::{
     CompiledAggregateAwaitShape, CompiledResourceOperationBatch,
-    CompiledResourceOperationBatchLeaf, ExecutionHost, RuntimeError, Value, error_value,
-    is_process_handle, is_runtime_process_handle, record_with_capacity, success,
-    unwrap_tool_result,
+    CompiledResourceOperationBatchLeaf, ExecutionHost, ExecutionHostError, RuntimeError, Value,
+    execution_host_error_value, is_process_handle, is_runtime_process_handle, record_with_capacity,
+    success, unwrap_tool_result,
 };
 use super::control::VmOutcome;
 use super::pending_tools::{
@@ -76,24 +76,29 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmEffect::ResourceCall { operation, argc } => {
                 let (receiver, args) = self.drain_receiver_call(argc)?;
                 ensure_no_tool_handle_arguments(&args)?;
+                let operation_name = self.chunk.names[operation].text.to_string();
                 let result = match self
                     .host
                     .perform(AbilityOp::ResourceOperation(ResourceOperation {
                         receiver,
-                        operation: self.chunk.names[operation].text.to_string(),
+                        operation: operation_name.clone(),
                         args,
                         call_site: active.map(lashlang_execution_call_site),
                     }))
                     .await
                 {
-                    Ok(AbilityResult::Value(value)) => host_success(value),
-                    Ok(AbilityResult::ResourceOperationBatch(_)) => error_value(
-                        "module operation returned a resource operation batch result".to_string(),
+                    Ok(AbilityResult::Value(value)) => host_success(value, &operation_name),
+                    Ok(AbilityResult::ResourceOperationBatch(_)) => execution_host_error_value(
+                        ExecutionHostError::new(
+                            "module operation returned a resource operation batch result",
+                        ),
+                        &operation_name,
                     ),
-                    Ok(AbilityResult::Unit) => {
-                        error_value("module operation returned no value".to_string())
-                    }
-                    Err(error) => error_value(error.to_string()),
+                    Ok(AbilityResult::Unit) => execution_host_error_value(
+                        ExecutionHostError::new("module operation returned no value"),
+                        &operation_name,
+                    ),
+                    Err(error) => execution_host_error_value(error, &operation_name),
                 };
                 self.stack.push(result);
             }
@@ -670,7 +675,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         }
                         leaf_values.push(Value::Null);
                     } else {
-                        leaf_values.push(error_value(error.to_string()));
+                        leaf_values.push(execution_host_error_value(error, "resource_batch"));
                         if let Some(active) = active {
                             self.complete_lashlang_execution(active);
                         }
@@ -733,14 +738,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .perform(AbilityOp::Await(Value::Record(handles)))
                         .await
                     {
-                        Ok(AbilityResult::Value(value)) => host_success(value),
-                        Ok(AbilityResult::ResourceOperationBatch(_)) => error_value(
-                            "await returned a resource operation batch result".to_string(),
+                        Ok(AbilityResult::Value(value)) => host_success(value, "await"),
+                        Ok(AbilityResult::ResourceOperationBatch(_)) => execution_host_error_value(
+                            ExecutionHostError::new(
+                                "await returned a resource operation batch result",
+                            ),
+                            "await",
                         ),
-                        Ok(AbilityResult::Unit) => {
-                            error_value("await returned no value".to_string())
-                        }
-                        Err(error) => error_value(error.to_string()),
+                        Ok(AbilityResult::Unit) => execution_host_error_value(
+                            ExecutionHostError::new("await returned no value"),
+                            "await",
+                        ),
+                        Err(error) => execution_host_error_value(error, "await"),
                     },
                 ),
                 Value::Record(handles) => {
@@ -780,8 +789,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .perform(AbilityOp::Await(Value::Record(handles)))
                 .await
                 .and_then(|result| result.into_value("await"))
-                .map_err(|error| RuntimeError::UnwrappedToolResultFailed {
-                    message: error.to_string(),
+                .map_err(|error| {
+                    if error.tool_failure_code().is_some() {
+                        RuntimeError::UnwrappedHostToolResultFailed { source: error }
+                    } else {
+                        RuntimeError::UnwrappedToolResultFailed {
+                            message: error.to_string(),
+                        }
+                    }
                 }),
             Value::Tuple(_) | Value::List(_) | Value::Record(_) => {
                 unwrap_tool_result(self.await_value(handle).await?)
@@ -970,9 +985,11 @@ fn process_handle_id_from_value(value: &Value) -> Option<ProcessId> {
 /// A host value that clears the value-entry guard becomes a success result; one
 /// that does not becomes the same error result a failed ability produces, so
 /// the refusal reaches the guest by the route it already handles.
-fn host_success(value: Value) -> Value {
+fn host_success(value: Value, operation: &str) -> Value {
     match prototype_chain_data_key_error(&value) {
-        Some(error) => error_value(error.to_string()),
+        Some(error) => {
+            execution_host_error_value(ExecutionHostError::new(error.to_string()), operation)
+        }
         None => success(value),
     }
 }

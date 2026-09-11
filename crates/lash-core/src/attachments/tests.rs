@@ -275,6 +275,13 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
         AttachmentRootSet::release_attachment_condemnation(self.factory, id).await
     }
 
+    async fn recover_abandoned_attachment_write(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        AttachmentRootSet::recover_abandoned_attachment_write(self.factory, id).await
+    }
+
     async fn reclaim_attachment_condemnation(
         &self,
         id: &AttachmentId,
@@ -377,9 +384,11 @@ impl AttachmentStore for DeleteFailingAttachmentStore {
     }
 
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        Err(AttachmentStoreError::Backend(format!(
-            "scripted delete failure for {id}"
-        )))
+        Err(AttachmentStoreError::Backend {
+            operation: "delete",
+            class: AttachmentStoreFailureClass::Transient,
+            source: format!("scripted delete failure for {id}").into(),
+        })
     }
 
     async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
@@ -1223,7 +1232,7 @@ fn window_writer(
             match attempts.recv().await {
                 // The writer is inside the window with an intent recorded: give
                 // its bytes time to land before the window closes.
-                Some(AttachmentWriteFence::Granted) => {
+                Some(AttachmentWriteFence::Granted(_)) => {
                     let _ = put_done_rx.await;
                 }
                 // The writer is parked on the fence. Nothing more will happen
@@ -1253,6 +1262,22 @@ impl AttachmentManifest for SignalingManifest {
         let fence = self.inner.begin_attachment_write(intent)?;
         let _ = self.attempts.send(fence);
         Ok(fence)
+    }
+
+    fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.complete_attachment_write(intent, permit)
+    }
+
+    fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.abort_attachment_write(intent, permit)
     }
 
     fn commit_refs(
@@ -1346,12 +1371,12 @@ async fn same_content_put_inside_the_delete_window_survives() {
     assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
 }
 
-/// CONTENTION (the condemned window). The sweep has condemned the digest but not
-/// yet armed the delete when a writer takes it back. The arm CAS loses, so no
-/// delete is issued at all and the digest is deferred to the next sweep — the
-/// sweep never waits for the writer and the writer never waits for the sweep.
+/// CONTENTION after arming and before final `HEAD`. Arming must precede the
+/// absence observation, so a writer arriving in this window parks until the
+/// sweep records `Reclaimed`, then claims that fact, restores the bytes, and
+/// clears only its own token.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
+async fn writer_after_delete_arming_restores_the_reclaimed_digest() {
     let fixture = fenced_fixture(&SessionId::from("condemned-window-writer")).await;
     let bytes = vec![2, 7, 1, 8];
     let id = content_id(&bytes);
@@ -1381,17 +1406,17 @@ async fn writer_revoking_a_condemnation_defers_the_digest_without_deleting() {
     writer
         .await
         .expect("writer task")
-        .expect("a writer in the condemned window is granted immediately");
+        .expect("a writer after arming retries and restores the digest");
     assert_eq!(
-        report.reclaimed_count, 0,
-        "a revoked condemnation must not produce a delete"
+        report.reclaimed_count, 1,
+        "the armed sweep must record its completed reclamation"
     );
     assert_eq!(
         *backend.delete_calls.lock_recover(),
-        0,
+        1,
         "the physical delete is only ever issued for an armed digest"
     );
-    assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
+    assert!(report.condemn_deferred_ids.is_empty());
     assert!(
         report.deleted_while_referenced.is_empty(),
         "a fenced sweep must never delete a referenced blob: {:?}",
@@ -1856,4 +1881,43 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
         unpinned.attachments().is_empty(),
         "the changed table must be a meaningful counterexample"
     );
+}
+
+#[test]
+fn backend_failure_class_drives_retry_and_operator_verdicts() {
+    let cases = [
+        (AttachmentStoreFailureClass::Transient, true, false),
+        (AttachmentStoreFailureClass::Credentials, false, true),
+        (AttachmentStoreFailureClass::Terminal, false, false),
+    ];
+    for (class, retryable, operator_actionable) in cases {
+        let error = AttachmentStoreError::Backend {
+            operation: "test",
+            class,
+            source: "scripted failure".into(),
+        };
+        assert_eq!(error.failure_class(), Some(class));
+        assert_eq!(error.is_retryable(), retryable, "{error}");
+        assert_eq!(
+            error.is_operator_actionable(),
+            operator_actionable,
+            "{error}"
+        );
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the backend cause must be preserved: {error}"
+        );
+    }
+
+    let contract = AttachmentStoreError::Contract("stored key is malformed".into());
+    assert_eq!(contract.failure_class(), None);
+    assert!(!contract.is_retryable());
+    assert!(!contract.is_operator_actionable());
+
+    let reclamation = AttachmentStoreError::ReclamationInFlight {
+        attachment_id: AttachmentId::parse("blake3-deadbeef").expect("valid id"),
+        attempts: 3,
+    };
+    assert!(reclamation.is_retryable());
+    assert!(!reclamation.is_operator_actionable());
 }
