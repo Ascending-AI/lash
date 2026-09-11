@@ -101,6 +101,7 @@ fn continuation_runtime_error_wire_variants_are_pinned() {
                     "ValidateTypeLiteralRequired",
                     "NotTypeValue",
                     "UnwrappedToolResultFailed",
+                    "UnwrappedHostToolResultFailed",
                     "UnwrappedModuleOperationFailed",
                     "MissingAssignmentIndex",
                     "MissingAssignmentField",
