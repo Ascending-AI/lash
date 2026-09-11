@@ -99,15 +99,6 @@ struct PipeProcessState {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CommonCommandParams {
-    pub(crate) cmd: String,
-    pub(crate) workdir: PathBuf,
-    pub(crate) shell_path: String,
-    pub(crate) login: bool,
-    pub(crate) max_output_tokens: Option<usize>,
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct ExecCommandParams {
     pub(crate) cmd: String,
     pub(crate) workdir: PathBuf,

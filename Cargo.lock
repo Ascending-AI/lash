@@ -2591,6 +2591,7 @@ dependencies = [
  "libc",
  "portable-pty",
  "reqwest 0.13.4",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "tempfile",

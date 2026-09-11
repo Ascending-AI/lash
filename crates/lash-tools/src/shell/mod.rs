@@ -6,6 +6,7 @@
 //! factory. The process-lifecycle machinery lives in [`runtime`] and the
 //! output-buffer plumbing in [`output`].
 
+mod arguments;
 mod output;
 mod runtime;
 
@@ -28,14 +29,17 @@ use lash_core::{
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
-    invalid_request_failure, object_schema, parse_optional_bool, parse_optional_usize_arg,
-    require_str,
+    invalid_request_failure, object_schema, parse_optional_bool, require_str,
 };
 
+use crate::shell::arguments::{
+    ExecCommandArgs, InternalStartCommandArgs, InternalStartCommandLane, PublicStartCommandArgs,
+    StartCommandLane,
+};
 use crate::shell::output::{PollOutcome, shell_io_result, timed_out_shell_io_result};
 use crate::shell::runtime::{
-    CommonCommandParams, DEFAULT_EXEC_COMMAND_TIMEOUT_MS, ExecCommandParams,
-    PipeExecProcessRequest, ShellRuntime, StartCommandParams,
+    DEFAULT_EXEC_COMMAND_TIMEOUT_MS, ExecCommandParams, PipeExecProcessRequest, ShellRuntime,
+    StartCommandParams,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -100,71 +104,66 @@ impl StandardShell {
         self
     }
 
-    fn parse_common_command_params(
-        &self,
-        args: &serde_json::Value,
-    ) -> Result<CommonCommandParams, ToolOutcome> {
-        let cmd = require_str(args, "cmd")?.to_string();
-        let workdir = self.runtime.resolve_workdir(
-            args.get("workdir")
-                .and_then(|value| value.as_str())
-                .filter(|value| !value.is_empty()),
-        );
-        let shell_path = args
-            .get("shell")
-            .and_then(|value| value.as_str())
-            .filter(|value| !value.is_empty())
-            .unwrap_or(&self.runtime.shell_path)
-            .to_string();
-        let login = parse_optional_bool(args, "login", false)?;
-        let max_output_tokens = parse_optional_usize_arg(args, "max_output_tokens", None, true, 1)?;
-
-        Ok(CommonCommandParams {
-            cmd,
-            workdir,
-            shell_path,
-            login,
-            max_output_tokens,
-        })
-    }
-
     fn parse_exec_command_params(
         &self,
         args: &serde_json::Value,
     ) -> Result<ExecCommandParams, ToolOutcome> {
-        let common = self.parse_common_command_params(args)?;
-        let timeout_ms = parse_optional_usize_arg(args, "timeout_ms", None, false, 1)?
-            .map(|value| value as u64)
-            .unwrap_or(DEFAULT_EXEC_COMMAND_TIMEOUT_MS);
+        let args = ExecCommandArgs::parse(args)?;
+        if args.lane.timeout_ms == 0 {
+            return Err(lash_tool_support::invalid_tool_args(
+                "Invalid timeout_ms: must be >= 1",
+            ));
+        }
 
         Ok(ExecCommandParams {
-            cmd: common.cmd,
-            workdir: common.workdir,
-            shell_path: common.shell_path,
-            login: common.login,
-            timeout_ms,
-            max_output_tokens: common.max_output_tokens,
+            cmd: args.cmd,
+            workdir: self
+                .runtime
+                .resolve_workdir(args.workdir.as_deref().filter(|value| !value.is_empty())),
+            shell_path: args
+                .shell
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| self.runtime.shell_path.clone()),
+            login: args.login,
+            timeout_ms: args.lane.timeout_ms,
+            max_output_tokens: args.max_output_tokens,
         })
     }
 
-    fn parse_start_command_params(
+    fn parse_public_start_command_params(
         &self,
         args: &serde_json::Value,
     ) -> Result<StartCommandParams, ToolOutcome> {
-        let common = self.parse_common_command_params(args)?;
-        let detach = parse_optional_bool(args, "detach", false)?;
-        let detached_process_id = args
-            .get("detached_process_id")
-            .and_then(serde_json::Value::as_str)
-            .map(ProcessId::from);
+        let args = PublicStartCommandArgs::parse(args)?;
+        self.start_command_params(args, None)
+    }
 
+    fn parse_internal_start_command_params(
+        &self,
+        args: &serde_json::Value,
+    ) -> Result<StartCommandParams, ToolOutcome> {
+        let args = InternalStartCommandArgs::parse(args)?;
+        let detached_process_id = args.lane.internal.detached_process_id.clone();
+        self.start_command_params(args, detached_process_id)
+    }
+
+    fn start_command_params<I>(
+        &self,
+        args: arguments::ShellCommandArgs<StartCommandLane<I>>,
+        detached_process_id: Option<ProcessId>,
+    ) -> Result<StartCommandParams, ToolOutcome> {
         Ok(StartCommandParams {
-            cmd: common.cmd,
-            workdir: common.workdir,
-            shell_path: common.shell_path,
-            login: common.login,
-            max_output_tokens: common.max_output_tokens,
-            detach,
+            cmd: args.cmd,
+            workdir: self
+                .runtime
+                .resolve_workdir(args.workdir.as_deref().filter(|value| !value.is_empty())),
+            shell_path: args
+                .shell
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| self.runtime.shell_path.clone()),
+            login: args.login,
+            max_output_tokens: args.max_output_tokens,
+            detach: args.lane.detach,
             detached_process_id,
         })
     }
@@ -583,25 +582,20 @@ fn start_command_process_args(
     params: &StartCommandParams,
     detached_process_id: Option<&ProcessId>,
 ) -> serde_json::Value {
-    let mut args = serde_json::Map::new();
-    args.insert("cmd".to_string(), json!(params.cmd.clone()));
-    args.insert(
-        "workdir".to_string(),
-        json!(params.workdir.to_string_lossy().to_string()),
-    );
-    args.insert("shell".to_string(), json!(params.shell_path.clone()));
-    args.insert("login".to_string(), json!(params.login));
-    args.insert("detach".to_string(), json!(params.detach));
-    if let Some(detached_process_id) = detached_process_id {
-        args.insert(
-            "detached_process_id".to_string(),
-            json!(detached_process_id),
-        );
-    }
-    if let Some(max_output_tokens) = params.max_output_tokens {
-        args.insert("max_output_tokens".to_string(), json!(max_output_tokens));
-    }
-    serde_json::Value::Object(args)
+    serde_json::to_value(InternalStartCommandArgs {
+        cmd: params.cmd.clone(),
+        workdir: Some(params.workdir.to_string_lossy().to_string()),
+        shell: Some(params.shell_path.clone()),
+        login: params.login,
+        max_output_tokens: params.max_output_tokens,
+        lane: StartCommandLane {
+            detach: params.detach,
+            internal: InternalStartCommandLane {
+                detached_process_id: detached_process_id.cloned(),
+            },
+        },
+    })
+    .expect("typed shell process arguments contain only JSON values")
 }
 
 fn shell_signal_event_type() -> ProcessEventType {
@@ -642,7 +636,7 @@ impl StaticToolExecute for StandardShell {
                 })
                 .await;
         }
-        let params = match self.parse_start_command_params(call.args) {
+        let params = match self.parse_internal_start_command_params(call.args) {
             Ok(params) => params,
             Err(err) => return err,
         };
@@ -657,7 +651,7 @@ impl StaticToolExecute for StandardShell {
     async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         match call.name {
             "start_command" => {
-                let params = match self.parse_start_command_params(call.args) {
+                let params = match self.parse_public_start_command_params(call.args) {
                     Ok(params) => params,
                     Err(err) => return tool_result_without_intents(err),
                 };
@@ -673,49 +667,16 @@ impl StaticToolExecute for StandardShell {
 
 impl StandardShell {
     fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        let exec_command_description = "Run a noninteractive one-shot command with stdin closed and stdout/stderr captured, then wait for it to finish. The command is executed exactly as written by the selected shell; the tool does not add strict-mode prefixes or rewrite pipelines. Completed commands always include `status: \"completed\"`, `done: true`, `running: false`, cleaned `output`, and `exit_code`. Nonzero exit codes are returned as ordinary result data: a command that exited nonzero is not a tool failure and does not abort your code. Inspect `exit_code` yourself when it matters. Commands time out after 600000 ms by default; set `timeout_ms` to override the hard timeout. Timed-out commands are killed and returned as a tool failure with `status: \"timed_out\"`, `timed_out: true`, and no `exit_code`. Use `shell.start` instead for interactive, TTY-dependent, or intentionally long-lived processes. ANSI/control noise is stripped from returned output. Large or truncated output may also include `full_output_path` pointing at the saved raw stream; prefer that over shell-level `head`/`tail` truncation when you need to inspect more.";
+        let exec_command_description = format!(
+            "Run a noninteractive one-shot command with stdin closed and stdout/stderr captured, then wait for it to finish. The command is executed exactly as written by the selected shell; the tool does not add strict-mode prefixes or rewrite pipelines. Completed commands always include `status: \"completed\"`, `done: true`, `running: false`, cleaned `output`, and `exit_code`. Nonzero exit codes are returned as ordinary result data: a command that exited nonzero is not a tool failure and does not abort your code. Inspect `exit_code` yourself when it matters. Commands time out after {DEFAULT_EXEC_COMMAND_TIMEOUT_MS} ms by default; set `timeout_ms` to override the hard timeout. Timed-out commands are killed and returned as a tool failure with `status: \"timed_out\"`, `timed_out: true`, and no `exit_code`. Use `shell.start` instead for interactive, TTY-dependent, or intentionally long-lived processes. ANSI/control noise is stripped from returned output. Large or truncated output may also include `full_output_path` pointing at the saved raw stream; prefer that over shell-level `head`/`tail` truncation when you need to inspect more."
+        );
         let start_command_description = "Start an interactive or intentionally long-lived command in a PTY as a durable background process. The command is executed exactly as written by the selected shell. The result contains the deterministic derived process id before the next model step; use `processes.list` to see it and `processes.cancel` to stop it. When the process exits, nonzero exit codes are returned as ordinary result data with `exit_code`: a process that exited nonzero is not a tool failure and does not abort your code. Inspect `exit_code` yourself. Use `shell.exec` for builds, installs, tests, service setup, verification, and other commands that must complete before the next step. Set `detach: true` to launch a fully detached process that the host/OS owns and Lash abandons when the parent turn ends.";
-        let command_common = |command_description: &str| {
-            json!({
-                "cmd": {
-                    "type": "string",
-                    "description": command_description
-                },
-                "workdir": {
-                    "type": "string",
-                    "description": "Optional working directory to run the command in; defaults to the turn cwd."
-                },
-                "shell": {
-                    "type": "string",
-                    "description": "Shell binary to launch. Defaults to the user's default shell."
-                },
-                "login": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Whether to run the shell with -l semantics. Defaults to false to avoid startup prompts and shell init noise."
-                },
-                "max_output_tokens": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum number of tokens to return. Excess output will be truncated."
-                }
-            })
-        };
         vec![
             ToolDefinition::raw(
                 "tool:exec_command",
                 "exec_command",
                 exec_command_description,
-                {
-                    let mut properties = command_common("Shell command to execute.");
-                    properties["timeout_ms"] = json!({
-                        "type": "integer",
-                        "minimum": 1,
-                        "default": DEFAULT_EXEC_COMMAND_TIMEOUT_MS,
-                        "description": "Hard timeout in milliseconds. If reached before the command exits, the process is killed and returned as a tool failure with `status: \"timed_out\"` and `timed_out: true`. Defaults to 600000 ms."
-                    });
-                    object_schema(properties, &["cmd"])
-                },
+                ExecCommandArgs::schema(),
                 shell_exec_output_schema(),
             )
             .with_examples(vec![
@@ -732,15 +693,7 @@ finish probe.exit_code == 0"#.into(),
                 "tool:start_command",
                 "start_command",
                 start_command_description,
-                {
-                    let mut properties = command_common("Shell command to start.");
-                    properties["detach"] = json!({
-                        "type": "boolean",
-                        "default": false,
-                        "description": "Launch the command fully detached (its own session via setsid) so it outlives this session and host. lash records only an immediately-terminal audit fact and never tracks, signals, or stops it. Defaults to false (a tracked PTY process)."
-                    });
-                    object_schema(properties, &["cmd"])
-                },
+                PublicStartCommandArgs::schema(),
                 shell_start_output_schema(),
             )
             .with_examples(vec![
@@ -790,12 +743,7 @@ finish probe.exit_code == 0"#.into(),
                 RUN_START_COMMAND_TOOL_ID,
                 "run_start_command",
                 "Internal owner-bound process body for shell.start.",
-                {
-                    let mut properties = command_common("Shell command to start.");
-                    properties["detach"] = json!({ "type": "boolean", "default": false });
-                    properties["detached_process_id"] = json!({ "type": "string" });
-                    object_schema(properties, &["cmd"])
-                },
+                InternalStartCommandArgs::schema(),
                 shell_start_output_schema(),
             )
             .with_activation(lash_core::ToolActivation::Internal)
