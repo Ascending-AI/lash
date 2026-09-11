@@ -61,7 +61,7 @@ impl ToolRegistryEntry {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub(super) struct ToolSurface {
     pub(super) by_id: BTreeMap<ToolId, ToolRegistryEntry>,
     pub(super) by_name: BTreeMap<String, ToolId>,

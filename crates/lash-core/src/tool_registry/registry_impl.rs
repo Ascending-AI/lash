@@ -286,9 +286,11 @@ impl ToolRegistry {
             surface.remove(&id);
         }
         surface.debug_assert_invariant();
-        let changed = export_tool_state_entries(&surface) != previous;
-        let generation = reconciled_generation(authority.state.generation, changed)?;
-        let state_revision = changed
+        let public_changed = export_tool_state_entries(&surface) != previous;
+        let private_changed = surface != authority.state.surface;
+        debug_assert!(!public_changed || private_changed);
+        let generation = reconciled_generation(authority.state.generation, public_changed)?;
+        let state_revision = private_changed
             .then(|| checked_state_revision(authority.state_revision))
             .transpose()?;
 
@@ -353,7 +355,7 @@ impl ToolRegistry {
                     export_tool_state_entries(&next_state.surface) != previous,
                 )
             })();
-            let changed = match rebuilt {
+            let public_changed = match rebuilt {
                 Ok(changed) => changed,
                 Err(error) => {
                     if self.reconciliation_inputs_changed(
@@ -375,8 +377,10 @@ impl ToolRegistry {
                 continue;
             }
             let next_source_revision = checked_source_revision(authority.source_revision)?;
-            let generation = reconciled_generation(authority.state.generation, changed)?;
-            let next_state_revision = changed
+            let private_changed = authority.state.surface != next_state.surface;
+            debug_assert!(!public_changed || private_changed);
+            let generation = reconciled_generation(authority.state.generation, public_changed)?;
+            let next_state_revision = private_changed
                 .then(|| checked_state_revision(authority.state_revision))
                 .transpose()?;
             let retired = authority
@@ -454,9 +458,10 @@ impl ToolRegistry {
                 continue;
             }
             let next_source_revision = checked_source_revision(authority.source_revision)?;
+            let private_changed = authority.state.surface != reconciled.surface;
+            debug_assert!(!reconciled.changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
-            let next_state_revision = reconciled
-                .changed
+            let next_state_revision = private_changed
                 .then(|| checked_state_revision(authority.state_revision))
                 .transpose()?;
             let retired = authority
@@ -518,8 +523,10 @@ impl ToolRegistry {
             {
                 continue;
             }
+            let private_changed = authority.state.surface != reconciled.surface;
+            debug_assert!(!reconciled.changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
-            if reconciled.changed {
+            if private_changed {
                 let next_state_revision = checked_state_revision(authority.state_revision)?;
                 authority.state.surface = reconciled.surface;
                 authority.state.surface.debug_assert_invariant();

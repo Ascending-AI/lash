@@ -113,6 +113,123 @@ struct ReentrantDropProvider {
     read_completed: Arc<AtomicBool>,
 }
 
+struct RoutedAdmissionSource {
+    id: &'static str,
+    enabled: Arc<AtomicBool>,
+    result: &'static str,
+    block_once: AtomicBool,
+    entered: Arc<Barrier>,
+    release: Arc<Barrier>,
+}
+
+impl RoutedAdmissionSource {
+    fn ungated(id: &'static str, enabled: Arc<AtomicBool>, result: &'static str) -> Self {
+        Self {
+            id,
+            enabled,
+            result,
+            block_once: AtomicBool::new(false),
+            entered: Arc::new(Barrier::new(1)),
+            release: Arc::new(Barrier::new(1)),
+        }
+    }
+
+    fn unarmed_gate(
+        id: &'static str,
+        enabled: Arc<AtomicBool>,
+        entered: Arc<Barrier>,
+        release: Arc<Barrier>,
+    ) -> Self {
+        Self {
+            id,
+            enabled,
+            result: "unused",
+            block_once: AtomicBool::new(false),
+            entered,
+            release,
+        }
+    }
+
+    fn arm(&self) {
+        assert!(
+            !self.block_once.swap(true, Ordering::SeqCst),
+            "source gate was already armed"
+        );
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolSourceExecutor for RoutedAdmissionSource {
+    fn id(&self) -> &str {
+        self.id
+    }
+
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        let manifests = self
+            .enabled
+            .load(Ordering::SeqCst)
+            .then(|| MutableAdmissionSource::manifest("alpha"))
+            .into_iter()
+            .collect();
+        if self.block_once.swap(false, Ordering::SeqCst) {
+            self.entered.wait();
+            self.release.wait();
+        }
+        manifests
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+        None
+    }
+
+    async fn execute(
+        &self,
+        _tool: &str,
+        _args: &serde_json::Value,
+        _context: &crate::AttemptContext<'_>,
+    ) -> ToolOutcome {
+        ToolOutcome::ok(json!(self.result))
+    }
+}
+
+struct RoutedProvider {
+    result: &'static str,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for RoutedProvider {
+    fn tool_manifests(&self) -> Vec<ToolManifest> {
+        vec![MutableAdmissionSource::manifest("alpha")]
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::ok(json!(self.result))
+    }
+}
+
+fn test_attempt_context() -> crate::AttemptContext<'static> {
+    let tool = crate::ToolContext::builder(
+        crate::SessionId::from("registry-admission-test"),
+        Arc::new(crate::testing::MockSessionManager::default()),
+        Arc::new(crate::testing::MockSessionManager::default()),
+        Arc::new(crate::testing::MockSessionManager::default()),
+        Arc::new(crate::UnavailableProcessService),
+        crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
+            crate::NativeRuntimeEffectController::default(),
+        )),
+        Arc::new(crate::SessionAttachmentStore::in_memory()),
+        crate::DirectCompletionClient::unavailable(
+            "direct completions are unavailable in this test context",
+        ),
+    )
+    .build();
+    crate::testing::mock_attempt_context_from(&tool)
+}
+
 #[async_trait::async_trait]
 impl ToolProvider for ReentrantDropProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
@@ -271,6 +388,107 @@ fn stale_refresh_retries_instead_of_overwriting_newer_curation() {
         "refresh must preserve curation committed while it was reconciling"
     );
     assert!(final_state.contains(&ToolId::from("tool:gamma")));
+}
+
+#[tokio::test]
+async fn binding_only_refresh_routes_to_the_new_source_and_fences_stale_work() {
+    let source_a_enabled = Arc::new(AtomicBool::new(true));
+    let source_b_enabled = Arc::new(AtomicBool::new(false));
+    let registry = ToolRegistry::empty();
+    registry
+        .upsert_source(Arc::new(RoutedAdmissionSource::ungated(
+            "source-a",
+            Arc::clone(&source_a_enabled),
+            "source-a",
+        )))
+        .expect("source A admission");
+    registry
+        .upsert_source(Arc::new(RoutedAdmissionSource::ungated(
+            "source-b",
+            Arc::clone(&source_b_enabled),
+            "source-b",
+        )))
+        .expect("dormant source B admission");
+
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let gate = Arc::new(RoutedAdmissionSource::unarmed_gate(
+        "source-z-gate",
+        Arc::new(AtomicBool::new(false)),
+        Arc::clone(&entered),
+        Arc::clone(&release),
+    ));
+    registry
+        .upsert_source(Arc::clone(&gate) as Arc<dyn ToolSourceExecutor>)
+        .expect("gate source admission");
+
+    let initial = registry
+        .execute_by_id(
+            &ToolId::from("tool:alpha"),
+            &json!({}),
+            &test_attempt_context(),
+        )
+        .await;
+    assert_eq!(initial.value_for_projection(), json!("source-a"));
+    let before = registry.export_state();
+    let state_revision = registry.inner.read_recover().state_revision;
+    gate.arm();
+    let stale_refresh = {
+        let registry = registry.clone();
+        std::thread::spawn(move || registry.refresh_sources())
+    };
+    entered.wait();
+
+    source_a_enabled.store(false, Ordering::SeqCst);
+    source_b_enabled.store(true, Ordering::SeqCst);
+    registry
+        .refresh_sources()
+        .expect("binding-only source refresh");
+    let refreshed_state_revision = registry.inner.read_recover().state_revision;
+
+    release.wait();
+    stale_refresh
+        .join()
+        .expect("stale refresh thread")
+        .expect("stale refresh retries after the binding update");
+
+    assert_eq!(registry.generation(), before.generation());
+    assert_eq!(registry.export_state().entries(), before.entries());
+    assert_eq!(
+        refreshed_state_revision,
+        state_revision + 1,
+        "a private binding update must advance the private freshness revision"
+    );
+    let result = registry
+        .execute_by_id(
+            &ToolId::from("tool:alpha"),
+            &json!({}),
+            &test_attempt_context(),
+        )
+        .await;
+    assert_eq!(result.value_for_projection(), json!("source-b"));
+}
+
+#[tokio::test]
+async fn identical_context_overlay_routes_to_the_context_provider() {
+    let registry = ToolRegistry::from_tool_provider(Arc::new(RoutedProvider { result: "base" }))
+        .expect("base registry");
+    let before = registry.export_state();
+
+    let composed = registry
+        .compose_session_catalog(true, vec![Arc::new(RoutedProvider { result: "context" })])
+        .expect("identical context overlay");
+
+    assert_eq!(composed.generation(), before.generation());
+    assert_eq!(composed.export_state().entries(), before.entries());
+    let result = composed
+        .execute_by_id(
+            &ToolId::from("tool:alpha"),
+            &json!({}),
+            &test_attempt_context(),
+        )
+        .await;
+    assert_eq!(result.value_for_projection(), json!("context"));
 }
 
 #[test]
