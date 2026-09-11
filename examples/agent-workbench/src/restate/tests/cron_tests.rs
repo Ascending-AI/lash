@@ -21,6 +21,23 @@ async fn register_cron_test_subscription_record(
     subscription_key: &str,
     source_key: &str,
 ) -> lash::triggers::TriggerSubscriptionRecord {
+    register_test_subscription_record(
+        trigger_store,
+        session_id,
+        subscription_key,
+        crate::CRON_SCHEDULE_SOURCE_TYPE,
+        source_key,
+    )
+    .await
+}
+
+async fn register_test_subscription_record(
+    trigger_store: &lash::triggers::InMemoryTriggerStore,
+    session_id: &SessionId,
+    subscription_key: &str,
+    source_type: &str,
+    source_key: &str,
+) -> lash::triggers::TriggerSubscriptionRecord {
     let outcome = lash::triggers::TriggerStore::execute_command(
         trigger_store,
         &format!("register:{session_id}:{subscription_key}"),
@@ -32,7 +49,7 @@ async fn register_cron_test_subscription_record(
             draft: lash::triggers::TriggerSubscriptionDraft::for_process(
                 subscription_key,
                 lash::process::ProcessExecutionEnvRef::new(format!("process-env:{source_key}")),
-                crate::CRON_SCHEDULE_SOURCE_TYPE,
+                source_type,
                 source_key,
                 lash::process::ProcessInput::Engine {
                     kind: "cron-test-engine".to_string(),
@@ -44,8 +61,8 @@ async fn register_cron_test_subscription_record(
         },
     )
     .await
-    .expect("register cron trigger")
-    .expect("cron trigger mutation");
+    .expect("register trigger")
+    .expect("trigger mutation");
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         panic!("register must return a mutation receipt");
     };
@@ -75,14 +92,24 @@ async fn delete_cron_test_subscription(
     trigger_store: &lash::triggers::InMemoryTriggerStore,
     record: &lash::triggers::TriggerSubscriptionRecord,
 ) {
+    let filter = lash::triggers::TriggerSubscriptionFilter {
+        subscription_key: Some(record.subscription_key.clone()),
+        ..Default::default()
+    };
+    let current = lash::triggers::TriggerStore::list_subscriptions(trigger_store, filter)
+        .await
+        .expect("list current cron trigger")
+        .into_iter()
+        .find(|candidate| candidate.subscription_key == record.subscription_key)
+        .expect("current cron trigger");
     lash::triggers::TriggerStore::execute_command(
         trigger_store,
         &format!("delete:{session}", session = record.subscription_key),
         lash::triggers::TriggerCommand::Delete {
-            owner_scope: record.owner_scope.clone(),
-            actor: record.registrant.clone(),
-            subscription_key: record.subscription_key.clone(),
-            expected_revision: record.revision,
+            owner_scope: current.owner_scope,
+            actor: current.registrant,
+            subscription_key: current.subscription_key,
+            expected_revision: current.revision,
         },
     )
     .await
@@ -1345,7 +1372,7 @@ fn cron_tick_decision_keeps_session_arms_ahead_of_registration_arms() {
 }
 
 #[test]
-fn cron_tick_basis_journal_round_trips_and_accepts_legacy_session_values() {
+fn cron_tick_basis_journal_round_trips_and_legacy_live_replays_as_a_bounded_tick() {
     let disabled = cron_tick_basis(
         CronSessionDisposition::Live,
         CronRegistrationDisposition::Disabled,
@@ -1356,14 +1383,26 @@ fn cron_tick_basis_journal_round_trips_and_accepts_legacy_session_values() {
         disabled
     );
 
-    // Pre-FIG-1071 invocations journaled the session axis alone; they must keep
-    // replaying as a live/enabled basis rather than failing the handler.
+    // Pre-FIG-1071 invocations journaled the session axis alone. A live legacy
+    // value must replay as live/enabled so the handler continues; that means an
+    // in-flight legacy tick may run once before the next tick self-cancels. The
+    // bounded exception is deliberate, so this test pins the legacy decodes and
+    // the run decision that follows, not immediate post-retirement silence.
+    let legacy_live = CronTickBasis::from_journal_value("live").expect("decode legacy live basis");
     assert_eq!(
-        CronTickBasis::from_journal_value("live").expect("decode legacy live basis"),
+        legacy_live,
         cron_tick_basis(
             CronSessionDisposition::Live,
             CronRegistrationDisposition::Enabled
         )
+    );
+    assert_eq!(
+        crate::restate::cron_tick_decision(
+            legacy_live,
+            &cron_tick_test_state(&SessionId::from("legacy-live-session")),
+            "cron-job-legacy-live",
+        ),
+        crate::restate::CronTick::Run
     );
     assert_eq!(
         CronTickBasis::from_journal_value("retired")
@@ -1643,6 +1682,133 @@ async fn cron_registration_disposition_aggregates_duplicate_registrations() {
         .await
         .expect("classify no registration"),
         CronRegistrationDisposition::Absent
+    );
+}
+
+#[tokio::test]
+async fn cron_registration_disposition_ignores_record_order() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+
+    // Records sort by subscription key: the disabled record is first here.
+    let source_key = "cron-source:fig1071-order-disabled-first";
+    let disabled_first = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-a",
+        source_key,
+    )
+    .await;
+    let _enabled_second = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-b",
+        source_key,
+    )
+    .await;
+    disable_cron_test_subscription(trigger_store.as_ref(), &disabled_first).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify disabled-first duplicates"),
+        CronRegistrationDisposition::Enabled,
+        "a leading disabled record must not mask a later enabled record"
+    );
+
+    // Mirror image: the enabled record is first and the disabled one last.
+    let source_key = "cron-source:fig1071-order-enabled-first";
+    let _enabled_first = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-c",
+        source_key,
+    )
+    .await;
+    let disabled_second = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:order-d",
+        source_key,
+    )
+    .await;
+    disable_cron_test_subscription(trigger_store.as_ref(), &disabled_second).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify enabled-first duplicates"),
+        CronRegistrationDisposition::Enabled,
+        "an enabled first record must dominate a trailing disabled record"
+    );
+}
+
+#[tokio::test]
+async fn cron_registration_disposition_confines_matches_to_session_source_type_and_key() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+    let other_session = SessionId::from("fig1071-isolation-other-session");
+    let source_key = "cron-source:fig1071-isolation-shared";
+
+    // The single matching registration is disabled.
+    let matching = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:isolation-match",
+        source_key,
+    )
+    .await;
+    disable_cron_test_subscription(trigger_store.as_ref(), &matching).await;
+
+    // Every decoy is enabled; each violates exactly one filter dimension.
+    let _wrong_source_type = register_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "button-test:isolation",
+        crate::BUTTON_TRIGGER_SOURCE_TYPE,
+        source_key,
+    )
+    .await;
+    let _wrong_source_key = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &session_id,
+        "cron-test:isolation-other-key",
+        "cron-source:fig1071-isolation-other",
+    )
+    .await;
+    let _wrong_session = register_cron_test_subscription_record(
+        trigger_store.as_ref(),
+        &other_session,
+        "cron-test:isolation-other-session",
+        source_key,
+    )
+    .await;
+
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify amid enabled decoys"),
+        CronRegistrationDisposition::Disabled,
+        "source type, source key, and session must all confine the read"
+    );
+
+    delete_cron_test_subscription(trigger_store.as_ref(), &matching).await;
+    assert_eq!(
+        crate::restate::cron_registration_disposition(&state, &session_id, source_key)
+            .await
+            .expect("classify absent amid enabled decoys"),
+        CronRegistrationDisposition::Absent,
+        "enabled decoys outside the filter must not resurrect an absent registration"
     );
 }
 

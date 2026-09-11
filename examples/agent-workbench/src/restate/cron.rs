@@ -81,7 +81,11 @@ impl CronTickBasis {
                 registration: CronRegistrationDisposition::from_journal_value(registration)?,
             }),
             // Pre-FIG-1071 invocations journaled the session axis alone; only the
-            // session arm could cancel, so a live legacy value keeps ticking.
+            // session arm could cancel, so a live legacy value keeps ticking. This
+            // is intentionally a bounded exception, not immediate silence: an
+            // in-flight legacy `live` tick may emit or re-arm once before its next
+            // tick journals the registration axis and self-cancels. It never
+            // resurrects a retired or absent session, which the session arm owns.
             None => Ok(Self {
                 session: CronSessionDisposition::from_journal_value(value)?,
                 registration: CronRegistrationDisposition::Enabled,

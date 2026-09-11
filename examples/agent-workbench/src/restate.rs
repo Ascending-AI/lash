@@ -494,9 +494,17 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
                     async move {
                         let session =
                             cron_session_disposition(&app_state.core, &session_id).await?;
-                        let registration =
-                            cron_registration_disposition(&app_state, &session_id, &source_key)
-                                .await?;
+                        // A non-live session cancels unconditionally, so probing the
+                        // registration store would only add a failure dependency to an
+                        // already-confirmed cancellation. The placeholder is inert: the
+                        // decision returns the session arm before it reads this axis.
+                        let registration = match session {
+                            CronSessionDisposition::Live => {
+                                cron_registration_disposition(&app_state, &session_id, &source_key)
+                                    .await?
+                            }
+                            _ => CronRegistrationDisposition::Enabled,
+                        };
                         Ok::<_, HandlerError>(
                             CronTickBasis {
                                 session,

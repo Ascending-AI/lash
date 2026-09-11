@@ -60,6 +60,9 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+http = "1"
+http-body = "1"
+http-body-util = { version = "0.1", features = ["channel"] }
 lash-lashlang-runtime = { workspace = true }
 lash-llm-tools = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }
