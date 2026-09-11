@@ -1426,4 +1426,206 @@ grep -Fq 'workbench process metadata is missing or invalid' \
   || fail "invalid process metadata refusal did not report the failed proof"
 printf '%s\n' "$down_invalid_pid_record" > "$down_invalid_pid"
 
+data_down_mismatch="$test_tmp/data-down-pid-mismatch"
+port_down_mismatch=3118
+launcher_env "$data_down_mismatch" "$port_down_mismatch" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_mismatch" \
+  > "$test_tmp/down-pid-mismatch-up.log" 2>&1
+down_mismatch_pid="$data_down_mismatch/run/workbench-127.0.0.1_${port_down_mismatch}.pid"
+read -r down_mismatch_actual_pid down_mismatch_actual_start < "$down_mismatch_pid"
+printf '%s %s\n' "$down_mismatch_actual_pid" "$((down_mismatch_actual_start + 1))" \
+  > "$down_mismatch_pid"
+if launcher_env "$data_down_mismatch" "$port_down_mismatch" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_mismatch" \
+  > "$test_tmp/down-pid-mismatch-refusal.log" 2>&1; then
+  fail "down accepted a mismatched full-stack process receipt"
+fi
+[[ "$(awk '{print $22}' "/proc/$down_mismatch_actual_pid/stat" 2>/dev/null || true)" \
+    = "$down_mismatch_actual_start" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_mismatch" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_mismatch" ]] \
+  || fail "mismatched process receipt changed the original process or dependencies"
+grep -Fq 'workbench PID belongs to a different process incarnation' \
+  "$test_tmp/down-pid-mismatch-refusal.log" \
+  || fail "mismatched process receipt refusal did not report its observation state"
+printf '%s %s\n' "$down_mismatch_actual_pid" "$down_mismatch_actual_start" > "$down_mismatch_pid"
+
+data_down_retry="$test_tmp/data-down-retry"
+port_down_retry=3120
+launcher_env "$data_down_retry" "$port_down_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_retry" \
+  > "$test_tmp/down-retry-up.log" 2>&1
+down_retry_pid="$data_down_retry/run/workbench-127.0.0.1_${port_down_retry}.pid"
+down_retry_receipt="$data_down_retry/run/workbench-127.0.0.1_${port_down_retry}.process-retired"
+down_retry_pid_record="$(<"$down_retry_pid")"
+rm -f "$mock_state/docker-rm-failed-restate"
+if launcher_env "$data_down_retry" "$port_down_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=once \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_retry" \
+  > "$test_tmp/down-retry-first.log" 2>&1; then
+  fail "first down ignored a transient Restate retirement failure"
+fi
+[[ "$(<"$down_retry_pid")" = "$down_retry_pid_record" \
+  && -f "$down_retry_receipt" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_retry" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_retry" ]] \
+  || fail "failed down did not retain exact process and service retry receipts"
+launcher_env "$data_down_retry" "$port_down_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_retry" \
+  > "$test_tmp/down-retry-second.log" 2>&1
+[[ ! -e "$down_retry_pid" && ! -e "$down_retry_receipt" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_retry" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_retry" ]] \
+  || fail "fault-free down retry did not complete the exact retained teardown"
+
+data_down_store_retry="$test_tmp/data-down-store-retry"
+port_down_store_retry=3130
+launcher_env "$data_down_store_retry" "$port_down_store_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_down_store_retry" \
+  > "$test_tmp/down-store-retry-up.log" 2>&1
+store_retry_key="127.0.0.1_${port_down_store_retry}"
+store_retry_restate_receipt="$data_down_store_retry/run/restate-$store_retry_key.service-retired"
+rm -f "$mock_state/docker-rm-failed-postgres"
+if launcher_env "$data_down_store_retry" "$port_down_store_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  MOCK_RM_FAIL_COMPONENT=postgres MOCK_RM_FAIL_MODE=once \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_store_retry" \
+  > "$test_tmp/down-store-retry-first.log" 2>&1; then
+  fail "first down ignored a transient PostgreSQL retirement failure"
+fi
+[[ -f "$store_retry_restate_receipt" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_down_store_retry" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_store_retry" ]] \
+  || fail "partial down did not retain exact retired-engine evidence before PostgreSQL retry"
+launcher_env "$data_down_store_retry" "$port_down_store_retry" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_down_store_retry" \
+  > "$test_tmp/down-store-retry-second.log" 2>&1
+[[ ! -e "$store_retry_restate_receipt" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_down_store_retry" \
+  && ! -e "$data_down_store_retry/run/workbench-$store_retry_key.process-retired" ]] \
+  || fail "fault-free PostgreSQL retry did not complete retained teardown receipts"
+
+data_observation_failure="$test_tmp/data-process-observation-failure"
+port_observation_failure=3122
+if launcher_env "$data_observation_failure" "$port_observation_failure" \
+  MOCK_POST_REMOVE_PID=1 \
+  'BASH_FUNC_awk%%=() { if [[ " ${FUNCNAME[*]} " = *" stop_process_identity "* ]]; then return 1; fi; command awk "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_observation_failure" \
+  > "$test_tmp/process-observation-failure.log" 2>&1; then
+  fail "startup with unknown process observation unexpectedly succeeded"
+fi
+read -r observation_pid observation_start < "$mock_state/removed-pid-record"
+[[ "$(awk '{print $22}' "/proc/$observation_pid/stat" 2>/dev/null || true)" \
+    = "$observation_start" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_observation_failure" \
+  && -f "$data_observation_failure/attempt-app-state" ]] \
+  || fail "unknown process observation deleted the live child or dependent state"
+grep -Fq 'process identity could not be observed' "$test_tmp/process-observation-failure.log" \
+  || fail "unknown process observation did not report conservative retention"
+kill -- "-$observation_pid" >/dev/null 2>&1 || kill "$observation_pid" >/dev/null 2>&1 \
+  || fail "test could not stop its retained observation-failure child"
+
+wait_foreground_ready() {
+  local log_file="$1" invocation_pid="$2"
+  for _ in {1..200}; do
+    grep -q '^\[agent-workbench\] ready:' "$log_file" && return 0
+    kill -0 "$invocation_pid" >/dev/null 2>&1 || return 1
+    sleep 0.05
+  done
+  return 1
+}
+
+data_foreground_normal="$test_tmp/data-foreground-normal"
+port_foreground_normal=3124
+launcher_env "$data_foreground_normal" "$port_foreground_normal" \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_normal"'"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_normal" \
+  > "$test_tmp/foreground-normal.log" 2>&1 &
+foreground_normal_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-normal.log" "$foreground_normal_invocation" \
+  || fail "normal foreground fixture did not become ready"
+read -r foreground_normal_child _ < \
+  "$data_foreground_normal/run/workbench-127.0.0.1_${port_foreground_normal}.pid"
+kill -TERM "$foreground_normal_child"
+wait "$foreground_normal_invocation" \
+  || fail "normal foreground child exit did not preserve success status"
+[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_normal" ]] \
+  || fail "normal foreground exit did not retire its exact engine"
+! grep -Fq 'unbound variable' "$test_tmp/foreground-normal.log" \
+  || fail "normal foreground cleanup outlived its ownership context"
+
+data_foreground_crash="$test_tmp/data-foreground-crash"
+port_foreground_crash=3132
+launcher_env "$data_foreground_crash" "$port_foreground_crash" \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_crash"'"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_crash" \
+  > "$test_tmp/foreground-crash.log" 2>&1 &
+foreground_crash_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-crash.log" "$foreground_crash_invocation" \
+  || fail "crashing foreground fixture did not become ready"
+read -r foreground_crash_child _ < \
+  "$data_foreground_crash/run/workbench-127.0.0.1_${port_foreground_crash}.pid"
+kill -KILL "$foreground_crash_child"
+foreground_crash_status=0
+wait "$foreground_crash_invocation" || foreground_crash_status=$?
+[[ "$foreground_crash_status" = 137 \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_crash" ]] \
+  || fail "foreground child crash did not preserve status and retire its exact engine"
+! grep -Fq 'unbound variable' "$test_tmp/foreground-crash.log" \
+  || fail "foreground crash cleanup outlived its ownership context"
+
+data_foreground_term="$test_tmp/data-foreground-term"
+port_foreground_term=3126
+foreground_term_attempts_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
+launcher_env "$data_foreground_term" "$port_foreground_term" \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_term"'"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_term" \
+  > "$test_tmp/foreground-term.log" 2>&1 &
+foreground_term_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-term.log" "$foreground_term_invocation" \
+  || {
+    cat "$test_tmp/foreground-term.log" >&2
+    fail "TERM foreground fixture did not become ready"
+  }
+foreground_term_launcher="$(<"$mock_state/launcher-$port_foreground_term")"
+kill -TERM "$foreground_term_launcher"
+foreground_term_status=0
+wait "$foreground_term_invocation" || foreground_term_status=$?
+[[ "$foreground_term_status" = 143 \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_term" ]] \
+  || fail "foreground TERM did not preserve signal status and retire its exact engine"
+foreground_term_attempts="$(tail -n "+$((foreground_term_attempts_before + 1))" \
+  "$mock_state/docker-rm-attempt.log" | grep -c ' restate$' || true)"
+[[ "$foreground_term_attempts" = 1 ]] \
+  || fail "foreground TERM executed engine retirement more than once"
+! grep -Fq 'unbound variable' "$test_tmp/foreground-term.log" \
+  || fail "foreground TERM cleanup ran after its ownership context expired"
+
+data_foreground_registry="$test_tmp/data-foreground-registry"
+port_foreground_registry=3128
+launcher_env "$data_foreground_registry" "$port_foreground_registry" \
+  bash -c 'printf "%s\n" "$$" > "$MOCK_STATE/launcher-'"$port_foreground_registry"'"; exec bash "$1" foreground --port "$2"' \
+  _ "$repo_root/scripts/agent-workbench-dev.sh" "$port_foreground_registry" \
+  > "$test_tmp/foreground-registry.log" 2>&1 &
+foreground_registry_invocation=$!
+wait_foreground_ready "$test_tmp/foreground-registry.log" "$foreground_registry_invocation" \
+  || fail "changed-registry foreground fixture did not become ready"
+foreground_registry_admin=$((19070 + (port_foreground_registry - 3030) * 10))
+printf '%s\t%s\t%s\n' "$foreground_registry_admin" dp_foreign http://127.0.0.1:65531 \
+  >> "$mock_state/deployments"
+foreground_registry_launcher="$(<"$mock_state/launcher-$port_foreground_registry")"
+kill -TERM "$foreground_registry_launcher"
+foreground_registry_status=0
+wait "$foreground_registry_invocation" || foreground_registry_status=$?
+[[ "$foreground_registry_status" = 143 \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_foreground_registry" \
+  && -f "$data_foreground_registry/attempt-app-state" ]] \
+  || fail "changed-registry foreground cleanup removed its engine or dependent state"
+grep -Fq 'cannot prove fresh exclusive Restate registry ownership' \
+  "$test_tmp/foreground-registry.log" \
+  || fail "changed-registry foreground cleanup did not report its fresh refusal"
+grep -Fq $'\tdp_foreign\thttp://127.0.0.1:65531' "$mock_state/deployments" \
+  || fail "changed-registry foreground cleanup lost the foreign registration"
+! grep -Fq 'unbound variable' "$test_tmp/foreground-registry.log" \
+  || fail "changed-registry foreground cleanup ran outside its ownership context"
+
 printf '%s\n' 'agent-workbench explicit reset lifecycle checks passed'

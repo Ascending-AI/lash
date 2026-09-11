@@ -37,6 +37,8 @@ run_owner_record=""
 registered_deployment_id=""
 restate_registry_hash=""
 restate_retirement_authorized=0
+foreground_cleanup_done=0
+foreground_cleanup_status=0
 
 log() {
   printf '[agent-workbench] %s\n' "$*" >&2
@@ -247,7 +249,7 @@ deployment_registry_records() {
   local admin_url="$1"
   local response
   response="$(
-    curl --http2-prior-knowledge -fsS \
+    curl --http2-prior-knowledge -fsS --max-time 5 \
       "${admin_url%/}/deployments"
   )" || return 1
   printf '%s' "$response" | python3 -c '
@@ -357,9 +359,32 @@ read_pid_file() {
 }
 
 pid_identity_matches() {
-  local pid="$1" expected_start_time="$2" current_start_time
-  current_start_time="$(process_start_time "$pid" 2>/dev/null || true)"
-  [[ -n "$current_start_time" && "$current_start_time" = "$expected_start_time" ]]
+  [[ "$(process_identity_observation "$1" "$2")" = running ]]
+}
+
+process_identity_observation() {
+  local pid="${1:-}" expected_start_time="${2:-}" current_start_time=""
+  if [[ ! "$pid" =~ ^[0-9]+$ || ! "$expected_start_time" =~ ^[0-9]+$ ]]; then
+    printf 'unknown\n'
+    return
+  fi
+  if [[ ! -e "/proc/$pid" ]]; then
+    printf 'retired\n'
+    return
+  fi
+  if ! current_start_time="$(process_start_time "$pid" 2>/dev/null)"; then
+    if [[ ! -e "/proc/$pid" ]]; then
+      printf 'retired\n'
+    else
+      printf 'unknown\n'
+    fi
+    return
+  fi
+  if [[ "$current_start_time" = "$expected_start_time" ]]; then
+    printf 'running\n'
+  else
+    printf 'mismatch\n'
+  fi
 }
 
 pid_file_identity() {
@@ -459,6 +484,8 @@ path_contains_reset_footprint_record() {
     find -P "$path" -xdev -mindepth 1 \
       \( -name '.agent-workbench-dev-run-owner-*' \
       -o -name '.agent-workbench-dev-attempt-owner' \
+      -o -name 'workbench-*.process-retired' \
+      -o -name '*-*.service-retired' \
       -o -name 'restate-*.lease' -o -name 'postgres-*.lease' \
       -o -name '*-recover.sh' \) \
       -print -quit 2>/dev/null
@@ -739,66 +766,191 @@ workbench_ready() {
 
 cleanup_stale_pid() {
   [[ -e "$pid_file" ]] || return 0
-  if pid_file_identity "$pid_file" >/dev/null; then
+  local record="" pid="" start_time="" observation=""
+  record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
+  if [[ -z "$record" ]]; then
+    remove_stale_pid_file "$pid_file"
     return
   fi
-  remove_stale_pid_file "$pid_file"
+  read -r pid start_time <<<"$record"
+  observation="$(process_identity_observation "$pid" "$start_time")"
+  case "$observation" in
+    running) return 0 ;;
+    retired|mismatch) remove_stale_pid_file "$pid_file" ;;
+    *) die "workbench process identity could not be observed; retaining PID metadata" ;;
+  esac
 }
 
 stop_process_identity() {
-  local pid="$1" start_time="$2"
-  if ! pid_identity_matches "$pid" "$start_time"; then
-    local current_start_time=""
-    current_start_time="$(process_start_time "$pid" 2>/dev/null || true)"
-    if [[ -z "$current_start_time" || "$current_start_time" != "$start_time" ]]; then
-      return 0
-    fi
-    log "process identity could not be verified; refusing cleanup for PID $pid"
-    return 1
-  fi
+  local pid="$1" start_time="$2" observation=""
+  observation="$(process_identity_observation "$pid" "$start_time")"
+  case "$observation" in
+    retired|mismatch) return 0 ;;
+    running) ;;
+    *)
+      log "process identity could not be observed; refusing cleanup for PID $pid"
+      return 1
+      ;;
+  esac
   log "stopping process $pid"
   if ! signal_verified_process TERM "$pid" "$start_time"; then
-    if [[ ! -e "/proc/$pid" ]]; then
-      return 0
-    fi
-    log "process identity changed or could not be signaled; refusing cleanup for PID $pid"
-    return 1
+    observation="$(process_identity_observation "$pid" "$start_time")"
+    case "$observation" in
+      retired|mismatch) return 0 ;;
+      *)
+        log "process identity changed or could not be signaled; refusing cleanup for PID $pid"
+        return 1
+        ;;
+    esac
   fi
   for _ in {1..30}; do
-    pid_identity_matches "$pid" "$start_time" || break
+    observation="$(process_identity_observation "$pid" "$start_time")"
+    [[ "$observation" = running ]] || break
     sleep 0.5
   done
-  if pid_identity_matches "$pid" "$start_time"; then
+  observation="$(process_identity_observation "$pid" "$start_time")"
+  if [[ "$observation" = unknown ]]; then
+    log "process retirement could not be observed; refusing dependent cleanup for PID $pid"
+    return 1
+  fi
+  if [[ "$observation" = running ]]; then
     log "process $pid did not exit; sending SIGKILL"
     if ! signal_verified_process KILL "$pid" "$start_time"; then
       log "process identity changed before SIGKILL; refusing to signal PID $pid"
       return 1
     fi
     for _ in {1..30}; do
-      pid_identity_matches "$pid" "$start_time" || break
+      observation="$(process_identity_observation "$pid" "$start_time")"
+      [[ "$observation" = running ]] || break
       sleep 0.1
     done
-    if pid_identity_matches "$pid" "$start_time"; then
+    observation="$(process_identity_observation "$pid" "$start_time")"
+    if [[ "$observation" = running ]]; then
       log "process $pid still exists after SIGKILL; refusing cleanup"
       return 1
     fi
+  fi
+  if [[ "$observation" = unknown ]]; then
+    log "process retirement could not be observed; refusing dependent cleanup for PID $pid"
+    return 1
   fi
 }
 
 stop_pid_file() {
   local file="$1"
   [[ -e "$file" ]] || return 0
-  local record="" pid="" start_time=""
-  record="$(pid_file_identity "$file" 2>/dev/null || true)"
+  local record="" pid="" start_time="" observation=""
+  record="$(read_pid_file "$file" 2>/dev/null || true)"
   if [[ -z "$record" ]]; then
     remove_stale_pid_file "$file"
     return
   fi
   read -r pid start_time <<<"$record"
-
-  stop_process_identity "$pid" "$start_time" || return 1
+  observation="$(process_identity_observation "$pid" "$start_time")"
+  if [[ "$observation" = unknown ]]; then
+    log "process identity could not be observed; retaining PID metadata at $file"
+    return 1
+  fi
+  if [[ "$observation" = running ]]; then
+    stop_process_identity "$pid" "$start_time" || return 1
+  elif [[ "$observation" = mismatch ]]; then
+    log "removing stale or mismatched PID file $file"
+  fi
 
   rm -f "$file"
+}
+
+read_process_retirement_receipt() {
+  local file="$1"
+  regular_private_file "$file" || return 1
+  local schema token pid start_time extra
+  read -r schema token pid start_time extra < "$file" || return 1
+  [[ "$schema" = 1 && "$token" =~ ^[0-9a-fA-F-]{36}$ \
+    && "$pid" =~ ^[0-9]+$ && "$start_time" =~ ^[0-9]+$ && -z "$extra" ]] \
+    || return 1
+  printf '%s %s %s %s\n' "$schema" "$token" "$pid" "$start_time"
+}
+
+write_process_retirement_receipt() {
+  local file="$1" token="$2" pid="$3" start_time="$4"
+  local expected="1 $token $pid $start_time" existing="" temporary="$file.$$.tmp"
+  if [[ -e "$file" || -L "$file" ]]; then
+    existing="$(read_process_retirement_receipt "$file" 2>/dev/null || true)"
+    [[ "$existing" = "$expected" ]]
+    return
+  fi
+  (umask 077; printf '%s\n' "$expected" > "$temporary") || return 1
+  chmod 600 "$temporary" || return 1
+  mv -f -- "$temporary" "$file"
+}
+
+validate_persisted_process_state() {
+  local pid_file="$1" receipt_file="$2" token="$3"
+  local record="" receipt="" pid="" start_time="" observation=""
+  record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
+  if [[ -z "$record" ]]; then
+    log "refusing teardown: workbench process metadata is missing or invalid at $pid_file"
+    return 1
+  fi
+  read -r pid start_time <<<"$record"
+  if [[ -e "$receipt_file" || -L "$receipt_file" ]]; then
+    receipt="$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+    if [[ "$receipt" != "1 $token $pid $start_time" ]]; then
+      log "refusing teardown: process retirement receipt is invalid or changed at $receipt_file"
+      return 1
+    fi
+    return 0
+  fi
+  observation="$(process_identity_observation "$pid" "$start_time")"
+  case "$observation" in
+    running|retired) return 0 ;;
+    mismatch)
+      log "refusing teardown: workbench PID belongs to a different process incarnation"
+      return 1
+      ;;
+    *)
+      log "refusing teardown: workbench process identity could not be observed"
+      return 1
+      ;;
+  esac
+}
+
+retire_persisted_process() {
+  local pid_file="$1" receipt_file="$2" token="$3"
+  local record="" receipt="" pid="" start_time="" observation=""
+  record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
+  [[ -n "$record" ]] || return 1
+  read -r pid start_time <<<"$record"
+  receipt="$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  if [[ -n "$receipt" ]]; then
+    [[ "$receipt" = "1 $token $pid $start_time" ]] || return 1
+    return 0
+  fi
+  observation="$(process_identity_observation "$pid" "$start_time")"
+  case "$observation" in
+    running) stop_process_identity "$pid" "$start_time" || return 1 ;;
+    retired) ;;
+    *)
+      log "workbench process retirement could not be proven; retaining dependent services"
+      return 1
+      ;;
+  esac
+  write_process_retirement_receipt "$receipt_file" "$token" "$pid" "$start_time" || {
+    log "could not persist the verified workbench process retirement receipt"
+    return 1
+  }
+}
+
+clear_persisted_process_receipts() {
+  local pid_file="$1" receipt_file="$2" token="$3"
+  local record="" receipt="" pid="" start_time=""
+  record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
+  [[ -n "$record" ]] || return 1
+  read -r pid start_time <<<"$record"
+  receipt="$(read_process_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  [[ "$receipt" = "1 $token $pid $start_time" ]] || return 1
+  rm -f -- "$pid_file" || return 1
+  rm -f -- "$receipt_file"
 }
 
 stop_attempt_workbench() {
@@ -831,33 +983,6 @@ stop_started_postgres() {
     "$ownership_token" postgres "$postgres_marker_file"
 }
 
-stop_persisted_service() {
-  local marker_file="$1" component="$2" lease_file="$3" expected_token="${4:-}"
-  if [[ ! -e "$marker_file" && ! -L "$marker_file" ]]; then
-    log "refusing to stop $component: ownership marker is missing at $marker_file"
-    return 1
-  fi
-  local record name id token marker_component expected_lease
-  record="$(read_container_marker "$marker_file" 2>/dev/null || true)"
-  if [[ -z "$record" ]]; then
-    log "refusing to stop $component: ownership marker is legacy or invalid at $marker_file"
-    return 1
-  fi
-  read -r name id token marker_component <<<"$record"
-  expected_lease="1 $component $token $id"
-  if [[ "$marker_component" != "$component" \
-    || ( -n "$expected_token" && "$token" != "$expected_token" ) \
-    || "$(read_service_lease "$lease_file" 2>/dev/null || true)" != "$expected_lease" ]]; then
-    log "refusing to stop $component: service lease does not prove exclusive ownership"
-    return 1
-  fi
-  stop_owned_container_file "$marker_file" "$component" || return 1
-  remove_service_lease "$lease_file" "$expected_lease" || {
-    log "removed the owned $component container but could not clear its exact service lease"
-    return 1
-  }
-}
-
 validate_persisted_service() {
   local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
   local record name id token marker_component expected_lease
@@ -874,6 +999,107 @@ validate_persisted_service() {
     log "refusing teardown: $component identity or service lease does not prove ownership"
     return 1
   fi
+}
+
+read_service_retirement_receipt() {
+  local file="$1"
+  regular_private_file "$file" || return 1
+  local schema component token id extra
+  read -r schema component token id extra < "$file" || return 1
+  [[ "$schema" = 1 && "$component" =~ ^(restate|postgres)$ \
+    && "$token" =~ ^[0-9a-fA-F-]{36}$ \
+    && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]] || return 1
+  printf '%s %s %s %s\n' "$schema" "$component" "$token" "$id"
+}
+
+write_service_retirement_receipt() {
+  local file="$1" component="$2" token="$3" id="$4"
+  local expected="1 $component $token $id" existing="" temporary="$file.$$.tmp"
+  if [[ -e "$file" || -L "$file" ]]; then
+    existing="$(read_service_retirement_receipt "$file" 2>/dev/null || true)"
+    [[ "$existing" = "$expected" ]]
+    return
+  fi
+  (umask 077; printf '%s\n' "$expected" > "$temporary") || return 1
+  chmod 600 "$temporary" || return 1
+  mv -f -- "$temporary" "$file"
+}
+
+validate_persisted_service_state() {
+  local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
+  local receipt_file="$5" receipt="" record="" name="" id="" token="" marker_component=""
+  if [[ ! -e "$receipt_file" && ! -L "$receipt_file" ]]; then
+    validate_persisted_service "$marker_file" "$component" "$lease_file" "$expected_token"
+    return
+  fi
+  receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  read -r _ marker_component token id <<<"$receipt"
+  if [[ -z "$receipt" || "$marker_component" != "$component" || "$token" != "$expected_token" ]]; then
+    log "refusing teardown: $component retirement receipt is invalid or changed"
+    return 1
+  fi
+  if [[ -e "$marker_file" || -L "$marker_file" ]]; then
+    record="$(read_container_marker "$marker_file" 2>/dev/null || true)"
+    read -r name _ _ _ <<<"$record"
+    if [[ -z "$record" || "$record" != "$name $id $token $component" ]]; then
+      log "refusing teardown: $component marker changed after verified retirement"
+      return 1
+    fi
+  fi
+  if [[ -e "$lease_file" || -L "$lease_file" ]]; then
+    [[ "$(read_service_lease "$lease_file" 2>/dev/null || true)" \
+      = "1 $component $token $id" ]] || {
+      log "refusing teardown: $component lease changed after verified retirement"
+      return 1
+    }
+  fi
+}
+
+retire_persisted_service() {
+  local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
+  local receipt_file="$5" receipt="" record="" name="" id="" token="" marker_component=""
+  receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  if [[ -n "$receipt" ]]; then
+    validate_persisted_service_state \
+      "$marker_file" "$component" "$lease_file" "$expected_token" "$receipt_file"
+    return
+  fi
+  record="$(read_container_marker "$marker_file" 2>/dev/null || true)"
+  read -r name id token marker_component <<<"$record"
+  [[ -n "$record" && "$token" = "$expected_token" && "$marker_component" = "$component" \
+    && "$(read_service_lease "$lease_file" 2>/dev/null || true)" \
+      = "1 $component $token $id" ]] || return 1
+  container_identity_matches "$name" "$id" "$token" "$component" || return 1
+  log "stopping $component container $name"
+  if ! docker rm -fv "$id" >/dev/null; then
+    log "could not remove the exact owned $component container $name"
+    return 1
+  fi
+  write_service_retirement_receipt "$receipt_file" "$component" "$token" "$id" || {
+    log "removed the exact owned $component container but could not persist its retirement receipt"
+    return 1
+  }
+}
+
+clear_persisted_service_receipts() {
+  local marker_file="$1" component="$2" lease_file="$3" expected_token="$4"
+  local receipt_file="$5" receipt=""
+  validate_persisted_service_state \
+    "$marker_file" "$component" "$lease_file" "$expected_token" "$receipt_file" || return 1
+  receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+  [[ -n "$receipt" ]] || return 1
+  rm -f -- "$marker_file" || {
+    log "could not clear the exact retired $component ownership marker"
+    return 1
+  }
+  rm -f -- "$lease_file" || {
+    log "could not clear the exact retired $component service lease"
+    return 1
+  }
+  rm -f -- "$receipt_file" || {
+    log "could not clear the exact retired $component ownership receipts"
+    return 1
+  }
 }
 
 stop_stack_from_meta() (
@@ -901,12 +1127,13 @@ stop_stack_from_meta() (
     return 1
   fi
   local stack_pid_file="$state_dir/workbench-$stack_key.pid"
+  local stack_process_receipt="$state_dir/workbench-$stack_key.process-retired"
   local stack_restate_marker="$state_dir/restate-$stack_key.container"
   local stack_postgres_marker="$state_dir/postgres-$stack_key.container"
-  if [[ -z "$(read_pid_file "$stack_pid_file" 2>/dev/null || true)" ]]; then
-    log "refusing teardown: workbench process metadata is missing or invalid at $stack_pid_file"
-    return 1
-  fi
+  local stack_restate_receipt="$state_dir/restate-$stack_key.service-retired"
+  local stack_postgres_receipt="$state_dir/postgres-$stack_key.service-retired"
+  validate_persisted_process_state \
+    "$stack_pid_file" "$stack_process_receipt" "$ownership_token" || return 1
 
   local ingress_host ingress_port admin_host admin_port canonical_ingress canonical_admin
   read -r ingress_host ingress_port < <(url_host_port "$restate_ingress_url")
@@ -935,34 +1162,49 @@ stop_stack_from_meta() (
       log "refusing teardown: stack metadata does not authorize exclusive Restate retirement"
       return 1
     fi
-    validate_persisted_service "$stack_restate_marker" restate "$restate_lease" "$ownership_token" || return 1
-    local registry_records registry_hash expected_registry_record
-    registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
-    registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
-    expected_registry_record="$restate_deployment_id"$'\t'"${deployment_url%/}"
-    if [[ "$registry_records" != "$expected_registry_record" \
-      || "$registry_hash" != "$restate_registry_hash" ]]; then
-      log "refusing teardown: current Restate deployment registry does not prove exclusive ownership"
-      return 1
+    validate_persisted_service_state "$stack_restate_marker" restate "$restate_lease" \
+      "$ownership_token" "$stack_restate_receipt" || return 1
+    if [[ ! -e "$stack_restate_receipt" && ! -L "$stack_restate_receipt" ]]; then
+      local registry_records registry_hash expected_registry_record
+      registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
+      registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
+      expected_registry_record="$restate_deployment_id"$'\t'"${deployment_url%/}"
+      if [[ "$registry_records" != "$expected_registry_record" \
+        || "$registry_hash" != "$restate_registry_hash" ]]; then
+        log "refusing teardown: current Restate deployment registry does not prove exclusive ownership"
+        return 1
+      fi
     fi
   fi
   if [[ "$postgres_managed" = 1 ]]; then
-    validate_persisted_service "$stack_postgres_marker" postgres "$postgres_lease" "$ownership_token" || return 1
+    validate_persisted_service_state "$stack_postgres_marker" postgres "$postgres_lease" \
+      "$ownership_token" "$stack_postgres_receipt" || return 1
   fi
 
-  stop_pid_file "$stack_pid_file" || return 1
+  retire_persisted_process \
+    "$stack_pid_file" "$stack_process_receipt" "$ownership_token" || return 1
   if [[ "$restate_managed" = 1 ]]; then
-    stop_persisted_service "$stack_restate_marker" restate "$restate_lease" "$ownership_token" || return 1
+    retire_persisted_service "$stack_restate_marker" restate "$restate_lease" \
+      "$ownership_token" "$stack_restate_receipt" || return 1
   elif [[ "$postgres_managed" = 1 ]]; then
     log "workbench stopped; retaining managed Postgres because the Restate engine is external"
     return 1
   else
     log "workbench stopped; external Restate remains registered"
+    clear_persisted_process_receipts \
+      "$stack_pid_file" "$stack_process_receipt" "$ownership_token" || return 1
     return 0
   fi
   if [[ "$postgres_managed" = 1 ]]; then
-    stop_persisted_service "$stack_postgres_marker" postgres "$postgres_lease" "$ownership_token" || return 1
+    retire_persisted_service "$stack_postgres_marker" postgres "$postgres_lease" \
+      "$ownership_token" "$stack_postgres_receipt" || return 1
+    clear_persisted_service_receipts "$stack_postgres_marker" postgres "$postgres_lease" \
+      "$ownership_token" "$stack_postgres_receipt" || return 1
   fi
+  clear_persisted_service_receipts "$stack_restate_marker" restate "$restate_lease" \
+    "$ownership_token" "$stack_restate_receipt" || return 1
+  clear_persisted_process_receipts \
+    "$stack_pid_file" "$stack_process_receipt" "$ownership_token"
 )
 
 stop_target() {
@@ -1024,10 +1266,11 @@ cleanup_start_attempt() {
     log "startup cleanup cannot retire the external Restate engine; retaining application state, managed stores, and ownership metadata"
     return 1
   fi
-  if (( started_restate_this_attempt )) && [[ -n "$registered_deployment_id" ]] \
-    && (( ! restate_retirement_authorized )); then
-    log "startup cleanup cannot prove exclusive Restate registry ownership; retaining the engine and dependent state"
-    return 1
+  if (( started_restate_this_attempt )) && [[ -n "$registered_deployment_id" ]]; then
+    if ! fresh_restate_registry_ownership; then
+      log "startup cleanup cannot prove fresh exclusive Restate registry ownership; retaining the engine and dependent state"
+      return 1
+    fi
   fi
   if (( started_restate_this_attempt )); then
     if (( created_restate_service_lease_this_attempt )) \
@@ -1174,7 +1417,12 @@ stop_all_known() {
     expected_meta="$state_dir/workbench-$key.meta"
     [[ -e "$expected_meta" || -L "$expected_meta" ]] && continue
     found=1
-    stop_pid_file "$file" || true
+    if [[ -e "$state_dir/workbench-$key.process-retired" \
+      || -L "$state_dir/workbench-$key.process-retired" ]]; then
+      log "retaining orphan process retirement receipt without stack metadata"
+    else
+      stop_pid_file "$file" || true
+    fi
     log "refusing service teardown: process metadata has no matching stack metadata at $expected_meta"
     failed=1
   done
@@ -1343,6 +1591,18 @@ capture_restate_registry_ownership() {
     restate_registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
     restate_retirement_authorized=1
   fi
+}
+
+fresh_restate_registry_ownership() {
+  (( restate_retirement_authorized )) || return 1
+  [[ "$registered_deployment_id" =~ ^dp_[A-Za-z0-9]+$ \
+    && "$restate_registry_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+  local registry_records registry_hash expected_record
+  registry_records="$(deployment_registry_records "$restate_admin_url" 2>/dev/null || true)"
+  registry_hash="$(printf '%s' "$registry_records" | sha256sum | awk '{print $1}')"
+  expected_record="$registered_deployment_id"$'\t'"$(endpoint_url)"
+  expected_record="${expected_record%/}"
+  [[ "$registry_records" = "$expected_record" && "$registry_hash" = "$restate_registry_hash" ]]
 }
 
 attempt_meta_matches() {
@@ -1790,45 +2050,62 @@ run_foreground() {
   fi
   ensure_postgres
 
-  local started_pid="" started_start_time=""
   cleanup_foreground() {
+    if (( foreground_cleanup_done )); then
+      return "$foreground_cleanup_status"
+    fi
+    foreground_cleanup_done=1
+    foreground_cleanup_status=1
     local published_record=""
-    if [[ -n "$started_pid" ]]; then
-      if ! stop_process_identity "$started_pid" "$started_start_time"; then
+    if [[ -n "$started_workbench_pid" ]]; then
+      if [[ -z "$started_workbench_start_time" ]] \
+        || ! stop_process_identity "$started_workbench_pid" "$started_workbench_start_time"; then
         log "foreground cleanup could not stop the owned workbench; retaining its engine and application state"
+        foreground_cleanup_status=1
         return 1
       fi
       published_record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
-      if [[ "$published_record" = "$started_pid $started_start_time" ]]; then
-        rm -f "$pid_file" || return 1
+      if [[ "$published_record" = "$started_workbench_pid $started_workbench_start_time" ]]; then
+        write_process_retirement_receipt "$process_retirement_receipt_file" \
+          "$ownership_token" "$started_workbench_pid" "$started_workbench_start_time" || {
+          log "foreground cleanup could not persist its verified process retirement receipt"
+          return 1
+        }
       elif [[ -e "$pid_file" || -L "$pid_file" ]]; then
         log "stopped the captured foreground process but retained changed PID metadata at $pid_file"
       fi
-      wait "$started_pid" >/dev/null 2>&1 || true
+      wait "$started_workbench_pid" >/dev/null 2>&1 || true
+      started_workbench_this_attempt=0
     fi
     if (( external_restate_used_this_attempt )); then
       log "foreground cleanup cannot retire the external Restate engine; retaining application state, managed stores, and ownership metadata"
+      foreground_cleanup_status=1
       return 1
     fi
-    if (( started_restate_this_attempt )) && [[ -n "$registered_deployment_id" ]] \
-      && (( ! restate_retirement_authorized )); then
-      log "foreground cleanup cannot prove exclusive Restate registry ownership; retaining the engine and dependent state"
-      return 1
+    if (( started_restate_this_attempt )) && [[ -n "$registered_deployment_id" ]]; then
+      if ! fresh_restate_registry_ownership; then
+        log "foreground cleanup cannot prove fresh exclusive Restate registry ownership; retaining the engine and dependent state"
+        foreground_cleanup_status=1
+        return 1
+      fi
     fi
     if (( started_restate_this_attempt )); then
       if (( created_restate_service_lease_this_attempt )) \
         && [[ "$(read_service_lease "$restate_service_lease_file" 2>/dev/null || true)" \
           != "$restate_service_lease_record" ]]; then
         log "foreground cleanup could not verify its exact Restate service lease; retaining application state"
+        foreground_cleanup_status=1
         return 1
       fi
       if ! stop_started_restate; then
         log "foreground cleanup could not remove the exact owned Restate engine; retaining application state"
+        foreground_cleanup_status=1
         return 1
       fi
       if (( created_restate_service_lease_this_attempt )) \
         && ! remove_service_lease "$restate_service_lease_file" "$restate_service_lease_record"; then
         log "foreground cleanup could not clear the exact Restate service lease; retaining application state"
+        foreground_cleanup_status=1
         return 1
       fi
     fi
@@ -1837,15 +2114,18 @@ run_foreground() {
         && [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
           != "$postgres_service_lease_record" ]]; then
         log "foreground cleanup could not verify its exact Postgres service lease; retaining application state"
+        foreground_cleanup_status=1
         return 1
       fi
       if ! stop_started_postgres; then
         log "foreground cleanup could not remove the exact owned Postgres store; retaining application state"
+        foreground_cleanup_status=1
         return 1
       fi
       if (( created_postgres_service_lease_this_attempt )) \
         && ! remove_service_lease "$postgres_service_lease_file" "$postgres_service_lease_record"; then
         log "foreground cleanup could not clear the exact Postgres service lease; retaining application state"
+        foreground_cleanup_status=1
         return 1
       fi
     fi
@@ -1853,21 +2133,50 @@ run_foreground() {
       if [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" != "$run_owner_record" ]] \
         || ! rm -f "$run_owner_file"; then
         log "foreground cleanup could not clear its exact run-footprint record; retaining application state"
+        foreground_cleanup_status=1
         return 1
       fi
     fi
     if (( data_dir_created_this_attempt )); then
       if ! release_data_creation_receipt; then
         log "foreground cleanup could not retire application data creation metadata"
+        foreground_cleanup_status=1
         return 1
       fi
     fi
+    if [[ -e "$process_retirement_receipt_file" || -L "$process_retirement_receipt_file" ]]; then
+      clear_persisted_process_receipts \
+        "$pid_file" "$process_retirement_receipt_file" "$ownership_token" || {
+        log "foreground cleanup could not clear its exact process retirement receipts"
+        return 1
+      }
+    fi
     if ! remove_attempt_meta; then
       log "foreground cleanup could not verify its run metadata; retaining it"
+      foreground_cleanup_status=1
       return 1
     fi
+    foreground_cleanup_status=0
   }
-  trap cleanup_foreground EXIT INT TERM
+  foreground_exit() {
+    local original_status=$? cleanup_status=0
+    trap - EXIT INT TERM
+    cleanup_foreground || cleanup_status=$?
+    if (( original_status == 0 && cleanup_status != 0 )); then
+      original_status="$cleanup_status"
+    fi
+    exit "$original_status"
+  }
+  foreground_signal() {
+    local signal_status="$1"
+    trap - INT TERM
+    exit "$signal_status"
+  }
+  foreground_cleanup_done=0
+  foreground_cleanup_status=0
+  trap foreground_exit EXIT
+  trap 'foreground_signal 130' INT
+  trap 'foreground_signal 143' TERM
 
   log "starting workbench at $workbench_url"
   local -a feature_args=()
@@ -1882,15 +2191,17 @@ run_foreground() {
     "RESTATE_ADMIN_URL=$restate_admin_url"
     "AGENT_WORKBENCH_DATA_DIR=$data_dir"
   )
-  env "${workbench_env[@]}" cargo run -p agent-workbench --profile judged "${feature_args[@]}" &
-  started_pid="$!"
-  started_workbench_pid="$started_pid"
+  (
+    exec {launcher_lock_fd}>&-
+    exec {launcher_data_lock_fd}>&-
+    exec env "${workbench_env[@]}" cargo run -p agent-workbench --profile judged "${feature_args[@]}"
+  ) &
+  started_workbench_pid="$!"
   started_workbench_this_attempt=1
-  started_start_time="$(process_start_time "$started_pid")" \
-    || die "could not retain process identity for $started_pid"
-  started_workbench_start_time="$started_start_time"
-  write_pid_file "$pid_file" "$started_pid" "$started_start_time" \
-    || die "could not record process identity for $started_pid"
+  started_workbench_start_time="$(process_start_time "$started_workbench_pid")" \
+    || die "could not retain process identity for $started_workbench_pid"
+  write_pid_file "$pid_file" "$started_workbench_pid" "$started_workbench_start_time" \
+    || die "could not record process identity for $started_workbench_pid"
   write_meta
   created_meta_this_attempt=1
 
@@ -1905,26 +2216,33 @@ run_foreground() {
   require_workbench_alive "before reporting ready"
   log "ready: $workbench_url"
   open_browser "$workbench_url"
-  wait "$started_pid"
+  wait "$started_workbench_pid"
   start_attempt_active=0
 }
 
 run_status_one() {
-  local record="" pid="" start_time=""
-  record="$(pid_file_identity "$pid_file" 2>/dev/null || true)"
+  local record="" pid="" start_time="" observation="retired"
+  record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
   if [[ -n "$record" ]]; then
     read -r pid start_time <<<"$record"
+    observation="$(process_identity_observation "$pid" "$start_time")"
+  elif [[ -e "$pid_file" || -L "$pid_file" ]]; then
+    observation="unknown"
   fi
   if workbench_ready; then
-    if [[ -n "$pid" ]]; then
+    if [[ "$observation" = running ]]; then
       log "running: $workbench_url (pid $pid, log $log_file)"
     else
-      log "running: $workbench_url (unmanaged process)"
+      log "running: $workbench_url (process identity unverified)"
     fi
     return 0
   fi
-  if [[ -n "$pid" ]] && pid_identity_matches "$pid" "$start_time"; then
+  if [[ "$observation" = running ]]; then
     log "process $pid exists but health check failed: $workbench_url/healthz"
+    return 1
+  fi
+  if [[ "$observation" = unknown ]]; then
+    log "unknown: process identity could not be observed for $workbench_url"
     return 1
   fi
   log "stopped: $workbench_url"
@@ -2175,6 +2493,7 @@ ownership_token="$(new_ownership_token)"
 
 state_key="$(printf '%s' "$workbench_addr" | tr -c 'A-Za-z0-9_.-' '_')"
 pid_file="$state_dir/workbench-$state_key.pid"
+process_retirement_receipt_file="$state_dir/workbench-$state_key.process-retired"
 meta_file="$state_dir/workbench-$state_key.meta"
 log_file="$state_dir/workbench-$state_key.log"
 restate_marker_file="$state_dir/restate-$state_key.container"
