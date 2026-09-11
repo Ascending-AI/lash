@@ -1,4 +1,8 @@
 use crate::ast::{Expr, LabelMetadata, ListComprehensionClause};
+use crate::runtime::{
+    BRANCH_EXECUTION_SITE_KIND, STEP_EXECUTION_SITE_KIND, execution_site_descriptor,
+    label_attaches_to_concrete_node,
+};
 use crate::tracking::{LashlangAstPath, LashlangExecutionContext, WorkflowExecutionSite};
 use crate::{LashlangExecutionSite, ModuleArtifact};
 
@@ -24,7 +28,7 @@ pub fn runtime_execution_site_for_workflow_site(
         )
     };
     let path = LashlangAstPath::from_indices(&site.path);
-    let mut runtime_site = if site.kind == "branch" {
+    let mut runtime_site = if site.kind == BRANCH_EXECUTION_SITE_KIND {
         context.builder().branch_site(&path)
     } else {
         context
@@ -61,7 +65,7 @@ fn collect_execution_sites(
         sites.push(WorkflowExecutionSite::new(
             owner,
             path,
-            "step",
+            STEP_EXECUTION_SITE_KIND,
             label.title.as_str(),
         ));
         collect_execution_sites(expression, owner, path, None, sites);
@@ -79,89 +83,22 @@ fn collect_execution_sites(
         Expr::Await(expr) | Expr::ResultUnwrap(expr) if label.is_some() => {
             collect_execution_sites(expr, owner, &child_path(path, 0), label, sites);
         }
-        Expr::ReceiverCall { operation, .. } => {
-            sites.push(WorkflowExecutionSite::new(
-                owner,
-                path,
-                "resource_operation",
-                operation.as_str(),
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::StartProcess(start) => {
-            sites.push(WorkflowExecutionSite::new(
-                owner,
-                path,
-                "child_process",
-                format!("start {}", start.process),
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::SleepFor(_) => {
-            sites.push(WorkflowExecutionSite::new(
-                owner,
-                path,
-                "sleep",
-                "sleep for",
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::SleepUntil(_) => {
-            sites.push(WorkflowExecutionSite::new(
-                owner,
-                path,
-                "sleep",
-                "sleep until",
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::WaitSignal { name } => sites.push(WorkflowExecutionSite::new(
-            owner,
-            path,
-            "wait",
-            format!("wait_signal {name}"),
-        )),
-        Expr::SignalRun { .. } => {
-            sites.push(WorkflowExecutionSite::new(
-                owner,
-                path,
-                "signal",
-                "signal_run",
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::Finish(_) => {
-            sites.push(WorkflowExecutionSite::new(
-                owner, path, "terminal", "result",
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::Fail(_) => {
-            sites.push(WorkflowExecutionSite::new(
-                owner, path, "terminal", "failure",
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::Yield(_) => {
-            sites.push(WorkflowExecutionSite::new(
-                owner,
-                path,
-                "process_event",
-                "yield",
-            ));
-            collect_child_execution_sites(expression, owner, path, sites);
-        }
-        Expr::Wake(_) => {
-            sites.push(WorkflowExecutionSite::new(
-                owner,
-                path,
-                "process_event",
-                "wake",
-            ));
+        Expr::ReceiverCall { .. }
+        | Expr::StartProcess(_)
+        | Expr::SleepFor(_)
+        | Expr::SleepUntil(_)
+        | Expr::WaitSignal { .. }
+        | Expr::SignalRun { .. }
+        | Expr::Finish(_)
+        | Expr::Fail(_)
+        | Expr::Yield(_)
+        | Expr::Wake(_)
+        | Expr::Call { .. } => {
+            push_execution_site_descriptor(expression, owner, path, sites);
             collect_child_execution_sites(expression, owner, path, sites);
         }
         Expr::If { condition, .. } => {
-            sites.push(WorkflowExecutionSite::new(owner, path, "branch", "if"));
+            push_execution_site_descriptor(expression, owner, path, sites);
             collect_execution_sites(condition, owner, &child_path(path, 0), None, sites);
         }
         Expr::For { iterable, .. } => {
@@ -189,6 +126,17 @@ fn collect_execution_sites(
     }
 }
 
+fn push_execution_site_descriptor(
+    expression: &Expr,
+    owner: &str,
+    path: &[u32],
+    sites: &mut Vec<WorkflowExecutionSite>,
+) {
+    let (kind, label) = execution_site_descriptor(expression)
+        .expect("execution-site expression must have a compiler descriptor");
+    sites.push(WorkflowExecutionSite::new(owner, path, kind, label));
+}
+
 fn collect_child_execution_sites(
     expression: &Expr,
     owner: &str,
@@ -197,25 +145,5 @@ fn collect_child_execution_sites(
 ) {
     for (index, child) in expression.children().enumerate() {
         collect_execution_sites(child, owner, &child_path(path, index as u32), None, sites);
-    }
-}
-
-fn label_attaches_to_concrete_node(expression: &Expr) -> bool {
-    match expression {
-        Expr::Assign { expr, .. } | Expr::Await(expr) | Expr::ResultUnwrap(expr) => {
-            label_attaches_to_concrete_node(expr)
-        }
-        Expr::ReceiverCall { .. }
-        | Expr::StartProcess(_)
-        | Expr::SleepFor(_)
-        | Expr::SleepUntil(_)
-        | Expr::WaitSignal { .. }
-        | Expr::SignalRun { .. }
-        | Expr::Yield(_)
-        | Expr::Wake(_)
-        | Expr::Finish(_)
-        | Expr::Fail(_)
-        | Expr::If { .. } => true,
-        _ => false,
     }
 }
