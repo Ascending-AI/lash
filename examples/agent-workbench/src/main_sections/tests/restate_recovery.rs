@@ -1859,22 +1859,18 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let base_endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let port_offset = match backend {
-        "sqlite" => 0,
-        "postgres" => 1,
+    let endpoint_bind_variable = match backend {
+        "sqlite" => "AGENT_WORKBENCH_E2E_ENDPOINT_BIND",
+        "postgres" => "AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND",
         other => panic!("unsupported recovery E2E backend `{other}`"),
     };
-    let endpoint_bind = SocketAddr::new(
-        base_endpoint_bind.ip(),
-        base_endpoint_bind
-            .port()
-            .checked_add(port_offset)
-            .expect("recovery E2E endpoint port range"),
-    );
+    let endpoint_bind: SocketAddr = std::env::var(endpoint_bind_variable)
+        .unwrap_or_else(|_| {
+            panic!("{endpoint_bind_variable} must assign a distinct immutable recovery endpoint")
+        })
+        .parse()
+        .unwrap_or_else(|error| panic!("valid {endpoint_bind_variable}: {error}"));
+    record_fixture_owned_endpoint(endpoint_bind);
     let endpoint_url = format!("http://{endpoint_bind}");
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-recovery-{backend}-e2e-{}",

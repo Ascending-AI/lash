@@ -84,6 +84,7 @@ impl LiveRestateEndpoint {
         let addr = listener
             .local_addr()
             .expect("read immutable workbench Restate endpoint address");
+        record_fixture_owned_endpoint(addr);
         let endpoint_url = format!("http://{addr}");
         listener
             .set_nonblocking(true)
@@ -422,6 +423,21 @@ pub(crate) fn record_fixture_owned_child(pid: u32) {
         "{pid}"
     )
     .expect("append fixture child manifest");
+}
+
+pub(crate) fn record_fixture_owned_endpoint(addr: SocketAddr) {
+    let Some(manifest) = std::env::var_os("AGENT_WORKBENCH_FIXTURE_ENDPOINT_MANIFEST") else {
+        return;
+    };
+    use std::io::Write as _;
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(manifest)
+            .expect("open fixture endpoint manifest"),
+        "{addr}"
+    )
+    .expect("append fixture endpoint manifest");
 }
 
 #[derive(Deserialize)]
