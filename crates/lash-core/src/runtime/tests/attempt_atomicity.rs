@@ -261,6 +261,7 @@ fn tool_context<'run>(
         fixtures,
         Arc::new(crate::testing::EmptyToolProvider),
         Vec::new(),
+        true,
     )
 }
 
@@ -269,6 +270,7 @@ fn tool_context_with_provider<'run>(
     fixtures: &Fixtures,
     tools: Arc<dyn crate::ToolProvider>,
     catalog: Vec<crate::ToolDefinition>,
+    bind_direct_client_to_attempt: bool,
 ) -> crate::ToolContext<'run> {
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(4);
     let plugins = crate::plugin::PluginHost::new(Vec::new())
@@ -288,8 +290,12 @@ fn tool_context_with_provider<'run>(
         .direct_completion_client(
             effect_controller.clone(),
             Some(TurnId::from(TURN.to_string())),
-        )
-        .with_tool_attempt_parent_invocation(attempt_parent.clone());
+        );
+    let direct_completions = if bind_direct_client_to_attempt {
+        direct_completions.with_tool_attempt_parent_invocation(attempt_parent.clone())
+    } else {
+        direct_completions
+    };
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools,
@@ -485,6 +491,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
         &fixtures,
         Arc::clone(&provider) as Arc<dyn crate::ToolProvider>,
         Vec::new(),
+        true,
     );
 
     crate::RuntimeEffectController::execute_effect(
@@ -1413,7 +1420,52 @@ fn raw_client_probe<'run>(
         fixtures,
         Arc::clone(provider) as Arc<dyn crate::ToolProvider>,
         vec![RawClientDirectProvider::definition()],
+        false,
     )
+}
+
+async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
+    let tier = ControllerOwnedTier::ordinal_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let provider = Arc::new(RawClientDirectProvider::default());
+    let tool = raw_client_probe(&sentinel, fixtures, &provider);
+    let direct_completions = tool
+        .runtime_dispatch
+        .as_ref()
+        .expect("raw-client probe carries runtime dispatch")
+        .direct_completions
+        .clone();
+
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        attempt_effect_envelope(),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            let completion = direct_completions
+                .direct_completion(
+                    crate::DirectRequest::text(DIRECT_MODEL, "unbound client precondition"),
+                    "attempt-atomicity",
+                )
+                .await
+                .expect("unbound direct-client precondition completes");
+            assert_eq!(completion.text, DIRECT_TEXT);
+            Ok(attempt_done_outcome())
+        }),
+    )
+    .await
+    .expect("unbound direct-client precondition attempt completes");
+
+    assert_eq!(ledger.attempt_bodies_opened(), 1);
+    let crossings = ledger.crossings_inside_attempt();
+    assert_eq!(
+        crossings.len(),
+        1,
+        "the raw-client fixture must enter production with exactly one observable unbound crossing"
+    );
+    assert!(
+        crossings[0].starts_with("execute_effect:direct:"),
+        "the raw-client fixture must start unbound to a ToolAttempt: {crossings:?}"
+    );
 }
 
 /// The execution-context attempt path (`RuntimeExecutionContext::
@@ -1422,6 +1474,7 @@ fn raw_client_probe<'run>(
 #[tokio::test]
 async fn execution_context_attempt_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
+    assert_raw_client_probe_starts_unbound(&fixtures).await;
     let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
@@ -1481,6 +1534,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
 #[tokio::test]
 async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
+    assert_raw_client_probe_starts_unbound(&fixtures).await;
     let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
