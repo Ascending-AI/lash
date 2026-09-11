@@ -51,6 +51,9 @@ pub(super) struct Linker<'module> {
     /// Optional best-effort editor projection populated by the same walk.
     pub(super) workflow_analysis: Option<RefCell<WorkflowLinkAnalysis>>,
     pub(super) recover_workflow_errors: Cell<bool>,
+    /// The source expression whose facts the workflow projector will read for
+    /// a recovered error in the current top-level workflow node.
+    pub(super) workflow_diagnostic_owner: Cell<Option<usize>>,
     pub(super) collect_trigger_keys: Cell<bool>,
     pub(super) derived_trigger_registrations: RefCell<BTreeSet<(String, String, String)>>,
     /// The surface dialect the linked source was written in.
@@ -79,6 +82,7 @@ impl<'module> Linker<'module> {
             collect_completion: Cell::new(false),
             workflow_analysis: None,
             recover_workflow_errors: Cell::new(false),
+            workflow_diagnostic_owner: Cell::new(None),
             collect_trigger_keys: Cell::new(false),
             derived_trigger_registrations: RefCell::new(BTreeSet::new()),
         }

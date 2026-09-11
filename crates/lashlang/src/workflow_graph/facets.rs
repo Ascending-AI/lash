@@ -92,9 +92,9 @@ pub(super) fn projected_node_type_facets(
             .iter()
             .map(|diagnostic| WorkflowTypeDiagnostic {
                 node_id: id.clone(),
-                kind: diagnostic.kind().to_string(),
-                message: diagnostic.to_string(),
-                span: diagnostic.span(),
+                kind: diagnostic.error.kind().to_string(),
+                message: diagnostic.error.to_string(),
+                span: diagnostic.span,
             })
             .collect(),
     })

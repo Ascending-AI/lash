@@ -47,7 +47,9 @@ use type_helpers::{
 };
 mod facets;
 pub(crate) use facets::analyze_workflow_program;
-use facets::{expression_spans_by_pointer, recover_workflow_binding};
+use facets::{
+    expression_spans_by_pointer, recover_workflow_binding, workflow_diagnostic_owner_key,
+};
 #[cfg(test)]
 mod tests;
 
@@ -60,7 +62,13 @@ pub(crate) struct WorkflowLinkAnalysis {
 pub(crate) struct WorkflowLinkNodeFacts {
     pub(crate) available_variables: BTreeMap<String, TypeExpr>,
     pub(crate) expected_arguments: Vec<WorkflowLinkExpectedArgument>,
-    pub(crate) diagnostics: Vec<LinkError>,
+    pub(crate) diagnostics: Vec<WorkflowLinkDiagnostic>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WorkflowLinkDiagnostic {
+    pub(crate) error: LinkError,
+    pub(crate) span: Option<Span>,
 }
 
 #[derive(Clone, Debug)]

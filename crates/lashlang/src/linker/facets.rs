@@ -181,6 +181,7 @@ impl<'module> Linker<'module> {
     }
 
     pub(super) fn record_workflow_error(&self, expr: &Expr, error: LinkError) {
+        let span = error.span();
         let Some(analysis) = &self.workflow_analysis else {
             return;
         };
@@ -190,8 +191,32 @@ impl<'module> Linker<'module> {
             .nodes
             .entry(expr as *const Expr as usize)
             .or_default();
-        facts.diagnostics.push(error);
+        facts
+            .diagnostics
+            .push(WorkflowLinkDiagnostic { error, span });
         facts.expected_arguments = expected_arguments;
+    }
+
+    pub(super) fn record_recovered_workflow_error(&self, expr: &Expr, error: LinkError) {
+        let Some(owner) = self.workflow_diagnostic_owner.get() else {
+            self.record_workflow_error(expr, error);
+            return;
+        };
+        let Some(analysis) = &self.workflow_analysis else {
+            return;
+        };
+        let span = self
+            .expression_spans
+            .get(&owner)
+            .copied()
+            .or_else(|| error.span());
+        let mut analysis = analysis.borrow_mut();
+        analysis
+            .nodes
+            .entry(owner)
+            .or_default()
+            .diagnostics
+            .push(WorkflowLinkDiagnostic { error, span });
     }
 
     pub(super) fn clear_workflow_analysis(&self) {
@@ -239,6 +264,17 @@ impl<'module> Linker<'module> {
         }
         arguments
     }
+}
+
+pub(super) fn workflow_diagnostic_owner_key(expr: &Expr) -> Option<usize> {
+    // The projector peels a node label before reading facts, but keeps an
+    // assignment as the facts owner even when its kind is derived from the
+    // assigned value. Other wrappers, including Print, keep their own facts.
+    let projected = match expr {
+        Expr::LabelAnnotated { expr, .. } => expr.as_ref(),
+        _ => expr,
+    };
+    matches!(projected, Expr::Assign { .. }).then(|| projected as *const Expr as usize)
 }
 
 fn workflow_node_value(mut expr: &Expr) -> &Expr {

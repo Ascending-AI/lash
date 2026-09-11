@@ -428,6 +428,90 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
 }
 
 #[test]
+fn recovered_diagnostics_follow_the_workflow_projection_owner() {
+    let environment = full_label_environment();
+
+    for source in [
+        "value = missing ? 1 : 2",
+        "value = [missing ? 1 : 2]",
+        "value = { choice: missing ? 1 : 2 }",
+    ] {
+        let graph = crate::workflow_graph_from_source_with_facets(source, Some(&environment))
+            .expect("an assigned invalid conditional remains projectable");
+        let node = &graph.main.nodes[0];
+        let diagnostics = &node
+            .type_facets
+            .as_ref()
+            .expect("host-backed projection has type facets")
+            .diagnostics;
+        assert_eq!(diagnostics.len(), 1, "unexpected diagnostics for {source}");
+        assert_eq!(diagnostics[0].kind, "unknown_name");
+        assert!(diagnostics[0].message.contains("missing"));
+        assert_eq!(diagnostics[0].span, node.source_span);
+        assert!(matches!(
+            LinkedModule::link(crate::parse(source).unwrap(), environment.clone()),
+            Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
+        ));
+    }
+
+    let print_source = "print (missing ? 1 : 2)";
+    let graph = crate::workflow_graph_from_source_with_facets(print_source, Some(&environment))
+        .expect("a printed invalid conditional remains projectable");
+    assert!(
+        graph.main.nodes[0]
+            .type_facets
+            .as_ref()
+            .expect("host-backed projection has type facets")
+            .diagnostics
+            .is_empty()
+    );
+    assert!(matches!(
+        LinkedModule::link(crate::parse(print_source).unwrap(), environment.clone()),
+        Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
+    ));
+
+    for source in [
+        "@label(title: \"Guard\")\nif missing { seen = 1 } else { seen = 2 }",
+        "@label(title: \"Choice\")\nvalue = [missing ? 1 : 2]",
+    ] {
+        let graph = crate::workflow_graph_from_source_with_facets(source, Some(&environment))
+            .expect("a labeled invalid conditional remains projectable");
+        let node = &graph.main.nodes[0];
+        let diagnostics = &node
+            .type_facets
+            .as_ref()
+            .expect("labeled projection has type facets")
+            .diagnostics;
+        assert_eq!(diagnostics.len(), 1, "unexpected diagnostics for {source}");
+        assert_eq!(diagnostics[0].kind, "unknown_name");
+        assert!(diagnostics[0].message.contains("missing"));
+    }
+
+    let call_source = r#"value = missing
+        ? timer.Schedule({ expr: "0 8 * * *" })
+        : timer.Schedule({ expr: "0 9 * * *" })"#;
+    let graph = crate::workflow_graph_from_source_with_facets(call_source, Some(&environment))
+        .expect("recovery preserves expected argument facets on the assignment owner");
+    let facets = graph.main.nodes[0]
+        .type_facets
+        .as_ref()
+        .expect("the assigned conditional has type facets");
+    assert_eq!(facets.diagnostics.len(), 1);
+    assert_eq!(facets.diagnostics[0].kind, "unknown_name");
+    assert_eq!(facets.expected_arguments.len(), 4);
+    assert_eq!(
+        facets
+            .expected_arguments
+            .iter()
+            .filter(|argument| {
+                argument.slot.ends_with("arg[0].expr") && argument.ty == TypeExpr::Str
+            })
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn try_keeps_its_compatible_any_binding_while_lowering_its_body() {
     let try_expr = Expr::Try(Box::new(crate::TryExpr {
         body: Box::new(Expr::String("text".into())),

@@ -178,11 +178,16 @@ impl<'module> Linker<'module> {
         let last_index = expressions.len().saturating_sub(1);
         for (index, expression) in expressions.iter().enumerate() {
             let before = scope.clone();
+            let previous_diagnostic_owner = self
+                .workflow_diagnostic_owner
+                .replace(workflow_diagnostic_owner_key(expression));
             let result = self.lower_expr_expected(
                 expression,
                 scope,
                 (index == last_index).then_some(expected).flatten(),
             );
+            self.workflow_diagnostic_owner
+                .set(previous_diagnostic_owner);
             match result {
                 Ok((expr, binding)) => {
                     lowered.push(expr);
@@ -457,7 +462,7 @@ impl<'module> Linker<'module> {
         let (condition, recovered_header) = match self.lower_expr(condition, &mut condition_scope) {
             Ok((condition, _)) => (condition, false),
             Err(error) if self.recover_workflow_errors.get() => {
-                self.record_workflow_error(original, error);
+                self.record_recovered_workflow_error(original, error);
                 (condition.clone(), true)
             }
             Err(error) => return Err(error),
@@ -528,13 +533,13 @@ impl<'module> Linker<'module> {
                 {
                     Ok(item_ty) => (iterable, item_ty, false),
                     Err(error) if self.recover_workflow_errors.get() => {
-                        self.record_workflow_error(original, error);
+                        self.record_recovered_workflow_error(original, error);
                         (iterable, TypeExpr::Any, true)
                     }
                     Err(error) => return Err(error),
                 },
                 Err(error) if self.recover_workflow_errors.get() => {
-                    self.record_workflow_error(original, error);
+                    self.record_recovered_workflow_error(original, error);
                     (iterable.clone(), TypeExpr::Any, true)
                 }
                 Err(error) => return Err(error),
@@ -584,7 +589,7 @@ impl<'module> Linker<'module> {
         let (condition, recovered_header) = match self.lower_expr(condition, &mut condition_scope) {
             Ok((condition, _)) => (condition, false),
             Err(error) if self.recover_workflow_errors.get() => {
-                self.record_workflow_error(original, error);
+                self.record_recovered_workflow_error(original, error);
                 (condition.clone(), true)
             }
             Err(error) => return Err(error),
