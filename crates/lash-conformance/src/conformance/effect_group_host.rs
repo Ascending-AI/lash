@@ -74,6 +74,7 @@ where
     a_child_with_no_runner_refuses_the_open_and_refuses_the_retry(&make, &prefix).await;
     a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal(&make, &prefix).await;
     the_capability_flag_and_the_group_surface_agree(&make, &prefix).await;
+    wrong_scope_groups_are_refused_before_any_child_runs(&make, &prefix).await;
     duplicate_replay_keys_are_refused_before_a_host_sees_them(&make, &prefix).await;
     the_first_settlement_wakes_the_caller_while_the_loser_still_runs(&make, &prefix).await;
     a_scope_with_a_live_group_child_is_not_quiescent(&make, &prefix).await;
@@ -86,6 +87,84 @@ where
     closing_twice_under_one_disposition_succeeds(&make, &prefix).await;
     a_reopen_is_fenced_on_shape_and_runs_no_child_twice(&make, &prefix).await;
     a_second_host_instance_reads_the_ranks_the_first_recorded(&make, &prefix).await;
+}
+
+async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
+    let host = make();
+    let admitted = scope(prefix, "scope-admission");
+    let foreign = scope(prefix, "foreign-scope");
+    let scoped = host.scoped(admitted.clone()).expect("a scope binds");
+
+    for (label, header_scope, child_scope) in [
+        ("wrong-header", &foreign, &admitted),
+        ("wrong-child", &admitted, &foreign),
+    ] {
+        let executions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&executions);
+        let key = group_key(prefix, label);
+        let invalid = group_with_scopes(header_scope, child_scope, &key);
+        let invalid = staged(
+            invalid,
+            vec![RuntimeEffectLocalExecutor::testing(move |_| async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(outcome_of(0))
+            })],
+        );
+        let error = scoped
+            .controller()
+            .open_effect_group(invalid)
+            .await
+            .expect_err("a group outside the admitted scope must be refused");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::RuntimeEffectScopeMismatch
+        );
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            0,
+            "{label}: scope admission precedes resolver and local execution"
+        );
+    }
+
+    let reopen_key = group_key(prefix, "wrong-child-reopen");
+    let mut opened = open(
+        &scoped,
+        &reopen_key,
+        1,
+        GroupWakePolicy::All,
+        RUN,
+        vec![settles(0)],
+    )
+    .await;
+    next(&scoped, &mut opened)
+        .await
+        .expect("the valid first open settles");
+
+    let executions = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&executions);
+    let invalid_reopen = staged(
+        group_with_scopes(&admitted, &foreign, &reopen_key),
+        vec![RuntimeEffectLocalExecutor::testing(move |_| async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(outcome_of(0))
+        })],
+    );
+    let error = scoped
+        .controller()
+        .open_effect_group(invalid_reopen)
+        .await
+        .expect_err("a wrong-scope child must be refused on reopen too");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectScopeMismatch
+    );
+    assert_eq!(executions.load(Ordering::SeqCst), 0);
+    close(&scoped, opened, RUN)
+        .await
+        .expect("the valid original handle closes");
 }
 
 /// The durable-tier law: a cancelled child's terminal is a *journaled* fact.
@@ -1493,6 +1572,26 @@ fn group(
         disposition,
     )
     .expect("a group with at least one child assembles")
+}
+
+fn group_with_scopes(
+    header_scope: &ExecutionScope,
+    child_scope: &ExecutionScope,
+    key: &str,
+) -> RuntimeEffectGroup {
+    RuntimeEffectGroup::try_new(
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(header_scope.clone(), format!("{key}:group"))
+                .expect("valid group address"),
+            RuntimeAttribution::none(),
+            "group",
+        ),
+        key,
+        vec![child(child_scope, key, 0)],
+        GroupWakePolicy::All,
+        RUN,
+    )
+    .expect("individually valid addresses assemble before scope admission")
 }
 
 /// A test-side [`GroupExecutors`] resolver, keyed by replay key.

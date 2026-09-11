@@ -533,6 +533,7 @@ pub(super) struct RecordingContext {
     pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
     pub(super) scope_effect_begins: AtomicUsize,
+    pub(super) scope_group_records: AtomicUsize,
     awaited_events: Mutex<HashMap<String, Resolution>>,
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
@@ -675,6 +676,18 @@ impl RecordingContext {
 }
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
+    fn scope_group_record<'run>(
+        &'run self,
+        _index_key: String,
+        _group_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.scope_group_records.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(true) })
+    }
+
     fn sleep_send<'run>(
         &'run self,
         duration: Duration,

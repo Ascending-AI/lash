@@ -276,6 +276,7 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(group.invocation().execution_scope())?;
         let executors = self.groups.registered_executors()?;
         NativeEffectGroups::open(&self.groups, &executors, group)
     }

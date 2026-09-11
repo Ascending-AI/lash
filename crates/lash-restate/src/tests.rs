@@ -205,6 +205,56 @@ async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_exec
     assert_eq!(context.scope_effect_begins.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn restate_scope_controller_refuses_wrong_scope_group_before_index_or_handoff() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let admitted = ExecutionScope::process("admitted-restate-process");
+    let scoped = controller
+        .scoped_effect_controller(admitted.clone())
+        .expect("scoped Restate controller");
+    let group_key = "restate-scope-group";
+    let child = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::process("wrong-restate-process"),
+                format!("{group_key}:child:0"),
+            )
+            .expect("wrong-scope child address"),
+            lash_core::RuntimeAttribution::none(),
+            "restate-scope-admission-child",
+        ),
+        RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "scope-admission-child".to_string(),
+        },
+    );
+    let group = lash_core::RuntimeEffectGroup::try_new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(admitted, format!("{group_key}:group"))
+                .expect("admitted group address"),
+            lash_core::RuntimeAttribution::none(),
+            "restate-scope-admission-group",
+        ),
+        group_key,
+        vec![child],
+        lash_core::GroupWakePolicy::All,
+        lash_core::LoserPolicy::RunToCompletion,
+    )
+    .expect("the independently valid group assembles before admission");
+
+    let error = scoped
+        .controller()
+        .open_effect_group(group)
+        .await
+        .expect_err("wrong-scope Restate group must be refused");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch
+    );
+    assert_eq!(context.scope_group_records.load(Ordering::SeqCst), 0);
+}
+
 fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::ProcessWorkWiring {
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let registry = Arc::clone(watched.registry());

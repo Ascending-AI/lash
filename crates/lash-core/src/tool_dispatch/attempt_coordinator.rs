@@ -65,7 +65,7 @@ impl ToolAttemptEffectIdentity {
                 effect_id.clone(),
             )
             .expect("tool dispatch carries an admitted effect scope"),
-            crate::RuntimeAttribution::for_session(&context.session_id),
+            context.parentless_attribution(),
             effect_id.clone(),
         )
     }
@@ -100,10 +100,16 @@ impl ToolAttemptEffectIdentity {
             );
         }
 
-        let replay_base = format!(
-            "lash-tool:{}:{}:{}",
-            context.session_id, call.call_id, call.tool_name
-        );
+        let replay_base = match self {
+            Self::Process { process_id, .. } => {
+                format!("process:{process_id}:tool:{}", call.tool_name)
+            }
+            Self::Scalar { .. } => format!(
+                "lash-tool:{}:{}:{}",
+                context.session_id, call.call_id, call.tool_name
+            ),
+            Self::Batch { .. } => unreachable!("batch retry sleeps return above"),
+        };
         let effect_id = format!("{replay_base}:attempt:{attempt}:sleep");
         RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
@@ -111,7 +117,7 @@ impl ToolAttemptEffectIdentity {
                 effect_id.clone(),
             )
             .expect("tool retry carries an admitted effect scope"),
-            crate::RuntimeAttribution::for_session(&context.session_id),
+            context.parentless_attribution(),
             effect_id.clone(),
         )
     }

@@ -182,6 +182,19 @@ impl ToolDispatchContext<'_> {
             .as_deref()
             .is_some_and(|registry| registry.is_orchestrating_tool(tool_id))
     }
+
+    /// Attribution available without a causal parent comes only from the
+    /// admitted execution scope. `CurrentSession` also hosts process and
+    /// runtime-operation work, so its descriptive session id is not provenance
+    /// for those sessionless scopes.
+    pub(crate) fn parentless_attribution(&self) -> crate::RuntimeAttribution {
+        self.effect_controller
+            .scoped()
+            .execution_scope()
+            .session_id()
+            .map(crate::RuntimeAttribution::for_session)
+            .unwrap_or_else(crate::RuntimeAttribution::none)
+    }
 }
 
 impl<'run> ToolDispatchContext<'run> {

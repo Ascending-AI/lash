@@ -265,6 +265,20 @@ impl RuntimeEffectGroup {
     pub fn loser_disposition(&self) -> LoserPolicy {
         self.loser_disposition
     }
+
+    /// Proves that both the group header and every child belong to the scope a
+    /// controller is about to admit. Composite admission must run before any
+    /// resolver, index, journal, or local-execution side effect.
+    pub fn validate_execution_scope(
+        &self,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.invocation.validate_execution_scope(admitted_scope)?;
+        for child in &self.children {
+            child.invocation.validate_execution_scope(admitted_scope)?;
+        }
+        Ok(())
+    }
 }
 
 /// The common group facts a host records and later fences on reopen.

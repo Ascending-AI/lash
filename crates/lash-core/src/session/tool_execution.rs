@@ -729,7 +729,7 @@ impl RuntimeExecutionContext<'_> {
                     format!("tool:{call_id}:await"),
                 )
                 .expect("tool await carries an admitted effect scope"),
-                crate::RuntimeAttribution::for_session(&self.dispatch.session_id),
+                self.dispatch.parentless_attribution(),
                 format!("tool:{call_id}:await"),
             );
             &fallback
@@ -957,9 +957,7 @@ impl RuntimeExecutionContext<'_> {
                                             format!("orchestration:{call_id}"),
                                         )
                                         .expect("orchestration carries an admitted effect scope"),
-                                        crate::RuntimeAttribution::for_session(
-                                            &dispatch.session_id,
-                                        ),
+                                        dispatch.parentless_attribution(),
                                         format!("orchestration:{call_id}"),
                                     )
                                 }),

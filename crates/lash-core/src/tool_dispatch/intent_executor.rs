@@ -343,7 +343,7 @@ async fn execute_one(
                 identity.replay_key.clone(),
             )
             .expect("tool-intent execution carries an admitted effect scope"),
-            crate::RuntimeAttribution::for_session(&context.session_id),
+            context.parentless_attribution(),
             format!("tool-intent:{}", identity.intent_index),
         )
         .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(

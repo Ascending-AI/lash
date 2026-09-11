@@ -479,6 +479,7 @@ impl RuntimeEffectController for FencedNativeController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
         let live = self.admit().await?;
         let handle = self.host.open_effect_group(group).await?;
         // An open group stays live until it is closed through this

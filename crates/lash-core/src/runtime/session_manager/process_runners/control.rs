@@ -246,7 +246,13 @@ impl<'scope> ProcessCommandRunner<'scope> {
             .parent_invocation
             .as_ref()
             .map(|parent| parent.attribution.clone())
-            .unwrap_or_else(|| crate::RuntimeAttribution::for_session(&self.current.session_id));
+            .unwrap_or_else(|| {
+                scoped
+                    .execution_scope()
+                    .session_id()
+                    .map(crate::RuntimeAttribution::for_session)
+                    .unwrap_or_else(crate::RuntimeAttribution::none)
+            });
         let invocation = crate::runtime::causal::process_effect_invocation(
             scoped.execution_scope(),
             attribution,

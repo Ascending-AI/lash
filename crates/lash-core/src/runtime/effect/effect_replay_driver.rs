@@ -1371,6 +1371,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         cancel: Option<&CancellationToken>,
         busy: BusyPolicy,
     ) -> Result<EffectRun, RuntimeEffectControllerError> {
+        envelope.invocation.validate_execution_scope(scope)?;
         scope
             .validate()
             .map_err(RuntimeEffectControllerError::from)?;

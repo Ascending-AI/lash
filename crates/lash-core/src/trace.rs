@@ -60,6 +60,68 @@ pub(crate) fn emit_trace_at(
     }
 }
 
+/// Emit a context projected from a runtime invocation. Invocation-owned
+/// identity is authoritative, including absent fields; host-owned run metadata
+/// and an explicit host parent remain intact.
+pub(crate) fn emit_projected_trace(
+    sink: &Option<Arc<dyn TraceSink>>,
+    base_context: &TraceContext,
+    context: TraceContext,
+    event: TraceEvent,
+    clock: &dyn crate::Clock,
+) {
+    emit_projected_trace_at(
+        sink,
+        base_context,
+        context,
+        event,
+        clock.timestamp_datetime(),
+    );
+}
+
+fn emit_projected_trace_at(
+    sink: &Option<Arc<dyn TraceSink>>,
+    base_context: &TraceContext,
+    context: TraceContext,
+    event: TraceEvent,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) {
+    let Some(sink) = sink else {
+        return;
+    };
+    let mut merged = merge_runtime_projection(base_context, context);
+    assign_span_identity(&mut merged, &event);
+    if let Err(err) = sink.append(&TraceRecord::new_with_timestamp(merged, event, timestamp)) {
+        tracing::warn!(error = %err, "failed to append trace record");
+    }
+}
+
+fn merge_runtime_projection(base: &TraceContext, projection: TraceContext) -> TraceContext {
+    let explicit_parent = base.parent_graph_node_id.clone();
+    let projected_parent = projection.parent_graph_node_id.clone();
+    let projected_session = projection.session_id.clone();
+    let projected_turn = projection.turn_id.clone();
+    let projected_graph_node = projection.graph_node_id.clone();
+    let projected_turn_index = projection.turn_index;
+    let projected_protocol_iteration = projection.protocol_iteration;
+    let projected_effect = projection.effect_id.clone();
+    let projected_llm_call = projection.llm_call_id.clone();
+
+    let mut merged = base.clone();
+    merged.metadata.remove("replay_key");
+    merged.metadata.remove("caused_by");
+    merge_context(&mut merged, projection);
+    merged.session_id = projected_session;
+    merged.turn_id = projected_turn;
+    merged.graph_node_id = projected_graph_node;
+    merged.parent_graph_node_id = explicit_parent.or(projected_parent);
+    merged.turn_index = projected_turn_index;
+    merged.protocol_iteration = projected_protocol_iteration;
+    merged.effect_id = projected_effect;
+    merged.llm_call_id = projected_llm_call;
+    merged
+}
+
 /// Emit evidence only for store failures whose typed class means persisted
 /// state is corrupt or a monotonic durable identity cannot advance.
 pub(crate) fn emit_store_error(
@@ -215,7 +277,8 @@ fn set_span(context: &mut TraceContext, self_id: Option<String>, parent_id: Opti
     if context.graph_node_id.is_none() {
         context.graph_node_id = self_id;
     }
-    if let Some(parent_id) = parent_id
+    if context.parent_graph_node_id.is_none()
+        && let Some(parent_id) = parent_id
         && context.graph_node_id.as_deref() != Some(parent_id.as_str())
     {
         context.parent_graph_node_id = Some(parent_id);

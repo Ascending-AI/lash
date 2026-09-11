@@ -30,7 +30,7 @@ pub(crate) fn emit_llm_trace_started(
     request: &CoreLlmRequest,
     clock: &dyn crate::Clock,
 ) {
-    crate::trace::emit_trace(
+    crate::trace::emit_projected_trace(
         trace_sink,
         base_context,
         context,
@@ -57,7 +57,7 @@ pub(crate) fn emit_llm_trace_completed(
     clock: &dyn crate::Clock,
 ) {
     super::emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
-    crate::trace::emit_trace(
+    crate::trace::emit_projected_trace(
         trace_sink,
         base_context,
         context,
@@ -133,7 +133,7 @@ pub(crate) fn emit_llm_trace_failed(
     clock: &dyn crate::Clock,
 ) {
     super::emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
-    crate::trace::emit_trace(
+    crate::trace::emit_projected_trace(
         trace_sink,
         base_context,
         context,
@@ -191,7 +191,7 @@ pub(crate) fn emit_provider_replay_drops(
             minting_route: drop.minting_route.as_ref().map(route),
             serving_route: route(&drop.serving_route),
         };
-        crate::trace::emit_trace(
+        crate::trace::emit_projected_trace(
             trace_sink,
             base_context,
             context.clone(),
@@ -388,6 +388,180 @@ fn direct_trace_context(
 mod tests {
     use crate::SessionId;
     use crate::TurnId;
+    use lash_sansio::sync::MutexExt;
+    use std::sync::Arc;
+
+    #[derive(Default)]
+    struct RecordingTraceSink(std::sync::Mutex<Vec<lash_trace::TraceRecord>>);
+
+    impl lash_trace::TraceSink for RecordingTraceSink {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            self.0.lock_recover().push(record.clone());
+            Ok(())
+        }
+    }
+
+    fn request() -> crate::LlmRequest {
+        crate::LlmRequest {
+            instructions: None,
+            model: "test/model".to_string(),
+            messages: Vec::new(),
+            resolved_stored: Default::default(),
+            tools: Arc::new(Vec::new()),
+            tool_choice: crate::llm::types::LlmToolChoice::Auto,
+            model_variant: crate::ReasoningSelection::ProviderDefault,
+            model_capability: Default::default(),
+            generation: Default::default(),
+            scope: crate::LlmRequestScope::new("request-session", "frame", "request"),
+            output_spec: None,
+            stream_events: None,
+            provider_trace: None,
+        }
+    }
+
+    fn projected_context(
+        attribution: crate::RuntimeAttribution,
+        caused_by: Option<crate::CausalRef>,
+    ) -> lash_trace::TraceContext {
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::process("trace-process"),
+                "trace-effect",
+            )
+            .expect("valid trace address"),
+            attribution,
+            "trace-effect",
+        )
+        .with_caused_by(caused_by);
+        crate::trace::trace_context_from_effect_invocation(&invocation).for_llm_call("llm-witness")
+    }
+
+    #[test]
+    fn emitted_llm_records_keep_authoritative_projection_and_parent_precedence() {
+        let sink = Arc::new(RecordingTraceSink::default());
+        let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
+        let mut base = lash_trace::TraceContext::default()
+            .for_session("ambient-session")
+            .for_turn("ambient-turn")
+            .for_turn_index(99)
+            .for_protocol_iteration(42);
+        base.run_id = Some("host-run".to_string());
+        base.parent_graph_node_id = Some("host:explicit-parent".to_string());
+        base.metadata
+            .insert("host_key".to_string(), serde_json::json!("kept"));
+        let cause = crate::CausalRef::Effect {
+            address: crate::EffectAddress::new(
+                crate::ExecutionScope::process("cause-process"),
+                "cause-effect",
+            )
+            .expect("valid cause address"),
+        };
+        let context = projected_context(crate::RuntimeAttribution::none(), Some(cause));
+
+        super::emit_llm_trace_started(
+            &Some(Arc::clone(&sink_dyn)),
+            &base,
+            context.clone(),
+            &request(),
+            &crate::SystemClock,
+        );
+        super::emit_llm_trace_completed(
+            &Some(Arc::clone(&sink_dyn)),
+            &base,
+            context.clone(),
+            &crate::LlmResponse::default(),
+            "test/model",
+            1,
+            None,
+            None,
+            &crate::SystemClock,
+        );
+        super::emit_llm_trace_failed(
+            &Some(sink_dyn),
+            &base,
+            context,
+            super::LlmTraceFailure::invalid_structured_output("invalid".to_string()),
+            None,
+            None,
+            &crate::SystemClock,
+        );
+
+        let records = sink.0.lock_recover();
+        assert_eq!(records.len(), 3);
+        assert!(
+            records
+                .iter()
+                .all(|record| record.context.session_id.is_none())
+        );
+        assert!(
+            records
+                .iter()
+                .all(|record| record.context.turn_id.is_none())
+        );
+        assert!(
+            records
+                .iter()
+                .all(|record| record.context.turn_index.is_none())
+        );
+        assert!(
+            records
+                .iter()
+                .all(|record| record.context.protocol_iteration.is_none())
+        );
+        assert!(records.iter().all(|record| {
+            record.context.parent_graph_node_id.as_deref() == Some("host:explicit-parent")
+        }));
+        assert!(records.iter().all(|record| {
+            record.context.run_id.as_deref() == Some("host-run")
+                && record.context.metadata.get("host_key") == Some(&serde_json::json!("kept"))
+        }));
+    }
+
+    #[test]
+    fn emitted_llm_parent_falls_back_from_full_cause_to_actual_turn() {
+        let sink = Arc::new(RecordingTraceSink::default());
+        let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
+        let cause_address = crate::EffectAddress::new(
+            crate::ExecutionScope::process("cause-process"),
+            "cause-effect",
+        )
+        .expect("valid cause address");
+        super::emit_llm_trace_started(
+            &Some(Arc::clone(&sink_dyn)),
+            &lash_trace::TraceContext::default(),
+            projected_context(
+                crate::RuntimeAttribution::for_turn("actual-session", "actual-turn", 3, 1),
+                Some(crate::CausalRef::Effect {
+                    address: cause_address.clone(),
+                }),
+            ),
+            &request(),
+            &crate::SystemClock,
+        );
+        super::emit_llm_trace_started(
+            &Some(sink_dyn),
+            &lash_trace::TraceContext::default(),
+            projected_context(
+                crate::RuntimeAttribution::for_turn("actual-session", "actual-turn", 3, 1),
+                None,
+            ),
+            &request(),
+            &crate::SystemClock,
+        );
+
+        let records = sink.0.lock_recover();
+        assert_eq!(
+            records[0].context.parent_graph_node_id.as_deref(),
+            Some(cause_address.graph_key().as_str())
+        );
+        assert_eq!(
+            records[1].context.parent_graph_node_id.as_deref(),
+            Some("turn:actual-session:actual-turn")
+        );
+    }
 
     #[test]
     fn direct_effect_invocation_preserves_runtime_scope() {

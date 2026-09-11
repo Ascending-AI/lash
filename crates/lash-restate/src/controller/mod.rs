@@ -623,6 +623,7 @@ where
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(group.invocation().execution_scope())?;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
         let shape = EffectGroupShape::from_group(&group)?;

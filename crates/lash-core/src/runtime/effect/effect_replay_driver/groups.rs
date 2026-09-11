@@ -298,6 +298,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         scope: &ExecutionScope,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(scope)?;
         let journal_identity = scope
             .journal_identity()
             .map_err(RuntimeEffectControllerError::from)?;

@@ -452,6 +452,7 @@ impl RuntimeEffectController for FencedRestateController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
         self.refuse_if_retired().await?;
         // The group is a live child of this scope until its index reports
         // every child settled: recorded in the scope's index so a
@@ -934,6 +935,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(group.invocation().execution_scope())?;
         let ingress = &self.await_event_ingress.ingress;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);

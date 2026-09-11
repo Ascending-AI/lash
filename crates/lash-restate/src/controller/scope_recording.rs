@@ -257,6 +257,7 @@ where
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
         if let Some(index_key) = self.index_key()
             && !self
                 .inner
