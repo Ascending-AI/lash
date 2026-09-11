@@ -664,7 +664,16 @@ impl Compiler {
             return;
         }
         match self.handler_chain_digests.last_mut() {
-            Some((start, last)) if *start == ip => *last = digest,
+            // One ip, one live chain: the table is keyed by ip alone, so a
+            // second chain recorded at the same ip would silently win and
+            // false-reject honest state at that boundary.
+            Some((start, last)) if *start == ip => {
+                debug_assert_eq!(
+                    *last, digest,
+                    "instruction {ip} was recorded with two different handler chains"
+                );
+                *last = digest;
+            }
             _ => self.handler_chain_digests.push((ip, digest)),
         }
     }

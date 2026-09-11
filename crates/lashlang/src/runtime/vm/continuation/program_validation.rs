@@ -220,9 +220,13 @@ pub(super) fn validate_program_continuation(
     // the ones holding no handler at all, must hash to it.
     for frame_depth in 0..=continuation.frame_stack.len() {
         let anchor = match continuation.frame_stack.get(frame_depth) {
-            // The call site, not the return site: a call in the last
-            // instruction of a `try` body returns onto that scope's
-            // `PopHandler`, which the caller has not run yet.
+            // The call site, which is the instruction the suspended caller is
+            // still executing. `InvalidReturnSite` above has already pinned
+            // this to a real call instruction, and a breakpoint never starts
+            // immediately after one — breakpoints follow a `PushHandler`,
+            // `PopHandler`, `Jump` or `Return` — so the return site would
+            // resolve to the same digest today. Anchoring at the instruction
+            // that is actually running is what keeps that true.
             Some(frame) => frame.return_instruction_pointer.saturating_sub(1),
             None => continuation.instruction_pointer,
         };
