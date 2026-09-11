@@ -10,9 +10,9 @@ use axum::Json;
 use axum::extract::{Path as AxumPath, State};
 use lash::CancellationToken;
 use lash::runtime::{
-    GroupExecutors, GroupWakePolicy, LoserPolicy, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeScope,
+    EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
+    RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
+    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_restate::{
     EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupSettlementTerminal,
@@ -341,17 +341,19 @@ fn effect_group(
     run_id: &str,
 ) -> Result<RuntimeEffectGroup, lash::runtime::RuntimeEffectControllerError> {
     let group_key = group_key(run_id);
-    let scope = RuntimeScope::new(format!("agent-service-effect-group:{run_id}"));
+    // Restate's effect-group controller derives every READY/rank/cancel wait
+    // from this same runtime-operation scope and group key.
+    let scope = ExecutionScope::runtime_operation(group_key.clone());
     let children = CHILD_DURATIONS_MS
         .iter()
         .enumerate()
         .map(|(position, duration_ms)| {
             RuntimeEffectEnvelope::new(
-                lash_core::RuntimeEffectInvocation::new(
-                    scope.clone(),
+                RuntimeEffectInvocation::new(
+                    EffectAddress::new(scope.clone(), child_replay_key(&group_key, position))
+                        .expect("worked effect-group scope and child replay key are admitted"),
+                    RuntimeAttribution::none(),
                     format!("sleep-{position}"),
-                    RuntimeEffectKind::Sleep,
-                    child_replay_key(&group_key, position),
                 ),
                 RuntimeEffectCommand::Sleep {
                     duration_ms: *duration_ms,
@@ -360,11 +362,11 @@ fn effect_group(
         })
         .collect();
     RuntimeEffectGroup::try_new(
-        lash_core::RuntimeEffectInvocation::new(
-            scope,
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(scope.clone(), format!("{group_key}:group"))
+                .expect("worked effect-group scope and group replay key are admitted"),
+            RuntimeAttribution::none(),
             "effect-group",
-            RuntimeEffectKind::Sleep,
-            format!("{group_key}:group"),
         ),
         group_key,
         children,
@@ -388,6 +390,8 @@ mod tests {
     #[test]
     fn worked_group_is_a_three_child_first_settlement_deadline() {
         let group = effect_group("shape-test").expect("worked group assembles");
+        let admitted_scope = ExecutionScope::runtime_operation(group.group_key());
+        assert_eq!(group.invocation().execution_scope(), &admitted_scope);
         assert_eq!(group.children().len(), 3);
         assert_eq!(group.wake(), GroupWakePolicy::First);
         assert_eq!(group.loser_disposition(), LoserPolicy::Cancel);
@@ -395,9 +399,10 @@ mod tests {
             let membership = child.group.as_deref().expect("child is stamped");
             assert_eq!(membership.position, position);
             assert_eq!(membership.group_key, group.group_key());
+            assert_eq!(child.invocation.execution_scope(), &admitted_scope);
             assert_eq!(
                 child.invocation.replay_key(),
-                Some(child_replay_key(group.group_key(), position).as_str())
+                child_replay_key(group.group_key(), position)
             );
         }
     }
@@ -414,11 +419,14 @@ mod tests {
         );
 
         let unsupported = RuntimeEffectEnvelope::new(
-            lash_core::RuntimeEffectInvocation::new(
-                RuntimeScope::new("routing-test"),
+            RuntimeEffectInvocation::new(
+                EffectAddress::new(
+                    ExecutionScope::runtime_operation("routing-test"),
+                    "routing-test:unsupported",
+                )
+                .expect("test runtime operation and replay key are admitted"),
+                RuntimeAttribution::none(),
                 "unsupported",
-                RuntimeEffectKind::LanguageRuntimeValue,
-                "routing-test:unsupported",
             ),
             RuntimeEffectCommand::LanguageRuntimeValue {
                 operation: "unsupported".to_string(),
