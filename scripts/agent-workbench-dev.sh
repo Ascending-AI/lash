@@ -1910,7 +1910,6 @@ run_foreground() {
 }
 
 run_status_one() {
-  cleanup_stale_pid
   local record="" pid="" start_time=""
   record="$(pid_file_identity "$pid_file" 2>/dev/null || true)"
   if [[ -n "$record" ]]; then

@@ -81,6 +81,13 @@ run_agent_workbench_cases() {
   spawn_owned_sleep
   printf '%s %s\n' "$SPAWNED_PID" "$((SPAWNED_START + 1))" > "$pid_file"
   if AGENT_WORKBENCH_RUN_DIR="$run_dir" \
+    bash "$repo_root/scripts/agent-workbench-dev.sh" status --addr "$address" \
+    >> "$output" 2>&1; then
+    fail "agent-workbench status accepted a mismatched PID identity"
+  fi
+  [[ -e "$pid_file" ]] || fail "agent-workbench status mutated mismatched PID metadata"
+  assert_identity_alive "$SPAWNED_PID" "$SPAWNED_START"
+  if AGENT_WORKBENCH_RUN_DIR="$run_dir" \
     bash "$repo_root/scripts/agent-workbench-dev.sh" down --addr "$address" \
     >> "$output" 2>&1; then
     fail "agent-workbench mismatched PID teardown unexpectedly reported complete service retirement"
