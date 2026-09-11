@@ -206,6 +206,54 @@ async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_exec
 }
 
 #[tokio::test]
+async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingress() {
+    let transport = Arc::new(effect_execution::ScriptedHttpTransport::new([]));
+    let host = RestateEffectHost::new(RestateConnection::with_transport(
+        "https://restate.example",
+        transport.clone(),
+    ));
+    let scoped = host
+        .scoped(ExecutionScope::process("admitted-deployment-process"))
+        .expect("scoped deployment host");
+    let envelope = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::process("wrong-deployment-process"),
+                "wrong-deployment-effect",
+            )
+            .expect("wrong-scope deployment address"),
+            lash_core::RuntimeAttribution::none(),
+            "wrong-deployment-effect",
+        ),
+        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+    );
+    let local_executions = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&local_executions);
+
+    let error = scoped
+        .controller()
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(RuntimeEffectOutcome::Sleep)
+            }),
+        )
+        .await
+        .expect_err("raw bound controller must reject a foreign effect address");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch
+    );
+    assert!(
+        transport.requests().is_empty(),
+        "scope refusal must precede the retired-scope probe and effect ingress"
+    );
+    assert_eq!(local_executions.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn restate_scope_controller_refuses_wrong_scope_group_before_index_or_handoff() {
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));

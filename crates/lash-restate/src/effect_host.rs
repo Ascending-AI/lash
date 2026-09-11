@@ -442,6 +442,7 @@ impl RuntimeEffectController for FencedRestateController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        envelope.invocation.validate_execution_scope(&self.scope)?;
         self.refuse_if_retired().await?;
         self.controller
             .execute_effect(envelope, local_executor)

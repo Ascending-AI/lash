@@ -395,9 +395,6 @@ fn trace_context_for_invocation_parts(
     }
     if let Some(caused_by) = caused_by {
         context = trace_context_with_causal_ref(context, caused_by);
-        if context.parent_graph_node_id.is_none() {
-            context.parent_graph_node_id = Some(causal_node_id(caused_by));
-        }
     }
     if context.parent_graph_node_id.is_none()
         && let (Some(session_id), Some(turn_id)) = (
@@ -416,6 +413,9 @@ pub(crate) fn trace_context_with_causal_ref(
 ) -> TraceContext {
     if let Ok(value) = serde_json::to_value(caused_by) {
         context.metadata.insert("caused_by".to_string(), value);
+    }
+    if context.parent_graph_node_id.is_none() {
+        context.parent_graph_node_id = Some(causal_node_id(caused_by));
     }
     context
 }

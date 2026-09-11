@@ -564,6 +564,90 @@ mod tests {
     }
 
     #[test]
+    fn emitted_direct_llm_records_preserve_full_cause_and_explicit_parent() {
+        let sink = Arc::new(RecordingTraceSink::default());
+        let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
+        let session_id = SessionId::from("direct-session");
+        let effect_address = crate::EffectAddress::new(
+            crate::ExecutionScope::process("direct-parent-process"),
+            "direct-parent-effect",
+        )
+        .expect("valid direct parent address");
+        let effect_cause = crate::CausalRef::Effect {
+            address: effect_address.clone(),
+        };
+        let trigger_cause = crate::CausalRef::TriggerOccurrence {
+            occurrence_id: "direct-occurrence".to_string(),
+            subscription_id: Some("direct-subscription".to_string()),
+            subscription_incarnation: Some("direct-incarnation".to_string()),
+            subscription_revision: Some(9),
+        };
+
+        super::emit_llm_trace_started(
+            &Some(Arc::clone(&sink_dyn)),
+            &lash_trace::TraceContext::default(),
+            super::direct_trace_context(&session_id, Some("direct-start"), Some(&effect_cause)),
+            &request(),
+            &crate::SystemClock,
+        );
+        super::emit_llm_trace_completed(
+            &Some(Arc::clone(&sink_dyn)),
+            &lash_trace::TraceContext::default(),
+            super::direct_trace_context(
+                &session_id,
+                Some("direct-completed"),
+                Some(&trigger_cause),
+            ),
+            &crate::LlmResponse::default(),
+            "test/model",
+            1,
+            None,
+            None,
+            &crate::SystemClock,
+        );
+        let explicit_base = lash_trace::TraceContext {
+            parent_graph_node_id: Some("host:explicit-parent".to_string()),
+            ..Default::default()
+        };
+        super::emit_llm_trace_failed(
+            &Some(sink_dyn),
+            &explicit_base,
+            super::direct_trace_context(&session_id, Some("direct-failed"), Some(&effect_cause)),
+            super::LlmTraceFailure::invalid_structured_output("invalid".to_string()),
+            None,
+            None,
+            &crate::SystemClock,
+        );
+
+        let records = sink.0.lock_recover();
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0].context.parent_graph_node_id.as_deref(),
+            Some(effect_address.graph_key().as_str())
+        );
+        assert_eq!(
+            records[1].context.parent_graph_node_id.as_deref(),
+            Some(
+                format!(
+                    "trigger:{}",
+                    serde_json::to_string(&trigger_cause).expect("trigger cause serializes")
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(
+            records[2].context.parent_graph_node_id.as_deref(),
+            Some("host:explicit-parent")
+        );
+        assert!(records.iter().all(|record| {
+            record.context.session_id.as_deref() == Some("direct-session")
+                && record.context.turn_id.is_none()
+                && record.context.turn_index.is_none()
+                && record.context.protocol_iteration.is_none()
+        }));
+    }
+
+    #[test]
     fn direct_effect_invocation_preserves_runtime_scope() {
         let invocation = crate::runtime::causal::direct_effect_invocation(
             &crate::ExecutionScope::runtime_operation("direct-test"),
