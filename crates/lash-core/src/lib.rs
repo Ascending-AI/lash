@@ -58,6 +58,7 @@ pub mod store_backend_support {
     use lash_sansio::SessionId;
 
     mod append_identity;
+    pub mod required_constraints;
     mod session_meta;
 
     pub use append_identity::decode_append_request_identity;
@@ -87,17 +88,18 @@ pub mod store_backend_support {
         batches: Vec<crate::runtime::QueuedWorkBatch>,
         abandon_restore_claim_id: Option<String>,
         abandon_restore_claim_token: Option<String>,
-    ) -> crate::runtime::QueuedWorkClaimData {
-        assert_eq!(
-            abandon_restore_claim_id.is_some(),
-            abandon_restore_claim_token.is_some(),
-            "queued-work predecessor claim identity and token must be paired"
-        );
-        crate::runtime::QueuedWorkClaimData {
+    ) -> Result<crate::runtime::QueuedWorkClaimData, crate::StoreError> {
+        if abandon_restore_claim_id.is_some() != abandon_restore_claim_token.is_some() {
+            return Err(crate::StoreError::QueuedWorkPredecessorClaimCorrupt {
+                claim_id_present: abandon_restore_claim_id.is_some(),
+                claim_token_present: abandon_restore_claim_token.is_some(),
+            });
+        }
+        Ok(crate::runtime::QueuedWorkClaimData {
             batches,
             abandon_restore_claim_id,
             abandon_restore_claim_token: abandon_restore_claim_token.map(String::into_boxed_str),
-        }
+        })
     }
 
     /// Return the interrupted predecessor identity an abandoning queued-work
