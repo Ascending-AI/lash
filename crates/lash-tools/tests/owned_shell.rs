@@ -71,6 +71,8 @@ async fn provider_owned_exec_drains_after_consumer_abandons_before_publication()
                             release_path.display(),
                             release_path.display(),
                         ),
+                        "shell": "/bin/sh",
+                        "login": false,
                         "timeout_ms": 5_000,
                     }),
                     cancellation,
