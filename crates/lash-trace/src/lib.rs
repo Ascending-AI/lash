@@ -96,6 +96,8 @@ pub use lashlang_graph::{
 /// Version 19 adds the attempt usage disposition to retry attempts so an
 /// aborted or failed call whose usage never arrived is distinguishable from
 /// a free one.
+/// Version 20 carries admitted effect addresses, independently optional
+/// attribution, and complete trigger cause identity in trace graph subjects.
 pub const TRACE_SCHEMA_VERSION: u32 = 20;
 
 /// A durable trace record was written under a schema this reader does not support.

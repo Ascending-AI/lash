@@ -1247,27 +1247,6 @@ impl RemoteRuntimeSubject {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteRuntimeEffectKind {
-    LlmCall,
-    AssistantResponseHooks,
-    Direct,
-    ToolAttempt,
-    ToolBatch,
-    ToolParentEnd,
-    Process,
-    Trigger,
-    ExecCode,
-    AcceptTurnInput,
-    Checkpoint,
-    SyncExecutionEnvironment,
-    Sleep,
-    AwaitEvent,
-    PeekAwaitEvent,
-    LanguageRuntimeValue,
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessPluginOptions {

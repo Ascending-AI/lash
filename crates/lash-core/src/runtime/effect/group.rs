@@ -671,9 +671,10 @@ impl LoserPolicy {
 #[cfg(test)]
 mod effect_group_contract_tests {
     use super::*;
+    use crate::RuntimeEffectKind;
     use crate::SessionId;
     use crate::TurnId;
-    use crate::runtime::effect::envelope::{RuntimeEffectCommand, RuntimeEffectKind};
+    use crate::runtime::effect::envelope::RuntimeEffectCommand;
 
     fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
         let _ = kind;

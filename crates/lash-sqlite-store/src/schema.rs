@@ -544,7 +544,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// existing catalogs are rejected rather than migrated with a defaulted column.
 /// Version 54 preserves successful attachment deletion as the terminal
 /// `reclaimed` phase so adoption can refuse roots whose bytes are absent.
-pub(crate) const SCHEMA_VERSION: i32 = 54;
+/// Version 55 persists full effect addresses in session causal metadata.
+/// Version-54 catalogs are rejected rather than assigning replay keys to an
+/// invented execution scope.
+pub(crate) const SCHEMA_VERSION: i32 = 55;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -813,7 +816,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version-29 registries are rejected rather than migrated.
 /// Version 31 removes the unread process waiting projection and its index.
 /// Version-30 registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 32;
+/// Version 33 persists full admitted effect addresses and optional truthful
+/// attribution in process registration and wake payloads. Older registries are
+/// rejected rather than fabricating an execution scope or session owner.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 33;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1042,7 +1048,10 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // children, groups, and await-event promises in one transaction and leaves a
 // tombstone every admission path refuses. Pre-17 effect databases are
 // rejected at open; there is no migration arm.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 17;
+// Version 18 persists the admitted execution scope with every replay key.
+// Pre-18 journals are rejected because their keys cannot identify the scope
+// whose authority admitted the effect.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 18;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

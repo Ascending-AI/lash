@@ -47,7 +47,7 @@ use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
 use super::envelope::{
     ProcessCommand, ProcessEffectOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectOutcome,
+    RuntimeEffectEnvelope, RuntimeEffectOutcome,
 };
 use super::outcome::llm_call_error_from_transport;
 

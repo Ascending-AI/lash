@@ -533,6 +533,7 @@ pub(super) struct RecordingContext {
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
+    pub(super) scope_effect_begins: AtomicUsize,
     awaited_events: Mutex<HashMap<String, Resolution>>,
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
@@ -995,6 +996,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         let revoked = self.revoked_sessions.lock_recover().contains(&session_id);
         Box::pin(async move { Ok(revoked) })
     }
+
+    fn scope_effect_begin<'run>(
+        &'run self,
+        _index_key: String,
+        _replay_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.scope_effect_begins.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(true) })
+    }
 }
 
 pub(super) struct ZeroPermitSemaphore(tokio::sync::Semaphore);
@@ -1070,14 +1083,14 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     RuntimeInvocation::effect(
-                        RuntimeScope::for_turn(
+                        lash_core::EffectAddress::new(scope.clone(), "tool-intent-corpus-attempt")
+                            .expect("valid tool-intent corpus address"),
+                        lash_core::RuntimeAttribution::for_turn(
                             TOOL_INTENT_CORPUS_SESSION,
                             TOOL_INTENT_CORPUS_TURN,
                             0,
                             0,
                         ),
-                        "tool-intent-corpus-attempt",
-                        RuntimeEffectKind::ToolAttempt,
                         "tool-intent-corpus-attempt",
                     ),
                     RuntimeEffectCommand::ToolAttempt {
@@ -2072,10 +2085,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
 pub(super) fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> RuntimeInvocation {
     RuntimeInvocation::effect(
-        lash_core::runtime::RuntimeScope::for_turn("session", "turn", 1, 0),
+        lash_core::EffectAddress::new(
+            durable_turn_scope("session", "turn"),
+            format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
+        )
+        .expect("valid recording-context effect address"),
+        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
         effect_id,
-        kind,
-        format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
     )
 }
 

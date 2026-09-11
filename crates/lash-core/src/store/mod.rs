@@ -105,7 +105,10 @@ pub use work_claim::{WorkClaim, WorkCompletion};
 fn default_root_session_id() -> SessionId {
     SessionId::from("root")
 }
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 7;
+/// Version 8 persists full effect addresses and optional truthful attribution
+/// in queued work and session metadata. Older metadata is refused rather than
+/// assigning a replay key to an invented scope or session.
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 8;
 
 #[cfg(test)]
 mod prompt_persistence_compat_tests;

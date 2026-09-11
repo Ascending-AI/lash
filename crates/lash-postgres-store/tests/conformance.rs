@@ -868,9 +868,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         sequence: 1,
         event_type: "producer.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::new(session_id),
-            "wake-source-lock",
-            lash_core::RuntimeEffectKind::Process,
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::process("wake-source-lock-process"),
+                "wake-source-lock",
+            )
+            .expect("valid wake effect address"),
+            lash_core::RuntimeAttribution::for_session(session_id),
             "wake-source-lock",
         ),
         process_caused_by: None,

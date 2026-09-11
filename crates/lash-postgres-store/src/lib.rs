@@ -317,7 +317,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // (FIG-2512); component-82 stores must be recreated so successful physical
 // deletion remains durable byte-absence evidence. There is no migration into this
 // generation.
-const SCHEMA_VERSION: i32 = 83;
+// Version 84 persists full admitted effect addresses and optional truthful
+// attribution across session, process, wake, and effect payloads. Older
+// components are recreated rather than fabricating scope or session authority.
+const SCHEMA_VERSION: i32 = 84;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

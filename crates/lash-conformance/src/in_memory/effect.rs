@@ -25,10 +25,13 @@ const SCOPE: &str = "fig1535-session";
 fn child(key: &str, position: usize) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            crate::RuntimeScope::new(SCOPE),
+            EffectAddress::new(
+                ExecutionScope::runtime_operation(SCOPE),
+                format!("{key}:child:{position}"),
+            )
+            .expect("valid child effect address"),
+            RuntimeAttribution::none(),
             "effect",
-            RuntimeEffectKind::Sleep,
-            format!("{key}:child:{position}"),
         ),
         RuntimeEffectCommand::Sleep { duration_ms: 0 },
     )
@@ -42,10 +45,13 @@ fn group(
 ) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
         RuntimeInvocation::effect(
-            crate::RuntimeScope::new(SCOPE),
+            EffectAddress::new(
+                ExecutionScope::runtime_operation(SCOPE),
+                format!("{key}:group"),
+            )
+            .expect("valid group effect address"),
+            RuntimeAttribution::none(),
             "group",
-            RuntimeEffectKind::Sleep,
-            format!("{key}:group"),
         ),
         key,
         (0..children).map(|position| child(key, position)).collect(),

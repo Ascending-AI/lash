@@ -14,8 +14,6 @@
 //! again, and the flat Tool Catalog is never mutated — resolution is
 //! link-scoped only.
 
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

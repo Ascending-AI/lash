@@ -1,6 +1,5 @@
 use crate::ProcessId;
 use crate::SessionId;
-use crate::TurnId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -20,9 +19,11 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
+#[cfg(test)]
+use super::identity_types::process_transfer_set_preimage;
 use super::identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
-    process_transfer_set_identity, process_transfer_set_preimage,
+    process_transfer_set_identity,
 };
 
 /// Canonical lineage for a runtime-side invocation.

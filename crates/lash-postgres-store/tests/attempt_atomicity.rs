@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::{
     EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
 };
 use lash_postgres_store::{PostgresEffectHost, PostgresStorage};
 
@@ -1103,10 +1103,10 @@ async fn assert_fig1293_literal_outputs(
 
 fn attempt_invocation() -> RuntimeInvocation {
     RuntimeInvocation::effect(
-        RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        lash_core::EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, TURN), ATTEMPT_KEY)
+            .expect("valid attempt address"),
+        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-attempt-atomicity-attempt",
-        RuntimeEffectKind::ToolAttempt,
-        ATTEMPT_KEY,
     )
 }
 
@@ -1115,10 +1115,10 @@ fn attempt_invocation() -> RuntimeInvocation {
 /// a nested process command's key in production.
 fn nested_invocation() -> RuntimeInvocation {
     RuntimeInvocation::effect(
-        RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        lash_core::EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, TURN), NESTED_KEY)
+            .expect("valid nested attempt address"),
+        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-attempt-atomicity-nested",
-        RuntimeEffectKind::ToolAttempt,
-        NESTED_KEY,
     )
 }
 
@@ -2078,10 +2078,13 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     )
     .expect("literal PostgreSQL intent identity");
     let mut invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+        lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::turn(SESSION, TURN),
+            identity.replay_key.clone(),
+        )
+        .expect("valid recorded intent address"),
+        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-recorded-intent-start",
-        RuntimeEffectKind::Process,
-        identity.replay_key.clone(),
     );
     invocation.replay = Some(lash_core::RuntimeReplay {
         key: identity.replay_key.clone(),

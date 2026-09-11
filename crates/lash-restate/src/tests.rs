@@ -43,7 +43,7 @@ use lash_core::{
     RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
     facade_support::DurableProcessWorker, facade_support::TurnAddress, facade_support::TurnAttach,
 };
-use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
+use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
@@ -167,12 +167,71 @@ async fn assert_restate_queued_lane_conformance() {
     assert_eq!(host_probe.pause_calls.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let scoped = controller
+        .scoped_effect_controller(ExecutionScope::process("admitted-restate-process"))
+        .expect("scoped Restate controller");
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeInvocation::effect(
+            lash_core::EffectAddress::new(
+                ExecutionScope::process("wrong-restate-process"),
+                "shared-replay-key",
+            )
+            .expect("wrong-scope effect address"),
+            lash_core::RuntimeAttribution::none(),
+            "restate-scope-admission-sleep",
+        ),
+        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+    );
+
+    let error = scoped
+        .controller()
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                panic!("wrong-scope Restate effect must not execute locally")
+            }),
+        )
+        .await
+        .expect_err("wrong Restate scope must be refused");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch
+    );
+    assert_eq!(context.scope_effect_begins.load(Ordering::SeqCst), 0);
+}
+
 fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::ProcessWorkWiring {
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let registry = Arc::clone(watched.registry());
     lash_core::ProcessWorkWiring::new(
         watched,
         Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+    )
+}
+
+fn test_turn_effect_invocation(
+    session_id: &str,
+    turn_id: &str,
+    turn_index: usize,
+    protocol_iteration: usize,
+    effect_id: impl Into<String>,
+    replay_key: impl Into<String>,
+) -> RuntimeInvocation {
+    RuntimeInvocation::effect(
+        lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
+            .expect("valid Restate test effect address"),
+        lash_core::RuntimeAttribution::for_turn(
+            session_id,
+            turn_id,
+            turn_index,
+            protocol_iteration,
+        ),
+        effect_id,
     )
 }
 
@@ -1055,10 +1114,12 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
         let outcome = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn("fig793-session", "fig793-turn", 1, 0),
+                    test_turn_effect_invocation(
+                        "fig793-session",
+                        "fig793-turn",
+                        1,
+                        0,
                         "turn_cancel.after_llm.0",
-                        RuntimeEffectKind::PeekAwaitEvent,
                         "turn_cancel.after_llm.0",
                     ),
                     RuntimeEffectCommand::PeekAwaitEvent { key },
@@ -1164,10 +1225,12 @@ fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
     let mut request = llm_spec();
     request.model = format!("model-v{model_version}");
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::for_turn("fig1142-session", "fig1142-turn", 0, 0),
+        test_turn_effect_invocation(
+            "fig1142-session",
+            "fig1142-turn",
+            0,
+            0,
             "fig1142-replay-divergence",
-            RuntimeEffectKind::LlmCall,
             "fig1142-replay-divergence",
         ),
         RuntimeEffectCommand::LlmCall {
@@ -1206,10 +1269,12 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
         let pending = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn("fig1126-session", "fig1126-turn", 0, 0),
+                    test_turn_effect_invocation(
+                        "fig1126-session",
+                        "fig1126-turn",
+                        0,
+                        0,
                         "fig1126-pending-tool",
-                        RuntimeEffectKind::ToolAttempt,
                         "fig1126-pending-tool",
                     ),
                     RuntimeEffectCommand::ToolAttempt {
@@ -1249,10 +1314,12 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
         let waited = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn("fig1126-session", "fig1126-turn", 0, 0),
+                    test_turn_effect_invocation(
+                        "fig1126-session",
+                        "fig1126-turn",
+                        0,
+                        0,
                         "fig1126-await-pending-tool",
-                        RuntimeEffectKind::AwaitEvent,
                         "fig1126-await-pending-tool",
                     ),
                     RuntimeEffectCommand::AwaitEvent { key: *key },

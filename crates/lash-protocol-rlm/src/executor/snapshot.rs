@@ -7,6 +7,9 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v18 carries admitted effect addresses and independently optional attribution
+// through deferred protocol state. Older snapshots fail closed rather than
+// inventing an execution scope or session owner.
 // v17 cuts serialized protocol driver scratch state over to its collapsed
 // step representation: typed failure state and a required code field. Older
 // snapshots fail closed with the standard drain-or-recreate remedy.

@@ -14,10 +14,10 @@ mod validation;
 
 pub use envelope::{
     AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
-    ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
+    ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
+    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome,
+    RuntimeInvocation, RuntimeLlmCallOutcome, ToolAttemptEffectOutcome, ToolAttemptLaunch,
+    ToolBatchEffectOutcome, ToolCallLaunch,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{

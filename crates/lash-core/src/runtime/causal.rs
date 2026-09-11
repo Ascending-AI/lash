@@ -305,6 +305,8 @@ pub(crate) fn direct_effect_invocation(
     .with_caused_by(caused_by)
 }
 
+// Version 3 includes the admitted execution scope in the direct effect's
+// address. Version 2 identified the replay only by descriptive session fields.
 const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
 
 fn direct_effect_replay_preimage(

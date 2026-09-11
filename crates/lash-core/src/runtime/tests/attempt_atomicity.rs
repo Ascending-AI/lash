@@ -1325,7 +1325,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
             crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
             Some(TurnId::from(TURN.to_string())),
         )
-        .with_parent_invocation(Some(attempt_invocation()));
+        .with_tool_attempt_parent_invocation(attempt_invocation());
 
     crate::RuntimeEffectController::execute_effect(
         &sentinel,

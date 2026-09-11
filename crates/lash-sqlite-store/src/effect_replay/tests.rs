@@ -68,10 +68,10 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
             )),
         }),
         ..lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cutover-session", "cutover-turn", 0, 0),
+            lash_core::EffectAddress::new(scope.clone(), v2_identity.replay_key.clone())
+                .expect("valid cutover address"),
+            lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 0, 0),
             "cutover-effect",
-            lash_core::RuntimeEffectKind::ExecCode,
-            v2_identity.replay_key.clone(),
         )
     };
     let v1_replay_key = lash_core::facade_support::legacy_tool_intent_v1_lookup_key(&v2_invocation)
@@ -510,9 +510,9 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
     let scope = ExecutionScope::turn("cold-session", "cold-turn");
     let envelope = RuntimeEffectEnvelope::new(
         lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cold-session", "cold-turn", 1, 0),
-            "cold-effect",
-            lash_core::RuntimeEffectKind::ExecCode,
+            lash_core::EffectAddress::new(scope.clone(), "cold-effect")
+                .expect("valid cold effect address"),
+            lash_core::RuntimeAttribution::for_turn("cold-session", "cold-turn", 1, 0),
             "cold-effect",
         ),
         lash_core::RuntimeEffectCommand::ExecCode {

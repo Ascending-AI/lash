@@ -1258,7 +1258,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 58,
+            expected: 59,
         }
     ));
 
@@ -1448,7 +1448,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 58,
+            "protocol_version": 59,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1509,7 +1509,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 58,
+            expected: 59,
         }
     ));
 
@@ -1859,7 +1859,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 58,
+            expected: 59,
         })
     ));
 }
@@ -1890,8 +1890,7 @@ enum Protocol37RuntimeEffectKind {
 
 #[test]
 fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_decode() {
-    let kind = serde_json::to_value(RemoteRuntimeEffectKind::LanguageRuntimeValue)
-        .expect("serialize the version 38 effect kind");
+    let kind = serde_json::json!("language_runtime_value");
     assert_eq!(kind, serde_json::json!("language_runtime_value"));
 
     assert!(
@@ -1899,7 +1898,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 58,
+                expected: 59,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1935,7 +1934,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 58,
+                expected: 59,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1982,8 +1981,7 @@ enum Protocol39RuntimeEffectKind {
 /// supposed to cost an edit here.
 #[test]
 fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_decode() {
-    let kind = serde_json::to_value(RemoteRuntimeEffectKind::AssistantResponseHooks)
-        .expect("serialize the version 40 effect kind");
+    let kind = serde_json::json!("assistant_response_hooks");
     assert_eq!(kind, serde_json::json!("assistant_response_hooks"));
 
     assert!(
@@ -1991,7 +1989,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 58,
+                expected: 59,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -2023,7 +2021,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 58,
+                expected: 59,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2513,6 +2511,63 @@ fn remote_process_event() -> RemoteProcessEvent {
         },
         occurred_at_ms: 3,
     }
+}
+
+#[test]
+fn remote_owner_scope_validation_accepts_core_grammar_and_refuses_empty_ids() {
+    for owner in [
+        RemoteTriggerOwnerScope::Session {
+            session_id: SessionId::from("owner/session:alpha"),
+        },
+        RemoteTriggerOwnerScope::Host {
+            binding_id: "host binding/alpha:1".to_string(),
+        },
+        RemoteTriggerOwnerScope::Platform,
+    ] {
+        owner
+            .validate("RemoteTriggerOwnerScope")
+            .expect("existing non-empty core owner grammar must survive");
+    }
+
+    for owner in [
+        RemoteTriggerOwnerScope::Session {
+            session_id: SessionId::from("  "),
+        },
+        RemoteTriggerOwnerScope::Host {
+            binding_id: String::new(),
+        },
+    ] {
+        assert!(
+            owner.validate("RemoteTriggerOwnerScope").is_err(),
+            "empty owner identifiers must be refused"
+        );
+    }
+}
+
+#[test]
+fn remote_cause_validation_preserves_partial_trigger_identity_and_checks_effect_scope() {
+    let partial = RemoteCausalRef::TriggerOccurrence {
+        occurrence_id: "occurrence:partial".to_string(),
+        subscription_id: Some("subscription:known".to_string()),
+        subscription_incarnation: None,
+        subscription_revision: None,
+    };
+    partial
+        .validate("RemoteCausalRef")
+        .expect("truthful partial trigger cause");
+    let encoded = serde_json::to_value(&partial).expect("encode partial cause");
+    assert_eq!(
+        serde_json::from_value::<RemoteCausalRef>(encoded).expect("decode partial cause"),
+        partial
+    );
+
+    let invalid_effect = RemoteCausalRef::Effect {
+        address: lash_sansio::EffectAddress {
+            execution_scope: lash_sansio::ExecutionScope::runtime_operation(" "),
+            replay_key: "replay".to_string(),
+        },
+    };
+    assert!(invalid_effect.validate("RemoteCausalRef").is_err());
 }
 
 #[test]

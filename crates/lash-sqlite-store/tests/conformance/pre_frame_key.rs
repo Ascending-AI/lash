@@ -4,10 +4,13 @@ fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffe
     let call_id = "continue-as-call";
     let envelope = RuntimeEffectEnvelope::new(
         lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cutover-session", "cutover-turn", 3, 1),
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn("cutover-session", "cutover-turn"),
+                "continue-as-attempt-replay",
+            )
+            .expect("valid cutover effect address"),
+            lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 3, 1),
             "continue-as-attempt",
-            RuntimeEffectKind::ToolAttempt,
-            "continue-as-attempt-replay",
         ),
         RuntimeEffectCommand::ToolAttempt {
             call: lash_core::PreparedToolCall::from_parts(

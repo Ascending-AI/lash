@@ -280,54 +280,6 @@ impl From<RemoteRuntimeSubject> for lash_core::runtime::RuntimeSubject {
     }
 }
 
-impl From<lash_core::RuntimeEffectKind> for RemoteRuntimeEffectKind {
-    fn from(value: lash_core::RuntimeEffectKind) -> Self {
-        match value {
-            lash_core::RuntimeEffectKind::LlmCall => Self::LlmCall,
-            lash_core::RuntimeEffectKind::AssistantResponseHooks => Self::AssistantResponseHooks,
-            lash_core::RuntimeEffectKind::Direct => Self::Direct,
-            lash_core::RuntimeEffectKind::ToolAttempt => Self::ToolAttempt,
-            lash_core::RuntimeEffectKind::ToolBatch => Self::ToolBatch,
-            lash_core::RuntimeEffectKind::ToolParentEnd => Self::ToolParentEnd,
-            lash_core::RuntimeEffectKind::Process => Self::Process,
-            lash_core::RuntimeEffectKind::Trigger => Self::Trigger,
-            lash_core::RuntimeEffectKind::ExecCode => Self::ExecCode,
-            lash_core::RuntimeEffectKind::AcceptTurnInput => Self::AcceptTurnInput,
-            lash_core::RuntimeEffectKind::Checkpoint => Self::Checkpoint,
-            lash_core::RuntimeEffectKind::SyncExecutionEnvironment => {
-                Self::SyncExecutionEnvironment
-            }
-            lash_core::RuntimeEffectKind::Sleep => Self::Sleep,
-            lash_core::RuntimeEffectKind::AwaitEvent => Self::AwaitEvent,
-            lash_core::RuntimeEffectKind::PeekAwaitEvent => Self::PeekAwaitEvent,
-            lash_core::RuntimeEffectKind::LanguageRuntimeValue => Self::LanguageRuntimeValue,
-        }
-    }
-}
-
-impl From<RemoteRuntimeEffectKind> for lash_core::RuntimeEffectKind {
-    fn from(value: RemoteRuntimeEffectKind) -> Self {
-        match value {
-            RemoteRuntimeEffectKind::LlmCall => Self::LlmCall,
-            RemoteRuntimeEffectKind::AssistantResponseHooks => Self::AssistantResponseHooks,
-            RemoteRuntimeEffectKind::Direct => Self::Direct,
-            RemoteRuntimeEffectKind::ToolAttempt => Self::ToolAttempt,
-            RemoteRuntimeEffectKind::ToolBatch => Self::ToolBatch,
-            RemoteRuntimeEffectKind::ToolParentEnd => Self::ToolParentEnd,
-            RemoteRuntimeEffectKind::Process => Self::Process,
-            RemoteRuntimeEffectKind::Trigger => Self::Trigger,
-            RemoteRuntimeEffectKind::ExecCode => Self::ExecCode,
-            RemoteRuntimeEffectKind::AcceptTurnInput => Self::AcceptTurnInput,
-            RemoteRuntimeEffectKind::Checkpoint => Self::Checkpoint,
-            RemoteRuntimeEffectKind::SyncExecutionEnvironment => Self::SyncExecutionEnvironment,
-            RemoteRuntimeEffectKind::Sleep => Self::Sleep,
-            RemoteRuntimeEffectKind::AwaitEvent => Self::AwaitEvent,
-            RemoteRuntimeEffectKind::PeekAwaitEvent => Self::PeekAwaitEvent,
-            RemoteRuntimeEffectKind::LanguageRuntimeValue => Self::LanguageRuntimeValue,
-        }
-    }
-}
-
 impl From<lash_core::PluginOptions> for RemoteProcessPluginOptions {
     fn from(value: lash_core::PluginOptions) -> Self {
         let lash_core::PluginOptions { plugins } = value;

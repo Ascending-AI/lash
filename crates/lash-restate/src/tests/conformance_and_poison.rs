@@ -1,5 +1,43 @@
 use super::*;
 
+fn operation_effect_invocation(
+    operation_id: impl Into<String>,
+    attribution: lash_core::RuntimeAttribution,
+    effect_id: impl Into<String>,
+    replay_key: impl Into<String>,
+) -> RuntimeInvocation {
+    RuntimeInvocation::effect(
+        lash_core::EffectAddress::new(
+            ExecutionScope::runtime_operation(operation_id.into()),
+            replay_key,
+        )
+        .expect("valid test runtime-operation effect address"),
+        attribution,
+        effect_id,
+    )
+}
+
+fn turn_effect_invocation(
+    session_id: &str,
+    turn_id: &str,
+    turn_index: usize,
+    protocol_iteration: usize,
+    effect_id: impl Into<String>,
+    replay_key: impl Into<String>,
+) -> RuntimeInvocation {
+    RuntimeInvocation::effect(
+        lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
+            .expect("valid test turn effect address"),
+        lash_core::RuntimeAttribution::for_turn(
+            session_id,
+            turn_id,
+            turn_index,
+            protocol_iteration,
+        ),
+        effect_id,
+    )
+}
+
 #[tokio::test]
 pub(super) async fn restate_turn_work_driver_satisfies_shared_conformance() {
     let context = Arc::new(RecordingContext::default());
@@ -344,10 +382,10 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
         },
     );
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new("trace-replay-session"),
+        operation_effect_invocation(
+            "trace-replay-session",
+            lash_core::RuntimeAttribution::for_session("trace-replay-session"),
             "trace-replay-tool",
-            RuntimeEffectKind::ToolAttempt,
             "trace-replay-tool",
         ),
         RuntimeEffectCommand::ToolAttempt {
@@ -439,10 +477,10 @@ pub(super) async fn restate_handler_controller_journals_typed_trigger_execution(
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new("restate-trigger-session"),
+        operation_effect_invocation(
+            "restate-trigger-session",
+            lash_core::RuntimeAttribution::for_session("restate-trigger-session"),
             "restate-trigger-list",
-            RuntimeEffectKind::Trigger,
             "restate-trigger-list",
         ),
         RuntimeEffectCommand::Trigger {
@@ -474,10 +512,10 @@ pub(super) async fn restate_handler_controller_journals_typed_trigger_execution(
 
 pub(super) fn fig1464_poison_list_envelope(session: &str, effect: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new(session),
+        operation_effect_invocation(
+            session,
+            lash_core::RuntimeAttribution::for_session(session),
             effect,
-            RuntimeEffectKind::Trigger,
             effect,
         ),
         RuntimeEffectCommand::Trigger {
@@ -774,10 +812,12 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     );
 
     // Arm 1: Durable Process Command
-    let process_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let process_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-process-cmd",
-        RuntimeEffectKind::Process,
         "fig1767-process-cmd",
     );
     let process_envelope = RuntimeEffectEnvelope::new(
@@ -847,10 +887,12 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     }
 
     // Arm 2: Durable Tool Batch
-    let batch_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let batch_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-tool-batch",
-        RuntimeEffectKind::ToolBatch,
         "fig1767-tool-batch",
     );
     let batch_envelope = RuntimeEffectEnvelope::new(
@@ -915,10 +957,12 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     let context = Arc::new(ReplayableRecordingContext::default());
 
     // 1. Durable Process Command over budget
-    let process_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let process_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-over-budget-proc",
-        RuntimeEffectKind::Process,
         "fig1767-over-budget-proc",
     );
     let process_envelope = RuntimeEffectEnvelope::new(
@@ -993,10 +1037,12 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 
     // 2. Durable Tool Batch over budget
     context.replaying.store(false, Ordering::SeqCst);
-    let batch_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let batch_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-over-budget-batch",
-        RuntimeEffectKind::ToolBatch,
         "fig1767-over-budget-batch",
     );
     let batch_envelope = RuntimeEffectEnvelope::new(
@@ -1075,14 +1121,14 @@ pub(super) async fn journaled_cancel_peeks_replay_while_live_watcher_observes_la
     let envelope = |identity: &str| {
         RuntimeEffectEnvelope::new(
             RuntimeInvocation::effect(
-                RuntimeScope {
-                    session_id: SessionId::from("journaled-peek-session"),
+                lash_core::EffectAddress::new(scope.clone(), identity)
+                    .expect("valid journaled peek address"),
+                lash_core::RuntimeAttribution {
+                    session_id: Some(SessionId::from("journaled-peek-session")),
                     turn_id: Some(TurnId::from("journaled-peek-turn")),
                     turn_index: None,
                     protocol_iteration: None,
                 },
-                identity,
-                RuntimeEffectKind::PeekAwaitEvent,
                 identity,
             ),
             RuntimeEffectCommand::PeekAwaitEvent { key: key.clone() },
@@ -1211,12 +1257,7 @@ pub(super) fn recorded_runtime_effect_hash_match_returns_replayed_outcome() {
 
 pub(super) fn test_sleep_envelope(duration_ms: u64) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            lash_core::runtime::RuntimeScope::for_turn("session", "turn", 0, 0),
-            "sleep:test",
-            RuntimeEffectKind::Sleep,
-            "sleep:test",
-        ),
+        turn_effect_invocation("session", "turn", 0, 0, "sleep:test", "sleep:test"),
         RuntimeEffectCommand::Sleep { duration_ms },
     )
 }

@@ -166,6 +166,109 @@ impl RuntimeEffectController for TestResolver {
     }
 }
 
+#[derive(Default)]
+struct EffectAdmissionProbe {
+    controller_calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl AwaitEventResolver for EffectAdmissionProbe {}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for EffectAdmissionProbe {
+    async fn execute_effect(
+        &self,
+        _envelope: RuntimeEffectEnvelope,
+        _local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.controller_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(RuntimeEffectOutcome::Sleep)
+    }
+}
+
+fn sleep_envelope(scope: ExecutionScope, replay_key: &str) -> RuntimeEffectEnvelope {
+    RuntimeEffectEnvelope::new(
+        crate::RuntimeInvocation::effect(
+            crate::EffectAddress::new(scope, replay_key).expect("effect address"),
+            crate::RuntimeAttribution::none(),
+            "scope-admission-sleep",
+        ),
+        crate::RuntimeEffectCommand::Sleep { duration_ms: 1 },
+    )
+}
+
+#[tokio::test]
+async fn scoped_controller_refuses_wrong_scope_before_controller_or_local_execution() {
+    let probe = EffectAdmissionProbe::default();
+    let local_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let local_calls_for_executor = Arc::clone(&local_calls);
+    let scoped = ScopedEffectController::borrowed(
+        &probe,
+        ExecutionScope::runtime_operation("admitted-scope"),
+    )
+    .expect("scoped admission probe");
+
+    let error = scoped
+        .execute_effect(
+            sleep_envelope(
+                ExecutionScope::runtime_operation("wrong-scope"),
+                "shared-replay-key",
+            ),
+            RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+                local_calls_for_executor.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(RuntimeEffectOutcome::Sleep)
+            }),
+        )
+        .await
+        .expect_err("wrong scope must be refused");
+
+    assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectScopeMismatch);
+    assert_eq!(
+        probe
+            .controller_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert_eq!(local_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn task_proxy_refuses_wrong_scope_before_handoff() {
+    let probe = EffectAdmissionProbe::default();
+    let (scoped, mut requests) = EffectTaskController::scoped(
+        &probe,
+        ExecutionScope::runtime_operation("admitted-proxy-scope"),
+    )
+    .expect("scoped task proxy");
+
+    let error = scoped
+        .controller()
+        .execute_effect(
+            sleep_envelope(
+                ExecutionScope::runtime_operation("wrong-proxy-scope"),
+                "shared-replay-key",
+            ),
+            RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                panic!("wrong-scope proxy must not run the local executor")
+            }),
+        )
+        .await
+        .expect_err("wrong proxy scope must be refused");
+
+    assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectScopeMismatch);
+    assert_eq!(
+        probe
+            .controller_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    assert!(matches!(
+        requests.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
 struct FakeQueuedLaneProbe {
     attempts: std::sync::Mutex<std::collections::VecDeque<QueuedLaneAttempt>>,
     try_calls: std::sync::atomic::AtomicUsize,

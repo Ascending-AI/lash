@@ -3,7 +3,7 @@ use crate::runtime::{RuntimeError, RuntimeErrorCode};
 
 use serde::{Deserialize, Serialize};
 
-use super::RuntimeEffectKind;
+use crate::RuntimeEffectKind;
 
 #[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
 #[error("{code}: {message}")]

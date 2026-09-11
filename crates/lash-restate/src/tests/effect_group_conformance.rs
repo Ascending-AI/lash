@@ -13,7 +13,6 @@ use lash_core::{
     ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy, Resolution, RuntimeEffectCommand,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeErrorCode, RuntimeInvocation,
-    RuntimeScope,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::endpoint::Endpoint;
@@ -541,10 +540,13 @@ impl ScopeLivenessProbe for ScopeLivenessProbeImpl {
             .map_err(TerminalError::from_error)?;
         let envelope = RuntimeEffectEnvelope::new(
             RuntimeInvocation::effect(
-                RuntimeScope::new("scope-liveness"),
+                lash_core::EffectAddress::new(
+                    ExecutionScope::runtime_operation(scope_id.clone()),
+                    format!("{scope_id}:work"),
+                )
+                .map_err(TerminalError::from_error)?,
+                lash_core::RuntimeAttribution::none(),
                 "work",
-                RuntimeEffectKind::LanguageRuntimeValue,
-                format!("{scope_id}:work"),
             ),
             RuntimeEffectCommand::LanguageRuntimeValue {
                 operation: "scope-liveness".to_string(),
@@ -626,10 +628,13 @@ async fn cold_reopen_admits_the_registered_process<F, Fut>(
         .expect("resolve the effect's promise");
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::new("cold-reopen"),
+            lash_core::EffectAddress::new(
+                scope.clone(),
+                format!("cold-reopen-first-{label}-{nonce}"),
+            )
+            .expect("valid cold-reopen effect address"),
+            lash_core::RuntimeAttribution::none(),
             "first",
-            RuntimeEffectKind::AwaitEvent,
-            format!("cold-reopen-first-{label}-{nonce}"),
         ),
         RuntimeEffectCommand::AwaitEvent { key },
     );
@@ -937,10 +942,13 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
 fn witness_child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::new(group_key),
+            lash_core::EffectAddress::new(
+                ExecutionScope::runtime_operation(group_key),
+                format!("{group_key}:child:{position}"),
+            )
+            .expect("valid witness child address"),
+            lash_core::RuntimeAttribution::none(),
             "effect",
-            RuntimeEffectKind::LanguageRuntimeValue,
-            format!("{group_key}:child:{position}"),
         ),
         RuntimeEffectCommand::LanguageRuntimeValue {
             operation: format!("witness-child-{position}"),
