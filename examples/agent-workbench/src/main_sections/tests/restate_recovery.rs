@@ -3,6 +3,9 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
+#[path = "restate_recovery/immutable_deployment.rs"]
+mod immutable_deployment;
+
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_process_llm_query_with_typed_output_succeeds() {
@@ -16,12 +19,6 @@ async fn live_restate_process_llm_query_with_typed_output_succeeds_inner() {
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-process-llm-query-e2e-{}",
         uuid::Uuid::new_v4()
@@ -74,14 +71,13 @@ finish (await handle)?
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let invocation =
         run_workbench_turn_via_restate(&harness.state, "Run the typed process llm_query repro.")
@@ -94,6 +90,9 @@ finish (await handle)?
         "outer turn plus exactly one in-attempt llm_query provider call"
     );
     println!("workbench process-llm-query gate passed: typed-output; provider-calls=2");
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -124,12 +123,6 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-suspended-sleep-cancel-e2e-{}",
         uuid::Uuid::new_v4()
@@ -152,14 +145,13 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let invocation_id =
         run_workbench_turn_via_restate(&harness.state, "cancel this suspended durable sleep").await;
@@ -243,6 +235,9 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     .expect("late cancellation evidence must arrive on the SSE product stream");
     wait_for_active_turns_empty(&harness.state, &session_id, Duration::from_secs(10)).await;
     println!("workbench suspended-sleep gate passed: post-suspension-cancel; late-SSE-evidence");
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -259,12 +254,6 @@ async fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evid
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-stop-over-process-await-e2e-{}",
         uuid::Uuid::new_v4()
@@ -298,14 +287,13 @@ finish (await handle)?
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let invocation_id = run_workbench_turn_via_restate(
         &harness.state,
@@ -412,6 +400,9 @@ finish (await handle)?
     println!(
         "workbench Stop-over-process gate passed: committed-Cancelled; process-Cancelled; late-SSE-evidence"
     );
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -571,7 +562,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     println!(
         "workbench auth-failure gate passed: failed terminal, visible error, next turn recovered"
     );
-    let _ = std::fs::remove_dir_all(data_dir);
+    harness.shutdown(data_dir).await;
 }
 
 async fn submit_workbench_turn_via_restate(
@@ -777,7 +768,7 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
     println!(
         "workbench rate-limit gate passed: retry succeeded and live/replay observers converged"
     );
-    let _ = std::fs::remove_dir_all(data_dir);
+    harness.shutdown(data_dir).await;
 }
 
 fn assert_single_retry_marker_message(projection: &str, messages: &[lash::messages::Message]) {
@@ -842,12 +833,6 @@ async fn live_failure_path_harness_with_provider(
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-{label}-e2e-{}",
         uuid::Uuid::new_v4()
@@ -862,19 +847,34 @@ async fn live_failure_path_harness_with_provider(
     )
     .await;
     let state = harness.state.clone();
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
-    (LiveFailurePathHarness { state }, data_dir)
+    )
+    .await;
+    (LiveFailurePathHarness { state, endpoint }, data_dir)
 }
 
 struct LiveFailurePathHarness {
     pub(super) state: AppState,
+    endpoint: LiveRestateEndpoint,
+}
+
+impl LiveFailurePathHarness {
+    async fn shutdown(mut self, data_dir: PathBuf) {
+        self.endpoint
+            .stop_after_producers_closed_and_drained(&self.state, Duration::from_secs(30))
+            .await;
+        std::fs::remove_dir_all(&data_dir)
+            .unwrap_or_else(|error| panic!("remove owned fixture {}: {error}", data_dir.display()));
+        assert!(
+            !data_dir.exists(),
+            "owned fixture data directory remained at {}",
+            data_dir.display()
+        );
+    }
 }
 
 async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inner() {
@@ -992,7 +992,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
             .await
             .expect("read successful retry tombstone fence")
     );
-    let _ = std::fs::remove_dir_all(data_dir);
+    harness.shutdown(data_dir).await;
 }
 
 async fn live_restate_session_delete_revokes_process_await_without_cancelling_process_inner() {
@@ -1000,12 +1000,6 @@ async fn live_restate_session_delete_revokes_process_await_without_cancelling_pr
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-revoked-process-await-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1036,14 +1030,13 @@ finish (await handle)?
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let deleted_session_id = harness.state.current_session_id();
     let turn_invocation_id = run_workbench_turn_via_restate(
@@ -1172,6 +1165,9 @@ finish (await handle)?
     println!(
         "workbench revoked-process-await gate passed: typed-SessionDeleted; no-process-cancel; process-survived"
     );
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1180,12 +1176,6 @@ async fn live_restate_processes_outlive_session_delete_and_cancel_globally_inner
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-process-lifecycle-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1221,14 +1211,13 @@ finish "started lifecycle gates"
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let deleted_session_id = harness.state.current_session_id();
     let turn_invocation_id =
@@ -1350,6 +1339,9 @@ finish "started lifecycle gates"
                 .iter()
                 .any(|event| event.event_type == "process.cancel_requested")
     }));
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1446,12 +1438,6 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
-        .parse()
-        .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-turn-ingress-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1503,14 +1489,13 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         ActiveTurns::default(),
     )
     .await;
-    restate::spawn_restate_endpoint(
-        endpoint_bind,
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
         harness.state.clone(),
         harness.process_deployment,
         harness.process_worker,
-    );
-    wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    )
+    .await;
 
     let mut rendered_events = harness
         .state
@@ -1776,6 +1761,9 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         "both ingress claims must settle"
     );
     unregister_session_open_admission_gate(&session_id);
+    endpoint
+        .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
+        .await;
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1827,7 +1815,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let mut first = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
     let first_pid = first.id().expect("first recovery child pid");
     wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    let deployment_id = register_restate_deployment(&admin_url, &endpoint_url).await;
     let request = restate::WorkbenchTurnWorkflowRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),
@@ -1838,11 +1826,19 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         },
         attachment_id: None,
     };
-    lash_restate::RestateIngressClient::new(ingress_url.clone())
+    let invocation_id = lash_restate::RestateIngressClient::new(ingress_url.clone())
         .send_workflow_json("WorkbenchTurnWorkflow", &turn_id, "run", &request)
         .await
         .expect("submit recovery E2E turn");
     wait_for_provider_owner(&data_dir, first_pid, Duration::from_secs(20)).await;
+    let admitted = restate_invocation_status_with_deployment(&admin_url, &invocation_id)
+        .await
+        .expect("admitted recovery invocation status");
+    assert_eq!(
+        admitted.pinned_deployment_id.as_deref(),
+        Some(deployment_id.as_str()),
+        "recovery invocation must stay pinned to the original immutable deployment"
+    );
     wait_for_trace_event_count(
         &data_dir.join("trace.jsonl"),
         "llm_call_completed",
@@ -1860,7 +1856,9 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let mut replacement = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
     let _replacement_pid = replacement.id().expect("replacement recovery child pid");
     wait_for_endpoint_socket(endpoint_bind).await;
-    register_restate_deployment(&admin_url, &endpoint_url).await;
+    // This is a process restart of the same configuration and storage at the
+    // same immutable endpoint. Keep the original Restate deployment identity;
+    // re-registering would turn the crash-recovery probe into a deployment update.
     wait_for_session_lease_generation(
         &data_dir,
         backend,

@@ -7,6 +7,8 @@ use lash::TurnId;
 #[path = "tests/support.rs"]
 mod support;
 use lash::rlm::RlmTurnBuilderExt;
+#[path = "tests/restate_endpoint.rs"]
+mod restate_endpoint;
 use lash::tracing::{
     TraceBranchSelection, TraceLanguageChildExecution, TraceLanguageExecution,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
@@ -14,6 +16,7 @@ use lash::tracing::{
     TraceLashlangEdgeSelection, TraceLashlangGraphChildLink, TraceRuntimeScope,
     TraceRuntimeSubject,
 };
+pub(crate) use restate_endpoint::*;
 use std::future::Future;
 pub(crate) use support::*;
 fn sync_await<T, F>(future: F) -> T
@@ -1686,7 +1689,7 @@ async fn live_restate_cron_zombie_cancel_path_end_to_end_inner() {
     )
     .await;
     assert_no_active_lash_restate_invocations(&scenario.state, Duration::from_secs(10)).await;
-    let _ = std::fs::remove_dir_all(scenario.data_dir);
+    scenario.shutdown().await;
 }
 
 #[test]
@@ -1755,7 +1758,7 @@ async fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner() {
         "sync-cancel scenario must not need the zombie backstop"
     );
     assert_no_active_lash_restate_invocations(&scenario.state, Duration::from_secs(10)).await;
-    let _ = std::fs::remove_dir_all(scenario.data_dir);
+    scenario.shutdown().await;
 }
 
 async fn run_workbench_turn_via_restate(
@@ -1851,6 +1854,7 @@ struct LiveWorkbenchRestateHarness {
     state: AppState,
     process_worker: lash::durability::DurableProcessWorker,
     process_deployment: lash_restate::RestateProcessDeployment,
+    process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     trace_path: PathBuf,
 }
 
@@ -1959,7 +1963,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
+        .process_env_store(Arc::clone(&process_env_store))
         .trigger_store(Arc::clone(&trigger_store))
         .trace_sink(Arc::clone(&trace_sink))
         .trace_level(TraceLevel::Extended)
@@ -2015,6 +2019,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         state,
         process_worker,
         process_deployment,
+        process_env_store,
         trace_path,
     }
 }
@@ -2104,29 +2109,6 @@ async fn wait_for_endpoint_socket(addr: SocketAddr) {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-}
-
-async fn register_restate_deployment(admin_url: &str, endpoint_url: &str) {
-    let client = reqwest::Client::builder()
-        .http2_prior_knowledge()
-        .build()
-        .expect("build Restate admin client");
-    let response = client
-        .post(format!("{}/deployments", admin_url.trim_end_matches('/')))
-        .json(&json!({
-            "uri": endpoint_url,
-            "force": true,
-            "breaking": true,
-        }))
-        .send()
-        .await
-        .expect("register deployment with Restate admin API");
-    assert!(
-        response.status().is_success(),
-        "Restate deployment registration failed: {} {}",
-        response.status(),
-        response.text().await.unwrap_or_default()
-    );
 }
 
 #[test]
