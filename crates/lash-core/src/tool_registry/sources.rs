@@ -21,8 +21,8 @@ impl ToolSourceExecutor for OrchestratingToolSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(Self::new(self.definition.clone()))
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self::new(self.definition.clone())))
     }
 
     fn source_key(&self) -> ToolSourceKey {
@@ -192,7 +192,10 @@ impl ToolProviderSource {
         None
     }
 
-    fn snapshot(&self, known_resident_ids: &BTreeSet<ToolId>) -> PinnedToolProviderSource {
+    fn snapshot(
+        &self,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<PinnedToolProviderSource, ReconfigureError> {
         let mut index = ToolProviderIndex::from_providers(&self.providers);
         let advertised_ids = index.by_id.keys().cloned().collect();
         for id in known_resident_ids {
@@ -201,13 +204,25 @@ impl ToolProviderSource {
             }
             for (provider_idx, provider) in self.providers.iter().enumerate() {
                 if let Some(manifest) = provider.resolve_manifest_by_id(id) {
+                    if manifest.id != *id {
+                        return Err(ReconfigureError::Validation(format!(
+                            "source `{}` resolved tool id `{id}` with mismatched manifest id `{}`",
+                            self.source_key(),
+                            manifest.id,
+                        )));
+                    }
                     index.insert(manifest, provider_idx);
                     break;
                 }
             }
         }
         *self.tools.write_recover() = index.clone();
-        PinnedToolProviderSource::new(self.id.clone(), index, advertised_ids, &self.providers)
+        Ok(PinnedToolProviderSource::new(
+            self.id.clone(),
+            index,
+            advertised_ids,
+            &self.providers,
+        ))
     }
 }
 
@@ -220,8 +235,8 @@ impl ToolSourceExecutor for ToolProviderSource {
     fn snapshot_execution_source(
         &self,
         known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(self.snapshot(known_resident_ids))
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(self.snapshot(known_resident_ids)?))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -401,8 +416,8 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(self.clone())
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(self.clone()))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {

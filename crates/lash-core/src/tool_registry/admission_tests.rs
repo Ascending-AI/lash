@@ -91,12 +91,12 @@ impl ToolSourceExecutor for AdmissionSourceSnapshot {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(Self {
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self {
             id: self.id.clone(),
             manifests: self.manifests.clone(),
             result: self.result,
-        })
+        }))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -126,12 +126,12 @@ impl ToolSourceExecutor for MutableAdmissionSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(AdmissionSourceSnapshot {
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(AdmissionSourceSnapshot {
             id: self.id.to_string(),
             manifests: self.advertised_tools(),
             result: None,
-        })
+        }))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -219,12 +219,12 @@ impl ToolSourceExecutor for RoutedAdmissionSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(AdmissionSourceSnapshot {
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(AdmissionSourceSnapshot {
             id: self.id.to_string(),
             manifests: self.advertised_tools(),
             result: Some(self.result),
-        })
+        }))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {

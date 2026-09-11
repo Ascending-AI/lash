@@ -206,7 +206,7 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     fn snapshot_execution_source(
         &self,
         known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor>;
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError>;
     fn source_key(&self) -> ToolSourceKey {
         ToolSourceKey::Leaf(self.id().to_string())
     }

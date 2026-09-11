@@ -315,7 +315,7 @@ impl ToolRegistry {
         source: Arc<dyn ToolSourceExecutor>,
     ) -> Result<u64, ReconfigureError> {
         let live_source = Arc::clone(&source);
-        let source = source.snapshot_execution_source(&BTreeSet::new());
+        let source = source.snapshot_execution_source(&BTreeSet::new())?;
         let source_key = source.source_key();
         debug_assert_eq!(live_source.source_key(), source_key);
         let manifests = source
@@ -521,12 +521,25 @@ impl ToolRegistry {
             let sources = live_sources
                 .iter()
                 .map(|(key, source)| {
-                    (
+                    Ok((
                         key.clone(),
-                        source.snapshot_execution_source(&known_resident_ids),
-                    )
+                        source.snapshot_execution_source(&known_resident_ids)?,
+                    ))
                 })
-                .collect::<BTreeMap<_, _>>();
+                .collect::<Result<BTreeMap<_, _>, ReconfigureError>>();
+            let sources = match sources {
+                Ok(sources) => sources,
+                Err(error) => {
+                    if self.reconciliation_inputs_changed(
+                        source_revision,
+                        state_revision,
+                        snapshot.generation,
+                    ) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+            };
             let reconciled = match reconcile_tool_state_entries(
                 snapshot.entries(),
                 &sources,

@@ -184,8 +184,8 @@ impl ToolSourceExecutor for LazyOrchestratingBatchSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(Self)
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self))
     }
 
     fn source_key(&self) -> ToolSourceKey {
@@ -494,8 +494,8 @@ impl ToolSourceExecutor for ExternalMockSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(Self)
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -557,8 +557,8 @@ impl ToolSourceExecutor for ExactResolvingSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(self.clone())
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(self.clone()))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -611,8 +611,8 @@ impl ToolSourceExecutor for NamedExactSource {
     fn snapshot_execution_source(
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Arc<dyn ToolSourceExecutor> {
-        Arc::new(Self { id: self.id })
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self { id: self.id }))
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -1656,6 +1656,101 @@ async fn pinned_source_retains_exactly_known_nonadvertised_resident_id() {
         )
         .await;
     assert_eq!(result.value_for_projection(), json!("known-resident"));
+}
+
+#[tokio::test]
+async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route() {
+    struct AdvertisedProvider;
+
+    #[async_trait::async_trait]
+    impl ToolProvider for AdvertisedProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            manifests(vec![test_tool("advertised", "advertised route")])
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+            contract_from(vec![test_tool("advertised", "advertised route")], name)
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("advertised-route"))
+        }
+    }
+
+    struct KnownIdProvider {
+        mismatched: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for KnownIdProvider {
+        fn tool_manifests(&self) -> Vec<ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+            (id == &tool_id("known")).then(|| {
+                if self.mismatched.load(Ordering::SeqCst) {
+                    test_tool("advertised", "malformed known-id route").manifest()
+                } else {
+                    test_tool("known", "valid known-id route").manifest()
+                }
+            })
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+            None
+        }
+
+        fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
+            (id == &tool_id("known"))
+                .then(|| Arc::new(test_tool("known", "valid known-id route").contract()))
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(json!("malformed-route"))
+        }
+    }
+
+    let mismatched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let registry = ToolRegistry::from_tool_providers(vec![
+        Arc::new(AdvertisedProvider),
+        Arc::new(KnownIdProvider {
+            mismatched: Arc::clone(&mismatched),
+        }),
+    ])
+    .expect("grouped provider registry");
+    let mut restored = BTreeMap::new();
+    restored.insert(
+        tool_id("known"),
+        ToolStateEntry::new(test_tool("known", "persisted known resident").manifest()),
+    );
+    registry
+        .restore_state(ToolState::new(registry.generation(), restored))
+        .expect("valid exact-id route restores the known resident");
+    let before = serde_json::to_value(registry.export_state()).expect("serialize state");
+
+    mismatched.store(true, Ordering::SeqCst);
+    let pin = registry.compose_session_catalog(true, Vec::new());
+    let error = pin.err().map(|error| error.to_string());
+    let after = serde_json::to_value(registry.export_state()).expect("serialize state");
+    let advertised = registry
+        .execute_by_id(&tool_id("advertised"), &json!({}), &test_attempt_context())
+        .await
+        .value_for_projection();
+
+    assert!(
+        error.is_some() && before == after && advertised == json!("advertised-route"),
+        "mismatched known-id pin must refuse without changing state or the advertised route: \
+         error={error:?}, state_unchanged={}, advertised={advertised}",
+        before == after,
+    );
+    assert_eq!(
+        error.as_deref(),
+        Some(
+            "validation error: source `plugins` resolved tool id `tool:known` with mismatched \
+             manifest id `tool:advertised`"
+        )
+    );
 }
 
 #[test]

@@ -37,6 +37,7 @@ orb gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
     test(~pinned_source_preserves_provider_by_id_overrides) |
     test(~captured_resident_route_does_not_bind_an_unrelated_tool_id) |
     test(~pinned_source_retains_exactly_known_nonadvertised_resident_id) |
+    test(~resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route) |
     test(~process_run_context_captures_catalog_and_execution_route_together) |
     test(~deferred_call_executes_through_grant_without_mutating_catalog) |
     test(~typescript_deferred_call_executes_through_the_same_grant_path)
@@ -44,7 +45,7 @@ orb gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
 ' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/resident-tool-authority.log"
 ```
 
-Expect exactly seventeen tests and `17 passed; 0 failed`. The positive witnesses
+Expect exactly eighteen tests and `18 passed; 0 failed`. The positive witnesses
 prove that native tool schemas, RLM documentation and host bindings, and
 argument validation retain the same catalog-owned contract even when the
 source resolver would return a different definition later. A restricted
@@ -63,14 +64,16 @@ effective duplicate identity, and a definition without a pinned route are
 typed admission failures. The route refusal is checked through both the live
 turn pin and the direct plugin-session catalog used by durable process paths.
 Their prepare counters remain zero. A malformed manifest removed by catalog
-curation does not become an admission failure.
+curation does not become an admission failure. A provider that resolves a known
+resident ID to a different manifest ID is refused before the source cache or
+registry state can change, so it cannot replace another advertised route.
 
 The deferred witnesses prove that replay does not resolve a current contract,
 that a hidden provider stays outside the resident snapshot, and that core,
 Lashlang, and TypeScript grants continue through the existing deferred
 execution path without mutating the resident catalog.
 
-Abort if the filter runs fewer or more than seventeen tests, a resolver is called
+Abort if the filter runs fewer or more than eighteen tests, a resolver is called
 after catalog construction, any negative case reaches preparation, a same-ID
 alias or old request loses its route, or a deferred call is admitted through
 resident membership.
@@ -87,4 +90,5 @@ resident membership.
 | Provider by-ID behavior remains authoritative | ordinary, attempt/intent, and internal override witnesses pass; unrelated IDs ignore the captured name | | `resident-tool-authority.log` |
 | Direct process dispatch uses one captured tool surface | old and fresh process contexts retain distinct definitions and routes | | `resident-tool-authority.log` |
 | Known nonadvertised residents retain their exact route | restored resident remains curated, nonorphaned, and executable | | `resident-tool-authority.log` |
+| Known resident identity mismatches fail atomically | mismatched exact-ID resolution is refused without state or advertised-route changes | | `resident-tool-authority.log` |
 | Deferred replay and execution retain their grant authority | four deferred witnesses pass | | `resident-tool-authority.log` |
