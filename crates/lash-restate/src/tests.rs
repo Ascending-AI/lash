@@ -35,13 +35,14 @@ use lash_core::ProcessWorkSubstrate as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
 use lash_core::{
-    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
-    ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome,
-    ProcessExecutionContext, ProcessExternalRef, ProcessRegistry, QueuedLaneAcquisition,
-    QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, ScopedEffectController, facade_support::DurableProcessWorker,
-    facade_support::TurnAddress, facade_support::TurnAttach,
+    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectAddress,
+    EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
+    ProcessEffectOutcome, ProcessExecutionContext, ProcessExternalRef, ProcessRegistry,
+    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome,
+    RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ScopedEffectController, facade_support::DurableProcessWorker, facade_support::TurnAddress,
+    facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_http_transport::HttpRequest;
@@ -79,14 +80,14 @@ use endpoint_protocol::{
     durable_wait_index_call_response, encode_call_replay, encode_captured_run_and_call_replay,
     encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
     encode_completed_gate_sleep_replay, encode_completed_intent_drain_replay,
-    encode_completed_sleep_replay, encode_one_way_call_replay, encode_process_segment_send_replay,
-    encode_process_terminal_delivery_replay, encode_recorded_commands_replay, encode_run_replay,
-    encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
-    invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
-    invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
-    invoke_process_workflow_endpoint, restate_call_frames, restate_command_frame_types,
-    restate_completed_promise, restate_error_message, restate_message_types,
-    restate_output_failure_message, restate_output_json,
+    encode_completed_sleep_replay, encode_process_segment_send_replay,
+    encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
+    encode_recorded_commands_with_invocations_replay, encode_run_replay, invoke_endpoint,
+    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
+    invoke_endpoint_open, invoke_endpoint_with_named_call_responses,
+    invoke_endpoint_with_scripted_responses, invoke_process_workflow_endpoint, restate_call_frames,
+    restate_command_frame_types, restate_completed_promise, restate_error_message,
+    restate_message_types, restate_output_failure_message, restate_output_json,
 };
 
 fn registry_local_executor(
@@ -929,6 +930,22 @@ impl HttpTransport for Fig779DurableCancelTransport {
 #[derive(Debug)]
 struct Fig779SuspendingProcessRunner;
 
+fn scoped_runtime_invocation(
+    scope: &ExecutionScope,
+    kind: RuntimeEffectKind,
+    effect_id: &str,
+) -> RuntimeEffectInvocation {
+    RuntimeEffectInvocation::new(
+        EffectAddress::new(
+            scope.clone(),
+            format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
+        )
+        .expect("valid scoped runtime effect address"),
+        RuntimeAttribution::for_turn("session", "turn", 1, 0),
+        effect_id,
+    )
+}
+
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig779SuspendingProcessRunner {
     async fn run_process_segment(
@@ -943,7 +960,11 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
             .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::Sleep, "fig779-redrive-sleep"),
+                    scoped_runtime_invocation(
+                        scoped_effect_controller.execution_scope(),
+                        RuntimeEffectKind::Sleep,
+                        "fig779-redrive-sleep",
+                    ),
                     RuntimeEffectCommand::Sleep {
                         duration_ms: 60_000,
                     },
@@ -994,7 +1015,11 @@ impl RestateProcessRunner for Fig788TerminalRedriveRunner {
             .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::Sleep, "fig788-terminal-redrive-sleep"),
+                    scoped_runtime_invocation(
+                        scoped_effect_controller.execution_scope(),
+                        RuntimeEffectKind::Sleep,
+                        "fig788-terminal-redrive-sleep",
+                    ),
                     RuntimeEffectCommand::Sleep {
                         duration_ms: 60_000,
                     },
@@ -1101,7 +1126,11 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
             .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::Sleep, "fig811-effectful-terminal-sleep"),
+                    scoped_runtime_invocation(
+                        scoped_effect_controller.execution_scope(),
+                        RuntimeEffectKind::Sleep,
+                        "fig811-effectful-terminal-sleep",
+                    ),
                     RuntimeEffectCommand::Sleep { duration_ms: 1 },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),
