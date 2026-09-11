@@ -21,6 +21,7 @@ members = [
     "crates/lash-plugin-mcp",
     "crates/lash-plugin-process-controls",
     "crates/lash-plugin-tool-output-budget",
+    "crates/lash-plugin-rolling-history",
     "crates/lash-llm-tools",
     "crates/lash-tool-support",
     "crates/lash-tools",
@@ -68,6 +69,7 @@ default-members = [
     "crates/lash-plugin-mcp",
     "crates/lash-plugin-process-controls",
     "crates/lash-plugin-tool-output-budget",
+    "crates/lash-plugin-rolling-history",
     "crates/lash-subagents",
 ]
 resolver = "3"
@@ -246,6 +248,7 @@ lash-s3-store = { package = "lash-internal-s3-store", path = "crates/lash-s3-sto
 lash-plugin-mcp = { package = "lash-internal-plugin-mcp", path = "crates/lash-plugin-mcp", version = "=0.0.0-dev" }
 lash-plugin-process-controls = { package = "lash-internal-plugin-process-controls", path = "crates/lash-plugin-process-controls", version = "=0.0.0-dev" }
 lash-plugin-tool-output-budget = { package = "lash-internal-plugin-tool-output-budget", path = "crates/lash-plugin-tool-output-budget", version = "=0.0.0-dev" }
+lash-plugin-rolling-history = { package = "lash-internal-plugin-rolling-history", path = "crates/lash-plugin-rolling-history", version = "=0.0.0-dev" }
 lash-protocol-rlm = { package = "lash-internal-protocol-rlm", path = "crates/lash-protocol-rlm", version = "=0.0.0-dev" }
 lash-protocol-standard = { package = "lash-internal-protocol-standard", path = "crates/lash-protocol-standard", version = "=0.0.0-dev" }
 lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = "crates/lash-provider-anthropic", version = "=0.0.0-dev" }
