@@ -736,7 +736,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             self.parent_invocation
                 .as_ref()
                 .map(|parent| parent.attribution.clone())
-                .unwrap_or_else(|| crate::RuntimeAttribution::none()),
+                .unwrap_or_else(crate::RuntimeAttribution::none),
             self.parent_invocation.as_ref(),
             process_id,
             signal_name,
@@ -815,7 +815,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             self.parent_invocation
                 .as_ref()
                 .map(|parent| parent.attribution.clone())
-                .unwrap_or_else(|| crate::RuntimeAttribution::none()),
+                .unwrap_or_else(crate::RuntimeAttribution::none),
             self.parent_invocation.clone(),
             &effect_id,
         );
@@ -894,7 +894,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             self.parent_invocation
                 .as_ref()
                 .map(|parent| parent.attribution.clone())
-                .unwrap_or_else(|| crate::RuntimeAttribution::none()),
+                .unwrap_or_else(crate::RuntimeAttribution::none),
             self.parent_invocation.as_ref(),
             scope,
             sequence,

@@ -1531,9 +1531,11 @@ mod identity_trace_tests {
             Some(parent_address.graph_key().as_str())
         );
 
-        let mut explicit = lash_trace::TraceContext::default();
-        explicit.parent_graph_node_id = Some("host:explicit-parent".to_string());
-        explicit.run_id = Some("restate-host-run".to_string());
+        let explicit = lash_trace::TraceContext {
+            parent_graph_node_id: Some("host:explicit-parent".to_string()),
+            run_id: Some("restate-host-run".to_string()),
+            ..Default::default()
+        };
         let explicit = trace_context_for_invocation(&explicit, &invocation);
         assert_eq!(
             explicit.parent_graph_node_id.as_deref(),

@@ -633,13 +633,13 @@ mod tests {
         let process_work = Arc::new(crate::NativeProcessWork::for_registry(
             registry.clone() as Arc<dyn ProcessRegistry>
         ));
-        wake_delivery_crash_matrix(
+        Box::pin(wake_delivery_crash_matrix(
             factory,
             registry,
             clock,
             process_work,
             ProcessTerminalWaitWitness::Direct,
-        )
+        ))
         .await;
     }
 

@@ -437,14 +437,14 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         }
         Err(group_shape_error(format!(
             "child {position} of durable effect group {} names a command this \
-             host has no runner for{}, so the group is refused before anything \
+             host has no runner for (replay key {}), so the group is refused before anything \
              of it is journaled: a recorded group whose child can never settle \
              holds a rank no settlement can take, every rank above it is \
              unservable, and a group row left behind by this refusal would make \
              the next attempt a reopen that strands the caller instead of \
-             refusing again",
+            refusing again",
             group.group_key(),
-            format!(" (replay key {})", child.invocation.replay_key()),
+            child.invocation.replay_key(),
         )))
     }
 
@@ -719,8 +719,7 @@ fn replay_keys_of(group: &RuntimeEffectGroup) -> Result<Vec<String>, RuntimeEffe
     Ok(group
         .children()
         .iter()
-        .enumerate()
-        .map(|(_, child)| child.invocation.replay_key().to_string())
+        .map(|child| child.invocation.replay_key().to_string())
         .collect())
 }
 

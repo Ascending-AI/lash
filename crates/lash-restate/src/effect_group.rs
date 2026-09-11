@@ -144,8 +144,7 @@ impl EffectGroupShape {
         let replay_keys = group
             .children()
             .iter()
-            .enumerate()
-            .map(|(_, child)| child.invocation.replay_key().to_owned())
+            .map(|child| child.invocation.replay_key().to_owned())
             .collect();
         let wait_scope = ExecutionScope::runtime_operation(group.group_key());
         Ok(Self {

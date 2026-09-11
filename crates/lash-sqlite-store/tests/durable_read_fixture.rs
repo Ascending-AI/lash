@@ -59,7 +59,7 @@ async fn sqlite_durable_fixture_reads_with_identical_semantics() {
 async fn sqlite_durable_fixture_expectations_match_what_this_build_writes() {
     let temp = tempfile::tempdir().expect("SQLite write-shape tempdir");
     let handles = open_handles(temp.path(), fixture::FIXTURE_WRITE_MS).await;
-    let written_now = fixture::seed(&handles).await;
+    let written_now = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
     fixture::assert_committed_expectations_match_current_writes(
         &std::fs::read(fixture_dir().join("expected.json"))
@@ -153,7 +153,7 @@ async fn regenerate_sqlite_durable_fixture() {
     );
     let temp = tempfile::tempdir().expect("SQLite generator tempdir");
     let handles = open_handles(temp.path(), fixture::FIXTURE_WRITE_MS).await;
-    let expected = fixture::seed(&handles).await;
+    let expected = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
     checkpoint_files(temp.path());
 

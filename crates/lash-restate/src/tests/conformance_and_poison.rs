@@ -287,13 +287,13 @@ pub(super) async fn restate_wake_delivery_crash_matrix_conformance() {
             Arc::clone(&clock) as Arc<dyn lash_core::Clock>
         ),
     );
-    lash_conformance::wake_delivery_crash_matrix(
+    Box::pin(lash_conformance::wake_delivery_crash_matrix(
         factory,
         registry as Arc<dyn lash_core::ConformanceProcessRegistry>,
         clock,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
-    )
+    ))
     .await;
     wait_transport.assert_reattached_to(&ProcessId::from("wake-crash-terminal"));
 }

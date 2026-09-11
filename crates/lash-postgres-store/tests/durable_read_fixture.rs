@@ -74,7 +74,7 @@ async fn postgres_durable_fixture_expectations_match_what_this_build_writes_when
         .await
         .expect("reopen Postgres write-shape schema with fixed await-event secret");
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
-    let written_now = fixture::seed(&handles).await;
+    let written_now = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
     storage.pool().close().await;
     drop_fixture_schema(&database_url).await;
@@ -126,7 +126,7 @@ async fn regenerate_postgres_durable_fixture() {
         .await
         .expect("reopen Postgres fixture with fixed await-event secret");
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
-    let expected = fixture::seed(&handles).await;
+    let expected = Box::pin(fixture::seed(&handles)).await;
     normalize_server_authoritative_fixture_rows(&storage).await;
     drop(handles);
     storage.pool().close().await;

@@ -841,9 +841,10 @@ impl RuntimeExecutionContext<'_> {
         args: serde_json::Value,
         _index: usize,
     ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, None)
-            .await;
+        let executed = Box::pin(
+            self.execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, None),
+        )
+        .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }
@@ -1065,14 +1066,14 @@ impl RuntimeExecutionContext<'_> {
         parent_invocation: Option<crate::RuntimeInvocation>,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     ) -> CompletedProtocolToolCall {
-        self.execute_tool_call(
+        Box::pin(self.execute_tool_call(
             call_id,
             ToolCallAuthorization::Catalog(tool_id),
             args,
             replay,
             parent_invocation,
             child_execution_trace_hook,
-        )
+        ))
         .await
     }
 
@@ -1085,16 +1086,15 @@ impl RuntimeExecutionContext<'_> {
         args: serde_json::Value,
         _index: usize,
     ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call(
-                call_id,
-                ToolCallAuthorization::Granted(Box::new(grant)),
-                args,
-                None,
-                None,
-                None,
-            )
-            .await;
+        let executed = Box::pin(self.execute_tool_call(
+            call_id,
+            ToolCallAuthorization::Granted(Box::new(grant)),
+            args,
+            None,
+            None,
+            None,
+        ))
+        .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }
@@ -1109,16 +1109,15 @@ impl RuntimeExecutionContext<'_> {
         _index: usize,
         trace_hook: crate::ToolChildExecutionTraceHook,
     ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call(
-                call_id,
-                ToolCallAuthorization::Granted(Box::new(grant)),
-                args,
-                None,
-                None,
-                Some(trace_hook),
-            )
-            .await;
+        let executed = Box::pin(self.execute_tool_call(
+            call_id,
+            ToolCallAuthorization::Granted(Box::new(grant)),
+            args,
+            None,
+            None,
+            Some(trace_hook),
+        ))
+        .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }
