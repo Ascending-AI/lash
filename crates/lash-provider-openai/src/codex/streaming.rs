@@ -131,8 +131,8 @@ impl CodexProvider {
         credential: &CodexCredential,
         credential_generation: u64,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
-        let full_body = self
-            .build_request_body(&req, true)
+        let (full_body, cache_control_emitted) = self
+            .build_request_body_with_cache_evidence(&req, true)
             .map_err(CodexWebSocketAttemptError::before_send)?;
         let timeouts = self.options.llm_timeouts();
         // WebSocket connection policy is separate from the response-start
@@ -155,7 +155,15 @@ impl CodexProvider {
                 allow_cached_context && lease.reusable,
             );
             match self
-                .run_websocket_attempt(&req, &full_body, lease, &plan, retry_state, timeouts)
+                .run_websocket_attempt(
+                    &req,
+                    &full_body,
+                    cache_control_emitted,
+                    lease,
+                    &plan,
+                    retry_state,
+                    timeouts,
+                )
                 .await
             {
                 Ok(response) => return Ok(response),
@@ -196,6 +204,7 @@ impl CodexProvider {
         &self,
         req: &LlmRequest,
         full_body: &Value,
+        cache_control_emitted: bool,
         lease: CodexWebsocketLease,
         plan: &CodexWebsocketRequestPlan,
         retry_state: CodexWebsocketRetryState,
@@ -324,7 +333,10 @@ impl CodexProvider {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     request_body: Some(request_body.clone()),
                     http_summary: Some(self.websocket_http_summary(&diagnostics)),
-                    generation_disposition: Some(Self::generation_disposition(req, full_body)),
+                    generation_disposition: Some(Self::generation_disposition(
+                        req,
+                        cache_control_emitted,
+                    )),
                     ..Default::default()
                 }));
             }
@@ -344,7 +356,8 @@ impl CodexProvider {
                     self.websocket_http_summary(&diagnostics),
                 );
                 partial.terminal_reason = LlmTerminalReason::Unknown;
-                partial.generation_disposition = Some(Self::generation_disposition(req, full_body));
+                partial.generation_disposition =
+                    Some(Self::generation_disposition(req, cache_control_emitted));
                 return Err(CodexWebSocketAttemptError::during_stream(
                     error
                         .with_request_body(request_body.clone())
@@ -400,7 +413,8 @@ impl CodexProvider {
                 self.websocket_http_summary(&diagnostics),
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
-            partial.generation_disposition = Some(Self::generation_disposition(req, full_body));
+            partial.generation_disposition =
+                Some(Self::generation_disposition(req, cache_control_emitted));
             return Err(CodexWebSocketAttemptError::during_stream(
                 LlmTransportError::new("Codex WebSocket ended before response.completed")
                     .with_request_body(request_body)
@@ -425,7 +439,8 @@ impl CodexProvider {
             self.websocket_http_summary(&diagnostics),
         );
         response.http_summary = Some(self.websocket_http_summary(&diagnostics));
-        response.generation_disposition = Some(Self::generation_disposition(req, full_body));
+        response.generation_disposition =
+            Some(Self::generation_disposition(req, cache_control_emitted));
         attempt.finish(continuation);
         Ok(response)
     }
@@ -713,8 +728,10 @@ impl Provider for CodexProvider {
         let provider_trace = req.provider_trace.clone();
         let timeouts = self.options.llm_timeouts();
 
-        let body = self.build_request_body(&req, stream_events.is_some())?;
-        let generation_disposition = Some(Self::generation_disposition(&req, &body));
+        let (body, cache_control_emitted) =
+            self.build_request_body_with_cache_evidence(&req, stream_events.is_some())?;
+        let generation_disposition =
+            Some(Self::generation_disposition(&req, cache_control_emitted));
 
         let request_body = serde_json::to_string(&body).ok();
         let body_bytes = serde_json::to_vec(&body).map_err(|e| {

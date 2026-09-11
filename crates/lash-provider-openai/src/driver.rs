@@ -110,12 +110,19 @@ fn build_request_body(
     endpoint: CompletionEndpoint,
     stream: bool,
     origin_route: &ProviderRouteIdentity,
-) -> Result<Value, LlmTransportError> {
-    let mut body = match endpoint {
-        CompletionEndpoint::Responses => {
-            provider.build_responses_request_body_for_route(req, stream, origin_route)?
+) -> Result<(Value, bool), LlmTransportError> {
+    let (mut body, cache_control_emitted) = match endpoint {
+        CompletionEndpoint::Responses => provider
+            .build_responses_request_body_for_route_with_cache_evidence(
+                req,
+                stream,
+                origin_route,
+            )?,
+        CompletionEndpoint::ChatCompletions => {
+            let (body, diagnostics) =
+                provider.build_chat_request_body_with_diagnostics(req, stream)?;
+            (body, diagnostics.cache_control_emitted)
         }
-        CompletionEndpoint::ChatCompletions => provider.build_chat_request_body(req, stream)?,
     };
     if provider.resolved_compat(endpoint).cache_session_affinity {
         body["session_id"] = Value::String(
@@ -126,7 +133,7 @@ fn build_request_body(
                 .collect(),
         );
     }
-    Ok(body)
+    Ok((body, cache_control_emitted))
 }
 
 fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
@@ -143,7 +150,7 @@ pub(crate) fn responses_request_fingerprint(
         &provider.base_url,
         req.model.clone(),
     );
-    let body = build_request_body(
+    let (body, _) = build_request_body(
         provider,
         req,
         endpoint,
@@ -274,8 +281,9 @@ pub(crate) async fn complete(
             // Sanitize the owned request before the builders borrow it, avoiding
             // replay_safe_for cloning the resolved-stored byte cache.
             req.drop_foreign_replay(&build_route);
-            let body = build_request_body(&builder, &req, endpoint, stream, &build_route)?;
-            let disposition = Some(generation_disposition(&req, &body));
+            let (body, cache_control_emitted) =
+                build_request_body(&builder, &req, endpoint, stream, &build_route)?;
+            let disposition = Some(generation_disposition(&req, &body, cache_control_emitted));
             let bytes = serialize_body(&body).map_err(|e| {
                 LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error()))
             })?;

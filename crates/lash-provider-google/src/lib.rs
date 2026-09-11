@@ -1285,6 +1285,26 @@ mod tests {
                 cache_breakpoint: true,
             }],
         )];
+        req.tools = Arc::new(vec![LlmToolSpec {
+            name: "cache-shaped-input".to_string(),
+            description: "Host tool with a provider-looking property".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "cachedContent": { "type": "string" } }
+            })
+            .into(),
+            output_schema: json!({}).into(),
+        }]);
+
+        let provider = GoogleOAuthProvider::for_test();
+        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
+        let body = GoogleOAuthProvider::build_request(&provider, &req, contents, None)
+            .expect("schema projection");
+        assert!(
+            body["request"]["tools"][0]["functionDeclarations"][0]
+                ["parametersJsonSchema"]["properties"]["cachedContent"]
+                .is_object()
+        );
 
         let disposition = GoogleOAuthProvider::generation_disposition(&req);
         assert_eq!(

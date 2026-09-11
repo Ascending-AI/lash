@@ -1019,27 +1019,6 @@ fn gemini_cache_dialect_emits_one_ephemeral_explicit_breakpoint() {
 }
 
 #[test]
-fn gemini_cache_dialect_falls_back_to_last_message_text() {
-    let mut req = request_with_instructions(
-        "stable system prompt",
-        vec![LlmMessage::text(LlmRole::User, "last stable text")],
-    );
-    req.model = "custom/model-v1".to_string();
-    enable_cache_control(&mut req, CacheControlDialect::Gemini);
-
-    let body = openrouter_provider()
-        .build_chat_request_body(&req, true)
-        .unwrap();
-
-    assert_eq!(count_object_key(&body, "cache_control"), 1);
-    assert_eq!(
-        body["messages"][1]["content"][0]["cache_control"],
-        json!({ "type": "ephemeral" })
-    );
-    assert!(body["messages"][0]["content"].is_array());
-}
-
-#[test]
 fn absent_cache_dialect_strips_breakpoint_even_on_the_openrouter_url() {
     let mut req = request(vec![LlmMessage::new(
         LlmRole::User,
@@ -2473,16 +2452,20 @@ fn generation_disposition_reports_what_each_dialect_carried() {
     req.generation.seed = Some(7);
 
     // Chat Completions carries both sampling controls.
-    let chat = provider.build_chat_request_body(&req, false).unwrap();
-    let chat = generation_disposition(&req, &chat);
+    let (chat, chat_diagnostics) = provider
+        .build_chat_request_body_with_diagnostics(&req, false)
+        .unwrap();
+    let chat = generation_disposition(&req, &chat, chat_diagnostics.cache_control_emitted);
     assert_eq!((chat.temperature, chat.seed), (Applied, Applied));
     assert_eq!(chat.cache, Applied);
     assert!(chat.nothing_omitted());
 
     // Responses has no seed field, so a repeatability request is dropped —
     // silently on the wire, but not in the report.
-    let responses = provider.build_responses_request_body(&req, false).unwrap();
-    let responses = generation_disposition(&req, &responses);
+    let (responses, responses_cache_emitted) = provider
+        .build_responses_request_body_with_cache_evidence(&req, false)
+        .unwrap();
+    let responses = generation_disposition(&req, &responses, responses_cache_emitted);
     assert_eq!(
         (responses.temperature, responses.seed),
         (Applied, OmittedUnsupported)
@@ -2490,12 +2473,17 @@ fn generation_disposition_reports_what_each_dialect_carried() {
     assert!(!responses.nothing_omitted());
 
     let direct = OpenAiProvider::new("key");
-    let direct_body = direct.build_responses_request_body(&req, false).unwrap();
+    let (direct_body, direct_cache_emitted) = direct
+        .build_responses_request_body_with_cache_evidence(&req, false)
+        .unwrap();
     assert_eq!(
-        generation_disposition(&req, &direct_body).cache,
+        generation_disposition(&req, &direct_body, direct_cache_emitted).cache,
         Applied,
         "OpenAI Responses carries prompt-cache intent via prompt_cache_key"
     );
 }
+
+#[path = "tests/cache_emission_tests.rs"]
+mod cache_emission_tests;
 
 mod epilogue;
