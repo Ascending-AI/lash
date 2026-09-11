@@ -1172,6 +1172,17 @@ fi
   || fail "partial startup cleanup did not preserve independent finalization authority"
 grep -Fq 'start_finalization_phase=retired' "$lease_public_retry_finalization" \
   || fail "partial startup cleanup did not retain its incomplete data phase"
+if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down \
+  > "$test_tmp/lease-public-retry-untargeted.log" 2>&1; then
+  fail "untargeted down overlooked nondefault startup finalization authority"
+fi
+[[ -f "$test_tmp/data-lease-public-retry/sentinel" \
+  && -f "$lease_public_retry_finalization" ]] \
+  || fail "untargeted down finalized nondefault startup data without an exact target"
+grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
+  "$test_tmp/lease-public-retry-untargeted.log" \
+  || fail "untargeted down did not report the nondefault receipt's exact target"
 lease_public_retry_builds_before="$(<"$mock_state/build-count")"
 if launcher_env "$test_tmp/data-lease-public-retry" 3091 \
   AGENT_WORKBENCH_RUN_DIR="$test_tmp/lease-public-retry-borrower-run" \
@@ -1191,8 +1202,8 @@ if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
 fi
 [[ ! -e "$test_tmp/data-lease-public-retry" \
   && -f "$lease_public_retry_finalization" ]] \
-  || fail "pre-unlink failure did not retain data-removed startup authority"
-grep -Fq 'start_finalization_phase=data-removed' "$lease_public_retry_finalization" \
+  || fail "pre-unlink failure did not retain data-finalized startup authority"
+grep -Fq 'start_finalization_phase=data-finalized' "$lease_public_retry_finalization" \
   || fail "pre-unlink failure lost completed startup data progress"
 grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
   "$test_tmp/lease-public-retry-final-clear.log" \
@@ -1210,6 +1221,48 @@ run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port
   > "$test_tmp/lease-public-retry-fresh-up.log" 2>&1
 run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" down \
   > "$test_tmp/lease-public-retry-fresh-down.log" 2>&1
+
+default_finalization_port=3030
+default_finalization_data="$test_tmp/data-default-start-finalization"
+default_finalization_key="127.0.0.1_${default_finalization_port}"
+default_finalization_admin=19070
+default_finalization_admin_hash="$(printf '%s' "loopback:$default_finalization_admin" | sha256sum | awk '{print $1}')"
+default_finalization_stable="$launcher_runtime_root/$lock_hash-$default_finalization_key-start-finalizing"
+rm -f "$mock_state/record-create-failed"
+if launcher_env "$default_finalization_data" "$default_finalization_port" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$default_finalization_admin_hash.lease" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$default_finalization_port" \
+  > "$test_tmp/default-start-finalization-first.log" 2>&1; then
+  fail "default startup cleanup fault unexpectedly succeeded"
+fi
+printf 'default retained data\n' > "$default_finalization_data/sentinel"
+if launcher_env "$default_finalization_data" "$default_finalization_port" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $AGENT_WORKBENCH_DATA_DIR" ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$default_finalization_port" \
+  > "$test_tmp/default-start-finalization-partial.log" 2>&1; then
+  fail "default targeted cleanup ignored a pre-side-effect data removal fault"
+fi
+[[ -f "$default_finalization_stable" \
+  && -f "$default_finalization_data/sentinel" \
+  && -f "$default_finalization_data/run/.agent-workbench-dev-run-owner-$default_finalization_key" \
+  && -f "$default_finalization_data/run/restate-$default_finalization_key.service-retired" ]] \
+  || fail "default partial cleanup did not retain stable and local authority"
+if launcher_env "$default_finalization_data" "$default_finalization_port" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down \
+  > "$test_tmp/default-start-finalization-untargeted.log" 2>&1; then
+  fail "untargeted down finalized the default receipt without an explicit target"
+fi
+[[ -f "$default_finalization_stable" \
+  && -f "$default_finalization_data/sentinel" \
+  && -f "$default_finalization_data/run/.agent-workbench-dev-run-owner-$default_finalization_key" \
+  && -f "$default_finalization_data/run/restate-$default_finalization_key.service-retired" ]] \
+  || fail "untargeted default down mutated retained startup authority or data"
+launcher_env "$default_finalization_data" "$default_finalization_port" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$default_finalization_port" \
+  > "$test_tmp/default-start-finalization-second.log" 2>&1
+[[ ! -e "$default_finalization_data" && ! -e "$default_finalization_stable" ]] \
+  || fail "exact default target did not complete retained startup cleanup"
 
 external_start_finalization_port=3168
 external_start_finalization_data="$test_tmp/data-external-start-finalization"
@@ -1281,6 +1334,82 @@ launcher_env "$external_start_finalization_data" "$external_start_finalization_p
   && ! -e "$external_start_finalization_receipt" \
   && ! -e "$external_start_finalization_run/restate-$external_start_finalization_key.service-retired" ]] \
   || fail "fault-free exact external-run down did not finish startup finalization"
+
+existing_data_port=3170
+existing_data_dir="$test_tmp/data-existing-start-finalization"
+existing_data_run="$test_tmp/run-existing-start-finalization"
+existing_data_key="127.0.0.1_${existing_data_port}"
+existing_data_admin=$((19070 + (existing_data_port - 3030) * 10))
+existing_data_ingress=$((8080 + (existing_data_port - 3030) * 10))
+existing_data_admin_hash="$(printf '%s' "loopback:$existing_data_admin" | sha256sum | awk '{print $1}')"
+existing_data_ingress_hash="$(printf '%s' "loopback:$existing_data_ingress" | sha256sum | awk '{print $1}')"
+existing_data_lease="$launcher_runtime_root/restate-ingress-$existing_data_ingress_hash.lease"
+existing_data_stable="$launcher_runtime_root/$lock_hash-$existing_data_key-start-finalizing"
+existing_data_owner="$existing_data_run/.agent-workbench-dev-run-owner-$existing_data_key"
+existing_data_service="$existing_data_run/restate-$existing_data_key.service-retired"
+mkdir -p "$existing_data_dir"
+printf 'preexisting bytes\n' > "$existing_data_dir/sentinel"
+existing_data_sentinel_hash="$(sha256sum "$existing_data_dir/sentinel" | awk '{print $1}')"
+rm -f "$mock_state/record-create-failed"
+if launcher_env "$existing_data_dir" "$existing_data_port" \
+  AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
+  MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
+  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$existing_data_admin_hash.lease" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$existing_data_port" \
+  > "$test_tmp/existing-data-first.log" 2>&1; then
+  fail "preexisting-data startup cleanup fault unexpectedly succeeded"
+fi
+[[ -f "$existing_data_lease" && -f "$existing_data_owner" \
+  && -f "$existing_data_service" && -f "$existing_data_dir/sentinel" \
+  && ! -e "$existing_data_dir/.agent-workbench-dev-attempt-owner" ]] \
+  || fail "preexisting-data startup did not retain exact non-destructive recovery proof"
+if launcher_env "$existing_data_dir" "$existing_data_port" \
+  AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
+  MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
+  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
+  MOCK_EXISTING_OWNER="$existing_data_owner" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_EXISTING_OWNER" ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
+  > "$test_tmp/existing-data-owner-retry.log" 2>&1; then
+  fail "preexisting-data cleanup ignored a pre-side-effect run-record fault"
+fi
+[[ -f "$existing_data_stable" && -f "$existing_data_owner" \
+  && -f "$existing_data_service" && -f "$existing_data_dir/sentinel" \
+  && "$(sha256sum "$existing_data_dir/sentinel" | awk '{print $1}')" \
+    = "$existing_data_sentinel_hash" ]] \
+  || fail "run-record fault changed preexisting data or lost retry authority"
+grep -Fq 'start_finalization_data_action=preserve' "$existing_data_stable" \
+  || fail "preexisting-data cleanup did not persist its non-destructive disposition"
+grep -Fq 'start_finalization_phase=data-finalized' "$existing_data_stable" \
+  || fail "preexisting-data cleanup did not persist completed data disposition"
+if launcher_env "$existing_data_dir" "$existing_data_port" \
+  AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
+  MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
+  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
+  MOCK_EXISTING_SERVICE="$existing_data_service" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_EXISTING_SERVICE" ]]; then command rm "$@"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
+  > "$test_tmp/existing-data-service-retry.log" 2>&1; then
+  fail "preexisting-data cleanup ignored a post-side-effect service-record fault"
+fi
+[[ -f "$existing_data_stable" && ! -e "$existing_data_owner" \
+  && ! -e "$existing_data_service" && -f "$existing_data_dir/sentinel" \
+  && "$(sha256sum "$existing_data_dir/sentinel" | awk '{print $1}')" \
+    = "$existing_data_sentinel_hash" ]] \
+  || fail "service-record retry changed preexisting data or lost final authority"
+launcher_env "$existing_data_dir" "$existing_data_port" \
+  AGENT_WORKBENCH_RUN_DIR="$existing_data_run" \
+  MOCK_PID_FILE="$existing_data_run/workbench-$existing_data_key.pid" \
+  MOCK_RESTATE_MARKER="$existing_data_run/restate-$existing_data_key.container" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$existing_data_port" \
+  > "$test_tmp/existing-data-final.log" 2>&1
+[[ ! -e "$existing_data_stable" && ! -e "$existing_data_owner" \
+  && ! -e "$existing_data_service" && -f "$existing_data_dir/sentinel" \
+  && "$(sha256sum "$existing_data_dir/sentinel" | awk '{print $1}')" \
+    = "$existing_data_sentinel_hash" ]] \
+  || fail "exact retry did not clear records while preserving preexisting data"
 
 postgres_lease_retry_port=3092
 postgres_lease_retry_service=$((55432 + (postgres_lease_retry_port - 3030) * 10))
