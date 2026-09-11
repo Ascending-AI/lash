@@ -11,8 +11,8 @@ use crate::{ErrorEnvelope, TurnOutcome};
 
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -791,7 +791,7 @@ impl ActiveTurnControl {
     /// the turn stop there.
     pub async fn observe_pending_cancel(
         &self,
-        controller: &dyn RuntimeEffectController,
+        controller: &ScopedEffectController<'_>,
         identity: TurnCancelPeekIdentity,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         let Some(gate) = self
@@ -855,16 +855,15 @@ impl ActiveTurnControl {
 
     async fn peek(
         &self,
-        controller: &dyn RuntimeEffectController,
+        controller: &ScopedEffectController<'_>,
         causal_identity: String,
         key: &AwaitEventKey,
     ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
+        // TurnAddress continues to route the cancellation promise in `key`;
+        // the journaled observation belongs to the controller's admitted scope.
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
-                crate::ExecutionScope::turn(
-                    self.address.session_id.clone(),
-                    self.address.turn_id.clone(),
-                ),
+                controller.execution_scope().clone(),
                 causal_identity.clone(),
             )?,
             RuntimeAttribution {

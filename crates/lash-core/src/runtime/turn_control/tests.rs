@@ -89,6 +89,43 @@ fn bound_driver(host: Arc<NativeEffectHost>, address: &TurnAddress) -> TurnWorkD
     )
 }
 
+fn scoped_turn_controller<'a>(
+    host: &'a NativeEffectHost,
+    address: &TurnAddress,
+) -> ScopedEffectController<'a> {
+    host.scoped(address.execution_scope())
+        .expect("scope turn controller")
+}
+
+#[tokio::test]
+async fn process_scoped_turn_control_peek_uses_admitted_effect_scope() {
+    let host = NativeEffectHost::default();
+    let address = TurnAddress::new(
+        "session:subagent:scope-probe",
+        "process:subagent:scope-probe",
+    );
+    let active = ActiveTurnControl::new(&host, address.clone())
+        .await
+        .expect("active process-backed turn control");
+    let process_scope = ExecutionScope::process("process:subagent:scope-probe");
+    let scoped = host
+        .scoped(process_scope.clone())
+        .expect("scope process controller");
+
+    assert_eq!(
+        active
+            .observe_pending_cancel(&scoped, TurnCancelPeekIdentity::StartGate)
+            .await
+            .expect("peek process-backed turn cancellation"),
+        None
+    );
+    assert_eq!(scoped.execution_scope(), &process_scope);
+    assert_eq!(
+        address.execution_scope(),
+        ExecutionScope::turn(&address.session_id, &address.turn_id)
+    );
+}
+
 struct TurnAttachProbe {
     calls: AtomicUsize,
 }
@@ -351,7 +388,7 @@ async fn recovered_owner_observes_pending_cancel_after_control_recreation() {
         .await
         .expect("recreate active control under the recovered owner");
     let observed = recovered
-        .observe_pending_cancel(scoped.controller(), TurnCancelPeekIdentity::StartGate)
+        .observe_pending_cancel(&scoped, TurnCancelPeekIdentity::StartGate)
         .await
         .expect("read recovered turn start gate")
         .expect("pending cancellation is visible before recovered effects");
@@ -709,6 +746,7 @@ async fn after_step_request_is_deferred_until_immediate_escalates_it() {
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");
+    let scoped = scoped_turn_controller(host.as_ref(), &address);
 
     let stop = driver
         .request_cancel(request(address.clone(), "stop-1").mode(TurnCancelMode::AfterStep))
@@ -724,7 +762,7 @@ async fn after_step_request_is_deferred_until_immediate_escalates_it() {
     // request is remembered as deferred, never as effective evidence.
     let observed = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped,
             TurnCancelPeekIdentity::AfterLlm {
                 protocol_iteration: 0,
             },
@@ -766,7 +804,7 @@ async fn after_step_request_is_deferred_until_immediate_escalates_it() {
 
     let observed = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped,
             TurnCancelPeekIdentity::AfterLlm {
                 protocol_iteration: 1,
             },
@@ -791,6 +829,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration(
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");
+    let scoped = scoped_turn_controller(host.as_ref(), &address);
     driver
         .request_cancel(request(address.clone(), "stop-1").mode(TurnCancelMode::AfterStep))
         .await
@@ -798,7 +837,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration(
     assert_eq!(
         active
             .observe_pending_cancel(
-                host.as_ref(),
+                &scoped,
                 TurnCancelPeekIdentity::AfterLlm {
                     protocol_iteration: 2,
                 },
@@ -809,7 +848,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration(
     );
     let honoured = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped,
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 2,
             },
@@ -845,6 +884,7 @@ async fn local_after_step_stop_resolves_the_own_gate_and_lands_at_commit() {
         .await
         .expect("active control")
         .with_local_cancel_origin(hint.clone());
+    let scoped = scoped_turn_controller(host.as_ref(), &address);
     hint.request_after_step(Some("shutdown".to_string()));
     assert!(hint.after_step_requested());
     active
@@ -853,7 +893,7 @@ async fn local_after_step_stop_resolves_the_own_gate_and_lands_at_commit() {
         .expect("resolve own gate");
     let honoured = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped,
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 0,
             },

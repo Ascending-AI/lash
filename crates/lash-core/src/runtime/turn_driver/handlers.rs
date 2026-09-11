@@ -187,7 +187,7 @@ impl RuntimeTurnDriver<'_> {
             let pending_cancel = self
                 .turn_control
                 .observe_pending_cancel(
-                    self.scoped_effect_controller.controller(),
+                    &self.scoped_effect_controller,
                     crate::runtime::turn_control::TurnCancelPeekIdentity::AfterLlm {
                         protocol_iteration: machine.protocol_iteration(),
                     },
@@ -317,13 +317,11 @@ impl RuntimeTurnDriver<'_> {
         let binding = effect_host
             .turn_control_binding(&self.scoped_effect_controller)
             .await?;
-        let (resolver, peek_controller): (&dyn AwaitEventResolver, &dyn RuntimeEffectController) =
+        let (resolver, peek_controller): (&dyn AwaitEventResolver, &ScopedEffectController<'_>) =
             match &binding {
-                crate::TurnControlBinding::HostOwned { resolver, peek } => {
-                    (*resolver, peek.controller())
-                }
+                crate::TurnControlBinding::HostOwned { resolver, peek } => (*resolver, peek),
                 crate::TurnControlBinding::RunScoped { resolver, .. } => {
-                    (*resolver, self.scoped_effect_controller.controller())
+                    (*resolver, &self.scoped_effect_controller)
                 }
             };
         // A process-local after-step stop lands on the durable gate before

@@ -80,8 +80,15 @@ impl LashRuntime {
             .trace_turn_id
             .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()))
             .clone();
-        let scoped_effect_controller =
-            scoped_effect_controller.rescope(self.state.turn_scope(&turn_id))?;
+        // A process-backed child turn executes as part of the process that
+        // admitted it, even though it also has session/turn routing and trace
+        // identity. Preserve that Process authority through the turn. Other
+        // turn entry points continue to acquire the runtime's canonical Turn
+        // scope exactly as before.
+        let scoped_effect_controller = match scoped_effect_controller.execution_scope() {
+            ExecutionScope::Process { .. } => scoped_effect_controller,
+            _ => scoped_effect_controller.rescope(self.state.turn_scope(&turn_id))?,
+        };
         // The stable execution-scope turn id is attached to every write-ahead
         // intent before ingress, tools, plugins, or envelope normalization can
         // put bytes. Replays bind the same id; no live pending-id state is used.
@@ -235,12 +242,12 @@ impl LashRuntime {
         // turn runs, which puts it inside a durable engine's replay window, and
         // a replayed handler must re-derive this admission rather than mint a
         // second one (ADR 0069 §6).
-        let accepted = opts
-            .scoped_effect_controller()
-            .controller()
+        let scoped_effect_controller = opts.scoped_effect_controller();
+        let accepted = scoped_effect_controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     super::causal::turn_acceptance_effect_invocation(
+                        scoped_effect_controller.execution_scope(),
                         &self.state.session_id,
                         &trace_turn_id,
                         // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.

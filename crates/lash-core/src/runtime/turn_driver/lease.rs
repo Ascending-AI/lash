@@ -9,6 +9,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         effect_kind: RuntimeEffectKind,
     ) -> Result<RuntimeEffectInvocation, RuntimeEffectControllerError> {
         Ok(crate::runtime::causal::turn_effect_invocation(
+            self.scoped_effect_controller.execution_scope(),
             &self.session_id,
             &self.turn_id,
             self.turn_index,

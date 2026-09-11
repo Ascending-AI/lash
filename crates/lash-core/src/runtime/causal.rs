@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub(crate) fn turn_effect_invocation(
+    execution_scope: &ExecutionScope,
     session_id: &SessionId,
     turn_id: &TurnId,
     turn_index: usize,
@@ -15,6 +16,8 @@ pub(crate) fn turn_effect_invocation(
     effect_id: EffectId,
     effect_kind: RuntimeEffectKind,
 ) -> RuntimeEffectInvocation {
+    // Session and turn describe the work for traces and replay-key stability;
+    // the scoped controller is the authority that owns the effect address.
     let replay_key = turn_effect_replay_key(
         session_id,
         turn_id,
@@ -24,8 +27,8 @@ pub(crate) fn turn_effect_invocation(
         effect_id,
     );
     RuntimeEffectInvocation::new(
-        EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
-            .expect("turn effect identity is admitted from validated session and turn ids"),
+        EffectAddress::new(execution_scope.clone(), replay_key)
+            .expect("turn effect uses the already admitted controller scope"),
         RuntimeAttribution::for_turn(session_id, turn_id, turn_index, protocol_iteration),
         effect_id.0.to_string(),
     )
@@ -39,17 +42,20 @@ pub(crate) fn turn_effect_invocation(
 /// engine reconstructs identically — so a redriven handler journals the same
 /// entry and re-derives the admission instead of admitting a second turn.
 pub(crate) fn turn_acceptance_effect_invocation(
+    execution_scope: &ExecutionScope,
     session_id: &SessionId,
     turn_id: &TurnId,
     turn_index: usize,
 ) -> RuntimeEffectInvocation {
+    // A process-backed turn still has truthful session/turn attribution, but
+    // its acceptance journal entry belongs to the admitted process scope.
     let replay_key = format!(
         "{session_id}:{turn_id}:{}",
         RuntimeEffectKind::AcceptTurnInput.as_str()
     );
     RuntimeEffectInvocation::new(
-        EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
-            .expect("turn acceptance identity is admitted from validated session and turn ids"),
+        EffectAddress::new(execution_scope.clone(), replay_key)
+            .expect("turn acceptance uses the already admitted controller scope"),
         RuntimeAttribution::for_turn(session_id, turn_id, turn_index, 0),
         format!("{turn_id}.accept"),
     )
@@ -528,6 +534,68 @@ pub(super) fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turn_invocations_use_admitted_scope_without_losing_turn_attribution() {
+        let session_id = SessionId::from("session:subagent:call");
+        let turn_id = TurnId::from("process:subagent:call");
+        let process_scope = ExecutionScope::process("process:subagent:call");
+
+        let effect = turn_effect_invocation(
+            &process_scope,
+            &session_id,
+            &turn_id,
+            3,
+            5,
+            EffectId(7),
+            RuntimeEffectKind::LlmCall,
+        );
+        assert_eq!(effect.execution_scope(), &process_scope);
+        assert_eq!(effect.attribution.session_id.as_ref(), Some(&session_id));
+        assert_eq!(effect.attribution.turn_id.as_ref(), Some(&turn_id));
+        assert_eq!(effect.attribution.turn_index, Some(3));
+        assert_eq!(effect.attribution.protocol_iteration, Some(5));
+        assert_eq!(
+            effect.replay_key(),
+            "session:subagent:call:process:subagent:call:3:5:llm_call:7"
+        );
+
+        let acceptance =
+            turn_acceptance_effect_invocation(&process_scope, &session_id, &turn_id, 3);
+        assert_eq!(acceptance.execution_scope(), &process_scope);
+        assert_eq!(
+            acceptance.attribution.session_id.as_ref(),
+            Some(&session_id)
+        );
+        assert_eq!(acceptance.attribution.turn_id.as_ref(), Some(&turn_id));
+        assert_eq!(acceptance.attribution.turn_index, Some(3));
+        assert_eq!(acceptance.attribution.protocol_iteration, Some(0));
+        assert_eq!(
+            acceptance.replay_key(),
+            "session:subagent:call:process:subagent:call:accept_turn_input"
+        );
+    }
+
+    #[test]
+    fn turn_invocations_retain_genuine_turn_scope() {
+        let session_id = SessionId::from("session");
+        let turn_id = TurnId::from("turn");
+        let turn_scope = ExecutionScope::turn(&session_id, &turn_id);
+
+        let effect = turn_effect_invocation(
+            &turn_scope,
+            &session_id,
+            &turn_id,
+            1,
+            2,
+            EffectId(4),
+            RuntimeEffectKind::Checkpoint,
+        );
+        let acceptance = turn_acceptance_effect_invocation(&turn_scope, &session_id, &turn_id, 1);
+
+        assert_eq!(effect.execution_scope(), &turn_scope);
+        assert_eq!(acceptance.execution_scope(), &turn_scope);
+    }
 
     #[test]
     fn direct_effect_identity_golden_corpus() {

@@ -201,6 +201,14 @@ impl LashRuntime {
             let turn_trace_turn_id = agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
             let turn_effect_controller = if turns.is_empty() {
                 scoped_effect_controller.clone()
+            } else if matches!(
+                scoped_effect_controller.execution_scope(),
+                ExecutionScope::Process { .. }
+            ) {
+                // Agent-frame switches create new physical turn identities,
+                // but a process-backed logical turn remains admitted under
+                // its owning Process for the complete run.
+                scoped_effect_controller.clone()
             } else {
                 match ScopedEffectController::borrowed(
                     scoped_effect_controller.controller(),
@@ -474,10 +482,18 @@ impl LashRuntime {
             if turns.len() >= MAX_AGENT_FRAME_SWITCHES {
                 let terminal_trace_turn_id =
                     agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
-                let terminal_effect_controller = match ScopedEffectController::borrowed(
-                    scoped_effect_controller.controller(),
-                    self.state.turn_scope(&terminal_trace_turn_id),
+                let terminal_effect_controller = if matches!(
+                    scoped_effect_controller.execution_scope(),
+                    ExecutionScope::Process { .. }
                 ) {
+                    Ok(scoped_effect_controller.clone())
+                } else {
+                    ScopedEffectController::borrowed(
+                        scoped_effect_controller.controller(),
+                        self.state.turn_scope(&terminal_trace_turn_id),
+                    )
+                };
+                let terminal_effect_controller = match terminal_effect_controller {
                     Ok(controller) => controller,
                     Err(err) => {
                         self.record_follow_on_failure(&mut turns, err);

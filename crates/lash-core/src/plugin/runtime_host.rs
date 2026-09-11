@@ -197,16 +197,11 @@ impl<'run> SessionTurnRequest<'run> {
     pub fn new(
         session_id: impl Into<SessionId>,
         turn_id: impl Into<TurnId>,
-        mut input: TurnInput,
+        input: TurnInput,
         scoped_effect_controller: crate::ScopedEffectController<'run>,
     ) -> Result<Self, PluginError> {
         let session_id = session_id.into();
         let turn_id = turn_id.into();
-        if turn_id.trim().is_empty() {
-            return Err(PluginError::Session(
-                "session turns require a non-empty stable turn id".to_string(),
-            ));
-        }
         if scoped_effect_controller.turn_id() != Some(&turn_id) {
             return Err(PluginError::Session(format!(
                 "session turn `{turn_id}` requires an effect turn scope with the same id"
@@ -216,6 +211,38 @@ impl<'run> SessionTurnRequest<'run> {
             return Err(PluginError::Session(format!(
                 "session turn `{turn_id}` requires an execution scope for session `{session_id}`"
             )));
+        }
+        Self::from_validated_scope(session_id, turn_id, input, scoped_effect_controller)
+    }
+
+    pub(crate) fn new_process_backed(
+        session_id: impl Into<SessionId>,
+        turn_id: impl Into<TurnId>,
+        input: TurnInput,
+        process_id: &crate::ProcessId,
+        scoped_effect_controller: crate::ScopedEffectController<'run>,
+    ) -> Result<Self, PluginError> {
+        let session_id = session_id.into();
+        let turn_id = turn_id.into();
+        let required_scope = crate::ExecutionScope::process(process_id);
+        if scoped_effect_controller.execution_scope() != &required_scope {
+            return Err(PluginError::Session(format!(
+                "process-backed session turn `{turn_id}` requires execution scope {required_scope:?}"
+            )));
+        }
+        Self::from_validated_scope(session_id, turn_id, input, scoped_effect_controller)
+    }
+
+    fn from_validated_scope(
+        session_id: SessionId,
+        turn_id: TurnId,
+        mut input: TurnInput,
+        scoped_effect_controller: crate::ScopedEffectController<'run>,
+    ) -> Result<Self, PluginError> {
+        if turn_id.trim().is_empty() {
+            return Err(PluginError::Session(
+                "session turns require a non-empty stable turn id".to_string(),
+            ));
         }
         if let Some(input_turn_id) = input.trace_turn_id.as_deref()
             && input_turn_id != turn_id

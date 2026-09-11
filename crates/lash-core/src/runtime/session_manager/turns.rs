@@ -485,16 +485,17 @@ async fn run_managed_session_turn(
     // the complete turn and publish from the guarded post-turn state before
     // releasing it, exactly as the former native path did.
     let mut runtime_guard = runtime.runtime.lock().await;
-    let scoped_effect_controller = scoped_effect_controller
-        .rescope(
-            runtime_guard.state.turn_scope(
-                scoped_effect_controller
-                    .turn_id()
-                    .cloned()
-                    .unwrap_or_else(|| TurnId::from(scoped_effect_controller.scope_id())),
-            ),
-        )
-        .map_err(crate::PluginError::Runtime)?;
+    let scoped_effect_controller = match scoped_effect_controller.execution_scope() {
+        crate::ExecutionScope::Turn { turn_id, .. } => scoped_effect_controller
+            .rescope(runtime_guard.state.turn_scope(turn_id.clone()))
+            .map_err(crate::PluginError::Runtime)?,
+        crate::ExecutionScope::Process { .. } => scoped_effect_controller,
+        scope => {
+            return Err(crate::PluginError::Session(format!(
+                "managed session turns require a turn or process execution scope, got {scope:?}"
+            )));
+        }
+    };
     let result = runtime_guard
         .stream_turn_with_agent_frames(
             input,
@@ -1034,5 +1035,31 @@ mod tests {
         };
 
         assert!(err.to_string().contains("same id"));
+    }
+
+    #[test]
+    fn process_backed_session_turn_request_preserves_admitted_scope_and_trace_identity() {
+        let controller = crate::NativeRuntimeEffectController::default();
+        let process_scope = crate::ExecutionScope::process("process:subagent:call");
+        let scoped_effect_controller =
+            crate::ScopedEffectController::borrowed(&controller, process_scope.clone())
+                .expect("process scope");
+        let request = crate::SessionTurnRequest::new_process_backed(
+            "session:subagent:call",
+            "process:subagent:call",
+            crate::TurnInput::text("run child"),
+            &crate::ProcessId::from("process:subagent:call"),
+            scoped_effect_controller,
+        )
+        .expect("valid process-backed child turn request");
+
+        assert_eq!(request.session_id(), "session:subagent:call");
+        assert_eq!(request.turn_id(), "process:subagent:call");
+        assert_eq!(
+            request.input().trace_turn_id.as_deref(),
+            Some("process:subagent:call")
+        );
+        let (_, scoped_effect_controller) = request.into_parts();
+        assert_eq!(scoped_effect_controller.execution_scope(), &process_scope);
     }
 }

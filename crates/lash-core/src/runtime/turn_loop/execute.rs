@@ -78,7 +78,7 @@ struct TurnEffectLoopContext<'loop_run, 'run> {
     clock: Arc<dyn Clock>,
     turn_control: Arc<ActiveTurnControl>,
     turn_control_host: Arc<dyn EffectHost>,
-    cancel_controller: &'loop_run dyn RuntimeEffectController,
+    cancel_controller: &'loop_run ScopedEffectController<'run>,
     event_rx: &'loop_run mut mpsc::Receiver<RuntimeStreamEvent>,
     assembler: &'loop_run mut TurnAssembler,
     child_usage_event_relay: &'loop_run ChildUsageEventRelay,
@@ -694,16 +694,11 @@ impl LashRuntime {
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
         let (turn_cancel_peek_controller, observes_durable_cancel_after_llm) =
             match &turn_control_binding {
-                crate::TurnControlBinding::HostOwned { resolver: _, peek } => {
-                    (peek.controller(), false)
-                }
+                crate::TurnControlBinding::HostOwned { resolver: _, peek } => (peek, false),
                 crate::TurnControlBinding::RunScoped {
                     resolver: _,
                     durable_cancel_after_llm,
-                } => (
-                    finish_scoped_effect_controller.controller(),
-                    *durable_cancel_after_llm,
-                ),
+                } => (&finish_scoped_effect_controller, *durable_cancel_after_llm),
             };
         let session = self
             .session

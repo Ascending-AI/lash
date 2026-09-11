@@ -222,6 +222,12 @@ fn scoped_child_turn_controller<'run>(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<ScopedEffectController<'run>, RuntimeError> {
+    if matches!(
+        scoped_effect_controller.execution_scope(),
+        ExecutionScope::Process { .. }
+    ) {
+        return Ok(scoped_effect_controller.clone());
+    }
     let scope = ExecutionScope::turn(session_id, turn_id);
     scoped_effect_controller.rescope(scope)
 }
