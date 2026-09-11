@@ -266,12 +266,15 @@ impl Processes {
         Ok(filter.clone())
     }
 
-    fn process_invocation(command: &lash_core::ProcessCommand) -> lash_core::RuntimeInvocation {
+    fn process_invocation(
+        command: &lash_core::ProcessCommand,
+        scope: &lash_core::ExecutionScope,
+    ) -> lash_core::RuntimeInvocation {
         let effect_id = command.effect_id();
         lash_core::RuntimeInvocation::effect(
-            lash_core::runtime::RuntimeScope::new("runtime"),
-            effect_id.clone(),
-            lash_core::RuntimeEffectKind::Process,
+            lash_core::EffectAddress::new(scope.clone(), effect_id.clone())
+                .expect("process command carries an admitted effect scope"),
+            lash_core::RuntimeAttribution::none(),
             effect_id,
         )
     }
@@ -290,7 +293,8 @@ impl Processes {
             .with_work_ports(ports.process.clone(), ports.queued_port())
             .process_work()
             .ok_or(EmbedError::MissingProcessRegistry)?;
-        let invocation = Self::process_invocation(&command);
+        let invocation =
+            Self::process_invocation(&command, scoped_effect_controller.execution_scope());
         let outcome = scoped_effect_controller
             .execute_process_effect(
                 lash_core::RuntimeEffectEnvelope::new(

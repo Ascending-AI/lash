@@ -13,18 +13,18 @@ use lash::durability::EffectHost;
 use lash::persistence::SessionStoreFactory as _;
 use lash_core::ProcessRegistrar as _;
 use lash_core::{
-    AwaitEventWaitIdentity, ExecutionScope, Resolution, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimeScope,
+    AwaitEventWaitIdentity, EffectAddress, ExecutionScope, Resolution, RuntimeAttribution,
+    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeInvocation,
 };
 use serde_json::json;
 
-fn envelope(effect_id: &str) -> RuntimeEffectEnvelope {
+fn envelope(scope: &ExecutionScope, effect_id: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeInvocation::effect(
-            RuntimeScope::for_turn("fence-session", "fence-turn", 1, 0),
-            effect_id,
-            RuntimeEffectKind::LanguageRuntimeValue,
+            EffectAddress::new(scope.clone(), effect_id)
+                .expect("process fence effect carries an admitted scope"),
+            RuntimeAttribution::none(),
             effect_id,
         ),
         RuntimeEffectCommand::LanguageRuntimeValue {
@@ -336,7 +336,7 @@ async fn admission(
     host.scoped(scope.clone())
         .expect("scope binds")
         .controller()
-        .execute_effect(envelope(effect_id), executor())
+        .execute_effect(envelope(scope, effect_id), executor())
         .await
         .map(|_| ())
         .map_err(|err| err.code)

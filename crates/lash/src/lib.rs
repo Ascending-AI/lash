@@ -584,9 +584,9 @@ pub mod remote {
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
             RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-            RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeEffectKind,
-            RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
-            RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
+            RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeAttribution,
+            RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
+            RemoteRuntimeSubject, RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 
@@ -781,17 +781,16 @@ pub mod runtime {
         QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
         QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
         QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
-        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
         RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
         RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
         RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
         RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
         RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
-        RuntimeProviderConfig, RuntimeScope, RuntimeTracingConfig, RuntimeTurnPhase,
-        RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkTarget, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-        TurnContext, TurnControlBinding, TurnControlParticipation, WorkCadencePolicy,
-        WorkerSweepPolicy,
+        RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
+        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkTarget,
+        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnContext,
+        TurnControlBinding, TurnControlParticipation, WorkCadencePolicy, WorkerSweepPolicy,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for

@@ -12,8 +12,7 @@ use crate::support::{
 use lash_core::facade_support;
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimeScope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
 };
 use lash_sansio::SessionId;
 
@@ -652,10 +651,16 @@ impl LashCore {
         }
         let process = if let Some(process) = administration.process() {
             let invocation = RuntimeInvocation::effect(
-                RuntimeScope::new(session_id.clone()),
+                lash_core::EffectAddress::new(
+                    lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
+                        context.controller(),
+                    )
+                    .clone(),
+                    format!("{session_id}:delete-session"),
+                )
+                .expect("session deletion carries an admitted effect scope"),
+                lash_core::RuntimeAttribution::for_session(session_id.clone()),
                 format!("process:delete-session:{session_id}"),
-                RuntimeEffectKind::Process,
-                format!("{session_id}:delete-session"),
             );
             let outcome = context
                 .controller()

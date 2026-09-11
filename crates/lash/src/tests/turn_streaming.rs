@@ -430,8 +430,8 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
         self.invocations
             .lock_recover()
             .push(DurableEffectInvocation {
-                kind: envelope.invocation.effect_kind().expect("effect kind"),
-                turn_id: envelope.invocation.scope.turn_id.clone(),
+                kind: envelope.command.kind(),
+                turn_id: envelope.invocation.attribution.turn_id.clone(),
                 replay_key: envelope.invocation.replay_key().map(ToOwned::to_owned),
             });
         if matches!(
@@ -530,8 +530,8 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         self.invocations
             .lock_recover()
             .push(DurableEffectInvocation {
-                kind: envelope.invocation.effect_kind().expect("effect kind"),
-                turn_id: envelope.invocation.scope.turn_id.clone(),
+                kind: envelope.command.kind(),
+                turn_id: envelope.invocation.attribution.turn_id.clone(),
                 replay_key: envelope.invocation.replay_key().map(ToOwned::to_owned),
             });
         if matches!(
