@@ -39,7 +39,8 @@ mod work_claim;
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence,
+    AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence, AttachmentWritePermit,
+    AttachmentWriteToken,
 };
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{

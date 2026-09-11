@@ -93,7 +93,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 83);
+    assert_eq!(PostgresStorage::schema_version(), 84);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -202,6 +202,14 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("create the effect-scope retirement fence from the authoritative DDL");
+    sqlx::query("DROP TABLE lash_attachment_condemnations")
+        .execute(&pool)
+        .await
+        .expect("discard the pre-write-token attachment condemnation table");
+    sqlx::raw_sql(schema_table_ddl("lash_attachment_condemnations"))
+        .execute(&pool)
+        .await
+        .expect("recreate the attachment condemnation table from the authoritative DDL");
     sqlx::raw_sql(
         "DROP TABLE lash_process_parent_end_plans;
          DROP TABLE lash_process_segment_handovers;
@@ -241,7 +249,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          ALTER TABLE lash_turn_cancel_requests
              ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
          UPDATE lash_schema_versions
-            SET version = 83
+            SET version = 84
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
