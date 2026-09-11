@@ -1,5 +1,15 @@
 use super::*;
 
+/// Serialized schema version for [`TurnCheckpoint`].
+///
+/// Version 1 is the historical unstamped checkpoint shape. Version 2 adds the
+/// host-reporting effect for tool calls refused before dispatch.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 2;
+
+const fn legacy_turn_checkpoint_schema_version() -> u32 {
+    1
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum EffectDeliveryStatus {
     #[default]
@@ -50,6 +60,8 @@ pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
+    #[serde(default = "legacy_turn_checkpoint_schema_version")]
+    pub(super) schema_version: u32,
     pub(super) state: MachineState<M>,
     pub(super) pending_effects: Vec<Effect<M>>,
     pub(super) next_effect_id: u64,
@@ -66,6 +78,13 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) cumulative_usage: TokenUsage,
     pub(super) termination: TurnTerminationPolicyState,
     pub(super) synced_protocol_iteration: Option<usize>,
+}
+
+impl<M: TurnProtocol> TurnCheckpoint<M> {
+    /// Returns the schema version decoded from this checkpoint.
+    pub fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
 }
 
 impl<M: TurnProtocol> Clone for MachineState<M> {

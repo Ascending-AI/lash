@@ -936,6 +936,7 @@ fn next_checkpoint_effect(machine: &mut TurnMachine) -> Option<Effect> {
     loop {
         match machine.poll_effect()? {
             Effect::Emit(_)
+            | Effect::ReportToolCalls { .. }
             | Effect::Log { .. }
             | Effect::Progress { .. }
             | Effect::Done { .. } => continue,

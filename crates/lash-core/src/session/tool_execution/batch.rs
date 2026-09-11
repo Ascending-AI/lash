@@ -334,7 +334,9 @@ impl RuntimeExecutionContext<'_> {
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
                 };
-                let completed = self.complete_tool_call(call.id, None, outcome).await;
+                let completed = self
+                    .complete_undispatched_tool_call(call.id, None, outcome)
+                    .await;
                 replies[index] = Some(
                     ToolInvocationReply::from_output(completed.completed.output)
                         .with_record(completed.record),
@@ -361,7 +363,9 @@ impl RuntimeExecutionContext<'_> {
                     ));
                 }
                 ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = self.complete_tool_call(call.id, None, *outcome).await;
+                    let completed = self
+                        .complete_undispatched_tool_call(call.id, None, *outcome)
+                        .await;
                     replies[index] = Some(
                         ToolInvocationReply::from_output(completed.completed.output)
                             .with_record(completed.record),
@@ -728,7 +732,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn batch_with_unresolvable_tool_ids_emits_per_call_completion_correlations() {
+    async fn batch_failures_before_dispatch_emit_ordered_per_call_lifecycle_pairs() {
         let (turn_tx, mut turn_rx) = tokio::sync::mpsc::channel(8);
         let context = batch_failure_context(Arc::new(BatchFailureEffectController::new(
             BatchFailureResponse::EffectDecodeError,
@@ -755,44 +759,34 @@ mod tests {
             ])
             .await;
 
-        let first = turn_rx.recv().await.expect("first completion activity");
-        let second = turn_rx.recv().await.expect("second completion activity");
-        let third = turn_rx.recv().await.expect("third completion activity");
-        assert_ne!(first.correlation_id, second.correlation_id);
-        assert_ne!(second.correlation_id, third.correlation_id);
-        assert_ne!(first.correlation_id, third.correlation_id);
-        assert!(matches!(
-            first.event,
-            crate::TurnEvent::ToolCallCompleted {
-                call_id: Some(ref call_id),
-                ..
-            } if call_id == "missing-call-a"
-        ));
-        assert!(matches!(
-            second.event,
-            crate::TurnEvent::ToolCallCompleted {
-                call_id: Some(ref call_id),
-                ..
-            } if call_id == "missing-call-b"
-        ));
-        assert_eq!(
-            first.correlation_id,
-            crate::TurnActivityId::new("tool:missing-call-a")
-        );
-        assert_eq!(
-            second.correlation_id,
-            crate::TurnActivityId::new("tool:missing-call-b")
-        );
-        assert!(matches!(
-            third.event,
-            crate::TurnEvent::ToolCallCompleted {
-                call_id: Some(ref call_id),
-                ..
-            } if call_id == "invalid-prepared"
-        ));
-        assert_eq!(
-            third.correlation_id,
-            crate::TurnActivityId::new("tool:invalid-prepared")
+        // A call that settles before provider dispatch is still a complete
+        // lifecycle attempt. Each call id therefore owns one ordered Started
+        // then Completed pair; the failure path must never publish a bare
+        // completion or borrow another call's correlation.
+        for call_id in ["missing-call-a", "missing-call-b", "invalid-prepared"] {
+            let started = turn_rx.recv().await.expect("tool start activity");
+            let completed = turn_rx.recv().await.expect("tool completion activity");
+            let correlation_id = crate::TurnActivityId::new(format!("tool:{call_id}"));
+            assert_eq!(started.correlation_id, correlation_id);
+            assert_eq!(completed.correlation_id, correlation_id);
+            assert!(matches!(
+                started.event,
+                crate::TurnEvent::ToolCallStarted {
+                    call_id: Some(ref observed),
+                    ..
+                } if observed == call_id
+            ));
+            assert!(matches!(
+                completed.event,
+                crate::TurnEvent::ToolCallCompleted {
+                    call_id: Some(ref observed),
+                    ..
+                } if observed == call_id
+            ));
+        }
+        assert!(
+            turn_rx.try_recv().is_err(),
+            "exactly one pair per failed call"
         );
     }
 

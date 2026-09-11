@@ -183,6 +183,12 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         id: EffectId,
         calls: Vec<PendingToolCall>,
     },
+    /// Report completed tool calls that the protocol refused before dispatch.
+    ///
+    /// The host emits the shared tool lifecycle pair for these calls. Turn
+    /// accounting is emitted separately by the machine immediately after this
+    /// effect, preserving `Started` before the accounting completion record.
+    ReportToolCalls { completed: Vec<CompletedToolCall> },
     /// Execute a protocol-owned code block.
     ExecCode {
         id: EffectId,
@@ -233,6 +239,9 @@ impl<M: TurnProtocol> Clone for Effect<M> {
             Self::ToolCalls { id, calls } => Self::ToolCalls {
                 id: *id,
                 calls: calls.clone(),
+            },
+            Self::ReportToolCalls { completed } => Self::ReportToolCalls {
+                completed: completed.clone(),
             },
             Self::ExecCode { id, language, code } => Self::ExecCode {
                 id: *id,
@@ -363,6 +372,10 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     },
     StartTools {
         calls: Vec<PendingToolCall>,
+    },
+    /// Report completed tool calls that were refused before host dispatch.
+    ReportToolCalls {
+        completed: Vec<CompletedToolCall>,
     },
     StartExec {
         language: String,

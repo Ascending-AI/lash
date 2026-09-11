@@ -64,6 +64,15 @@ fn record_effect<M: TurnProtocol>(transcript: &mut Transcript, actor: &str, effe
                 );
             }
         }
+        Effect::ReportToolCalls { completed } => {
+            for call in completed {
+                transcript.record(
+                    Entry::new(Kind::Tool, session(), "tool.report")
+                        .attr(Attr::text("name", &call.tool_name))
+                        .attr(Attr::id("call", IdKind::Call, &call.call_id)),
+                );
+            }
+        }
         Effect::ExecCode { language, .. } => {
             transcript.record(
                 Entry::new(Kind::Exec, session(), "cell.start").attr(Attr::text("lang", language)),

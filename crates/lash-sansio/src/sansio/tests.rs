@@ -174,6 +174,27 @@ fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
     serde_json::from_str(&encoded).expect("deserialize checkpoint")
 }
 
+#[test]
+fn turn_checkpoint_stamps_v2_and_identifies_the_legacy_unstamped_shape_as_v1() {
+    let machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let checkpoint = machine.checkpoint();
+    assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 2);
+
+    let mut legacy = serde_json::to_value(checkpoint).expect("checkpoint json");
+    legacy
+        .as_object_mut()
+        .expect("checkpoint object")
+        .remove("schema_version");
+    let legacy: TurnCheckpoint = serde_json::from_value(legacy).expect("legacy checkpoint");
+    assert_eq!(legacy.schema_version(), 1);
+}
+
 fn empty_exec_response() -> crate::ExecResponse {
     crate::ExecResponse {
         observations: Vec::new(),
@@ -207,6 +228,52 @@ fn completed_tool(
         intent_outcomes: Vec::new(),
         replay: None,
     }
+}
+
+#[test]
+fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    assert!(find_llm_call(&effects).is_some());
+
+    machine.apply_actions(vec![DriverAction::ReportToolCalls {
+        completed: vec![completed_tool(
+            "call-refused",
+            "catalog.private",
+            serde_json::json!({"query":"secret"}),
+            ToolCallOutput::failure(ToolFailure::tool(
+                ToolFailureClass::PermissionDenied,
+                "tool_not_advertised",
+                "tool was not advertised",
+            )),
+        )],
+    }]);
+
+    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
+    let mut restored =
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint);
+    let effects = drain_effects(&mut restored);
+
+    let Effect::ReportToolCalls { completed } = &effects[0] else {
+        panic!("reporting must precede accounting: {effects:?}");
+    };
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].call_id, "call-refused");
+    assert_eq!(completed[0].tool_name, "catalog.private");
+    assert!(matches!(
+        &effects[1],
+        Effect::Emit(SessionStreamEvent::ToolCall {
+            call_id: Some(call_id),
+            name,
+            ..
+        }) if call_id == "call-refused" && name == "catalog.private"
+    ));
 }
 
 struct ProseDriver;

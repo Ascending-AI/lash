@@ -418,19 +418,21 @@ async fn provider_spans_are_children_of_the_turn_span() {
     );
 }
 
-#[tokio::test]
-async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
-    // A standard-mode tool call must produce exactly one ToolCallStarted and
-    // one ToolCallCompleted trace record: the emission moved to the shared
-    // tool-execution seam, and the old standard-only path must not double it.
+async fn assert_standard_tool_lifecycle(
+    call_id: &str,
+    tool_name: &str,
+    input_json: &str,
+    expected_success: bool,
+    plugins: Vec<Arc<dyn crate::PluginFactory>>,
+) {
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
                 parts: vec![LlmOutputPart::ToolCall {
-                    call_id: "call-1".to_string(),
-                    tool_name: "echo_tool".to_string(),
-                    input_json: r#"{"value":"sample"}"#.to_string(),
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    input_json: input_json.to_string(),
                     replay: None,
                 }],
                 response_metadata: Default::default(),
@@ -450,15 +452,16 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
         },
     ]);
     let trace_path = std::env::temp_dir().join(format!(
-        "lash-standard-tool-trace-{}-{}.jsonl",
+        "lash-standard-tool-trace-{}-{}-{}.jsonl",
         std::process::id(),
+        call_id,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos()
     ));
     let mut runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
+        plugins,
         Arc::new(EchoTool),
         transport,
         test_host_config_with_trace_path(trace_path.clone()),
@@ -489,6 +492,10 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
         &turn.outcome,
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ));
+    assert_eq!(turn.tool_calls.len(), 1, "one accounting record per call");
+    assert_eq!(turn.tool_calls[0].call_id.as_deref(), Some(call_id));
+    assert_eq!(turn.tool_calls[0].tool, tool_name);
+    assert_eq!(turn.tool_calls[0].output.is_success(), expected_success);
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
     let entries = logged
@@ -516,23 +523,102 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
     );
     assert_eq!(
         started[0].get("call_id").and_then(|v| v.as_str()),
-        Some("call-1")
+        Some(call_id)
     );
     assert_eq!(
         started[0].get("name").and_then(|v| v.as_str()),
-        Some("echo_tool")
+        Some(tool_name)
+    );
+    let started_position = entries
+        .iter()
+        .position(|entry| {
+            entry.get("type").and_then(|value| value.as_str()) == Some("tool_call_started")
+                && entry.get("call_id").and_then(|value| value.as_str()) == Some(call_id)
+        })
+        .expect("started position");
+    let completed_position = entries
+        .iter()
+        .position(|entry| {
+            entry.get("type").and_then(|value| value.as_str()) == Some("tool_call_completed")
+                && entry.get("call_id").and_then(|value| value.as_str()) == Some(call_id)
+        })
+        .expect("completed position");
+    assert!(
+        started_position < completed_position,
+        "Started must precede Completed: {entries:?}"
     );
     // Span identity is stamped from session/turn context so the tool nests
     // under its turn as `tool:<call_id>`.
+    let expected_graph_node_id = format!("tool:{call_id}");
     assert_eq!(
         completed[0]
             .get("context")
             .and_then(|context| context.get("graph_node_id"))
             .and_then(|v| v.as_str()),
-        Some("tool:call-1")
+        Some(expected_graph_node_id.as_str())
     );
 
     let _ = std::fs::remove_file(&trace_path);
+}
+
+#[tokio::test]
+async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
+    // Successful prepared calls keep the one-pair contract: the reporting
+    // repair must not duplicate the start already emitted by batch execution.
+    Box::pin(assert_standard_tool_lifecycle(
+        "call-success",
+        "echo_tool",
+        r#"{"value":"sample"}"#,
+        true,
+        Vec::new(),
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn unavailable_tool_name_emits_an_ordered_lifecycle_pair() {
+    Box::pin(assert_standard_tool_lifecycle(
+        "call-missing-name",
+        "missing_tool",
+        r#"{"value":1}"#,
+        false,
+        Vec::new(),
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn invalid_tool_arguments_emit_an_ordered_lifecycle_pair() {
+    Box::pin(assert_standard_tool_lifecycle(
+        "call-invalid-args",
+        "echo_tool",
+        r#"{"other":true}"#,
+        false,
+        Vec::new(),
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
+    let refusal = Arc::new(crate::plugin::StaticPluginFactory::new(
+        "tool-refusal",
+        crate::PluginSpec::new().with_before_tool_call(Arc::new(|_ctx| {
+            Box::pin(async {
+                Ok(vec![crate::BeforeToolCallPluginDirective::short_circuit(
+                    crate::ToolOutcome::err_fmt("refused by test hook"),
+                )])
+            })
+        })),
+    ));
+    Box::pin(assert_standard_tool_lifecycle(
+        "call-hook-refusal",
+        "echo_tool",
+        r#"{"value":"blocked"}"#,
+        false,
+        vec![refusal],
+    ))
+    .await;
 }
 
 #[tokio::test]

@@ -8,6 +8,56 @@ pub(in crate::runtime) struct ToolBatchRunOutcome {
 }
 
 impl RuntimeTurnDriver<'_> {
+    pub(super) async fn report_undispatched_turn_tool_calls(
+        &self,
+        completed: Vec<crate::sansio::CompletedToolCall>,
+        protocol_iteration: usize,
+        event_tx: &mpsc::Sender<RuntimeStreamEvent>,
+    ) -> Result<(), RuntimeError> {
+        let (tool_event_tx, mut tool_event_rx) =
+            tokio::sync::mpsc::channel::<SessionStreamEvent>(64);
+        let (turn_event_tx, mut turn_event_rx) = tokio::sync::mpsc::channel::<TurnActivity>(64);
+        let runtime_event_tx = event_tx.clone();
+        let tool_event_forwarder = crate::task::spawn(async move {
+            while let Some(event) = tool_event_rx.recv().await {
+                send_session_event(&runtime_event_tx, event).await;
+            }
+        });
+        let runtime_event_tx = event_tx.clone();
+        let turn_event_forwarder = crate::task::spawn(async move {
+            while let Some(event) = turn_event_rx.recv().await {
+                let _ = runtime_event_tx.send(RuntimeStreamEvent::Turn(event)).await;
+            }
+        });
+        let context = match self.execution_context(
+            tool_event_tx.clone(),
+            Arc::new(crate::ChronologicalProjection::default()),
+        ) {
+            Ok(context) => context
+                .with_turn_event_sender(turn_event_tx.clone())
+                .with_tracing(self.execution_tracing(protocol_iteration)),
+            Err(err) => {
+                drop(tool_event_tx);
+                drop(turn_event_tx);
+                let _ = tool_event_forwarder.await;
+                let _ = turn_event_forwarder.await;
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::ToolCatalogResolutionFailed,
+                    err.to_string(),
+                ));
+            }
+        };
+        for call in &completed {
+            context.report_undispatched_tool_call(call).await;
+        }
+        drop(context);
+        drop(tool_event_tx);
+        drop(turn_event_tx);
+        let _ = tool_event_forwarder.await;
+        let _ = turn_event_forwarder.await;
+        Ok(())
+    }
+
     pub(super) async fn invoke_turn_tool_calls_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -18,10 +68,17 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<Vec<crate::sansio::CompletedToolCall>, RuntimeEffectControllerError> {
         let (tool_event_tx, mut tool_event_rx) =
             tokio::sync::mpsc::channel::<SessionStreamEvent>(64);
+        let (turn_event_tx, mut turn_event_rx) = tokio::sync::mpsc::channel::<TurnActivity>(64);
         let runtime_event_tx = event_tx.clone();
         let tool_event_forwarder = crate::task::spawn(async move {
             while let Some(event) = tool_event_rx.recv().await {
                 send_session_event(&runtime_event_tx, event).await;
+            }
+        });
+        let runtime_event_tx = event_tx.clone();
+        let turn_event_forwarder = crate::task::spawn(async move {
+            while let Some(event) = turn_event_rx.recv().await {
+                let _ = runtime_event_tx.send(RuntimeStreamEvent::Turn(event)).await;
             }
         });
         let prepare_context = self
@@ -35,6 +92,7 @@ impl RuntimeTurnDriver<'_> {
                     err.to_string(),
                 )
             })?
+            .with_turn_event_sender(turn_event_tx.clone())
             .with_tracing(self.execution_tracing(machine.protocol_iteration()));
         let call_count = calls.len();
         let mut results = vec![None; call_count];
@@ -48,7 +106,7 @@ impl RuntimeTurnDriver<'_> {
                 }
                 crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
                     let completed = prepare_context
-                        .complete_tool_call(call_id.clone(), replay, *outcome)
+                        .complete_undispatched_tool_call(call_id.clone(), replay, *outcome)
                         .await
                         .completed;
                     results[index] = Some(completed);
@@ -147,7 +205,9 @@ impl RuntimeTurnDriver<'_> {
         }
         drop(prepare_context);
         drop(tool_event_tx);
+        drop(turn_event_tx);
         let _ = tool_event_forwarder.await;
+        let _ = turn_event_forwarder.await;
         results
             .into_iter()
             .enumerate()
