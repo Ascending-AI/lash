@@ -2194,20 +2194,36 @@ async fn probe_loop_observes_healthy_dwell_and_resets_reconnect_backoff() {
         .expect("actor command barrier after generation 2 publication");
     tokio::time::advance(Duration::from_millis(11)).await;
     mock.event("ping").await;
-    tokio::time::advance(Duration::from_millis(81)).await;
-    tokio::task::yield_now().await;
-    assert_eq!(
-        current_entry
-            .service_snapshot()
-            .expect("healthy dwell must not disconnect a pending probe")
-            .generation,
-        2
-    );
 
+    // Make the healthy deadline and several commands ready together. The
+    // one-shot healthy transition must win before command traffic can end the
+    // generation, while stale timeout replies retain their established shape.
+    let probe_hook = Arc::new(ActorPauseHook::default());
+    *current_entry.probe_select_hook.write_recover() = Some(Arc::clone(&probe_hook));
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::CallSucceeded { generation: 2 })
+        .expect("wake the pending probe for its test rendezvous");
+    probe_hook.reached.notified().await;
+    tokio::time::advance(Duration::from_millis(81)).await;
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::CallSucceeded { generation: 2 })
+        .expect("queue matching success observation");
+    let (stale_reply, stale_result) = tokio::sync::oneshot::channel();
+    current_entry
+        .actor_tx
+        .send(LifecycleCommand::CallTimedOut {
+            generation: 1,
+            reply: stale_reply,
+        })
+        .expect("queue stale timeout observation");
     assert!(current_entry.mark_disconnected(
         "observe reconnect ceiling after healthy dwell".to_string(),
         2,
     ));
+    probe_hook.release.notify_one();
+    assert_eq!(stale_result.await.expect("stale timeout reply"), None);
     let (second_pid, second_deadline) = lifecycle.grace_armed().await;
     clock.expire(second_deadline).await;
     lifecycle.kill_issued(second_pid).await;
@@ -2219,6 +2235,37 @@ async fn probe_loop_observes_healthy_dwell_and_resets_reconnect_backoff() {
         "healthy dwell inside the pending probe must reset reconnect backoff to its initial value"
     );
     pool.shutdown_all().await;
+
+    // A normally answered interval probe completes and retains its published
+    // generation before a later disconnect.
+    let answered_root = tempfile::tempdir().unwrap();
+    let answered_pool = connect_mock(
+        answered_root.path(),
+        MockOptions {
+            behavior: "silent_ping",
+            probe_interval_ms: 10,
+            probe_timeout_ms: 5_000,
+            ..MockOptions::default()
+        },
+    )
+    .await;
+    let answered_entry = entry(&answered_pool);
+    tokio::time::advance(Duration::from_millis(11)).await;
+    answered_entry.probe_completed.notified().await;
+    let received = received(answered_root.path());
+    assert!(
+        received.contains("\"method\":\"ping\""),
+        "the interval probe must reach the server: {received}"
+    );
+    assert_eq!(
+        answered_entry
+            .service_snapshot()
+            .expect("answered probe retains publication")
+            .generation,
+        1
+    );
+    assert!(answered_entry.mark_disconnected("disconnect after answered probe".to_string(), 1));
+    answered_pool.shutdown_all().await;
 }
 
 #[cfg(target_os = "linux")]

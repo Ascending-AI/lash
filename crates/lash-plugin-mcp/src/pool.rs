@@ -146,6 +146,10 @@ struct McpEntry {
     #[cfg(test)]
     mid_establish_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
+    probe_select_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
+    #[cfg(test)]
+    probe_completed: tokio::sync::Notify,
+    #[cfg(test)]
     refresh_install_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
     panic_actor_on_quit: AtomicBool,
@@ -962,6 +966,10 @@ impl McpEntry {
                 ping_degrade_warned: AtomicBool::new(false),
                 #[cfg(test)]
                 mid_establish_hook: RwLock::new(None),
+                #[cfg(test)]
+                probe_select_hook: RwLock::new(None),
+                #[cfg(test)]
+                probe_completed: tokio::sync::Notify::new(),
                 #[cfg(test)]
                 refresh_install_hook: RwLock::new(None),
                 #[cfg(test)]

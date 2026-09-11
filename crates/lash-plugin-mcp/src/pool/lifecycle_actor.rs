@@ -112,10 +112,48 @@ enum CommandAction {
 type WaitingFuture =
     Pin<Box<dyn Future<Output = Result<QuitReason, tokio::task::JoinError>> + Send + 'static>>;
 
+enum ServiceWaiting {
+    Pending(WaitingFuture),
+    Complete,
+}
+
+impl ServiceWaiting {
+    fn new(waiting: WaitingFuture) -> Self {
+        Self::Pending(waiting)
+    }
+
+    async fn wait_for_cleanup(self, graceful_period: Duration) {
+        if let Self::Pending(mut waiting) = self {
+            let _ = timeout(graceful_period, waiting.as_mut()).await;
+        }
+    }
+}
+
+impl Future for ServiceWaiting {
+    type Output = Result<QuitReason, tokio::task::JoinError>;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let waiting = self.get_mut();
+        let Self::Pending(future) = waiting else {
+            panic!("service waiting future polled after completion");
+        };
+        match future.as_mut().poll(cx) {
+            std::task::Poll::Ready(reason) => {
+                *waiting = Self::Complete;
+                std::task::Poll::Ready(reason)
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
 struct Connection {
     cancellation: rmcp::service::RunningServiceCancellationToken,
     request_tasks: Arc<crate::host::McpHostRequestTasks>,
-    waiting: WaitingFuture,
+    waiting: ServiceWaiting,
     child: Option<StdioChildGuard>,
 }
 
@@ -141,11 +179,14 @@ impl Connection {
                 );
             } else {
                 // HTTP has no child to reap, but still gets the configured
-                // grace for its transport task to drain.
-                let (_, _) = tokio::join!(
-                    self.request_tasks.shutdown(),
-                    timeout(shutdown_policy.graceful_period, self.waiting.as_mut()),
-                );
+                // grace for its transport task to drain. A waiting future that
+                // already completed returns immediately without being re-polled.
+                shutdown_http_connection(
+                    self.request_tasks,
+                    self.waiting,
+                    shutdown_policy.graceful_period,
+                )
+                .await;
             }
         };
         tokio::pin!(cleanup);
@@ -426,7 +467,7 @@ impl LifecycleActor {
         let mut connection = Connection {
             cancellation: running.cancellation_token(),
             request_tasks: running.service().request_tasks(),
-            waiting: Box::pin(running.waiting()),
+            waiting: ServiceWaiting::new(Box::pin(running.waiting())),
             child: stdio_child.take(),
         };
         if self.pause_mid_establish().await {
@@ -470,7 +511,7 @@ impl LifecycleActor {
                         }
                     }
                 }
-                reason = connection.waiting.as_mut() => {
+                reason = &mut connection.waiting => {
                     let cause = format!("MCP server `{server_name}` service quit during discovery: {reason:?}");
                     self.record_error(cause.clone());
                     let shutdown = connection.cancel_and_reap(self, &server_name).await;
@@ -546,7 +587,7 @@ impl LifecycleActor {
         loop {
             let keepalive_at = self.keepalive_at;
             tokio::select! {
-                reason = connection.waiting.as_mut() => {
+                reason = &mut connection.waiting => {
                     let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
                     self.record_error(cause);
                     self.unpublish(generation);
@@ -654,9 +695,20 @@ impl LifecycleActor {
                     } else {
                         let mut probe = Box::pin(entry.probe_peer(&peer));
                         loop {
+                            #[cfg(test)]
+                            pause_probe_select_if_injected(&entry).await;
                             tokio::select! {
                                 biased;
-                                reason = connection.waiting.as_mut() => {
+                                () = &mut healthy, if !healthy_observed => {
+                                    healthy_observed = true;
+                                    if self.current_generation() == Some(generation) {
+                                        self.reconnect_backoff = self.entry.upgrade().map_or(
+                                            self.reconnect_backoff,
+                                            |entry| entry.config.reconnect_initial_backoff(),
+                                        );
+                                    }
+                                }
+                                reason = &mut connection.waiting => {
                                     let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
                                     drop(probe);
                                     drop(entry);
@@ -737,19 +789,12 @@ impl LifecycleActor {
                                     CommandAction::Establish { .. } => {
                                         unreachable!("probe reducer returned an establish action")
                                     }
-                                },
-                                () = &mut healthy, if !healthy_observed => {
-                                    healthy_observed = true;
-                                    if self.current_generation() == Some(generation) {
-                                        self.reconnect_backoff = self.entry.upgrade().map_or(
-                                            self.reconnect_backoff,
-                                            |entry| entry.config.reconnect_initial_backoff(),
-                                        );
-                                    }
                                 }
                             }
                         }
                     };
+                    #[cfg(test)]
+                    entry.probe_completed.notify_one();
                     drop(entry);
                     if let Some(failure) = failure {
                         self.unpublish(generation);
@@ -970,10 +1015,30 @@ async fn reap_child(
     active_pid.store(0, Ordering::SeqCst);
 }
 
+async fn shutdown_http_connection(
+    request_tasks: Arc<crate::host::McpHostRequestTasks>,
+    waiting: ServiceWaiting,
+    graceful_period: Duration,
+) {
+    let (_, ()) = tokio::join!(
+        waiting.wait_for_cleanup(graceful_period),
+        request_tasks.shutdown(),
+    );
+}
+
 async fn sleep_until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => pending().await,
+    }
+}
+
+#[cfg(test)]
+async fn pause_probe_select_if_injected(entry: &McpEntry) {
+    let hook = entry.probe_select_hook.write_recover().take();
+    if let Some(hook) = hook {
+        hook.reached.notify_one();
+        hook.release.notified().await;
     }
 }
 
@@ -985,4 +1050,36 @@ fn send_result(reply: Option<oneshot::Sender<Result<(), McpError>>>, result: Res
 
 fn send_shutdown(reply: Option<oneshot::Sender<Result<(), McpError>>>) {
     send_result(reply, Err(McpError::PoolShutDown));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn completed_http_wait_still_shuts_down_host_tasks_without_repoll() {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let observed_polls = Arc::clone(&polls);
+        let future = std::future::poll_fn(move |_| {
+            assert_eq!(
+                observed_polls.fetch_add(1, Ordering::SeqCst),
+                0,
+                "ordinary async waiting future was polled after completion"
+            );
+            std::task::Poll::Ready(Ok(QuitReason::Closed))
+        });
+        let mut waiting = ServiceWaiting::new(Box::pin(future));
+
+        assert!(matches!((&mut waiting).await, Ok(QuitReason::Closed)));
+        shutdown_http_connection(
+            Arc::new(crate::host::McpHostRequestTasks::default()),
+            waiting,
+            Duration::from_secs(3),
+        )
+        .await;
+
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+    }
 }
