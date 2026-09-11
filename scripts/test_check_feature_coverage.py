@@ -128,6 +128,32 @@ class FeatureCoverageContractTests(unittest.TestCase):
             timeout=5,
         )
 
+    def run_lane(self) -> subprocess.CompletedProcess[str]:
+        subprocess.run(
+            ["cargo", "generate-lockfile", "--offline"],
+            cwd=self.root,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
+        )
+        return subprocess.run(
+            [
+                "python3",
+                str(CHECKER),
+                "run",
+                "member-testing",
+                "--root",
+                str(self.root),
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
+        )
+
     def test_complete_contract_passes(self) -> None:
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -251,6 +277,210 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("lacks a test-context ON command for member/testing", result.stdout)
         self.assertIn("lacks a test-context ON command for member/other", result.stdout)
+
+    def test_runner_requires_a_whole_conjunction_witness(self) -> None:
+        manifest = self.root / "member" / "Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8") + "other = []\n",
+            encoding="utf-8",
+        )
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(all(feature = "testing", feature = "other"))]\n'
+            'compile_error!("UNCOVERED_CONJUNCTION");\n',
+            encoding="utf-8",
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        contents = plan.read_text(encoding="utf-8")
+        contents = contents.replace(
+            '"member/testing:on", "member/testing:off"',
+            '"member/testing:on", "member/testing:off", "member/other:on", "member/other:off"',
+        )
+        contents = contents.replace(
+            "commands = [",
+            'commands = [["cargo", "check", "-p", "member", "--lib", '
+            '"--no-default-features", "--features", "other", "--locked"], ',
+        )
+        plan.write_text(contents, encoding="utf-8")
+
+        result = self.run_lane()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no compiled artifact witnesses cfg predicate", result.stdout)
+        self.assertIn('all(feature = "testing", feature = "other")', result.stdout)
+
+    def test_runner_rejects_doctest_as_test_context_artifact(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(all(test, feature = "testing"))]\n'
+            'compile_error!("UNCOVERED_TEST_TARGET");\n',
+            encoding="utf-8",
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        plan.write_text(
+            plan.read_text(encoding="utf-8").replace(
+                "commands = [",
+                'commands = [["cargo", "test", "-p", "member", "--doc", '
+                '"--no-default-features", "--features", "testing", "--locked"], ',
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_lane()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("lacks a test-context ON command for member/testing", result.stdout)
+
+    def test_runner_rejects_missing_test_artifact(self) -> None:
+        manifest = self.root / "member" / "Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8")
+            + "\n[lib]\ntest = false\ndoctest = false\n",
+            encoding="utf-8",
+        )
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(all(test, feature = "testing"))]\n'
+            'pub fn test_support() {}\n',
+            encoding="utf-8",
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        plan.write_text(
+            plan.read_text(encoding="utf-8").replace(
+                "commands = [",
+                'commands = [["cargo", "test", "-p", "member", "--tests", '
+                '"--no-default-features", "--features", "testing", "--locked"], ',
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_lane()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("emitted no compiler artifact for selected package member", result.stdout)
+
+    def test_runner_rejects_transitive_dev_feature_as_off_witness(self) -> None:
+        manifest = self.root / "member" / "Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8")
+            + textwrap.dedent(
+                """
+                helper = ["testing"]
+
+                [dev-dependencies]
+                member = { path = ".", features = ["helper"] }
+                """
+            ),
+            encoding="utf-8",
+        )
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(test)]\nmod tests {\n'
+            '    #[cfg(not(feature = "testing"))]\n'
+            '    compile_error!("UNCOVERED_DEV_OFF");\n}\n',
+            encoding="utf-8",
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        contents = plan.read_text(encoding="utf-8")
+        contents = contents.replace(
+            '"member/testing:on", "member/testing:off"',
+            '"member/testing:on", "member/testing:off", "member/helper:on"',
+        )
+        contents = contents.replace(
+            "commands = [",
+            'commands = [["cargo", "check", "-p", "member", "--lib", '
+            '"--no-default-features", "--features", "helper", "--locked"], '
+            '["cargo", "test", "-p", "member", "--no-default-features", "--locked"], ',
+        )
+        plan.write_text(contents, encoding="utf-8")
+
+        result = self.run_lane()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no compiled artifact witnesses cfg predicate true", result.stdout)
+        self.assertIn('not(feature = "testing")', result.stdout)
+
+    def test_runner_accepts_real_test_and_normal_artifacts(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(all(test, feature = "testing"))]\n'
+            'pub fn test_support() {}\n',
+            encoding="utf-8",
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        plan.write_text(
+            plan.read_text(encoding="utf-8").replace(
+                "commands = [",
+                'commands = [["cargo", "check", "-p", "member", "--tests", '
+                '"--no-default-features", "--features", "testing", "--locked"], ',
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_lane()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("feature coverage lane passed", result.stdout)
+
+    def test_runner_preserves_normal_off_when_dev_tests_enable_feature(self) -> None:
+        manifest = self.root / "member" / "Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8")
+            + textwrap.dedent(
+                """
+
+                [dev-dependencies]
+                member = { path = ".", features = ["testing"] }
+                """
+            ),
+            encoding="utf-8",
+        )
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg(any(test, feature = "testing"))]\n'
+            'pub fn support() {}\n',
+            encoding="utf-8",
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        plan.write_text(
+            plan.read_text(encoding="utf-8").replace(
+                "commands = [",
+                'commands = [["cargo", "test", "-p", "member", '
+                '"--no-default-features", "--locked"], ',
+            ),
+            encoding="utf-8",
+        )
+
+        result = self.run_lane()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("feature coverage lane passed", result.stdout)
+
+    def test_nested_feature_cfg_attr_fails_closed(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg_attr(feature = "testing", cfg(feature = "missing"))]\n'
+            'pub fn support() {}\n',
+            encoding="utf-8",
+        )
+
+        result = self.check()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nested feature-bearing cfg_attr is unsupported", result.stdout)
+
+    def test_unknown_feature_cfg_attr_action_fails_closed(self) -> None:
+        source = self.root / "member" / "src" / "lib.rs"
+        source.write_text(
+            '#[cfg_attr(feature = "testing", path = "alternate.rs")]\n'
+            'pub mod support;\n',
+            encoding="utf-8",
+        )
+
+        result = self.check()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported feature-bearing cfg_attr action 'path'", result.stdout)
 
     def test_dev_self_dependency_cannot_serve_as_off_witness(self) -> None:
         manifest = self.root / "member" / "Cargo.toml"
