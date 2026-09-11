@@ -475,15 +475,15 @@ async fn response_metadata_captures_only_allowlisted_headers() {
         json!("0.000008")
     );
     assert!(!response.response_metadata.contains_key("header:set-cookie"));
-    assert!(events.lock_recover().iter().any(|event| {
-        matches!(
-            event,
-            lash_core::llm::types::LlmStreamEvent::Evidence(evidence)
-                if evidence.response_metadata.get("header:x-opper-cost")
+    let events = events.lock_recover();
+    assert!(matches!(
+        events.first(),
+        Some(lash_core::llm::types::LlmStreamEvent::Evidence(evidence))
+            if evidence.response_started
+                && evidence.response_metadata.get("header:x-opper-cost")
                     == Some(&json!("0.000008"))
-                    && !evidence.response_metadata.contains_key("header:set-cookie")
-        )
-    }));
+                && !evidence.response_metadata.contains_key("header:set-cookie")
+    ));
 }
 
 #[tokio::test]

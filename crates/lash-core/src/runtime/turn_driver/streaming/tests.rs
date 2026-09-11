@@ -14,12 +14,23 @@ fn terminal_attempt_position_tracks_observed_stream_state() {
     );
 
     let response_observed = crate::LlmStreamEvidence {
-        http_summary: Some("HTTP 502".to_string()),
+        response_started: true,
         ..Default::default()
     };
     assert_eq!(
         observed_stream_protocol_position(false, &empty, &response_observed),
         crate::ProtocolPosition::ResponseObserved
+    );
+
+    let request_diagnostic_only = crate::LlmStreamEvidence {
+        request_body: Some("{\"model\":\"test\"}".to_string()),
+        http_summary: Some("HTTP POST https://provider.test".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(
+        observed_stream_protocol_position(false, &empty, &request_diagnostic_only),
+        crate::ProtocolPosition::NoResponse,
+        "request diagnostics alone cannot establish a response"
     );
 
     let mut output_started = LlmStreamAccumulator::default();

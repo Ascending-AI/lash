@@ -322,6 +322,7 @@ impl CodexProvider {
             };
             if !events_seen && let Some(tx) = &stream_events {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                    response_started: true,
                     request_body: Some(request_body.clone()),
                     http_summary: Some(self.websocket_http_summary(&diagnostics)),
                     generation_disposition: Some(Self::generation_disposition(req, full_body)),
@@ -812,6 +813,7 @@ impl Provider for CodexProvider {
             ResponseMetadataCapture::from_response(&self.options, &response_headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                response_started: true,
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {} (stream)", self.responses_url)),
                 execution_evidence: provider_request_id.clone().map(|provider_request_id| {

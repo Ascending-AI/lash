@@ -337,15 +337,15 @@ mod tests {
                 .values()
                 .any(|value| value == "hidden")
         );
-        assert!(events.lock_recover().iter().any(|event| {
-            matches!(
-                event,
-                LlmStreamEvent::Evidence(evidence)
-                    if evidence.response_metadata.get("header:x-request-cost")
+        let events = events.lock_recover();
+        assert!(matches!(
+            events.first(),
+            Some(LlmStreamEvent::Evidence(evidence))
+                if evidence.response_started
+                    && evidence.response_metadata.get("header:x-request-cost")
                         == Some(&json!("0.02"))
-                        && !evidence.response_metadata.contains_key("header:set-cookie")
-            )
-        }));
+                    && !evidence.response_metadata.contains_key("header:set-cookie")
+        ));
     }
 
     #[tokio::test]
