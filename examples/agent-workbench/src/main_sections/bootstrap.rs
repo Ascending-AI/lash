@@ -56,8 +56,7 @@ pub(crate) fn configure_workbench_plugins(
 ///
 /// Construction is deliberately infallible for an unreachable server: only a
 /// configuration error fails, while a down server stays registered and
-/// reconnects in the background. The returned factory is retained so
-/// `web_configured` can be queried live rather than snapshotted at boot.
+/// reconnects in the background.
 pub(crate) async fn build_search_mcp(
     url: &str,
 ) -> AnyhowResult<Arc<lash_plugin_mcp::McpPluginFactory>> {
@@ -70,14 +69,6 @@ pub(crate) async fn build_search_mcp(
         .await
         .context("connect agent-workbench MCP servers")?,
     ))
-}
-
-/// Whether the search MCP server is connected right now.
-pub(crate) fn search_mcp_configured(factory: &lash_plugin_mcp::McpPluginFactory) -> bool {
-    factory
-        .server_statuses()
-        .iter()
-        .any(|status| status.server_name == WORKBENCH_SEARCH_MCP_SERVER && status.connected)
 }
 
 pub(crate) async fn async_main() -> AnyhowResult<()> {
@@ -360,8 +351,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // no API key and no auth headers. Construction never fails on an
     // unreachable server: the pool keeps reconnecting in the background and
     // the model-facing tools appear once it is up, so an offline boot degrades
-    // to "no web tools" rather than refusing to start. `web_configured` is
-    // derived live from this factory's status, never snapshotted at boot.
+    // to "no web tools" rather than refusing to start.
     let mcp_search = build_search_mcp(WORKBENCH_SEARCH_MCP_URL).await?;
     for status in mcp_search.server_statuses() {
         eprintln!(
@@ -427,7 +417,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 model,
                 model_variant: Some(model_variant),
             })),
-            mcp_search: Some(mcp_search),
             trace_sink: Some(Arc::clone(&trace_sink)),
             lashlang_execution,
             event_tx,
@@ -453,7 +442,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
                 "rlm_dialect": rlm_dialect.language_id(),
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
-                "web_configured": state.web_configured(),
                 "store_backend": stores.backend,
                 "restate_endpoint_addr": restate_endpoint_addr.to_string(),
                 "restate_ingress_url": state.restate_ingress_url,
@@ -867,8 +855,8 @@ mod startup_tests {
             "the search server must stay registered while it reconnects: {statuses:?}"
         );
         assert!(
-            !search_mcp_configured(&factory),
-            "an unreachable server must not report web tools as configured"
+            statuses.iter().all(|status| !status.connected),
+            "an unreachable server must stay disconnected: {statuses:?}"
         );
     }
 }

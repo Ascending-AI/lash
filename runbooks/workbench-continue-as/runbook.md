@@ -100,8 +100,8 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
    this runbook exercises, not a host-invoked standard-mode compaction.
 7. **Exercise a real tool before switching.** At least one pressure turn must produce paired
    successful `tool_call_started` / `tool_call_completed` records for the same call id (for
-   example the Parallel web-search MCP tool when `/api/state.settings.web_configured` is true). A Lashlang block
-   without a tool call does not satisfy this
+   example the Parallel web-search MCP tool). A Lashlang block without a tool call does not
+   satisfy this
    gate.
 8. **Try the organic lever once, then guide explicitly.** After compaction pressure exists,
    first ask the agent to continue the marker-retention task without naming the tool and
@@ -177,9 +177,8 @@ Submit several bounded turns. Each establishes one literal marker fact and asks 
 acknowledgement; deterministic inert filler may make each prompt roughly 4,000–6,000 tokens.
 One turn must ask the agent to call a small read-only workbench tool such as the Parallel
 web-search MCP tool (`mcp__parallel__web_search_*`, Lashlang `parallel.web_search_<digest>`)
-before acknowledging its marker.
-Require `/api/state.settings.web_configured == true` before choosing this example. Keep
-`FIG992A-SEED-<run-id>` as the future baton and explicitly label
+before acknowledging its marker. Keep `FIG992A-SEED-<run-id>` as the future baton and
+explicitly label
 `FIG992A-NONSEED-<run-id>` as `unseeded_secret` in old-frame context.
 
 After every send, gate the relevant `turn_completed`, idle, empty active turns, and stable

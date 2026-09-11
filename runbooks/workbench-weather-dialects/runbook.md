@@ -132,7 +132,7 @@ Do: boot the row, poll `/healthz` to 200, then open its scoped page with
 `wait_until="domcontentloaded"` and explicit waiting assertions.
 
 Expect: the composer is visible; the rendered session id and dialect equal the scoped id
-and row; `/api/state.settings` agrees; `web_configured == true`; the transcript is empty;
+and row; `/api/state.settings` agrees; the transcript is empty;
 the page is idle; the API has no active turns; the dedicated Postgres store has no graph
 rows for the session; and the trace has no turn, code-execution, or tool-call record for the
 session. Record the configured model from state, but treat the served-model evidence after

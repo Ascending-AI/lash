@@ -3,17 +3,6 @@ use lash::SessionId;
 use lash::TurnId;
 
 impl AppState {
-    /// Whether the web-search MCP server is connected right now.
-    ///
-    /// This reads the plugin's live server status on every call, so the
-    /// settings panel and startup trace reflect a reconnect or disconnect that
-    /// happened after boot instead of a stale startup snapshot.
-    pub(crate) fn web_configured(&self) -> bool {
-        self.mcp_search
-            .as_ref()
-            .is_some_and(|factory| search_mcp_configured(factory))
-    }
-
     /// The dialect this session is opened with: its roster row's, or the
     /// ambient default for a session the roster never recorded.
     pub(crate) fn requested_dialect(&self, session_id: &SessionId) -> lash::rlm::RlmDialect {
@@ -157,7 +146,6 @@ impl AppState {
         Settings {
             model: selected_model.model,
             model_variant: selected_model.model_variant,
-            web_configured: self.web_configured(),
             model_variants: vec!["", "low", "medium", "high"],
             session_name: self
                 .sessions
