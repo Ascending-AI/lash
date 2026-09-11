@@ -19,7 +19,7 @@ pub(crate) async fn app_state(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateReadSnapshot>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.state").await?);
+    let session_id = state.admit_session(&query, "api.state").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -279,7 +279,7 @@ pub(crate) async fn send_turn(
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
-    let session_id = SessionId::from(state.admit_session(&query, "api.turn").await?);
+    let session_id = state.admit_session(&query, "api.turn").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::EnqueueTurn {
@@ -408,7 +408,7 @@ pub(crate) async fn button_trigger(
 ) -> Result<Json<CommandAccepted>, AppError> {
     // Side-effect ingress: the fence refuses before any message is pushed or
     // any workflow submitted for a retired session.
-    let session_id = SessionId::from(state.admit_session(&query, "api.button_trigger").await?);
+    let session_id = state.admit_session(&query, "api.button_trigger").await?;
     let turn_model = model_spec_for_request(
         &state.selected_model(),
         request.model.as_deref(),
@@ -454,7 +454,7 @@ pub(crate) async fn list_triggers(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<WorkbenchTriggerRegistration>>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.triggers.list").await?);
+    let session_id = state.admit_session(&query, "api.triggers.list").await?;
     let records = state
         .trigger_store
         .list_subscriptions(lash::triggers::TriggerSubscriptionFilter::for_session(
@@ -477,7 +477,7 @@ pub(crate) async fn set_trigger_enabled(
     Query(query): Query<SessionQuery>,
     Json(request): Json<TriggerEnabledRequest>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.triggers.enable").await?);
+    let session_id = state.admit_session(&query, "api.triggers.enable").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     let changed = record.enabled != request.enabled;
     let command = if request.enabled {
@@ -550,7 +550,7 @@ pub(crate) async fn delete_trigger(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.triggers.delete").await?);
+    let session_id = state.admit_session(&query, "api.triggers.delete").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
     restate::cancel_cron_job_before_trigger_delete(&state, &session_id, &record).await?;
     state
@@ -669,7 +669,7 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     state: &AppState,
     reason: &str,
 ) -> Result<lash::SessionCommandReceipt, AppError> {
-    let session_id = SessionId::from(state.current_session_id());
+    let session_id = state.current_session_id();
     let session = state.open_session(&session_id).await.map_err(|error| {
         state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
     })?;
@@ -709,7 +709,7 @@ pub(crate) async fn inject_message(
 ) -> Result<Json<CommandAccepted>, AppError> {
     // Side-effect ingress: the fence refuses before mail is delivered or any
     // workflow submitted for a retired session.
-    let session_id = SessionId::from(state.admit_session(&query, "api.accounts.inject").await?);
+    let session_id = state.admit_session(&query, "api.accounts.inject").await?;
     let turn_model = model_spec_for_request(
         &state.selected_model(),
         request.model.as_deref(),
@@ -749,17 +749,14 @@ pub(crate) async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateSnapshot>, AppError> {
-    let old_session_id = SessionId::from(
-        state
-            .admit_session_for_delete(&query, "api.session.delete")
-            .await?,
-    );
+    let old_session_id = state
+        .admit_session_for_delete(&query, "api.session.delete")
+        .await?;
     retire_session(&state, &old_session_id).await?;
     state.event_tx.remove(&old_session_id);
     let retired_dialect = state.requested_dialect(&old_session_id);
     let (new_session_id, replaced_current) =
         state.sessions.replace(&old_session_id, retired_dialect);
-    let new_session_id = SessionId::from(new_session_id);
     state.trace_for_session(
         &old_session_id,
         "api.reset",
@@ -816,11 +813,11 @@ pub(crate) async fn list_work(
     // Only the explicit form is session-bound: the default query serves the
     // runtime-wide registry snapshot (including work retired by a session
     // delete), so it is not fenced on whatever session happens to be current.
-    let session_id = SessionId::from(if query.is_explicit() {
+    let session_id = if query.is_explicit() {
         state.admit_session(&query, "api.work.list").await?
     } else {
         query.resolve(&state)?
-    });
+    };
     let observed = if query.is_explicit() {
         state
             .process_observer
@@ -869,7 +866,7 @@ pub(crate) async fn list_queued_work(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Vec<lash::persistence::QueuedWorkBatch>>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.queued_work.list").await?);
+    let session_id = state.admit_session(&query, "api.queued_work.list").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -891,7 +888,7 @@ pub(crate) async fn run_queued_work_batch(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<QueuedWorkBatchAction>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.queued_work.run").await?);
+    let session_id = state.admit_session(&query, "api.queued_work.run").await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
@@ -973,11 +970,9 @@ pub(crate) async fn cancel_queued_work_batch(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<QueuedWorkBatchAction>, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(&query, "api.queued_work.cancel")
-            .await?,
-    );
+    let session_id = state
+        .admit_session(&query, "api.queued_work.cancel")
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
@@ -1026,9 +1021,7 @@ pub(crate) async fn cancel_work(
     }
     let session_id = match &process.originator {
         lash::process::ProcessOriginator::Session { session_id, .. } => session_id.clone(),
-        lash::process::ProcessOriginator::Host { .. } => {
-            SessionId::from(state.current_session_id())
-        }
+        lash::process::ProcessOriginator::Host { .. } => state.current_session_id(),
     };
     let operation_id = format!("workbench-process-cancel-{}", uuid::Uuid::new_v4());
     restate::submit_process_cancel(
@@ -1118,7 +1111,7 @@ pub(crate) async fn list_lashlang_graphs(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<execution_graphs::LashlangGraphIndex>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.lashlang_graphs").await?);
+    let session_id = state.admit_session(&query, "api.lashlang_graphs").await?;
     let index = execution_graphs::index_for_session(
         &state.process_observer,
         &session_id,
@@ -1133,7 +1126,7 @@ pub(crate) async fn lashlang_graph(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TraceLashlangGraph>, AppError> {
-    let session_id = SessionId::from(state.admit_session(&query, "api.lashlang_graph").await?);
+    let session_id = state.admit_session(&query, "api.lashlang_graph").await?;
     let graph = execution_graphs::visible_graph_by_key(
         &state.process_observer,
         &session_id,

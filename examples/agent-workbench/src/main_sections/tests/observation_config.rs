@@ -1,14 +1,10 @@
 use super::*;
-use lash::SessionId;
 
 async fn observation_get_preserves_config(path: &str) {
     let data_dir = tempfile::tempdir().unwrap();
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
     let session_id = state.current_session_id();
-    let session = state
-        .open_session(&SessionId::from(session_id.clone()))
-        .await
-        .unwrap();
+    let session = state.open_session(&session_id).await.unwrap();
     let peer_model = lash::ModelSpec::builder("peer-commanded-model")
         .context_window_tokens(8192)
         .build()
@@ -25,7 +21,7 @@ async fn observation_get_preserves_config(path: &str) {
     drop(session);
     let store = state
         .session_store_factory
-        .open_existing_store(&state_store_request(&state, &SessionId::from(session_id)))
+        .open_existing_store(&state_store_request(&state, &session_id))
         .await
         .unwrap()
         .unwrap();
