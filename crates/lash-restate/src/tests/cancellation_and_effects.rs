@@ -1134,48 +1134,9 @@ pub(super) fn replay_test_input(turn_id: &TurnId) -> lash_core::TurnInput {
     input
 }
 
-pub(super) struct Fig1293EchoTools;
-
-pub(super) fn fig1293_echo_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        "tool:fig1293_echo",
-        "fig1293_echo",
-        "Return the supplied literal value.",
-        serde_json::json!({
-            "type": "object",
-            "properties": { "value": {} },
-            "required": ["value"],
-            "additionalProperties": false
-        }),
-        serde_json::json!({
-            "type": "object",
-            "properties": { "echo": {} },
-            "required": ["echo"],
-            "additionalProperties": false
-        }),
-    )
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for Fig1293EchoTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![fig1293_echo_tool().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "fig1293_echo").then(|| Arc::new(fig1293_echo_tool().contract()))
-    }
-
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!({
-            "echo": call.args.get("value").cloned().unwrap_or_default(),
-        }))
-    }
-}
-
 pub(super) fn fig1293_migrated_tool_factories()
 -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
-    let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(Fig1293EchoTools);
+    let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
     vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
         Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),

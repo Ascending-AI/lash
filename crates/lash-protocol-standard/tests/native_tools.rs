@@ -61,9 +61,13 @@ fn standard_protocol_owns_batch_not_processes() {
 
 #[test]
 fn processes_are_composed_with_standard_protocol() {
+    let fixture: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
     let session = PluginHost::new(vec![
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
-        Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "native-tools-fixture",
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),
+        )),
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
     ])
     .build_session("root")
@@ -71,6 +75,7 @@ fn processes_are_composed_with_standard_protocol() {
 
     let names = tool_names(&session);
     assert!(names.contains(&"batch".to_string()));
+    assert!(names.contains(&lash_core::testing::FIXTURE_ECHO_TOOL.to_string()));
     assert!(names.contains(&"list_process_handles".to_string()));
     assert!(names.contains(&"cancel_process".to_string()));
 }
