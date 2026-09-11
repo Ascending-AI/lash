@@ -35,23 +35,6 @@ struct SourceNestingFrame {
     postfix: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
-#[repr(usize)]
-enum SourceConstruct {
-    Delimiter,
-    Operator,
-}
-
-/// The source constructs that consume the shared nesting budget.
-///
-/// Keeping the entries separate makes the limit policy explicit without
-/// splitting the cumulative counter: delimiters and operators must continue to
-/// draw on the same budget.
-const SOURCE_CONSTRUCT_LIMITS: [usize; 2] = [
-    MAX_SOURCE_NESTING_DEPTH, // SourceConstruct::Delimiter
-    MAX_SOURCE_NESTING_DEPTH, // SourceConstruct::Operator
-];
-
 #[derive(Default)]
 struct SourceNestingState {
     frames: Vec<SourceNestingFrame>,
@@ -67,7 +50,7 @@ impl SourceNestingState {
         postfix: bool,
         index: usize,
     ) -> Result<(), SourceSpan> {
-        self.ensure_within_limit(SourceConstruct::Delimiter, self.depth() + 1, index)?;
+        self.ensure_within_limit(self.depth() + 1, index)?;
         self.frames.push(SourceNestingFrame {
             delimiter,
             outer_operators: std::mem::take(&mut self.current_operators),
@@ -88,16 +71,11 @@ impl SourceNestingState {
 
     fn increment_operator(&mut self, index: usize) -> Result<(), SourceSpan> {
         self.current_operators += 1;
-        self.ensure_within_limit(SourceConstruct::Operator, self.depth(), index)
+        self.ensure_within_limit(self.depth(), index)
     }
 
-    fn ensure_within_limit(
-        &self,
-        construct: SourceConstruct,
-        depth: usize,
-        index: usize,
-    ) -> Result<(), SourceSpan> {
-        if depth > SOURCE_CONSTRUCT_LIMITS[construct as usize] {
+    fn ensure_within_limit(&self, depth: usize, index: usize) -> Result<(), SourceSpan> {
+        if depth > MAX_SOURCE_NESTING_DEPTH {
             return Err(SourceSpan {
                 start: index,
                 end: index + 1,
