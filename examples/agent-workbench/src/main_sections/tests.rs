@@ -1886,6 +1886,10 @@ async fn live_workbench_restate_state_with_provider_and_database(
     database_url: Option<&str>,
     lease_timings: lash::durability::LeaseTimings,
 ) -> LiveWorkbenchRestateHarness {
+    // An isolated live-test runner may need to retain this exact store when a
+    // fixture aborts. Record ownership before opening any replayable handle;
+    // normal fixture teardown still removes its own directory directly.
+    record_fixture_owned_data_dir(data_dir);
     let stores = WorkbenchStores::open(data_dir, database_url)
         .await
         .expect("open live workbench stores");

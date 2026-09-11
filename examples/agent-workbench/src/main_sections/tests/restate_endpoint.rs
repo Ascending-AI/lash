@@ -409,6 +409,21 @@ pub(crate) fn record_fixture_owned_data_dir(path: &std::path::Path) {
     .expect("append fixture data manifest");
 }
 
+pub(crate) fn record_fixture_owned_child(pid: u32) {
+    let Some(manifest) = std::env::var_os("AGENT_WORKBENCH_FIXTURE_CHILD_MANIFEST") else {
+        return;
+    };
+    use std::io::Write as _;
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(manifest)
+            .expect("open fixture child manifest"),
+        "{pid}"
+    )
+    .expect("append fixture child manifest");
+}
+
 #[derive(Deserialize)]
 struct RestateDeploymentRegistration {
     id: String,

@@ -2118,7 +2118,9 @@ fn spawn_recovery_e2e_child(
             endpoint_bind.to_string(),
         )
         .env("RESTATE_INGRESS_URL", ingress_url);
-    OwnedFixtureChild::new(command.spawn().expect("spawn workbench recovery child"))
+    let child = command.spawn().expect("spawn workbench recovery child");
+    record_fixture_owned_child(child.id());
+    OwnedFixtureChild::new(child)
 }
 
 async fn live_restate_recovery_child() {
