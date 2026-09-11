@@ -224,10 +224,13 @@ acquires the key itself and would queue behind the caller's own exclusive hold:
 already holds the key and owns its own transaction.
 
 The expectation artifact is regenerated from a live database rather than
-hand-written, and CI runs the Postgres lane on PostgreSQL 14, 16, and 18,
-asserting all three produce the byte-identical artifact. Any attribute that
-renders differently across the matrix leaves the scope; it is never special-cased
-per version.
+hand-written. CI uses a stable PostgreSQL 14/16/18 matrix: 14 and 18 run narrow
+live catalog compatibility checks, while 16 is the sole primary behavior lane.
+Whenever the PostgreSQL job runs, PostgreSQL 14 and 18 assert the byte-identical
+artifact. The PG16 full store suite asserts it on trunk and full-profile runs;
+PG16 also runs the focused runtime identity oracle on pull requests and merge
+groups. Any attribute that renders differently across the matrix leaves the
+scope; it is never special-cased per version.
 
 No fingerprint is persisted in `lash_schema_versions`. A published hash is
 exactly as copy-pasteable as an integer, so it would defend against typos rather

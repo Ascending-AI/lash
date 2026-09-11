@@ -66,13 +66,9 @@ class ConfidenceConclusionTests(unittest.TestCase):
 
 
 class ClassifyTests(unittest.TestCase):
-    # A docs-only verdict is a statement about content as well as paths, so
-    # these fixtures state the diff content they were classified from. An
-    # absent diff carries no content signal and deliberately widens instead.
     def test_docs_only_skips_every_expensive_family(self) -> None:
         plan = ci_plan.classify(
-            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")],
-            "+A paragraph about the operator runbook.",
+            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")]
         )
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
@@ -84,13 +80,13 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_addition_and_modification_preserve_docs_only_skip(self) -> None:
-        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")], "+A new sentence.")
+        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")])
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual("docs-only diff", plan["reason"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_markdown_file_stays_docs_only(self) -> None:
-        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")], "+A revised decision.")
+        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")])
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
@@ -141,9 +137,7 @@ class ClassifyTests(unittest.TestCase):
 
 def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
-    plan_outputs.update(
-        {"docs_only": "false", "fail_open": "false", "identity_versions": "false"}
-    )
+    plan_outputs.update({"docs_only": "false", "fail_open": "false"})
     needs = {job: {"result": "success", "outputs": {}} for job in ci_plan.UNGATED_JOBS | set(ci_plan.GATED_JOBS)}
     needs["plan"]["outputs"] = plan_outputs
     return needs
@@ -307,138 +301,113 @@ class ProducerConclusionTests(unittest.TestCase):
         self.assertEqual([], self.evaluate(needs, "merge_group", False))
 
 
-# Built at runtime rather than spelled out, so this file's own diff never
-# carries an identity-constant definition line and never widens its own CI.
-def identity_definition_line(sign: str, name: str, value: str) -> str:
-    return f"{sign}pub const {name}: u32 = {value};"
+POSTGRES_TEST_STEPS = {
+    "Test PostgreSQL catalog compatibility",
+    "Test Postgres store (conformance and attempt atomicity)",
+    "Test runtime pool-wait binding",
+    "Test runtime Postgres agent scenarios",
+    "Test cross-backend store differential",
+}
 
 
-def diff_around(*lines: str) -> str:
-    return "\n".join(
-        ("diff --git a/crates/x/src/lib.rs b/crates/x/src/lib.rs",
-         "--- a/crates/x/src/lib.rs",
-         "+++ b/crates/x/src/lib.rs",
-         "@@ -1 +1 @@",
-         *lines)
-    )
+def selected_postgres_test_steps(event: str, role: str) -> set[str]:
+    """Evaluate the small fixed condition vocabulary used by the PG matrix."""
+
+    pr_class = event in {"pull_request", "merge_group"}
+    selectors = {
+        "matrix.role == 'compatibility'": role == "compatibility",
+        "matrix.role == 'primary'": role == "primary",
+        (
+            "matrix.role == 'primary' && github.event_name != 'pull_request'"
+            " && github.event_name != 'merge_group'"
+        ): role == "primary" and not pr_class,
+    }
+    job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
+        "postgres-store"
+    ]
+    selected = set()
+    for step in job["steps"]:
+        if step.get("name") not in POSTGRES_TEST_STEPS:
+            continue
+        condition = step.get("if")
+        if condition not in selectors:
+            raise AssertionError(f"unmodelled PostgreSQL test condition: {condition!r}")
+        if selectors[condition]:
+            selected.add(step["name"])
+    return selected
 
 
-def conclusion_needs_for(plan: dict[str, str], event: str) -> dict[str, dict[str, object]]:
-    """A wholly successful board carrying `plan`'s real outputs."""
+class PostgresMatrixTests(unittest.TestCase):
+    COMPATIBILITY = {"Test PostgreSQL catalog compatibility"}
+    PRIMARY_PR = {"Test runtime Postgres agent scenarios"}
+    PRIMARY_TRUNK = {
+        "Test Postgres store (conformance and attempt atomicity)",
+        "Test runtime pool-wait binding",
+        "Test runtime Postgres agent scenarios",
+        "Test cross-backend store differential",
+    }
 
-    needs = successful_needs()
-    needs["plan"]["outputs"] = dict(plan)
-    apply_event_deferrals(needs, event)
-    return needs
-
-
-class IdentityVersionTests(unittest.TestCase):
-    """A semantic-hash or bytecode-format bump must buy the full PG matrix."""
-
-    def test_moving_either_constant_is_detected(self) -> None:
-        for name in ci_plan.IDENTITY_VERSION_CONSTANTS:
-            with self.subTest(constant=name):
-                diff = diff_around(
-                    identity_definition_line("-", name, "11"),
-                    identity_definition_line("+", name, "12"),
-                )
-                self.assertTrue(ci_plan.detect_identity_version_change(diff))
-                plan = ci_plan.classify([("M", "crates/x/src/lib.rs")], diff)
-                self.assertEqual("true", plan["identity_versions"])
-
-    def test_removing_a_definition_is_detected_so_a_relocation_still_fires(self) -> None:
-        diff = diff_around(identity_definition_line("-", "BYTECODE_FORMAT_VERSION", "12"))
-        self.assertTrue(ci_plan.detect_identity_version_change(diff))
-
-    def test_ordinary_diffs_do_not_widen_the_matrix(self) -> None:
-        name = "LASHLANG_SEMANTIC_HASH_VERSION"
-        for line in (
-            "+    let x = 1;",
-            # A re-export or a mere mention is not a move of the definition.
-            f"+pub use lash_sansio::{name};",
-            f"+/// See [`{name}`] for the identity contract.",
-            f"+        writer.atom({name});",
-        ):
-            with self.subTest(line=line):
-                self.assertFalse(ci_plan.detect_identity_version_change(diff_around(line)))
-        plan = ci_plan.classify(
-            [("M", "crates/lash-core/src/lib.rs")], diff_around("+    let x = 1;")
-        )
-        self.assertEqual("false", plan["identity_versions"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
-
-    def test_file_headers_naming_a_constant_are_not_definition_lines(self) -> None:
-        name = "BYTECODE_FORMAT_VERSION"
-        diff = "\n".join(
-            (
-                f"--- a/crates/x/{name}.rs",
-                f"+++ b/crates/x/{name}.rs",
-                "@@ -1 +1 @@",
-                "+// unrelated",
-            )
-        )
-        self.assertFalse(ci_plan.detect_identity_version_change(diff))
-
-    def test_a_docs_diff_quoting_a_definition_line_is_not_docs_only(self) -> None:
-        # An ADR code fence naming a constant is enough to set the signal.
-        # postgres-store gates its own `if` on the stores family, so a plan
-        # that widened the matrix while permitting that job to skip would
-        # demand, on a trunk push, a job that never ran.
-        diff = diff_around(identity_definition_line("+", "BYTECODE_FORMAT_VERSION", "13"))
-        plan = ci_plan.classify([("M", "docs/adr/0086-lashlang-identity.md")], diff)
-        self.assertEqual("true", plan["identity_versions"])
-        self.assertEqual("false", plan["docs_only"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
-        self.assertEqual("Lashlang identity version moved", plan["reason"])
-        self.assertEqual([], ci_plan.evaluate_conclusion(
-            conclusion_needs_for(plan, "push"), event_name="push", ref="refs/heads/main"
-        ))
-
-    def test_absent_diff_content_falls_open_to_the_full_matrix(self) -> None:
+    def test_matrix_has_fixed_explicit_primary_and_compatibility_roles(self) -> None:
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
         self.assertEqual(
-            "true", ci_plan.classify([("M", "crates/x/src/lib.rs")])["identity_versions"]
+            [
+                {"postgres": "14", "role": "compatibility"},
+                {"postgres": "16", "role": "primary"},
+                {"postgres": "18", "role": "compatibility"},
+            ],
+            jobs["postgres-store"]["strategy"]["matrix"]["include"],
         )
-        self.assertEqual("true", ci_plan.fail_open("no exact diff")["identity_versions"])
 
-    def test_conclusion_refuses_a_bump_whose_postgres_matrix_did_not_run(self) -> None:
-        for result in ("skipped", "failure", "cancelled"):
-            for event in ("pull_request", "merge_group", "push"):
-                with self.subTest(result=result, event=event):
-                    needs = successful_needs()
-                    needs["plan"]["outputs"]["identity_versions"] = "true"
-                    needs["postgres-store"]["result"] = result
-                    apply_event_deferrals(needs, event)
-                    problems = ci_plan.evaluate_conclusion(needs, event_name=event)
-                    self.assertTrue(any("postgres-store" in problem for problem in problems))
-                    self.assertTrue(
-                        any("identity version" in problem for problem in problems),
-                        problems,
-                    )
+    def test_event_and_role_selection_runs_the_right_real_tests(self) -> None:
+        for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
+            with self.subTest(event=event, role="compatibility"):
+                self.assertEqual(
+                    self.COMPATIBILITY,
+                    selected_postgres_test_steps(event, "compatibility"),
+                )
+            with self.subTest(event=event, role="primary"):
+                expected = (
+                    self.PRIMARY_PR
+                    if event in ci_plan.DEFERRED_EVENTS
+                    else self.PRIMARY_TRUNK
+                )
+                self.assertEqual(expected, selected_postgres_test_steps(event, "primary"))
 
-    def test_conclusion_requires_the_identity_output_to_be_stated(self) -> None:
-        needs = successful_needs()
-        del needs["plan"]["outputs"]["identity_versions"]
-        problems = ci_plan.evaluate_conclusion(needs, event_name="pull_request")
-        self.assertTrue(any("identity_versions" in problem for problem in problems))
-
-    def test_workflow_wires_the_output_into_the_postgres_matrix_and_steps(self) -> None:
-        workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    def test_commands_pin_live_catalog_version_and_runtime_identity_oracle(self) -> None:
+        job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
+            "postgres-store"
+        ]
+        steps = {step["name"]: step for step in job["steps"]}
+        compatibility = steps["Test PostgreSQL catalog compatibility"]["run"]
+        self.assertIn("committed_shape_artifact_matches_the_ddl_artifact", compatibility)
         self.assertIn(
-            "steps.classify.outputs.identity_versions", workflow["plan"]["outputs"]["identity_versions"]
+            "a_mismatched_version_stamp_is_reported_without_a_column_diff",
+            compatibility,
         )
-        job = workflow["postgres-store"]
-        matrix = job["strategy"]["matrix"]["postgres"]
-        self.assertIn("needs.plan.outputs.identity_versions == 'true'", matrix)
-        self.assertIn('"14", "16", "18"', matrix)
-        gated = {
-            step["name"]: step["if"]
-            for step in job["steps"]
-            if "if" in step and "github.event_name != 'pull_request'" in step["if"]
-        }
-        self.assertTrue(gated, "postgres-store must still defer heavy steps off pull requests")
-        for name, condition in gated.items():
-            with self.subTest(step=name):
-                self.assertIn("needs.plan.outputs.identity_versions == 'true'", condition)
+        self.assertIn(
+            "agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres",
+            steps["Test runtime Postgres agent scenarios"]["run"],
+        )
+
+    def test_postgres_conclusion_fails_closed_for_every_supported_event(self) -> None:
+        for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
+            for result in ("skipped", "failure", "cancelled"):
+                with self.subTest(event=event, result=result):
+                    needs = successful_needs()
+                    apply_event_deferrals(needs, event)
+                    needs["postgres-store"]["result"] = result
+                    problems = ci_plan.evaluate_conclusion(
+                        needs, event_name=event, ref="refs/heads/main"
+                    )
+                    self.assertTrue(any("postgres-store" in problem for problem in problems))
+            with self.subTest(event=event, result="missing"):
+                needs = successful_needs()
+                apply_event_deferrals(needs, event)
+                del needs["postgres-store"]
+                problems = ci_plan.evaluate_conclusion(
+                    needs, event_name=event, ref="refs/heads/main"
+                )
+                self.assertTrue(any("postgres-store" in problem for problem in problems))
 
 
 class FuzzSmokeTests(unittest.TestCase):

@@ -117,7 +117,6 @@ jobs:
       workflows_only: ${{ steps.classify.outputs.workflows_only }}
       e2e_relevant: ${{ steps.classify.outputs.e2e_relevant }}
       scripts_gates: ${{ steps.classify.outputs.scripts_gates }}
-      identity_versions: ${{ steps.classify.outputs.identity_versions }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
 
@@ -184,17 +183,8 @@ jobs:
           if ! git diff --name-status --no-renames -z "${base_sha}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-paths"; then
             fail_open "exact diff ${base_sha}..${GITHUB_SHA} could not be computed"
           fi
-          # The exact diff *content*, not just its paths: `identity_versions`
-          # keys on a changed `const LASHLANG_SEMANTIC_HASH_VERSION`/
-          # `const BYTECODE_FORMAT_VERSION` definition line, which a path list
-          # cannot see. Context-free (`--unified=0`) keeps it to the changed
-          # lines; a failure here falls open to the wide matrix.
-          if ! git diff --unified=0 --no-color --no-renames "${base_sha}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/exact-diff"; then
-            fail_open "exact diff content ${base_sha}..${GITHUB_SHA} could not be computed"
-          fi
           python3 scripts/ci_plan.py classify \
-            --paths-file "${RUNNER_TEMP}/changed-paths" \
-            --diff-file "${RUNNER_TEMP}/exact-diff" >> "${GITHUB_OUTPUT}"
+            --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
       - name: Summarize plan
         env:
@@ -1244,15 +1234,13 @@ jobs:
           if-no-files-found: error
 
   postgres-store:
-    name: Test Postgres store (PG ${{ matrix.postgres }})
+    name: Test Postgres store (PG ${{ matrix.postgres }}, ${{ matrix.role }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
-    # The focused runtime Agent Scenario is a pull-request and merge-queue gate.
-    # The heavier store/perf coverage below remains deferred to relevant trunk
-    # runs per the 2026-08-25 CI-scope ruling -- except on a diff that moves a
-    # Lashlang identity version (`plan.identity_versions`), where every step in
-    # this job is the gate.
+    # The stable matrix always supplies real PostgreSQL evidence on pull requests
+    # and merge groups. The heavier PG16 store/perf coverage remains deferred to
+    # relevant trunk runs per the 2026-08-25 CI-scope ruling.
     if: >-
       github.event_name == 'pull_request'
       || github.event_name == 'merge_group'
@@ -1265,23 +1253,21 @@ jobs:
     # 14 and 18 bracket the supported range — 18 is where NOT NULL became
     # `pg_constraint` rows, 14 is before `pg_index.indnullsnotdistinct` existed —
     # and the shape suite asserts all three produce the byte-identical artifact.
-    # Pull requests and merge-group runs are PR-class and test only the oldest
-    # supported major (14), keeping the queue on the same fast path. Main
-    # pushes run the full 14/16/18 catalog byte-identity bracket; the full
-    # profile (workflow_dispatch) keeps the release certification path intact.
-    #
-    # The one PR-class exception is `plan.identity_versions`: a diff that moves
-    # `LASHLANG_SEMANTIC_HASH_VERSION` or `BYTECODE_FORMAT_VERSION` invalidates
-    # the `resource_operation:<hex>` and `tool-intent:v2:blake3:` literals that
-    # only execute in the PG16 legs below, so such a pull request buys the full
-    # matrix -- and the trunk-only steps in this job -- on its own head commit.
-    # Three trunk outages in one night came from letting those diffs through on
-    # a PG14-only matrix. The evidence is this run, so nothing depends on a
-    # human sequencing a second dispatch by hand, and no run is cancelled.
+    # PG14 and PG18 are compatibility lanes: they run only the live catalog
+    # artifact comparison and a focused version-stamp gate. PG16 is the sole
+    # primary lane. On PR-class events it runs the proven runtime identity oracle;
+    # on trunk/full runs it retains the package-wide, pool-wait, runtime, and
+    # cross-backend behavior coverage without triplicating it across majors.
     strategy:
       fail-fast: false
       matrix:
-        postgres: ${{ fromJSON((github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || needs.plan.outputs.identity_versions == 'true') && '["14", "16", "18"]' || '["14"]') }}
+        include:
+          - postgres: "14"
+            role: compatibility
+          - postgres: "16"
+            role: primary
+          - postgres: "18"
+            role: compatibility
 
     services:
       postgres:
@@ -1336,6 +1322,20 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
+      # The compatibility lanes provision the published DDL and compare its live
+      # catalog rendering byte-for-byte with schema-shape.txt. The second test is
+      # a distinct version-stamp gate. Required mode makes a missing URL fail.
+      - name: Test PostgreSQL catalog compatibility
+        if: matrix.role == 'compatibility'
+        run: |
+          cargo test -p lash-internal-postgres-store --locked --lib \
+            committed_shape_artifact_matches_the_ddl_artifact
+          cargo test -p lash-internal-postgres-store --locked --test schema_drift \
+            a_mismatched_version_stamp_is_reported_without_a_column_diff
+        env:
+          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+          LASH_REQUIRE_POSTGRES: "1"
+
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
@@ -1352,24 +1352,25 @@ jobs:
       # Keep this package-wide: tests/attempt_atomicity.rs is part of this gate;
       # narrowing to --test conformance would silently drop attempt atomicity.
       - name: Test Postgres store (conformance and attempt atomicity)
-        if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.plan.outputs.identity_versions == 'true'
+        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: cargo test -p lash-internal-postgres-store --locked
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
       - name: Test runtime pool-wait binding
-        if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.plan.outputs.identity_versions == 'true'
+        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: cargo nextest run -p lash-perf -E 'test(pool_wait)' --locked
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
       # crates/lash currently has one Agent Scenario gated by the shared
-      # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. Keep this
-      # focused on the exact test instead of rerunning the runtime suite.
+      # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. It is also the
+      # test that caught a real identity-version mutation, so keep it stable and
+      # focused instead of scheduling tests by parsing changed source literals.
       - name: Test runtime Postgres agent scenarios
-        if: matrix.postgres == '16'
+        if: matrix.role == 'primary'
         run: >-
           cargo nextest run --profile ci -p lash-runtime --features rlm
           --locked -E
@@ -1378,10 +1379,10 @@ jobs:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
-      # The differential compares backend semantics, not catalog rendering, so it
-      # runs once on the primary major instead of three times.
+      # The full differential compares backend semantics, not catalog rendering,
+      # so it runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
-        if: ((github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.plan.outputs.identity_versions == 'true') && matrix.postgres == '16'
+        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: >-
           cargo nextest run --profile ci -p lash-sim
           --test cross_backend_store_differential
