@@ -8,7 +8,9 @@
 //!    legacy session-only value must replay without shifting any later syscall.
 //!    The run command is matched by header equality (name plus completion id),
 //!    so an inserted or renamed syscall fails the replay instead of silently
-//!    re-executing.
+//!    re-executing. The fixtures therefore encode the historical
+//!    `workbench-cron:session-disposition` run name that a real old journal
+//!    carries; the handler preserves that name on purpose.
 //! 2. A live session whose registration is absent or disabled must cancel the
 //!    tick at the handler level with no re-arm command and no delivery.
 
@@ -479,7 +481,7 @@ async fn legacy_live_basis_replay_continues_through_journaled_downstream_command
         &object_key,
         &[
             encode_get_lazy_state_command(crate::restate::CRON_STATE_KEY, 1),
-            encode_run_command(2, "workbench-cron:tick-basis"),
+            encode_run_command(2, "workbench-cron:session-disposition"),
             encode_run_command(3, "workbench-cron:fired-at"),
         ],
         &[
@@ -520,7 +522,7 @@ async fn legacy_retired_and_unknown_basis_replay_enter_the_cancel_path() {
             &object_key,
             &[
                 encode_get_lazy_state_command(crate::restate::CRON_STATE_KEY, 1),
-                encode_run_command(2, "workbench-cron:tick-basis"),
+                encode_run_command(2, "workbench-cron:session-disposition"),
             ],
             &[
                 encode_get_lazy_state_completion(1, Some(&state_json)),
@@ -558,7 +560,7 @@ async fn unfinished_basis_run_replay_reissues_the_same_run_identity() {
         &object_key,
         &[
             encode_get_lazy_state_command(crate::restate::CRON_STATE_KEY, 1),
-            encode_run_command(2, "workbench-cron:tick-basis"),
+            encode_run_command(2, "workbench-cron:session-disposition"),
         ],
         &[encode_get_lazy_state_completion(1, Some(&state_json))],
     );
@@ -718,4 +720,64 @@ async fn handler_cancels_an_absent_registration_without_rearming_or_emitting() {
 #[tokio::test]
 async fn handler_cancels_a_disabled_registration_without_rearming_or_emitting() {
     handler_cancels_without_rearming_or_emitting(true).await;
+}
+
+#[tokio::test]
+async fn non_live_session_cancels_without_reading_a_failing_registration_store() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(OccurrenceFailureTriggerStore::for_subscription_list(
+        lash::plugins::PluginError::Session(
+            "a non-live session must not probe the registration store".to_string(),
+        ),
+    ));
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    // A session that was never materialized is not live, so the session arm must
+    // cancel before the registration axis is consulted.
+    let session_id = SessionId::from("fig1071-short-circuit-absent-session");
+    assert_ne!(session_id, state.current_session_id());
+    let source_key = "cron-source:fig1071-short-circuit";
+    let cron_state = replay_cron_state(&session_id, source_key);
+    let endpoint = cron_endpoint(state);
+
+    let output = invoke_cron_run_driven(
+        &endpoint,
+        &crate::restate::cron_job_key(&session_id, source_key),
+        &cron_state,
+    )
+    .await
+    .expect("a non-live session must cancel even with a failing registration store");
+
+    assert_eq!(
+        trigger_store.list_subscription_calls(),
+        0,
+        "the non-live session arm must not read the registration store"
+    );
+    assert!(
+        !restate_frames(&output)
+            .iter()
+            .any(|(message_type, _)| *message_type == 0x0002),
+        "the registration-store failure must not surface as a handler error"
+    );
+    let occurrences = lash::triggers::TriggerStore::list_occurrences(
+        trigger_store.as_ref(),
+        lash::triggers::TriggerOccurrenceFilter::default(),
+    )
+    .await
+    .expect("list non-live tick outcomes");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "the session arm must record exactly one outcome; records={occurrences:?}"
+    );
+    assert_eq!(
+        occurrences[0].outcome,
+        lash::triggers::TriggerOccurrenceOutcome::Dropped {
+            reason: "session_absent".to_string(),
+        },
+        "the non-live tick must cancel on the session axis"
+    );
 }

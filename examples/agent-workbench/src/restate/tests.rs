@@ -40,6 +40,7 @@ struct OccurrenceFailureTriggerStore {
     inner: lash::triggers::InMemoryTriggerStore,
     occurrence_failure: Option<lash::plugins::PluginError>,
     list_subscriptions_failure: Option<lash::plugins::PluginError>,
+    list_subscription_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl OccurrenceFailureTriggerStore {
@@ -48,6 +49,7 @@ impl OccurrenceFailureTriggerStore {
             inner: lash::triggers::InMemoryTriggerStore::new(),
             occurrence_failure: Some(failure),
             list_subscriptions_failure: None,
+            list_subscription_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -56,7 +58,13 @@ impl OccurrenceFailureTriggerStore {
             inner: lash::triggers::InMemoryTriggerStore::new(),
             occurrence_failure: None,
             list_subscriptions_failure: Some(failure),
+            list_subscription_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
+    }
+
+    fn list_subscription_calls(&self) -> usize {
+        self.list_subscription_calls
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -74,6 +82,8 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
         &self,
         filter: lash::triggers::TriggerSubscriptionFilter,
     ) -> Result<Vec<lash::triggers::TriggerSubscriptionRecord>, lash::plugins::PluginError> {
+        self.list_subscription_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(failure) = &self.list_subscriptions_failure {
             return Err(failure.clone());
         }

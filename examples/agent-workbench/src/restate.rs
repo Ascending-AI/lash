@@ -514,7 +514,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
                         )
                     }
                 })
-                .name("workbench-cron:tick-basis")
+                .name("workbench-cron:session-disposition") // historical run identity; replay matches names
                 .await?;
             CronTickBasis::from_journal_value(&journal_value)?
         };

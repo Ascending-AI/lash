@@ -60,7 +60,6 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "http",
- "http-body",
  "http-body-util",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
