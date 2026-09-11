@@ -790,6 +790,95 @@ pub(super) async fn stream_prepared_turn_follows_agent_frame_switch() {
 }
 
 #[tokio::test]
+pub(super) async fn process_scoped_agent_frame_follow_on_uses_distinct_cancel_peek_keys() {
+    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let captured_call_index = Arc::clone(&call_index);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call_index = Arc::clone(&captured_call_index);
+            async move {
+                match call_index.fetch_add(1, Ordering::SeqCst) {
+                    0 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "process-follow-on-switch".to_string(),
+                            tool_name: "terminal_tool_0".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    1 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text: "process follow-on complete".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    index => panic!("unexpected provider call {index}"),
+                }
+            }
+        })
+        .build();
+    let recorder = super::effect::RecordingEffectController::default()
+        .with_controller_owned_replay()
+        .with_strict_replay_by_address()
+        .with_local_llm_execution();
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(TerminalControlTool {
+            controls: vec![crate::ToolControl::SwitchAgentFrame {
+                frame_key: crate::FrameKey::from_caller_material("process-follow-on-frame")
+                    .expect("non-empty caller material"),
+                initial_nodes: Vec::new(),
+                task: Some("finish the process-backed follow-on".to_string()),
+            }],
+        }),
+        transport,
+        crate::EmbeddedRuntimeHost::new(super::effect::runtime_host_config_with_native_controller(
+            Arc::new(recorder.clone()),
+        )),
+        Arc::new(RecordingStore::default()),
+    )
+    .await;
+    let process_id = ProcessId::from("process:subagent:physical-follow-on");
+    let root_turn_id = TurnId::from(process_id.as_str());
+    let follow_on_turn_id = TurnId::from(format!("{root_turn_id}:agent-frame:1"));
+
+    let run = runtime
+        .stream_turn_with_agent_frames(
+            TurnInput::text("start the process-backed frame chain"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                crate::ScopedEffectController::shared(
+                    Arc::new(recorder.clone()),
+                    crate::ExecutionScope::process(&process_id),
+                )
+                .expect("process scope"),
+            ),
+        )
+        .await
+        .expect("process-backed agent-frame run succeeds");
+
+    assert_eq!(run.turns.len(), 2);
+    assert_eq!(
+        run.final_turn()
+            .expect("final process-backed frame")
+            .assistant_output
+            .safe_text,
+        "process follow-on complete"
+    );
+    assert_eq!(call_index.load(Ordering::SeqCst), 2);
+    assert!(recorder.has_kind_for_turn(crate::RuntimeEffectKind::PeekAwaitEvent, &root_turn_id));
+    assert!(
+        recorder.has_kind_for_turn(crate::RuntimeEffectKind::PeekAwaitEvent, &follow_on_turn_id)
+    );
+}
+
+#[tokio::test]
 pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
     let call_index = Arc::new(AtomicUsize::new(0));
     let captured_call_index = Arc::clone(&call_index);

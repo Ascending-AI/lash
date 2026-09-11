@@ -5,7 +5,9 @@ use crate::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::sync::MutexExt;
 mod controller_doubles;
 pub(in crate::runtime::tests) use controller_doubles::RejectingEffectController;
-use controller_doubles::{SerialOnlyEffectController, WrongOutcomeEffectController};
+use controller_doubles::{
+    SerialOnlyEffectController, StrictReplayJournal, WrongOutcomeEffectController,
+};
 mod fig1127;
 mod fig1416;
 
@@ -43,6 +45,7 @@ pub(super) struct RecordingEffectController {
     controller_owned_replay: bool,
     engine_paced_lane: bool,
     replay_by_key: bool,
+    strict_replay: StrictReplayJournal,
     execute_llm_locally: bool,
     execute_code_locally: bool,
     fail_exec_after_local: Arc<std::sync::atomic::AtomicBool>,
@@ -108,6 +111,11 @@ impl RecordingEffectController {
 
     pub(super) fn with_replay_by_key(mut self) -> Self {
         self.replay_by_key = true;
+        self
+    }
+
+    pub(super) fn with_strict_replay_by_address(mut self) -> Self {
+        self.strict_replay.enable();
         self
     }
 
@@ -222,6 +230,12 @@ impl RecordingEffectController {
             .iter()
             .filter(|record| record.kind == kind)
             .count()
+    }
+
+    pub(super) fn has_kind_for_turn(&self, kind: RuntimeEffectKind, turn_id: &TurnId) -> bool {
+        self.records()
+            .iter()
+            .any(|record| record.kind == kind && record.turn_id.as_ref() == Some(turn_id))
     }
 
     fn record(&self, envelope: &RuntimeEffectEnvelope) {
@@ -390,6 +404,10 @@ impl RuntimeEffectController for RecordingEffectController {
                 "test_parent_end_failure",
                 "forced parent-end failure",
             ));
+        }
+        let strict_replay = self.strict_replay.prepare(&envelope)?;
+        if let Some(outcome) = self.strict_replay.replay(&strict_replay)? {
+            return Ok(outcome);
         }
         let replay_key = envelope.invocation.replay_key().to_string();
         if self.replay_by_key
@@ -690,6 +708,7 @@ impl RuntimeEffectController for RecordingEffectController {
                 .lock_recover()
                 .insert(replay_key, outcome.clone());
         }
+        self.strict_replay.record(strict_replay, &outcome);
         outcome
     }
 }

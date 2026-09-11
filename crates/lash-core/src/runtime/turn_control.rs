@@ -69,6 +69,30 @@ impl TurnCancelPeekIdentity {
     }
 }
 
+const PROCESS_TURN_CANCEL_PEEK_FAMILY_VERSION: u8 = 1;
+
+fn turn_cancel_peek_replay_key(
+    execution_scope: &ExecutionScope,
+    address: &TurnAddress,
+    causal_identity: &str,
+) -> String {
+    if !matches!(execution_scope, ExecutionScope::Process { .. }) {
+        return causal_identity.to_string();
+    }
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.turn-cancel-peek",
+        PROCESS_TURN_CANCEL_PEEK_FAMILY_VERSION,
+    );
+    identity.string(&address.session_id);
+    identity.string(&address.turn_id);
+    identity.string(causal_identity);
+    crate::stable_identity::rendered_hash(
+        "turn-cancel-peek",
+        PROCESS_TURN_CANCEL_PEEK_FAMILY_VERSION,
+        &identity.finish(),
+    )
+}
+
 /// Stable routing identity for one foreground turn.
 ///
 /// These identifiers select work; they are not authorization credentials.
@@ -861,11 +885,16 @@ impl ActiveTurnControl {
     ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
         // TurnAddress continues to route the cancellation promise in `key`;
         // the journaled observation belongs to the controller's admitted scope.
+        // One Process can carry several physical turns, so only that scope
+        // folds the captured TurnAddress into the replay key. A foreground
+        // Turn already has its physical identity in the scope itself.
+        let replay_key = turn_cancel_peek_replay_key(
+            controller.execution_scope(),
+            &self.address,
+            &causal_identity,
+        );
         let invocation = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                controller.execution_scope().clone(),
-                causal_identity.clone(),
-            )?,
+            crate::EffectAddress::new(controller.execution_scope().clone(), replay_key)?,
             RuntimeAttribution {
                 session_id: Some(self.address.session_id.clone()),
                 turn_id: Some(self.address.turn_id.clone()),
