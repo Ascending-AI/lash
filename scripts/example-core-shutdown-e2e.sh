@@ -165,8 +165,8 @@ run_agent_service_signal() {
   count="$(marker_count "$marker" agent-service)"
   assert_count "$count" 1 agent-service-signal-marker
   grep -q 'agent-service shutdown complete' "$log"
-  test -f "$trace"
-  printf 'agent-service-signal\t%s\tpresent\tyes\tSIGTERM graceful shutdown\n' "$count" >>"$scorecard"
+  test ! -e "$trace"
+  printf 'agent-service-signal\t%s\tempty-flush-returned\tyes\tSIGTERM graceful shutdown\n' "$count" >>"$scorecard"
 }
 
 run_agent_service_bind_error() {
@@ -207,8 +207,8 @@ PY
   count="$(marker_count "$marker" agent-service)"
   assert_count "$count" 1 agent-service-bind-error-marker
   grep -q 'Address already in use' "$log"
-  test -f "$trace"
-  printf 'agent-service-bind-error\t%s\tpresent\tyes\tprimary bind error retained\n' "$count" >>"$scorecard"
+  test ! -e "$trace"
+  printf 'agent-service-bind-error\t%s\tempty-flush-returned\tyes\tprimary bind error retained\n' "$count" >>"$scorecard"
 }
 
 run_workbench_signal_with_streams_and_fixture() {

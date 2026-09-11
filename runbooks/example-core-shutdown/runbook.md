@@ -29,7 +29,7 @@ The required scorecard rows are:
 
 | Row | Required evidence |
 | --- | --- |
-| `agent-service-signal` | SIGTERM stops Axum intake, the process exits, trace exists, and exactly one `agent-service` factory marker is durable. |
+| `agent-service-signal` | SIGTERM stops Axum intake, the process exits after its empty trace flush returns, and exactly one `agent-service` factory marker is durable. |
 | `agent-service-bind-error` | A post-build bind failure remains the primary error and still produces exactly one factory marker. |
 | `workbench-signal-active-streams` | Active `/api/events` and `/api/observations` responses close on host shutdown, Axum completes, and exactly one Workbench marker is durable. |
 | `workbench-valid-empty-nested` | The token-free fixture returns only after its nested core produced exactly one marker. |
@@ -38,6 +38,12 @@ The required scorecard rows are:
 The Workbench signal closes its host-owned HTTP producer streams so Axum can
 finish draining. It does not cancel an active turn or introduce a durable-turn
 policy.
+
+Agent-service emits no trace record until a turn runs. These token-free rows
+therefore require that its trace path remains absent and that the final
+`shutdown complete` line is reached after the source-ordered flush succeeds;
+they do not mislabel an empty sink as a persisted trace artifact. Workbench
+emits a startup trace, so its rows require the trace file itself.
 
 The owned Restate listener uses Restate SDK 0.11 `serve_with_cancel`. That API
 stops listener intake and applies its fixed ten-second connection grace before
