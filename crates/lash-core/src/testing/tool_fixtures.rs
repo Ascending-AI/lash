@@ -35,6 +35,11 @@ pub fn fixture_echo_definition() -> ToolDefinition {
 }
 
 /// A fixed provider that serves the command-free [`fixture_echo_definition`].
+///
+/// Unlike a permissive echo stub, an unknown tool name is a hard error rather
+/// than echoing the argument anyway. Migrated tests therefore fail loudly if a
+/// tool is renamed or a call is routed to the wrong provider, instead of
+/// silently observing a plausible value.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FixtureTools;
 
@@ -69,6 +74,35 @@ mod tests {
     use super::*;
     use crate::testing::run_tool;
 
+    #[test]
+    fn fixture_exposes_exactly_the_echo_manifest() {
+        let manifests = FixtureTools.tool_manifests();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].name, FIXTURE_ECHO_TOOL);
+        assert_eq!(manifests[0].id.as_str(), "tool:fixture_echo");
+        assert!(FixtureTools.resolve_manifest(FIXTURE_ECHO_TOOL).is_some());
+        assert!(
+            FixtureTools
+                .resolve_manifest("not_a_fixture_tool")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn fixture_resolves_only_the_echo_contract() {
+        assert!(FixtureTools.resolve_contract(FIXTURE_ECHO_TOOL).is_some());
+        assert!(
+            FixtureTools
+                .resolve_contract("not_a_fixture_tool")
+                .is_none()
+        );
+        assert!(
+            FixtureTools
+                .resolve_contract_by_id(&crate::ToolId::from("tool:fixture_echo".to_string()))
+                .is_some()
+        );
+    }
+
     #[tokio::test]
     async fn fixture_echo_returns_its_argument_as_typed_data() {
         let outcome = run_tool(
@@ -83,5 +117,19 @@ mod tests {
                 serde_json::json!({ "echo": "alpha" })
             ))
         );
+    }
+
+    #[tokio::test]
+    async fn fixture_rejects_unknown_tool_names() {
+        let outcome = run_tool(
+            &FixtureTools,
+            "not_a_fixture_tool",
+            &serde_json::json!({ "value": "alpha" }),
+        )
+        .await;
+        assert!(matches!(
+            outcome.as_output().outcome,
+            crate::ToolCallOutcome::Failure(_)
+        ));
     }
 }

@@ -60,7 +60,7 @@ fn standard_protocol_owns_batch_not_processes() {
 }
 
 #[test]
-fn processes_are_composed_with_standard_protocol() {
+fn process_controls_and_a_model_provider_compose_with_standard_protocol() {
     let fixture: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
     let session = PluginHost::new(vec![
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
