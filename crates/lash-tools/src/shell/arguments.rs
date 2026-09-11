@@ -2,7 +2,10 @@
 
 use lash_core::{ProcessId, ToolOutcome};
 use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{DeserializeOwned, Error as _},
+};
 use serde_json::{Value, json};
 
 use lash_tool_support::{invalid_tool_args, non_empty_string, typed_args};
@@ -30,7 +33,7 @@ pub(super) struct ShellCommandArgs<L> {
     #[schemars(with = "String")]
     pub(super) shell: Option<String>,
     /// Whether to run the shell with -l semantics. Defaults to false to avoid startup prompts and shell init noise.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_default_bool")]
     pub(super) login: bool,
     /// Maximum number of tokens to return. Excess output will be truncated.
     #[serde(
@@ -59,7 +62,7 @@ pub(super) struct ExecCommandLane {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub(super) struct StartCommandLane<I> {
     /// Launch the command fully detached (its own session via setsid) so it outlives this session and host. lash records only an immediately-terminal audit fact and never tracks, signals, or stops it. Defaults to false (a tracked PTY process).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_default_bool")]
     pub(super) detach: bool,
     #[serde(flatten)]
     pub(super) internal: I,
@@ -90,6 +93,10 @@ pub(super) trait ShellCommandLane: JsonSchema {
     const COMMAND_DESCRIPTION: &'static str;
 
     fn customize_schema(_schema: &mut Value) {}
+
+    fn validate_direct_input(_value: &Value) -> Result<(), ToolOutcome> {
+        Ok(())
+    }
 }
 
 impl ShellCommandLane for ExecCommandLane {
@@ -133,13 +140,22 @@ where
                 .remove("description");
         }
     }
+
+    fn validate_direct_input(value: &Value) -> Result<(), ToolOutcome> {
+        if I::PUBLIC && value.get("detached_process_id").is_some() {
+            return Err(invalid_tool_args(
+                "Invalid tool arguments: unknown field `detached_process_id`",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl<L> ShellCommandArgs<L>
 where
     L: ShellCommandLane,
 {
-    /// Derive the closed object schema from the same typed fields the parser reads.
+    /// Derive the closed model-facing schema from the typed canonical fields.
     pub(super) fn schema() -> Value {
         let mut schema = serde_json::to_value(schemars::schema_for!(ShellCommandArgs<L>))
             .expect("typed shell argument schemas serialize to JSON");
@@ -164,20 +180,15 @@ impl<L> ShellCommandArgs<L>
 where
     L: ShellCommandLane + DeserializeOwned,
 {
-    /// Parse only fields admitted by this lane's generated schema.
+    /// Parse canonical fields plus the legacy spellings accepted by direct callers.
+    ///
+    /// Model-facing calls still validate against [`Self::schema`] first. Direct
+    /// provider calls historically normalize null defaults and ignore unknown
+    /// fields, so deserialization retains that compatibility without widening
+    /// the generated schema. Lane validation separately protects fields whose
+    /// rejection is an authority boundary.
     pub(super) fn parse(value: &Value) -> Result<Self, ToolOutcome> {
-        if let Some(args) = value.as_object() {
-            let schema = Self::schema();
-            let properties = schema["properties"]
-                .as_object()
-                .expect("typed shell argument schema has object properties");
-            if let Some(unknown) = args.keys().find(|key| !properties.contains_key(*key)) {
-                return Err(invalid_tool_args(format!(
-                    "Invalid tool arguments: unknown field `{unknown}`"
-                )));
-            }
-        }
-
+        L::validate_direct_input(value)?;
         let parsed: Self = typed_args(value)?;
         non_empty_string(&parsed.cmd, "cmd")?;
         if parsed.max_output_tokens == Some(0) {
@@ -197,14 +208,31 @@ fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>
 where
     D: Deserializer<'de>,
 {
-    String::deserialize(deserializer).map(Some)
+    Value::deserialize(deserializer).map(|value| value.as_str().map(ToOwned::to_owned))
+}
+
+fn deserialize_default_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<bool>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 fn deserialize_optional_usize<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    u64::deserialize(deserializer).map(|value| Some(value as usize))
+    match Value::deserialize(deserializer)? {
+        Value::Null => Ok(None),
+        Value::String(value) if value.eq_ignore_ascii_case("none") => Ok(None),
+        Value::Number(value) => value
+            .as_u64()
+            .map(|value| Some(value as usize))
+            .ok_or_else(|| D::Error::custom("expected a positive integer, null, or \"none\"")),
+        _ => Err(D::Error::custom(
+            "expected a positive integer, null, or \"none\"",
+        )),
+    }
 }
 
 fn deserialize_timeout_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
@@ -218,5 +246,5 @@ fn deserialize_optional_process_id<'de, D>(deserializer: D) -> Result<Option<Pro
 where
     D: Deserializer<'de>,
 {
-    ProcessId::deserialize(deserializer).map(Some)
+    Value::deserialize(deserializer).map(|value| value.as_str().map(ProcessId::from))
 }

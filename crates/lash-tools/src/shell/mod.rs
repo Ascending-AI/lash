@@ -892,4 +892,6 @@ impl PluginFactory for StandardShellPluginFactory {
 }
 
 #[cfg(test)]
+mod argument_compatibility_tests;
+#[cfg(test)]
 mod tests;

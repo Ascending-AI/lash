@@ -1965,7 +1965,7 @@ fn assert_parser_schema_cases(
 }
 
 #[test]
-fn shell_argument_parsers_and_schemas_agree_by_lane() {
+fn canonical_shell_argument_parsers_and_schemas_agree_by_lane() {
     let shell = StandardShell::new().with_cwd("/");
     let definitions = shell.tool_definitions();
     let definition = |name| {
@@ -1975,11 +1975,6 @@ fn shell_argument_parsers_and_schemas_agree_by_lane() {
             .expect("shell definition")
     };
 
-    // The old imperative helpers accepted a few schema-invalid spellings in
-    // isolation (`null` paths/bools and `null`/`"none"` output limits), but
-    // generic contract validation rejected them before every public call. The
-    // typed parser follows that operative contract. Sealed internal start
-    // payloads have always serialized only the canonical spellings.
     assert_parser_schema_cases(
         "exec_command",
         definition("exec_command"),
@@ -1998,14 +1993,10 @@ fn shell_argument_parsers_and_schemas_agree_by_lane() {
             ),
             (json!({}), false),
             (json!({"cmd": 1}), false),
-            (json!({"cmd": "echo", "workdir": null}), false),
-            (json!({"cmd": "echo", "shell": false}), false),
-            (json!({"cmd": "echo", "login": null}), false),
-            (json!({"cmd": "echo", "max_output_tokens": "none"}), false),
+            (json!({"cmd": "echo", "login": "false"}), false),
             (json!({"cmd": "echo", "max_output_tokens": 0}), false),
             (json!({"cmd": "echo", "timeout_ms": null}), false),
             (json!({"cmd": "echo", "timeout_ms": 0}), false),
-            (json!({"cmd": "echo", "detach": false}), false),
         ],
         |args| shell.parse_exec_command_params(args).is_ok(),
     );
@@ -2027,15 +2018,11 @@ fn shell_argument_parsers_and_schemas_agree_by_lane() {
                 true,
             ),
             (json!({}), false),
-            (json!({"cmd": "cat", "workdir": null}), false),
             (json!({"cmd": "cat", "login": "false"}), false),
-            (json!({"cmd": "cat", "max_output_tokens": null}), false),
-            (json!({"cmd": "cat", "detach": null}), false),
             (
                 json!({"cmd": "cat", "detached_process_id": "caller-chosen"}),
                 false,
             ),
-            (json!({"cmd": "cat", "timeout_ms": 1}), false),
         ],
         |args| shell.parse_public_start_command_params(args).is_ok(),
     );
@@ -2054,9 +2041,7 @@ fn shell_argument_parsers_and_schemas_agree_by_lane() {
                 true,
             ),
             (json!({}), false),
-            (json!({"cmd": "cat", "detached_process_id": null}), false),
-            (json!({"cmd": "cat", "detached_process_id": 7}), false),
-            (json!({"cmd": "cat", "timeout_ms": 1}), false),
+            (json!({"cmd": "cat", "login": "false"}), false),
         ],
         |args| shell.parse_internal_start_command_params(args).is_ok(),
     );
