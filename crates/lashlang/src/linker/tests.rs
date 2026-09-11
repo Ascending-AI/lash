@@ -1,5 +1,6 @@
 use super::*;
 
+mod canonical_walk_tests;
 mod process_signature_tests;
 
 #[test]

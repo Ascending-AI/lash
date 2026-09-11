@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,8 @@ use pass_setup::{Binding, Linker, function_signature};
 mod lower_expr;
 mod pass_validation;
 use pass_validation::{
-    materialize_default_trigger_keys, validate_trigger_operation_subscription_key,
+    StaticTriggerBinding, TriggerKeyCollector, materialize_default_trigger_keys,
+    semantic_trigger_source_key, validate_trigger_operation_subscription_key,
 };
 mod type_helpers;
 use type_helpers::{
@@ -47,7 +48,7 @@ use type_helpers::{
 };
 mod facets;
 pub(crate) use facets::analyze_workflow_program;
-use facets::expression_spans_by_pointer;
+use facets::{expression_spans_by_pointer, recover_workflow_binding};
 #[cfg(test)]
 mod tests;
 
@@ -75,4 +76,4 @@ struct ExpectedTypeFacts {
 }
 
 #[cfg(test)]
-use pass_validation::{semantic_trigger_source_key, semantic_trigger_subscription_key};
+use pass_validation::semantic_trigger_subscription_key;

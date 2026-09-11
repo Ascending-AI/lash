@@ -5,7 +5,7 @@ impl<'module> Linker<'module> {
         &self,
         expr: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.lower_expr_expected(expr, scope, None)
     }
 
@@ -14,13 +14,33 @@ impl<'module> Linker<'module> {
         expr: &Expr,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
+        let expression_key = expr as *const Expr as usize;
+        self.begin_workflow_node(expr, scope);
+        if let (Some(facts), Some(expected)) = (&self.expected_type_facts, expected) {
+            facts
+                .borrow_mut()
+                .by_expression
+                .insert(expression_key, self.resolve_type_aliases(expected));
+        }
+        if self.collect_completion.get() {
+            self.completion_facts.borrow_mut().remove(&expression_key);
+        }
         let previous_span = scope.span;
         if let Some(span) = self.expression_spans.get(&(expr as *const Expr as usize)) {
             scope.span = Some(*span);
         }
         let result = self.lower_expr_expected_inner(expr, scope, expected);
         scope.span = previous_span;
+        if result.is_ok() && self.collect_completion.get() {
+            self.completion_facts
+                .borrow_mut()
+                .entry(expression_key)
+                .or_insert_with(Completion::fallthrough);
+        }
+        if result.is_ok() {
+            self.finish_workflow_node(expr);
+        }
         result
     }
 
@@ -39,7 +59,7 @@ impl<'module> Linker<'module> {
     /// The same accounting is why every arm *returns* its method's `Result`
     /// instead of unwrapping it with `?` into a shared `Ok(match ..)`. Each `?`
     /// is a separate temporary, so an unoptimized build gave every arm its own
-    /// `Result<(Expr, Option<Binding>), LinkError>` slot and this frame grew by
+    /// `Result<(Expr, Binding), LinkError>` slot and this frame grew by
     /// roughly two kilobytes per variant added — 28 KiB across the match, or
     /// about 2 MiB at the nesting cap, which is the entire host budget. Keep
     /// new variants in their own method, and keep the arm a tail call.
@@ -48,7 +68,7 @@ impl<'module> Linker<'module> {
         expr: &Expr,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.reject_trigger_event_special_form(expr, scope.span)?;
         self.validate_expected_literals(expr, expected, scope.span)?;
         if matches!(expr, Expr::Variable(_) | Expr::Field { .. })
@@ -56,15 +76,15 @@ impl<'module> Linker<'module> {
         {
             return Ok((
                 Expr::ResourceRef(resource.clone()),
-                Some(Binding::Resource {
+                Binding::Resource {
                     resource_type: resource.resource_type.to_string(),
-                }),
+                },
             ));
         }
         match expr {
-            Expr::Block(expressions) => self.lower_block(expressions, scope, expected),
-            Expr::LabelAnnotated { label, expr } => {
-                self.lower_label_annotated(label, expr, scope, expected)
+            Expr::Block(expressions) => self.lower_block(expr, expressions, scope, expected),
+            Expr::LabelAnnotated { label, expr: inner } => {
+                self.lower_label_annotated(expr, label, inner, scope, expected)
             }
             Expr::Variable(name) => self.lower_variable(name, scope),
             Expr::Null
@@ -73,13 +93,11 @@ impl<'module> Linker<'module> {
             | Expr::Number(_)
             | Expr::String(_)
             | Expr::Break
-            | Expr::Continue => Ok((expr.clone(), Some(Binding::Value(literal_type(expr))))),
+            | Expr::Continue => Ok((expr.clone(), Binding::Value(literal_type(expr)))),
             Expr::TypeLiteral(_) => Ok((
                 expr.clone(),
-                Some(
-                    self.closed_schema_witness_binding(expr)
-                        .unwrap_or_else(any_binding),
-                ),
+                self.closed_schema_witness_binding(expr)
+                    .unwrap_or_else(any_binding),
             )),
             Expr::Tuple(items) => self.lower_tuple(items, scope, expected),
             Expr::List(items) => self.lower_list(items, scope, expected),
@@ -92,13 +110,13 @@ impl<'module> Linker<'module> {
                 condition,
                 then_block,
                 else_block,
-            } => self.lower_if(condition, then_block, else_block, scope, expected),
+            } => self.lower_if(expr, condition, then_block, else_block, scope, expected),
             Expr::For {
                 binding,
                 iterable,
                 body,
-            } => self.lower_for(binding, iterable, body, scope),
-            Expr::While { condition, body } => self.lower_while(condition, body, scope),
+            } => self.lower_for(expr, binding, iterable, body, scope),
+            Expr::While { condition, body } => self.lower_while(expr, condition, body, scope),
             Expr::StartProcess(start) => self.lower_start_process(start, scope),
             Expr::ProcessRef { process } => self.lower_process_ref(process, scope),
             Expr::HostDescriptorConstructor { type_name, input } => {
@@ -122,8 +140,8 @@ impl<'module> Linker<'module> {
             Expr::Print(inner) => self.lower_print(inner, scope),
             Expr::Yield(inner) => self.lower_yield(inner, scope),
             Expr::Wake(inner) => self.lower_wake(inner, scope),
-            Expr::Finish(inner) => self.lower_finish(inner, scope),
-            Expr::Fail(inner) => self.lower_fail(inner, scope),
+            Expr::Finish(inner) => self.lower_finish(expr, inner, scope),
+            Expr::Fail(inner) => self.lower_fail(expr, inner, scope),
             Expr::BuiltinCall { name, args } => self.lower_builtin_call(name, args, scope),
             Expr::FunctionCall { function, args } => {
                 self.lower_function_call(function, args, scope)
@@ -131,7 +149,7 @@ impl<'module> Linker<'module> {
             Expr::Function(function) => self.lower_function(function, scope),
             Expr::Call { function, args } => self.lower_call(function, args, scope),
             Expr::Map { items, function } => self.lower_map(items, function, scope),
-            Expr::Try(exception) => self.lower_try_expr(exception, scope),
+            Expr::Try(exception) => self.lower_try_expr(exception, scope, expected),
             Expr::Throw(value) => self.lower_throw_expr(value, scope),
             Expr::Return(value) => self.lower_return_expr(value, scope),
             Expr::Field { target, field } => self.lower_field(target, field, scope),
@@ -150,38 +168,85 @@ impl<'module> Linker<'module> {
 
     pub(super) fn lower_block(
         &self,
+        original: &Expr,
         expressions: &[Expr],
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let mut lowered = Vec::with_capacity(expressions.len());
-        let mut last = None;
+        let mut last = any_binding();
         let last_index = expressions.len().saturating_sub(1);
         for (index, expression) in expressions.iter().enumerate() {
-            let (expr, binding) = self.lower_expr_expected(
+            let before = scope.clone();
+            let result = self.lower_expr_expected(
                 expression,
                 scope,
                 (index == last_index).then_some(expected).flatten(),
-            )?;
-            lowered.push(expr);
-            last = binding;
+            );
+            match result {
+                Ok((expr, binding)) => {
+                    lowered.push(expr);
+                    last = binding;
+                }
+                Err(error) if self.recover_workflow_errors.get() => {
+                    self.record_workflow_error(expression, error);
+                    *scope = before;
+                    recover_workflow_binding(expression, scope);
+                    lowered.push(expression.clone());
+                    last = any_binding();
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if self.collect_completion.get() {
+            let mut completion = Completion::fallthrough();
+            for expression in expressions {
+                if !completion.can_fallthrough {
+                    break;
+                }
+                if let Some(child) = self
+                    .completion_facts
+                    .borrow()
+                    .get(&(expression as *const Expr as usize))
+                    .cloned()
+                {
+                    completion.finishes.extend(child.finishes);
+                    completion.can_fallthrough = child.can_fallthrough;
+                }
+            }
+            self.completion_facts
+                .borrow_mut()
+                .insert(original as *const Expr as usize, completion);
         }
         Ok((Expr::Block(lowered), last))
     }
 
     pub(super) fn lower_label_annotated(
         &self,
+        original: &Expr,
         label: &crate::ast::LabelMetadata,
         expr: &Expr,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(
             self.surface.language_features.label_annotations,
             "label annotations",
             scope.span,
         )?;
+        let inner_key = expr as *const Expr as usize;
         let (expr, binding) = self.lower_expr_expected(expr, scope, expected)?;
+        if self.collect_completion.get() {
+            let completion = self
+                .completion_facts
+                .borrow()
+                .get(&inner_key)
+                .cloned()
+                .unwrap_or_else(Completion::fallthrough);
+            self.completion_facts
+                .borrow_mut()
+                .insert(original as *const Expr as usize, completion);
+        }
         Ok((
             Expr::LabelAnnotated {
                 label: label.clone(),
@@ -195,16 +260,16 @@ impl<'module> Linker<'module> {
         &self,
         name: &AstString,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.reject_function_name_binding(name.as_str(), scope.span)?;
         Ok(if let Some(binding) = scope.get(name) {
-            (Expr::Variable(name.clone()), Some(binding))
+            (Expr::Variable(name.clone()), binding)
         } else if let Some(process_ty) = self.process_types.get(name.as_str()) {
             (
                 Expr::ProcessRef {
                     process: name.clone(),
                 },
-                Some(Binding::Value(process_ty.clone())),
+                Binding::Value(process_ty.clone()),
             )
         } else {
             return Err(LinkError::UnknownName {
@@ -219,7 +284,7 @@ impl<'module> Linker<'module> {
         items: &[Expr],
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let mut lowered = Vec::with_capacity(items.len());
         let mut item_types = Vec::with_capacity(items.len());
         let expected_item =
@@ -230,13 +295,11 @@ impl<'module> Linker<'module> {
         for item in items {
             let (item, binding) = self.lower_expr_expected(item, scope, expected_item.as_ref())?;
             lowered.push(item);
-            item_types.push(binding_type(binding.as_ref()));
+            item_types.push(binding_type(&binding));
         }
         Ok((
             Expr::Tuple(lowered),
-            Some(Binding::Value(TypeExpr::List(Box::new(union_type(
-                item_types,
-            ))))),
+            Binding::Value(TypeExpr::List(Box::new(union_type(item_types)))),
         ))
     }
 
@@ -245,7 +308,7 @@ impl<'module> Linker<'module> {
         items: &[Expr],
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let mut lowered = Vec::with_capacity(items.len());
         let mut item_types = Vec::with_capacity(items.len());
         let expected_item =
@@ -256,13 +319,11 @@ impl<'module> Linker<'module> {
         for item in items {
             let (item, binding) = self.lower_expr_expected(item, scope, expected_item.as_ref())?;
             lowered.push(item);
-            item_types.push(binding_type(binding.as_ref()));
+            item_types.push(binding_type(&binding));
         }
         Ok((
             Expr::List(lowered),
-            Some(Binding::Value(TypeExpr::List(Box::new(union_type(
-                item_types,
-            ))))),
+            Binding::Value(TypeExpr::List(Box::new(union_type(item_types)))),
         ))
     }
 
@@ -271,7 +332,7 @@ impl<'module> Linker<'module> {
         element: &Expr,
         clauses: &[ListComprehensionClause],
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let mut lowered_clauses = Vec::with_capacity(clauses.len());
         let mut previous_bindings = Vec::new();
         for clause in clauses {
@@ -279,8 +340,8 @@ impl<'module> Linker<'module> {
                 ListComprehensionClause::For { binding, iterable } => {
                     self.reject_function_name_binding(binding.as_str(), scope.span)?;
                     let (iterable, iterable_binding) = self.lower_expr(iterable, scope)?;
-                    let item_ty = self
-                        .iterable_item_type(&binding_type(iterable_binding.as_ref()), scope.span)?;
+                    let item_ty =
+                        self.iterable_item_type(&binding_type(&iterable_binding), scope.span)?;
                     previous_bindings.push((
                         binding.to_string(),
                         scope.bind(binding.as_str(), self.binding_for_type(&item_ty)),
@@ -305,9 +366,7 @@ impl<'module> Linker<'module> {
                 element: Box::new(element),
                 clauses: lowered_clauses,
             },
-            Some(Binding::Value(TypeExpr::List(Box::new(binding_type(
-                binding.as_ref(),
-            ))))),
+            Binding::Value(TypeExpr::List(Box::new(binding_type(&binding)))),
         ))
     }
 
@@ -316,7 +375,7 @@ impl<'module> Linker<'module> {
         entries: &[(AstString, Expr)],
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let mut lowered = Vec::with_capacity(entries.len());
         let mut fields = Vec::with_capacity(entries.len());
         for (name, value) in entries {
@@ -332,14 +391,14 @@ impl<'module> Linker<'module> {
                 self.lower_expr_expected(value, scope, expected_field.as_ref())?;
             fields.push(TypeField {
                 name: name.clone(),
-                ty: binding_type(binding.as_ref()),
+                ty: binding_type(&binding),
                 optional: false,
             });
             lowered.push((name.clone(), value));
         }
         Ok((
             Expr::Record(lowered),
-            Some(Binding::Value(TypeExpr::Object(fields))),
+            Binding::Value(TypeExpr::Object(fields)),
         ))
     }
 
@@ -348,7 +407,7 @@ impl<'module> Linker<'module> {
         target: &crate::ast::AssignTarget,
         expr: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.reject_function_name_binding(target.root.as_str(), scope.span)?;
         for step in &target.steps {
             if let AssignPathStep::Index(index) = step {
@@ -357,13 +416,12 @@ impl<'module> Linker<'module> {
         }
         let target_expected = self.assignment_target_type(target, scope)?;
         let (lowered, binding) = self.lower_expr_expected(expr, scope, target_expected.as_ref())?;
+        let static_trigger_binding = self.static_trigger_binding_for(&lowered, scope);
         if target.steps.is_empty() {
-            scope.bind(
-                target.root.as_str(),
-                binding.clone().unwrap_or(any_binding()),
-            );
+            scope.bind(target.root.as_str(), binding.clone());
+            scope.set_static_trigger_binding(target.root.as_str(), static_trigger_binding);
         } else {
-            let value_ty = binding_type(binding.as_ref());
+            let value_ty = binding_type(&binding);
             scope.update_path(target, &value_ty)?;
         }
         Ok((
@@ -377,12 +435,15 @@ impl<'module> Linker<'module> {
 
     pub(super) fn lower_if(
         &self,
+        original: &Expr,
         condition: &Expr,
         then_block: &Expr,
         else_block: &Expr,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
+        let then_key = then_block as *const Expr as usize;
+        let else_key = else_block as *const Expr as usize;
         let condition = self.lower_expr(condition, scope)?.0;
         let mut then_scope = scope.clone();
         let (then_block, then_binding) =
@@ -390,6 +451,30 @@ impl<'module> Linker<'module> {
         let mut else_scope = scope.clone();
         let (else_block, else_binding) =
             self.lower_expr_expected(else_block, &mut else_scope, expected)?;
+        if self.collect_completion.get() {
+            let then_completion = self
+                .completion_facts
+                .borrow()
+                .get(&then_key)
+                .cloned()
+                .unwrap_or_else(Completion::fallthrough);
+            let else_completion = self
+                .completion_facts
+                .borrow()
+                .get(&else_key)
+                .cloned()
+                .unwrap_or_else(Completion::fallthrough);
+            let mut finishes = then_completion.finishes;
+            finishes.extend(else_completion.finishes);
+            self.completion_facts.borrow_mut().insert(
+                original as *const Expr as usize,
+                Completion {
+                    finishes,
+                    can_fallthrough: then_completion.can_fallthrough
+                        || else_completion.can_fallthrough,
+                },
+            );
+        }
         scope.join_branches(then_scope, else_scope);
         Ok((
             Expr::If {
@@ -397,28 +482,41 @@ impl<'module> Linker<'module> {
                 then_block: Box::new(then_block),
                 else_block: Box::new(else_block),
             },
-            Some(Binding::Value(union_type(vec![
-                binding_type(then_binding.as_ref()),
-                binding_type(else_binding.as_ref()),
-            ]))),
+            Binding::Value(union_type(vec![
+                binding_type(&then_binding),
+                binding_type(&else_binding),
+            ])),
         ))
     }
 
     pub(super) fn lower_for(
         &self,
+        original: &Expr,
         binding: &AstString,
         iterable: &Expr,
         body: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.reject_function_name_binding(binding.as_str(), scope.span)?;
         let (iterable, iterable_binding) = self.lower_expr(iterable, scope)?;
-        let item_ty =
-            self.iterable_item_type(&binding_type(iterable_binding.as_ref()), scope.span)?;
+        let item_ty = self.iterable_item_type(&binding_type(&iterable_binding), scope.span)?;
         let before = scope.clone();
         let mut body_scope = scope.clone();
         let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
+        let body_key = body as *const Expr as usize;
         let body = self.lower_expr(body, &mut body_scope)?.0;
+        if self.collect_completion.get() {
+            let mut completion = self
+                .completion_facts
+                .borrow()
+                .get(&body_key)
+                .cloned()
+                .unwrap_or_else(Completion::fallthrough);
+            completion.can_fallthrough = true;
+            self.completion_facts
+                .borrow_mut()
+                .insert(original as *const Expr as usize, completion);
+        }
         body_scope.restore(binding.as_str(), previous);
         scope.widen_loop(before, body_scope);
         Ok((
@@ -427,27 +525,41 @@ impl<'module> Linker<'module> {
                 iterable: Box::new(iterable),
                 body: Box::new(body),
             },
-            Some(Binding::Value(TypeExpr::Null)),
+            Binding::Value(TypeExpr::Null),
         ))
     }
 
     pub(super) fn lower_while(
         &self,
+        original: &Expr,
         condition: &Expr,
         body: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let condition = self.lower_expr(condition, scope)?.0;
         let before = scope.clone();
         let mut body_scope = scope.clone();
+        let body_key = body as *const Expr as usize;
         let body = self.lower_expr(body, &mut body_scope)?.0;
+        if self.collect_completion.get() {
+            let mut completion = self
+                .completion_facts
+                .borrow()
+                .get(&body_key)
+                .cloned()
+                .unwrap_or_else(Completion::fallthrough);
+            completion.can_fallthrough = true;
+            self.completion_facts
+                .borrow_mut()
+                .insert(original as *const Expr as usize, completion);
+        }
         scope.widen_loop(before, body_scope);
         Ok((
             Expr::While {
                 condition: Box::new(condition),
                 body: Box::new(body),
             },
-            Some(Binding::Value(TypeExpr::Null)),
+            Binding::Value(TypeExpr::Null),
         ))
     }
 
@@ -455,7 +567,7 @@ impl<'module> Linker<'module> {
         &self,
         start: &crate::ast::ProcessStartExpr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(self.surface.abilities.processes, "processes", scope.span)?;
         let Some(process) = self.program.process(start.process.as_str()) else {
             return Err(LinkError::UnknownProcess {
@@ -484,7 +596,7 @@ impl<'module> Linker<'module> {
                 process.name.as_str(),
                 arg.as_str(),
                 &param.ty,
-                binding.as_ref(),
+                &binding,
                 scope.span,
             )?;
             lowered_args.push((arg.clone(), lowered));
@@ -503,9 +615,7 @@ impl<'module> Linker<'module> {
                 process: start.process.clone(),
                 args: lowered_args,
             }),
-            Some(Binding::Value(
-                self.process_output_type(start.process.as_str()),
-            )),
+            Binding::Value(self.process_output_type(start.process.as_str())),
         ))
     }
 
@@ -513,7 +623,7 @@ impl<'module> Linker<'module> {
         &self,
         process: &AstString,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let Some(process_ty) = self.process_types.get(process.as_str()) else {
             return Err(LinkError::UnknownProcess {
                 name: process.to_string(),
@@ -524,7 +634,7 @@ impl<'module> Linker<'module> {
             Expr::ProcessRef {
                 process: process.clone(),
             },
-            Some(Binding::Value(process_ty.clone())),
+            Binding::Value(process_ty.clone()),
         ))
     }
 
@@ -533,13 +643,13 @@ impl<'module> Linker<'module> {
         type_name: &AstString,
         input: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::HostDescriptorConstructor {
                 type_name: type_name.clone(),
                 input: Box::new(self.lower_expr(input, scope)?.0),
             },
-            Some(Binding::Value(TypeExpr::Ref(type_name.clone()))),
+            Binding::Value(TypeExpr::Ref(type_name.clone())),
         ))
     }
 
@@ -547,13 +657,13 @@ impl<'module> Linker<'module> {
         &self,
         resource: &ResourceRefExpr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let resource = self.validate_resource_ref(resource, scope.span)?;
         Ok((
             Expr::ResourceRef(resource.clone()),
-            Some(Binding::Resource {
+            Binding::Resource {
                 resource_type: resource.resource_type.to_string(),
-            }),
+            },
         ))
     }
 
@@ -563,7 +673,7 @@ impl<'module> Linker<'module> {
         operation: &AstString,
         args: &[Expr],
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         if let Some(mut path) = module_path_for_expr(receiver) {
             path.push(operation.clone());
             if let Some(constructor) = self.surface.resources.resolve_value_constructor(&path) {
@@ -577,7 +687,7 @@ impl<'module> Linker<'module> {
                 }
                 let (input, input_binding) =
                     self.lower_expr_expected(&args[0], scope, Some(&constructor.input_ty))?;
-                let actual_ty = binding_type(input_binding.as_ref());
+                let actual_ty = binding_type(&input_binding);
                 if !self.is_type_assignable(&actual_ty, &constructor.input_ty) {
                     return Err(LinkError::IncompatibleConstructorInput {
                         path: module_path_key(&path),
@@ -593,7 +703,7 @@ impl<'module> Linker<'module> {
                         type_name: constructor.type_name.clone().into(),
                         input: Box::new(input),
                     },
-                    Some(Binding::Value(constructor.output_ty.clone())),
+                    Binding::Value(constructor.output_ty.clone()),
                 ));
             }
         }
@@ -610,7 +720,7 @@ impl<'module> Linker<'module> {
             } else {
                 let (lowered_receiver, binding) = self.lower_expr(receiver, scope)?;
                 let resource_type = match binding {
-                    Some(Binding::Resource { resource_type }) => Some(resource_type),
+                    Binding::Resource { resource_type } => Some(resource_type),
                     _ => None,
                 };
                 (lowered_receiver, resource_type, None)
@@ -680,15 +790,22 @@ impl<'module> Linker<'module> {
             )
         });
         if let Some(trigger_operation) = trigger_operation {
+            let trigger_scope = scope.clone();
             let (lowered_args, output_ty) =
                 self.lower_trigger_operation_args(trigger_operation, args, scope)?;
+            self.collect_default_trigger_key(
+                &lowered_receiver,
+                operation,
+                &lowered_args,
+                &trigger_scope,
+            )?;
             return Ok((
                 Expr::ReceiverCall {
                     receiver: Box::new(lowered_receiver),
                     operation: operation.clone(),
                     args: lowered_args,
                 },
-                Some(Binding::Value(output_ty)),
+                Binding::Value(output_ty),
             ));
         }
         let mut lowered_args = Vec::with_capacity(args.len());
@@ -697,7 +814,7 @@ impl<'module> Linker<'module> {
             let expected_arg = expected_call_arg_type(&operation_binding.input_ty, args.len());
             let (arg, binding) = self.lower_expr_expected(arg, scope, expected_arg)?;
             lowered_args.push(arg);
-            arg_types.push(binding_type(binding.as_ref()));
+            arg_types.push(binding_type(&binding));
         }
         let actual_input = call_input_type(arg_types);
         if !self.is_type_assignable(&actual_input, &operation_binding.input_ty) {
@@ -714,9 +831,7 @@ impl<'module> Linker<'module> {
                 operation: operation.clone(),
                 args: lowered_args,
             },
-            Some(Binding::Value(
-                self.operation_call_output_type(&operation_binding, args),
-            )),
+            Binding::Value(self.operation_call_output_type(&operation_binding, args)),
         ))
     }
 
@@ -725,14 +840,14 @@ impl<'module> Linker<'module> {
         inner: &Expr,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let (inner, binding) = self.lower_expr_expected(inner, scope, expected)?;
         if let Some(actual) = settled_literal_kind(&inner).or_else(|| {
             // A comprehension binding retains its inferred element type even
             // after its local iteration bindings leave scope. Calls are excluded:
             // their settled output types do not describe aggregate-await inputs.
             if !contains_awaitable_expression(&inner) {
-                settled_type_kind(&binding_type(binding.as_ref()))
+                settled_type_kind(&binding_type(&binding))
             } else {
                 None
             }
@@ -749,11 +864,11 @@ impl<'module> Linker<'module> {
         &self,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(self.surface.abilities.sleep, "sleep", scope.span)?;
         Ok((
             Expr::SleepFor(Box::new(self.lower_expr(inner, scope)?.0)),
-            Some(Binding::Value(TypeExpr::Null)),
+            Binding::Value(TypeExpr::Null),
         ))
     }
 
@@ -761,11 +876,11 @@ impl<'module> Linker<'module> {
         &self,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(self.surface.abilities.sleep, "sleep", scope.span)?;
         Ok((
             Expr::SleepUntil(Box::new(self.lower_expr(inner, scope)?.0)),
-            Some(Binding::Value(TypeExpr::Null)),
+            Binding::Value(TypeExpr::Null),
         ))
     }
 
@@ -773,7 +888,7 @@ impl<'module> Linker<'module> {
         &self,
         name: &AstString,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(
             self.surface.abilities.process_signals,
             "process signals",
@@ -787,7 +902,7 @@ impl<'module> Linker<'module> {
         }
         Ok((
             Expr::WaitSignal { name: name.clone() },
-            Some(Binding::Value(TypeExpr::Any)),
+            Binding::Value(TypeExpr::Any),
         ))
     }
 
@@ -797,7 +912,7 @@ impl<'module> Linker<'module> {
         name: &AstString,
         payload: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(
             self.surface.abilities.process_signals,
             "process signals",
@@ -813,7 +928,7 @@ impl<'module> Linker<'module> {
                     name: name.clone(),
                     payload: Box::new(self.lower_expr(payload, scope)?.0),
                 },
-                Some(Binding::Value(TypeExpr::Null)),
+                Binding::Value(TypeExpr::Null),
             ),
         )
     }
@@ -823,7 +938,7 @@ impl<'module> Linker<'module> {
         inner: &Expr,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let (inner, binding) = self.lower_expr_expected(inner, scope, expected)?;
         Ok((Expr::ResultUnwrap(Box::new(inner)), binding))
     }
@@ -832,10 +947,10 @@ impl<'module> Linker<'module> {
         &self,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Cancel(Box::new(self.lower_expr(inner, scope)?.0)),
-            Some(Binding::Value(TypeExpr::Any)),
+            Binding::Value(TypeExpr::Any),
         ))
     }
 
@@ -843,10 +958,10 @@ impl<'module> Linker<'module> {
         &self,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Print(Box::new(self.lower_expr(inner, scope)?.0)),
-            Some(Binding::Value(TypeExpr::Null)),
+            Binding::Value(TypeExpr::Null),
         ))
     }
 
@@ -854,10 +969,10 @@ impl<'module> Linker<'module> {
         &self,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Yield(Box::new(self.lower_expr(inner, scope)?.0)),
-            Some(Binding::Value(TypeExpr::Null)),
+            Binding::Value(TypeExpr::Null),
         ))
     }
 
@@ -865,36 +980,45 @@ impl<'module> Linker<'module> {
         &self,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Wake(Box::new(self.lower_expr(inner, scope)?.0)),
-            Some(Binding::Value(TypeExpr::Null)),
+            Binding::Value(TypeExpr::Null),
         ))
     }
 
     pub(super) fn lower_finish(
         &self,
+        original: &Expr,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let expected_return = scope.expected_return.clone();
         let (inner, binding) = self.lower_expr_expected(inner, scope, expected_return.as_ref())?;
-        let finish_ty = binding_type(binding.as_ref());
-        Ok((
-            Expr::Finish(Box::new(inner)),
-            Some(Binding::Value(finish_ty)),
-        ))
+        let finish_ty = binding_type(&binding);
+        if self.collect_completion.get() {
+            self.completion_facts.borrow_mut().insert(
+                original as *const Expr as usize,
+                Completion::terminal(vec![finish_ty.clone()]),
+            );
+        }
+        Ok((Expr::Finish(Box::new(inner)), Binding::Value(finish_ty)))
     }
 
     pub(super) fn lower_fail(
         &self,
+        original: &Expr,
         inner: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
-        Ok((
-            Expr::Fail(Box::new(self.lower_expr(inner, scope)?.0)),
-            Some(Binding::Value(TypeExpr::Null)),
-        ))
+    ) -> Result<(Expr, Binding), LinkError> {
+        let inner = self.lower_expr(inner, scope)?.0;
+        if self.collect_completion.get() {
+            self.completion_facts.borrow_mut().insert(
+                original as *const Expr as usize,
+                Completion::terminal(Vec::new()),
+            );
+        }
+        Ok((Expr::Fail(Box::new(inner)), Binding::Value(TypeExpr::Null)))
     }
 
     pub(super) fn lower_builtin_call(
@@ -902,7 +1026,7 @@ impl<'module> Linker<'module> {
         name: &AstString,
         args: &[Expr],
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         // Source spells a call to a declared function exactly like a builtin
         // call, so this is where the two namespaces are told apart. Builtins
         // win by construction: a declaration that reuses a builtin name is
@@ -936,7 +1060,7 @@ impl<'module> Linker<'module> {
             .collect::<Result<Vec<_>, _>>()?;
         let arg_types = lowered_args
             .iter()
-            .map(|(_, binding)| binding_type(binding.as_ref()))
+            .map(|(_, binding)| binding_type(binding))
             .collect::<Vec<_>>();
         self.validate_shaping_builtin(name.as_str(), &arg_types, scope.span)?;
         Ok((
@@ -944,10 +1068,7 @@ impl<'module> Linker<'module> {
                 name: name.clone(),
                 args: lowered_args.into_iter().map(|(expr, _)| expr).collect(),
             },
-            Some(Binding::Value(shaping_builtin_return_type(
-                name.as_str(),
-                &arg_types,
-            ))),
+            Binding::Value(shaping_builtin_return_type(name.as_str(), &arg_types)),
         ))
     }
 
@@ -962,7 +1083,7 @@ impl<'module> Linker<'module> {
         function: &AstString,
         args: &[Expr],
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let signature = self
             .function_signatures
             .get(function.as_str())
@@ -979,7 +1100,7 @@ impl<'module> Linker<'module> {
         let mut lowered = Vec::with_capacity(args.len());
         for (arg, (param_name, param_ty)) in args.iter().zip(&signature.params) {
             let (expr, binding) = self.lower_expr_expected(arg, scope, Some(param_ty))?;
-            let actual = binding_type(binding.as_ref());
+            let actual = binding_type(&binding);
             if !self.is_type_assignable(&actual, param_ty) {
                 return Err(LinkError::IncompatibleFunctionArgument {
                     function: function.to_string(),
@@ -996,7 +1117,7 @@ impl<'module> Linker<'module> {
                 function: function.clone(),
                 args: lowered,
             },
-            Some(Binding::Value(signature.return_ty)),
+            Binding::Value(signature.return_ty),
         ))
     }
 
@@ -1004,7 +1125,7 @@ impl<'module> Linker<'module> {
         &self,
         function: &crate::ast::FunctionExpr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         for capture in &function.captures {
             if scope.get(capture).is_none() {
                 return Err(LinkError::UnknownName {
@@ -1031,7 +1152,7 @@ impl<'module> Linker<'module> {
                 captures: function.captures.clone(),
                 body: Box::new(body),
             })),
-            Some(any_binding()),
+            any_binding(),
         ))
     }
 
@@ -1040,7 +1161,7 @@ impl<'module> Linker<'module> {
         function: &Expr,
         args: &[Expr],
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Call {
                 function: Box::new(self.lower_expr(function, scope)?.0),
@@ -1049,7 +1170,7 @@ impl<'module> Linker<'module> {
                     .map(|arg| self.lower_expr(arg, scope).map(|value| value.0))
                     .collect::<Result<_, _>>()?,
             },
-            Some(any_binding()),
+            any_binding(),
         ))
     }
 
@@ -1058,13 +1179,13 @@ impl<'module> Linker<'module> {
         items: &Expr,
         function: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Map {
                 items: Box::new(self.lower_expr(items, scope)?.0),
                 function: Box::new(self.lower_expr(function, scope)?.0),
             },
-            Some(any_binding()),
+            any_binding(),
         ))
     }
 
@@ -1073,15 +1194,15 @@ impl<'module> Linker<'module> {
         target: &Expr,
         field: &AstString,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let (target, binding) = self.lower_expr(target, scope)?;
-        let ty = self.field_type(&binding_type(binding.as_ref()), field.as_str(), scope.span)?;
+        let ty = self.field_type(&binding_type(&binding), field.as_str(), scope.span)?;
         Ok((
             Expr::Field {
                 target: Box::new(target),
                 field: field.clone(),
             },
-            Some(Binding::Value(ty)),
+            Binding::Value(ty),
         ))
     }
 
@@ -1090,7 +1211,7 @@ impl<'module> Linker<'module> {
         target: &Expr,
         index: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let (target, target_binding) = self.lower_expr(target, scope)?;
         let index = self.lower_expr(index, scope)?.0;
         Ok((
@@ -1098,10 +1219,7 @@ impl<'module> Linker<'module> {
                 target: Box::new(target),
                 index: Box::new(index),
             },
-            Some(Binding::Value(self.index_type(
-                &binding_type(target_binding.as_ref()),
-                scope.span,
-            )?)),
+            Binding::Value(self.index_type(&binding_type(&target_binding), scope.span)?),
         ))
     }
 
@@ -1110,16 +1228,16 @@ impl<'module> Linker<'module> {
         op: &crate::ast::UnaryOp,
         expr: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Unary {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr, scope)?.0),
             },
-            Some(Binding::Value(match op {
+            Binding::Value(match op {
                 crate::ast::UnaryOp::Not => TypeExpr::Bool,
                 crate::ast::UnaryOp::Negate => TypeExpr::Float,
-            })),
+            }),
         ))
     }
 
@@ -1129,13 +1247,13 @@ impl<'module> Linker<'module> {
         op: &crate::ast::BinaryOp,
         right: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         let (left, left_binding) = self.lower_expr(left, scope)?;
         let (right, right_binding) = self.lower_expr(right, scope)?;
         self.validate_binary_operands(
             *op,
-            &binding_type(left_binding.as_ref()),
-            &binding_type(right_binding.as_ref()),
+            &binding_type(&left_binding),
+            &binding_type(&right_binding),
             scope.span,
         )?;
         Ok((
@@ -1144,7 +1262,7 @@ impl<'module> Linker<'module> {
                 op: *op,
                 right: Box::new(right),
             },
-            Some(Binding::Value(binary_return_type(*op))),
+            Binding::Value(binary_return_type(*op)),
         ))
     }
 
@@ -1152,23 +1270,32 @@ impl<'module> Linker<'module> {
         &self,
         exception: &crate::ast::TryExpr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+        expected: Option<&TypeExpr>,
+    ) -> Result<(Expr, Binding), LinkError> {
         let before = scope.clone();
         let mut try_scope = before.clone();
-        let body = self.lower_expr(&exception.body, &mut try_scope)?.0;
-        let catch = if let Some(catch) = &exception.catch {
+        let (body, body_binding) =
+            self.lower_expr_expected(&exception.body, &mut try_scope, expected)?;
+        let (catch, result_binding) = if let Some(catch) = &exception.catch {
             let mut catch_scope = before.clone();
             let previous = catch_scope.bind(&catch.binding, any_binding());
-            let body = self.lower_expr(&catch.body, &mut catch_scope)?.0;
+            let (body, catch_binding) =
+                self.lower_expr_expected(&catch.body, &mut catch_scope, expected)?;
             catch_scope.restore(&catch.binding, previous);
             scope.join_branches(try_scope, catch_scope);
-            Some(crate::ast::CatchClause {
-                binding: catch.binding.clone(),
-                body: Box::new(body),
-            })
+            (
+                Some(crate::ast::CatchClause {
+                    binding: catch.binding.clone(),
+                    body: Box::new(body),
+                }),
+                Binding::Value(union_type(vec![
+                    binding_type(&body_binding),
+                    binding_type(&catch_binding),
+                ])),
+            )
         } else {
             *scope = try_scope;
-            None
+            (None, body_binding)
         };
         let finally = exception
             .finally
@@ -1184,7 +1311,7 @@ impl<'module> Linker<'module> {
                 catch,
                 finally,
             })),
-            Some(any_binding()),
+            result_binding,
         ))
     }
 
@@ -1192,10 +1319,10 @@ impl<'module> Linker<'module> {
         &self,
         value: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Throw(Box::new(self.lower_expr(value, scope)?.0)),
-            Some(any_binding()),
+            any_binding(),
         ))
     }
 
@@ -1203,10 +1330,10 @@ impl<'module> Linker<'module> {
         &self,
         value: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Return(Box::new(self.lower_expr(value, scope)?.0)),
-            Some(any_binding()),
+            any_binding(),
         ))
     }
 
@@ -1215,13 +1342,20 @@ impl<'module> Linker<'module> {
         op: &crate::ast::JavaScriptUnaryOp,
         expr: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
+        let ty = match op {
+            crate::ast::JavaScriptUnaryOp::Not => TypeExpr::Bool,
+            crate::ast::JavaScriptUnaryOp::TypeOf => TypeExpr::Str,
+            crate::ast::JavaScriptUnaryOp::Plus | crate::ast::JavaScriptUnaryOp::Negate => {
+                TypeExpr::Float
+            }
+        };
         Ok((
             Expr::JavaScriptUnary {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr, scope)?.0),
             },
-            Some(any_binding()),
+            Binding::Value(ty),
         ))
     }
 
@@ -1231,14 +1365,25 @@ impl<'module> Linker<'module> {
         op: &crate::ast::JavaScriptBinaryOp,
         right: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
+        let ty = match op {
+            crate::ast::JavaScriptBinaryOp::StrictEqual
+            | crate::ast::JavaScriptBinaryOp::StrictNotEqual
+            | crate::ast::JavaScriptBinaryOp::LooseEqual
+            | crate::ast::JavaScriptBinaryOp::LooseNotEqual
+            | crate::ast::JavaScriptBinaryOp::Less
+            | crate::ast::JavaScriptBinaryOp::LessEqual
+            | crate::ast::JavaScriptBinaryOp::Greater
+            | crate::ast::JavaScriptBinaryOp::GreaterEqual => TypeExpr::Bool,
+            _ => TypeExpr::Any,
+        };
         Ok((
             Expr::JavaScriptBinary {
                 left: Box::new(self.lower_expr(left, scope)?.0),
                 op: *op,
                 right: Box::new(self.lower_expr(right, scope)?.0),
             },
-            Some(any_binding()),
+            Binding::Value(ty),
         ))
     }
 
@@ -1248,14 +1393,14 @@ impl<'module> Linker<'module> {
         op: &crate::ast::JavaScriptLogicalOp,
         right: &Expr,
         scope: &mut Scope,
-    ) -> Result<(Expr, Option<Binding>), LinkError> {
+    ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::JavaScriptLogical {
                 left: Box::new(self.lower_expr(left, scope)?.0),
                 op: *op,
                 right: Box::new(self.lower_expr(right, scope)?.0),
             },
-            Some(any_binding()),
+            any_binding(),
         ))
     }
 

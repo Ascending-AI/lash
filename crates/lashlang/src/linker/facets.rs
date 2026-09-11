@@ -4,10 +4,12 @@ pub(crate) fn analyze_workflow_program(
     program: &Program,
     surface: &LashlangHostEnvironment,
 ) -> WorkflowLinkAnalysis {
-    let mut linker = Linker::new(program, surface).with_expected_type_facts();
+    let mut linker = Linker::new(program, surface)
+        .with_expected_type_facts()
+        .with_workflow_analysis();
     linker.prepare_for_workflow_analysis();
-    let spans = expression_spans_by_pointer(program);
-    let mut analysis = WorkflowLinkAnalysis::default();
+    linker.clear_workflow_analysis();
+    linker.recover_workflow_errors.set(true);
 
     for (index, declaration) in program.declarations.iter().enumerate() {
         let Declaration::Process(process) = declaration else {
@@ -20,15 +22,19 @@ pub(crate) fn analyze_workflow_program(
         }
         scope.bind("input", Binding::Value(process_input_type(process)));
         scope.bind("inputs", Binding::Value(process_input_record_type(process)));
-        linker.analyze_workflow_block(&process.body, &mut scope, &spans, &mut analysis);
+        if let Err(error) = linker.lower_expr(&process.body, &mut scope) {
+            linker.record_workflow_error(&process.body, error);
+        }
     }
 
     let mut main_scope = Scope::new(false, None);
     for name in &surface.globals {
         main_scope.bind(name, any_binding());
     }
-    linker.analyze_workflow_block(&program.main, &mut main_scope, &spans, &mut analysis);
-    analysis
+    if let Err(error) = linker.lower_expr(&program.main, &mut main_scope) {
+        linker.record_workflow_error(&program.main, error);
+    }
+    linker.take_workflow_analysis()
 }
 
 impl WorkflowLinkAnalysis {
@@ -105,13 +111,10 @@ impl<'module> Linker<'module> {
         for declaration in &self.program.declarations {
             match declaration {
                 Declaration::Type(declaration) => {
-                    self.type_names.insert(declaration.name.to_string());
                     self.type_defs
                         .insert(declaration.name.to_string(), declaration.ty.clone());
                 }
-                Declaration::Process(process) => {
-                    self.process_names.insert(process.name.to_string());
-                }
+                Declaration::Process(_) => {}
                 Declaration::Function(function) => {
                     self.function_signatures
                         .insert(function.name.to_string(), function_signature(function));
@@ -142,117 +145,66 @@ impl<'module> Linker<'module> {
         }
     }
 
-    pub(super) fn analyze_workflow_block(
-        &self,
-        expr: &Expr,
-        scope: &mut Scope,
-        spans: &BTreeMap<usize, Span>,
-        analysis: &mut WorkflowLinkAnalysis,
-    ) {
-        match expr {
-            Expr::Block(expressions) => {
-                for expression in expressions {
-                    self.analyze_workflow_node(expression, scope, spans, analysis);
-                }
-            }
-            expression => self.analyze_workflow_node(expression, scope, spans, analysis),
-        }
-    }
-
-    pub(super) fn analyze_workflow_node(
-        &self,
-        expr: &Expr,
-        scope: &mut Scope,
-        spans: &BTreeMap<usize, Span>,
-        analysis: &mut WorkflowLinkAnalysis,
-    ) {
-        let expression_key = expr as *const Expr as usize;
-        let mut facts = WorkflowLinkNodeFacts {
-            available_variables: scope
-                .bindings
-                .iter()
-                .map(|(name, binding)| {
-                    (
-                        name.clone(),
-                        self.resolve_type_aliases(&binding_type(Some(binding))),
-                    )
-                })
-                .collect(),
-            ..WorkflowLinkNodeFacts::default()
+    pub(super) fn begin_workflow_node(&self, expr: &Expr, scope: &Scope) {
+        let Some(analysis) = &self.workflow_analysis else {
+            return;
         };
-        let before = scope.clone();
-        let parent_span = scope.span;
-        scope.span = spans.get(&expression_key).copied().or(parent_span);
-        if let Err(error) = self.infer_expr_type(expr, scope) {
-            facts.diagnostics.push(error);
-            *scope = before.clone();
-            recover_workflow_binding(expr, scope);
-        }
-        scope.span = parent_span;
-        facts.expected_arguments = self.expected_arguments_for_node(expr);
-        analysis.nodes.insert(expression_key, facts);
-        self.analyze_nested_workflow_nodes(expr, &before, spans, analysis);
+        analysis.borrow_mut().nodes.insert(
+            expr as *const Expr as usize,
+            WorkflowLinkNodeFacts {
+                available_variables: scope
+                    .bindings
+                    .iter()
+                    .map(|(name, binding)| {
+                        (
+                            name.clone(),
+                            self.resolve_type_aliases(&binding_type(binding)),
+                        )
+                    })
+                    .collect(),
+                ..WorkflowLinkNodeFacts::default()
+            },
+        );
     }
 
-    pub(super) fn analyze_nested_workflow_nodes(
-        &self,
-        expr: &Expr,
-        scope: &Scope,
-        spans: &BTreeMap<usize, Span>,
-        analysis: &mut WorkflowLinkAnalysis,
-    ) {
-        let value = workflow_node_value(expr);
-        match value {
-            Expr::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                let mut branch_scope = scope.clone();
-                let _ = self.infer_expr_type(condition, &mut branch_scope);
-                let mut then_scope = branch_scope.clone();
-                self.analyze_workflow_block(then_block, &mut then_scope, spans, analysis);
-                let mut else_scope = branch_scope;
-                self.analyze_workflow_block(else_block, &mut else_scope, spans, analysis);
-            }
-            Expr::For {
-                binding,
-                iterable,
-                body,
-            } => {
-                let mut body_scope = scope.clone();
-                let item_ty = self
-                    .infer_expr_type(iterable, &mut body_scope)
-                    .and_then(|ty| self.iterable_item_type(&ty, body_scope.span))
-                    .unwrap_or(TypeExpr::Any);
-                body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
-                self.analyze_workflow_block(body, &mut body_scope, spans, analysis);
-            }
-            Expr::While { condition, body } => {
-                let mut body_scope = scope.clone();
-                let _ = self.infer_expr_type(condition, &mut body_scope);
-                self.analyze_workflow_block(body, &mut body_scope, spans, analysis);
-            }
-            Expr::ListComprehension { element, clauses } => {
-                let mut element_scope = scope.clone();
-                for clause in clauses {
-                    match clause {
-                        ListComprehensionClause::For { binding, iterable } => {
-                            let item_ty = self
-                                .infer_expr_type(iterable, &mut element_scope)
-                                .and_then(|ty| self.iterable_item_type(&ty, element_scope.span))
-                                .unwrap_or(TypeExpr::Any);
-                            element_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
-                        }
-                        ListComprehensionClause::If { condition } => {
-                            let _ = self.infer_expr_type(condition, &mut element_scope);
-                        }
-                    }
-                }
-                self.analyze_workflow_block(element, &mut element_scope, spans, analysis);
-            }
-            _ => {}
+    pub(super) fn finish_workflow_node(&self, expr: &Expr) {
+        let Some(analysis) = &self.workflow_analysis else {
+            return;
+        };
+        let expected_arguments = self.expected_arguments_for_node(expr);
+        analysis
+            .borrow_mut()
+            .nodes
+            .entry(expr as *const Expr as usize)
+            .or_default()
+            .expected_arguments = expected_arguments;
+    }
+
+    pub(super) fn record_workflow_error(&self, expr: &Expr, error: LinkError) {
+        let Some(analysis) = &self.workflow_analysis else {
+            return;
+        };
+        let expected_arguments = self.expected_arguments_for_node(expr);
+        let mut analysis = analysis.borrow_mut();
+        let facts = analysis
+            .nodes
+            .entry(expr as *const Expr as usize)
+            .or_default();
+        facts.diagnostics.push(error);
+        facts.expected_arguments = expected_arguments;
+    }
+
+    pub(super) fn clear_workflow_analysis(&self) {
+        if let Some(analysis) = &self.workflow_analysis {
+            *analysis.borrow_mut() = WorkflowLinkAnalysis::default();
         }
+    }
+
+    pub(super) fn take_workflow_analysis(&mut self) -> WorkflowLinkAnalysis {
+        self.workflow_analysis
+            .take()
+            .map(RefCell::into_inner)
+            .unwrap_or_default()
     }
 
     pub(super) fn expected_arguments_for_node(
@@ -300,7 +252,7 @@ fn workflow_node_value(mut expr: &Expr) -> &Expr {
     }
 }
 
-fn recover_workflow_binding(expr: &Expr, scope: &mut Scope) {
+pub(super) fn recover_workflow_binding(expr: &Expr, scope: &mut Scope) {
     let mut expr = expr;
     while let Expr::LabelAnnotated { expr: inner, .. } = expr {
         expr = inner;
