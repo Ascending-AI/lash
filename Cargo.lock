@@ -2619,6 +2619,7 @@ version = "0.0.0-dev"
 dependencies = [
  "futures",
  "lash-internal-lashlang",
+ "lash-internal-sansio",
  "lash-internal-typescript",
  "ryu-js",
  "serde",

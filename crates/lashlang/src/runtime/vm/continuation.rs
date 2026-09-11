@@ -23,9 +23,12 @@ use super::exceptions::PendingErrorOrigin;
 /// heap error's `error_kind` serializes by name here too, so a v7 reader fails
 /// to decode the new names instead of reporting a version boundary.
 ///
+/// v10 preserves structured tool-failure classification inside a pending
+/// runtime error's serialized execution-host source.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 9;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 10;
 
 /// The execution identity pending-tool handles carry.
 ///

@@ -7,6 +7,14 @@ use thiserror::Error;
 
 use super::ExecutionHostError;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct ExecutionHostToolFailure {
+    pub(super) class: lash_sansio::ToolFailureClass,
+    pub(super) code: String,
+    pub(super) source: lash_sansio::ToolFailureSource,
+    pub(super) retry: lash_sansio::ToolRetryStatus,
+}
+
 /// A failure while interpolating arguments into a format template.
 #[non_exhaustive]
 #[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
@@ -325,6 +333,9 @@ pub enum RuntimeError {
     /// The `?` operator unwrapped a failed tool result.
     #[error("`?` unwrapped failed tool result: {message}")]
     UnwrappedToolResultFailed { message: String },
+    /// The `?` operator unwrapped a failed host tool result with typed failure metadata.
+    #[error("`?` unwrapped failed tool result: {source}")]
+    UnwrappedHostToolResultFailed { source: ExecutionHostError },
     /// The `?` operator unwrapped a failed module operation.
     #[error("`?` unwrapped failed module operation: {source}")]
     UnwrappedModuleOperationFailed { source: ExecutionHostError },
@@ -554,6 +565,7 @@ impl RuntimeError {
             Self::ValidateTypeLiteralRequired => ErrorTaxonomy::Catchable,
             Self::NotTypeValue { .. } => ErrorTaxonomy::Catchable,
             Self::UnwrappedToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::UnwrappedHostToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::UnwrappedModuleOperationFailed { .. } => ErrorTaxonomy::EffectFailure,
             Self::MissingAssignmentIndex => ErrorTaxonomy::Catchable,
             Self::MissingAssignmentField { .. } => ErrorTaxonomy::Catchable,
@@ -685,6 +697,7 @@ impl RuntimeError {
             Self::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
             Self::NotTypeValue { .. } => "NotTypeValue",
             Self::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+            Self::UnwrappedHostToolResultFailed { .. } => "UnwrappedHostToolResultFailed",
             Self::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
             Self::MissingAssignmentIndex => "MissingAssignmentIndex",
             Self::MissingAssignmentField { .. } => "MissingAssignmentField",
@@ -771,6 +784,24 @@ impl RuntimeError {
                 | Self::MemoryLimitExceeded { .. }
                 | Self::FrameDepthExceeded { .. }
         )
+    }
+
+    pub(crate) fn execution_host_error(&self) -> Option<&ExecutionHostError> {
+        match self {
+            Self::UnwrappedHostToolResultFailed { source }
+            | Self::UnwrappedModuleOperationFailed { source }
+            | Self::ProcessStartFailed { source }
+            | Self::SleepFailed { source }
+            | Self::WaitSignalFailed { source }
+            | Self::SignalRunFailed { source }
+            | Self::CancelFailed { source }
+            | Self::ProcessEventFailed { source }
+            | Self::PrintFailed { source }
+            | Self::FinishFailed { source }
+            | Self::FailFailed { source }
+            | Self::ResourceBatchFailed { source } => Some(source),
+            _ => None,
+        }
     }
 }
 
@@ -939,6 +970,9 @@ mod tests {
             },
             RuntimeError::UnwrappedToolResultFailed {
                 message: "tool error".into(),
+            },
+            RuntimeError::UnwrappedHostToolResultFailed {
+                source: host_error(),
             },
             RuntimeError::UnwrappedModuleOperationFailed {
                 source: host_error(),
@@ -1263,6 +1297,9 @@ mod tests {
                 RuntimeError::UnwrappedToolResultFailed { .. } => {
                     "`?` unwrapped failed tool result: tool error"
                 }
+                RuntimeError::UnwrappedHostToolResultFailed { .. } => {
+                    "`?` unwrapped failed tool result: host error"
+                }
                 RuntimeError::UnwrappedModuleOperationFailed { .. } => {
                     "`?` unwrapped failed module operation: host error"
                 }
@@ -1372,7 +1409,7 @@ mod tests {
     /// Every guest-facing code, in declaration order. The list is the pin's
     /// completeness half: `expected_code` forces each variant to declare one,
     /// this forces each declared one to be exercised.
-    const RUNTIME_ERROR_CODES: [&str; 118] = [
+    const RUNTIME_ERROR_CODES: [&str; 119] = [
         "FrameDepthExceeded",
         "FunctionIndexOverflow",
         "NonFunctionCall",
@@ -1447,6 +1484,7 @@ mod tests {
         "ValidateTypeLiteralRequired",
         "NotTypeValue",
         "UnwrappedToolResultFailed",
+        "UnwrappedHostToolResultFailed",
         "UnwrappedModuleOperationFailed",
         "MissingAssignmentIndex",
         "MissingAssignmentField",
@@ -1581,6 +1619,7 @@ mod tests {
             RuntimeError::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
             RuntimeError::NotTypeValue { .. } => "NotTypeValue",
             RuntimeError::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
+            RuntimeError::UnwrappedHostToolResultFailed { .. } => "UnwrappedHostToolResultFailed",
             RuntimeError::UnwrappedModuleOperationFailed { .. } => "UnwrappedModuleOperationFailed",
             RuntimeError::MissingAssignmentIndex => "MissingAssignmentIndex",
             RuntimeError::MissingAssignmentField { .. } => "MissingAssignmentField",

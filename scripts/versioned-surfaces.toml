@@ -801,11 +801,19 @@ paths = ["crates/lashlang/src/runtime/error.rs"]
 must_cover = ["RuntimeError"]
 
 # Leaves the continuation reaches outside its own files: the execution mode it
-# resumes in and the span it blames a pending error on.
+# resumes in, a structured execution-host failure embedded in RuntimeError,
+# and the span it blames a pending error on.
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lashlang/src/runtime/host.rs"]
-symbols = ["ExecutionMode"]
+symbols = ["ExecutionMode", "ExecutionHostError"]
+
+# ExecutionHostError's durable classification carrier embeds these external
+# Serde enums, and rust_items guards intentionally do not follow type references.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/tool_output.rs"]
+symbols = ["ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"]
 
 [[surface.guard]]
 kind = "rust_items"

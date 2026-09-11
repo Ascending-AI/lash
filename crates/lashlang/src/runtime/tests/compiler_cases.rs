@@ -1778,7 +1778,9 @@ async fn helper_functions_are_covered_directly() {
         Value::Bool(true)
     );
     assert_eq!(
-        error_value("x".to_string()).as_record().unwrap()["error"],
+        execution_host_error_value(ExecutionHostError::new("x"), "test")
+            .as_record()
+            .unwrap()["error"],
         Value::String("x".to_string().into())
     );
     assert_eq!(stringify_value(&Value::Null).expect("stringify"), "null");
