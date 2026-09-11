@@ -1,7 +1,8 @@
 use crate::ast::{
     AssignPathStep, AssignTarget, AstString, BinaryOp, Declaration, Expr, ExpressionSourceSpan,
     FunctionDecl, FunctionParam, LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam,
-    ProcessSignalDecl, ProcessStartExpr, Program, TypeDecl, TypeExpr, TypeField, UnaryOp,
+    ProcessSignalDecl, ProcessSignature, ProcessStartExpr, ProcessType, Program, TypeDecl,
+    TypeExpr, TypeField, UnaryOp,
 };
 use crate::lexer::{LexError, Span, Token, TokenKind, lex};
 use thiserror::Error;
@@ -375,6 +376,16 @@ pub(crate) fn is_parser_reserved_name(name: &str, position: IdentifierPosition) 
         .iter()
         .find_map(|(reserved, positions)| (*reserved == name).then_some(*positions))
         .is_some_and(|positions| positions & position.mask() != 0)
+}
+
+pub(crate) fn is_source_identifier(name: &str, position: IdentifierPosition) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && !is_parser_reserved_name(name, position)
 }
 
 fn token_can_be_key(kind: &TokenKind) -> bool {

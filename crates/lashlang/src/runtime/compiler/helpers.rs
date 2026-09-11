@@ -395,7 +395,7 @@ pub(super) fn fold_type(ty: &TypeExpr) -> Option<Value> {
             rec.insert(ANY_OF.into(), Value::List(folded.into()));
             Some(Value::Record(Arc::new(rec)))
         }
-        TypeExpr::Process { .. } | TypeExpr::TriggerHandle(_) => Some(interned_scalar_schema(None)),
+        TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => Some(interned_scalar_schema(None)),
         TypeExpr::Ref(_) => None,
     }
 }
@@ -481,11 +481,9 @@ mod tests {
                 optional: false,
             }]),
             TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null]),
-            TypeExpr::Process {
-                input: Box::new(TypeExpr::Any),
-                output: Box::new(TypeExpr::Str),
-                input_count: 0,
-            },
+            TypeExpr::Process(crate::ProcessType::known(
+                crate::ProcessSignature::try_new(Vec::new(), TypeExpr::Str).unwrap(),
+            )),
             TypeExpr::TriggerHandle(Box::new(TypeExpr::Str)),
         ];
 
@@ -498,7 +496,7 @@ mod tests {
             let expected_type = match &ty {
                 TypeExpr::Any
                 | TypeExpr::Union(_)
-                | TypeExpr::Process { .. }
+                | TypeExpr::Process(_)
                 | TypeExpr::TriggerHandle(_) => None,
                 TypeExpr::Str | TypeExpr::Enum(_) => Some("string"),
                 TypeExpr::Int => Some("integer"),

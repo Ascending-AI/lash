@@ -1553,7 +1553,7 @@ pub fn lashlang_type_expr_schema(ty: &lashlang::TypeExpr) -> serde_json::Value {
         lashlang::TypeExpr::Any
         | lashlang::TypeExpr::Dict
         | lashlang::TypeExpr::Ref(_)
-        | lashlang::TypeExpr::Process { .. }
+        | lashlang::TypeExpr::Process(_)
         | lashlang::TypeExpr::TriggerHandle(_) => serde_json::json!({}),
         lashlang::TypeExpr::Str => serde_json::json!({ "type": "string" }),
         lashlang::TypeExpr::Int => serde_json::json!({ "type": "integer" }),

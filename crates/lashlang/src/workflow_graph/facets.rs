@@ -2,7 +2,7 @@ use super::*;
 use crate::linker::{LashlangHostEnvironment, analyze_workflow_program};
 
 /// Version of the optional, derived workflow type-facet contract.
-pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 1;
+pub const WORKFLOW_TYPE_FACET_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowNodeTypeFacets {

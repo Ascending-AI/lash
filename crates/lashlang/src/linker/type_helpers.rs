@@ -603,7 +603,7 @@ fn type_category(ty: &TypeExpr) -> u8 {
         | TypeExpr::Enum(_) => 1,
         TypeExpr::List(_) => 2,
         TypeExpr::Object(_) => 3,
-        TypeExpr::Process { .. } => 4,
+        TypeExpr::Process(_) => 4,
         TypeExpr::TriggerHandle(_) => 5,
         TypeExpr::Any | TypeExpr::Dict | TypeExpr::Ref(_) | TypeExpr::Union(_) => 0,
     }
@@ -640,11 +640,10 @@ pub(super) fn process_input_record_type(process: &ProcessDecl) -> TypeExpr {
 }
 
 pub(super) fn process_type_for_decl(process: &ProcessDecl, output: TypeExpr) -> TypeExpr {
-    TypeExpr::Process {
-        input: Box::new(process_input_type(process)),
-        output: Box::new(output),
-        input_count: process.params.len(),
-    }
+    TypeExpr::Process(crate::ProcessType::known(
+        crate::ProcessSignature::try_new(process.params.clone(), output)
+            .expect("validated process declaration must form a signature"),
+    ))
 }
 
 pub(super) fn module_path_for_expr(expr: &Expr) -> Option<Vec<AstString>> {

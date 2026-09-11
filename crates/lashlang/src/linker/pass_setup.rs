@@ -349,14 +349,25 @@ impl<'module> Linker<'module> {
                     .map(|item| self.close_schema_type_expr(item, resolving))
                     .collect::<Option<Vec<_>>>()?,
             ),
-            TypeExpr::Process {
-                input,
-                output,
-                input_count,
-            } => TypeExpr::Process {
-                input: Box::new(self.close_schema_type_expr(input, resolving)?),
-                output: Box::new(self.close_schema_type_expr(output, resolving)?),
-                input_count: *input_count,
+            TypeExpr::Process(process) => match process.as_signature() {
+                None => ty.clone(),
+                Some(signature) => {
+                    let params = signature
+                        .params()
+                        .iter()
+                        .map(|param| {
+                            Some(ProcessParam {
+                                name: param.name.clone(),
+                                ty: self.close_schema_type_expr(&param.ty, resolving)?,
+                            })
+                        })
+                        .collect::<Option<Vec<_>>>()?;
+                    let output = self.close_schema_type_expr(signature.output(), resolving)?;
+                    TypeExpr::Process(crate::ProcessType::known(
+                        crate::ProcessSignature::try_new(params, output)
+                            .expect("resolved checked process signature remains valid"),
+                    ))
+                }
             },
             TypeExpr::TriggerHandle(event) => {
                 TypeExpr::TriggerHandle(Box::new(self.close_schema_type_expr(event, resolving)?))
@@ -433,14 +444,22 @@ impl<'module> Linker<'module> {
                     .map(|item| self.resolve_type_aliases_inner(item, seen))
                     .collect(),
             ),
-            TypeExpr::Process {
-                input,
-                output,
-                input_count,
-            } => TypeExpr::Process {
-                input: Box::new(self.resolve_type_aliases_inner(input, seen)),
-                output: Box::new(self.resolve_type_aliases_inner(output, seen)),
-                input_count: *input_count,
+            TypeExpr::Process(process) => match process.as_signature() {
+                None => ty.clone(),
+                Some(signature) => TypeExpr::Process(crate::ProcessType::known(
+                    crate::ProcessSignature::try_new(
+                        signature
+                            .params()
+                            .iter()
+                            .map(|param| ProcessParam {
+                                name: param.name.clone(),
+                                ty: self.resolve_type_aliases_inner(&param.ty, seen),
+                            })
+                            .collect(),
+                        self.resolve_type_aliases_inner(signature.output(), seen),
+                    )
+                    .expect("resolved checked process signature remains valid"),
+                )),
             },
             TypeExpr::TriggerHandle(event) => {
                 TypeExpr::TriggerHandle(Box::new(self.resolve_type_aliases_inner(event, seen)))
@@ -667,9 +686,10 @@ impl<'module> Linker<'module> {
             // Awaited process handles are runtime result envelopes. Preserve
             // the inferred payload as the known branch while keeping the
             // envelope gradual; `?` does not narrow gradual information.
-            Some(TypeExpr::Process { output, .. }) => {
-                union_type(vec![*output.clone(), TypeExpr::Any])
-            }
+            Some(TypeExpr::Process(process)) => process
+                .as_signature()
+                .map(|signature| union_type(vec![signature.output().clone(), TypeExpr::Any]))
+                .unwrap_or(TypeExpr::Any),
             _ => TypeExpr::Any,
         }
     }
@@ -710,9 +730,14 @@ impl<'module> Linker<'module> {
                 }
                 Ok(())
             }
-            TypeExpr::Process { input, output, .. } => {
-                self.validate_type_refs(input, span)?;
-                self.validate_type_refs(output, span)
+            TypeExpr::Process(process) => {
+                let Some(signature) = process.as_signature() else {
+                    return Ok(());
+                };
+                for param in signature.params() {
+                    self.validate_type_refs(&param.ty, span)?;
+                }
+                self.validate_type_refs(signature.output(), span)
             }
             TypeExpr::TriggerHandle(event) => self.validate_type_refs(event, span),
             TypeExpr::Any
@@ -840,11 +865,24 @@ impl<'module> Linker<'module> {
                 scope.bind("input", Binding::Value(process_input_type(process)));
                 scope.bind("inputs", Binding::Value(process_input_record_type(process)));
                 let body = self.lower_expr(&process.body, &mut scope)?.0;
+                let return_ty = self
+                    .process_types
+                    .get(process.name.as_str())
+                    .and_then(|ty| match ty {
+                        TypeExpr::Process(process) => process
+                            .as_signature()
+                            .map(|signature| signature.output().clone()),
+                        _ => None,
+                    })
+                    .or_else(|| process.return_ty.clone())
+                    .unwrap_or(TypeExpr::Any);
                 Declaration::Process(ProcessDecl {
                     name: process.name.clone(),
                     params: process.params.clone(),
                     signals: process.signals.clone(),
-                    return_ty: process.return_ty.clone(),
+                    // Linked artifacts carry the inferred result explicitly so an
+                    // immutable process identity resolves to one complete signature.
+                    return_ty: Some(return_ty),
                     label: process.label.clone(),
                     body,
                 })

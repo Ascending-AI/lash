@@ -374,8 +374,15 @@ mod walk {
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
         .expect("decode frozen artifact shape");
-        let artifact = lashlang::ModuleArtifact::from_program(frozen.canonical_ir)
-            .expect("mint the current identity generation");
+        let artifact = lashlang::LinkedModule::link(
+            frozen.canonical_ir,
+            lashlang::LashlangHostEnvironment::new(
+                lashlang::LashlangHostCatalog::default(),
+                lashlang::LashlangAbilities::all(),
+            ),
+        )
+        .expect("link the frozen source IR with a complete process signature")
+        .artifact;
         store
             .put_module_artifact(&artifact)
             .await

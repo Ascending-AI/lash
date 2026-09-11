@@ -138,6 +138,19 @@ fn canonical_source_round_trips_complex_linked_module() {
 }
 
 #[test]
+fn canonical_source_round_trips_all_named_process_signature_shapes() {
+    assert_linked_source_round_trip(
+        r#"
+        type Zero = Process<(), bool>
+        type Scalar = Process<(message: str), bool>
+        type Object = Process<(payload: { value: str }), bool>
+        type Multiple = Process<(left: str, right: int), bool>
+        finish true
+        "#,
+    );
+}
+
+#[test]
 fn canonical_source_round_trips_precedence_and_literals() {
     let source = r#"
     type Payload = { "odd-key": enum["yes", "no"], maybe: str | null, list: list[int]? }
@@ -565,12 +578,8 @@ fn non_sourceable_type_shapes_are_rejected() {
     for (ty, expected_kind) in [
         (TypeExpr::Enum(Vec::new()), "empty enum"),
         (
-            TypeExpr::Process {
-                input: Box::new(TypeExpr::Object(vec![])),
-                output: Box::new(TypeExpr::Any),
-                input_count: 2,
-            },
-            "multi-input process",
+            TypeExpr::Process(crate::ProcessType::unknown()),
+            "process with unknown signature",
         ),
         (TypeExpr::Union(vec![TypeExpr::Str]), "single-variant union"),
     ] {

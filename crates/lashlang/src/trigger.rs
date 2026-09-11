@@ -69,27 +69,13 @@ impl TriggerHostOperation {
         match self {
             Self::Register => TypeExpr::Object(vec![
                 required_field("source", TypeExpr::Dict),
-                required_field(
-                    "target",
-                    TypeExpr::Process {
-                        input: Box::new(TypeExpr::Any),
-                        output: Box::new(TypeExpr::Any),
-                        input_count: 1,
-                    },
-                ),
+                required_field("target", TypeExpr::Process(crate::ProcessType::unknown())),
                 required_field("inputs", TypeExpr::Dict),
                 optional_field("name", TypeExpr::Str),
                 optional_field("subscription_key", TypeExpr::Str),
             ]),
             Self::List => TypeExpr::Object(vec![
-                optional_field(
-                    "target",
-                    TypeExpr::Process {
-                        input: Box::new(TypeExpr::Any),
-                        output: Box::new(TypeExpr::Any),
-                        input_count: 1,
-                    },
-                ),
+                optional_field("target", TypeExpr::Process(crate::ProcessType::unknown())),
                 optional_field("name", TypeExpr::Str),
                 optional_field("source_type", TypeExpr::Str),
                 optional_field("enabled", TypeExpr::Bool),
@@ -98,14 +84,7 @@ impl TriggerHostOperation {
                 required_field("subscription_key", TypeExpr::Str),
                 required_field("expected_revision", TypeExpr::Int),
                 required_field("source", TypeExpr::Dict),
-                required_field(
-                    "target",
-                    TypeExpr::Process {
-                        input: Box::new(TypeExpr::Any),
-                        output: Box::new(TypeExpr::Any),
-                        input_count: 1,
-                    },
-                ),
+                required_field("target", TypeExpr::Process(crate::ProcessType::unknown())),
                 required_field("inputs", TypeExpr::Dict),
                 optional_field("name", TypeExpr::Str),
             ]),
@@ -660,6 +639,9 @@ fn decode_process_definition_identity(
                 ProcessDefinitionIdentityError::InvalidField { field, message } => {
                     format!("invalid {field}: {message}")
                 }
+                other @ (ProcessDefinitionIdentityError::ArtifactMismatch { .. }
+                | ProcessDefinitionIdentityError::MissingSignature { .. }
+                | ProcessDefinitionIdentityError::InvalidArtifact { .. }) => other.to_string(),
             },
         }
     })
@@ -833,12 +815,7 @@ fn validate_trigger_compatibility_target(
             process_name: target.process_name.clone(),
         });
     }
-    let aliases = type_aliases(artifact);
-    let event_ty = resolve_type_refs(
-        &event_ty.to_ref_ty(),
-        &aliases,
-        &artifact.host_requirements.resources,
-    );
+    let event_ty = artifact.resolve_type(&event_ty.to_ref_ty());
     for param in &process.params {
         let Some(input) = inputs.get(param.name.as_str()) else {
             return Err(TriggerCompatibilityError::MissingInput {
@@ -846,8 +823,7 @@ fn validate_trigger_compatibility_target(
                 input: param.name.to_string(),
             });
         };
-        let input_ty =
-            resolve_type_refs(&param.ty, &aliases, &artifact.host_requirements.resources);
+        let input_ty = artifact.resolve_type(&param.ty);
         match input {
             TriggerInputBinding::Event => {
                 if !is_resolved_type_assignable(&event_ty, &input_ty) {
@@ -906,69 +882,6 @@ fn validate_fixed_input_value(
     }
 }
 
-fn resolve_type_refs(
-    ty: &TypeExpr,
-    aliases: &BTreeMap<String, TypeExpr>,
-    resources: &LashlangHostCatalog,
-) -> TypeExpr {
-    resolve_type_refs_inner(ty, aliases, Some(resources), &mut BTreeSet::new())
-}
-
-fn resolve_type_refs_inner(
-    ty: &TypeExpr,
-    aliases: &BTreeMap<String, TypeExpr>,
-    resources: Option<&LashlangHostCatalog>,
-    seen: &mut BTreeSet<String>,
-) -> TypeExpr {
-    match ty {
-        TypeExpr::Ref(name) if seen.insert(name.to_string()) => {
-            let resolved = if let Some(ty) = aliases.get(name.as_str()) {
-                resolve_type_refs_inner(ty, aliases, resources, seen)
-            } else if let Some(data_type) =
-                resources.and_then(|resources| resources.resolve_named_data_type(name.as_str()))
-            {
-                data_type.ty().clone()
-            } else {
-                ty.clone()
-            };
-            seen.remove(name.as_str());
-            resolved
-        }
-        TypeExpr::List(item) => TypeExpr::List(Box::new(resolve_type_refs_inner(
-            item, aliases, resources, seen,
-        ))),
-        TypeExpr::Object(fields) => TypeExpr::Object(
-            fields
-                .iter()
-                .map(|field| TypeField {
-                    name: field.name.clone(),
-                    ty: resolve_type_refs_inner(&field.ty, aliases, resources, seen),
-                    optional: field.optional,
-                })
-                .collect(),
-        ),
-        TypeExpr::Union(items) => TypeExpr::Union(
-            items
-                .iter()
-                .map(|item| resolve_type_refs_inner(item, aliases, resources, seen))
-                .collect(),
-        ),
-        TypeExpr::Process {
-            input,
-            output,
-            input_count,
-        } => TypeExpr::Process {
-            input: Box::new(resolve_type_refs_inner(input, aliases, resources, seen)),
-            output: Box::new(resolve_type_refs_inner(output, aliases, resources, seen)),
-            input_count: *input_count,
-        },
-        TypeExpr::TriggerHandle(event) => TypeExpr::TriggerHandle(Box::new(
-            resolve_type_refs_inner(event, aliases, resources, seen),
-        )),
-        _ => ty.clone(),
-    }
-}
-
 pub fn is_resolved_type_assignable(source: &TypeExpr, target: &TypeExpr) -> bool {
     if matches!(source, TypeExpr::Any) || matches!(target, TypeExpr::Any) {
         return true;
@@ -999,21 +912,23 @@ pub fn is_resolved_type_assignable(source: &TypeExpr, target: &TypeExpr) -> bool
             object_type_assignable(source, target)
         }
         (TypeExpr::Ref(source), TypeExpr::Ref(target)) => source == target,
-        (
-            TypeExpr::Process {
-                input: source_input,
-                output: source_output,
-                input_count: source_count,
-            },
-            TypeExpr::Process {
-                input: target_input,
-                output: target_output,
-                input_count: target_count,
-            },
-        ) => {
-            source_count == target_count
-                && is_resolved_type_assignable(source_input, target_input)
-                && is_resolved_type_assignable(source_output, target_output)
+        (TypeExpr::Process(source), TypeExpr::Process(target)) => {
+            match (source.as_signature(), target.as_signature()) {
+                (None, _) | (_, None) => true,
+                (Some(source), Some(target)) => {
+                    source.arity() == target.arity()
+                        && source.params().iter().zip(target.params()).all(
+                            |(source_param, target_param)| {
+                                source_param.name == target_param.name
+                                    && is_resolved_type_assignable(
+                                        &target_param.ty,
+                                        &source_param.ty,
+                                    )
+                            },
+                        )
+                        && is_resolved_type_assignable(source.output(), target.output())
+                }
+            }
         }
         (TypeExpr::TriggerHandle(source), TypeExpr::TriggerHandle(target)) => {
             is_resolved_type_assignable(source, target)
@@ -1035,18 +950,6 @@ fn object_type_assignable(source: &[TypeField], target: &[TypeField]) -> bool {
         }
         is_resolved_type_assignable(&source_field.ty, &target_field.ty)
     })
-}
-
-fn type_aliases(artifact: &ModuleArtifact) -> BTreeMap<String, TypeExpr> {
-    artifact
-        .canonical_ir
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            crate::Declaration::Type(decl) => Some((decl.name.to_string(), decl.ty.clone())),
-            _ => None,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -1124,6 +1027,22 @@ mod tests {
         }
     }
 
+    fn process_type(params: &[(&str, TypeExpr)], output: TypeExpr) -> TypeExpr {
+        TypeExpr::Process(crate::ProcessType::known(
+            crate::ProcessSignature::try_new(
+                params
+                    .iter()
+                    .map(|(name, ty)| crate::ProcessParam {
+                        name: (*name).into(),
+                        ty: ty.clone(),
+                    })
+                    .collect(),
+                output,
+            )
+            .unwrap(),
+        ))
+    }
+
     fn definition_for(artifact: &ModuleArtifact, process_name: &str) -> ProcessDefinitionIdentity {
         ProcessDefinitionIdentity::from_artifact_export(artifact, process_name)
             .expect("artifact should export process")
@@ -1192,6 +1111,53 @@ mod tests {
             &TypeExpr::List(Box::new(TypeExpr::Any)),
             &TypeExpr::List(Box::new(TypeExpr::Int)),
         ));
+    }
+
+    #[test]
+    fn process_assignability_preserves_names_order_variance_and_gradual_unknown() {
+        let accepting_float = process_type(&[("value", TypeExpr::Float)], TypeExpr::Str);
+        let accepting_int = process_type(&[("value", TypeExpr::Int)], TypeExpr::Str);
+        assert!(is_resolved_type_assignable(
+            &accepting_float,
+            &accepting_int
+        ));
+        assert!(!is_resolved_type_assignable(
+            &accepting_int,
+            &accepting_float
+        ));
+        let accepting_any = process_type(&[("value", TypeExpr::Any)], TypeExpr::Str);
+        assert!(is_resolved_type_assignable(&accepting_any, &accepting_int));
+        assert!(is_resolved_type_assignable(&accepting_int, &accepting_any));
+
+        let wide_output = process_type(&[("value", TypeExpr::Int)], TypeExpr::Any);
+        assert!(is_resolved_type_assignable(&accepting_int, &wide_output));
+        let returning_int = process_type(&[("value", TypeExpr::Int)], TypeExpr::Int);
+        let returning_float = process_type(&[("value", TypeExpr::Int)], TypeExpr::Float);
+        assert!(is_resolved_type_assignable(
+            &returning_int,
+            &returning_float
+        ));
+        assert!(!is_resolved_type_assignable(
+            &returning_float,
+            &returning_int
+        ));
+
+        let renamed = process_type(&[("payload", TypeExpr::Float)], TypeExpr::Str);
+        assert!(!is_resolved_type_assignable(&accepting_float, &renamed));
+        let reordered = process_type(
+            &[("right", TypeExpr::Int), ("left", TypeExpr::Str)],
+            TypeExpr::Str,
+        );
+        let ordered = process_type(
+            &[("left", TypeExpr::Str), ("right", TypeExpr::Int)],
+            TypeExpr::Str,
+        );
+        assert!(!is_resolved_type_assignable(&ordered, &reordered));
+
+        let unknown = TypeExpr::Process(crate::ProcessType::unknown());
+        assert!(is_resolved_type_assignable(&unknown, &ordered));
+        assert!(is_resolved_type_assignable(&ordered, &unknown));
+        assert!(!is_resolved_type_assignable(&unknown, &TypeExpr::Str));
     }
 
     #[test]

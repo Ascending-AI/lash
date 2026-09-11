@@ -1,5 +1,7 @@
 use super::*;
 
+mod process_signature_tests;
+
 #[test]
 fn empty_union_normalizes_to_null_for_empty_lists() {
     assert_eq!(union_type(Vec::new()), TypeExpr::Null);
@@ -1005,6 +1007,59 @@ fn linked_module_accepts_button_trigger_source_constructor() {
 }
 
 #[test]
+fn named_process_signature_survives_parameter_return_container_branch_and_trigger_flow() {
+    let program = crate::parse(
+        r#"
+            process scan(event: timer.Tick) -> bool { finish true }
+            process install(handler: Process<(event: timer.Tick), bool>) -> Process<(event: timer.Tick), bool> {
+              handlers = [handler]
+              boxed = { target: handlers[0] }
+              selected = handler
+              if true { selected = boxed.target } else { selected = handler }
+              source = timer.Schedule({ expr: "0 8 * * *" })
+              await triggers.register({
+                source: source,
+                target: selected,
+                inputs: { event: trigger.event },
+                subscription_key: "indirect-handler"
+              })?
+              finish selected
+            }
+            finish start install(handler: scan)
+            "#,
+    )
+    .expect("parse indirect named process flow");
+
+    LinkedModule::link(program, full_host_environment())
+        .expect("named process signature should survive supported indirect flows");
+}
+
+#[test]
+fn zero_parameter_process_is_valid_but_trigger_registration_still_requires_event_mapping() {
+    let direct = crate::parse(
+        r#"
+            process idle() -> bool { finish true }
+            finish start idle()
+            "#,
+    )
+    .expect("parse zero parameter process");
+    LinkedModule::link(direct, full_host_environment()).expect("zero parameter start links");
+
+    let trigger = crate::parse(
+        r#"
+            process idle() -> bool { finish true }
+            source = timer.Schedule({ expr: "0 8 * * *" })
+            await triggers.register({ source: source, target: idle, inputs: {} })?
+            "#,
+    )
+    .expect("parse zero parameter trigger");
+    assert!(matches!(
+        LinkedModule::link(trigger, full_host_environment()),
+        Err(LinkError::MissingTriggerEventInput { .. })
+    ));
+}
+
+#[test]
 fn linked_module_rejects_bad_trigger_registry_bindings() {
     let missing = crate::parse(
         r#"
@@ -1244,7 +1299,7 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
 fn linked_module_infers_process_output_and_validates_return_annotations() {
     let inferred = crate::parse(
         r#"
-            process done(tick: timer.Tick) -> bool {
+            process done(tick: timer.Tick) {
               finish true
             }
             source = timer.Schedule({ expr: "0 8 * * *" })
@@ -1256,7 +1311,16 @@ fn linked_module_infers_process_output_and_validates_return_annotations() {
             "#,
     )
     .expect("parse inferred output");
-    assert!(LinkedModule::link(inferred, full_host_environment()).is_ok());
+    let linked = LinkedModule::link(inferred, full_host_environment())
+        .expect("source linker should materialize the inferred process output");
+    let Some(TypeExpr::Process(process_type)) = linked.artifact.process_type("done") else {
+        panic!("linked artifact should export a process signature");
+    };
+    let signature = process_type
+        .as_signature()
+        .expect("linked artifact process signature should be complete");
+    assert_eq!(signature.params()[0].name.as_str(), "tick");
+    assert_eq!(signature.output(), &TypeExpr::Bool);
 
     let union_mismatch = crate::parse(
         r#"
