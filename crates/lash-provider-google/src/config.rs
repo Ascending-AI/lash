@@ -94,7 +94,6 @@ impl CredentialRefresher<GoogleCredential> for GoogleCredentialRefresher {
 #[derive(Clone, Debug)]
 pub struct GoogleOAuthProvider {
     pub(crate) credentials: Arc<CredentialManager<GoogleCredential>>,
-    pub(crate) attempt_credential: Option<Lease<GoogleCredential>>,
     pub(crate) oauth_client: GoogleOAuthClient,
     pub(crate) endpoint: String,
     pub(crate) api_version: String,
@@ -146,7 +145,6 @@ impl GoogleOAuthProvider {
                     oauth_client: oauth_client.clone(),
                 }),
             )),
-            attempt_credential: None,
             oauth_client,
             endpoint: CODE_ASSIST_ENDPOINT.to_string(),
             api_version: CODE_ASSIST_API_VERSION.to_string(),
