@@ -1,6 +1,174 @@
 use super::*;
 use lash_sansio::SessionId;
 
+#[derive(Clone)]
+struct RecordedProjectionLlm {
+    envelope: lash_core::facade_support::CanonicalRuntimeEffectEnvelope,
+    outcome: lash_core::RuntimeEffectOutcome,
+}
+
+struct ProjectionReplayController {
+    native: lash_core::facade_support::NativeRuntimeEffectController,
+    first_llm: StdMutex<Option<RecordedProjectionLlm>>,
+    replay_next_llm: std::sync::atomic::AtomicBool,
+    new_llm_calls: AtomicUsize,
+    replayed_llm_calls: AtomicUsize,
+    mismatch_count: AtomicUsize,
+    fail_on_new_llm_call: usize,
+}
+
+impl ProjectionReplayController {
+    fn failing_on_new_llm_call(ordinal: usize) -> Self {
+        Self {
+            native: Default::default(),
+            first_llm: Default::default(),
+            replay_next_llm: Default::default(),
+            new_llm_calls: Default::default(),
+            replayed_llm_calls: Default::default(),
+            mismatch_count: Default::default(),
+            fail_on_new_llm_call: ordinal,
+        }
+    }
+
+    fn clear_journal(&self) {
+        self.first_llm.lock_recover().take();
+        self.replay_next_llm.store(false, Ordering::SeqCst);
+    }
+
+    fn begin_redrive(&self) {
+        self.replay_next_llm.store(true, Ordering::SeqCst);
+    }
+}
+
+#[async_trait]
+impl lash_core::AwaitEventResolver for ProjectionReplayController {
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.native.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.native.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.native.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.native.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::RuntimeError> {
+        self.native
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::RuntimeError> {
+        self.native
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+}
+
+#[async_trait]
+impl lash_core::RuntimeEffectController for ProjectionReplayController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
+    async fn execute_effect(
+        &self,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
+    {
+        let is_llm = matches!(
+            &envelope.command,
+            lash_core::RuntimeEffectCommand::LlmCall { .. }
+        );
+        let canonical = envelope.canonical_form()?;
+        if is_llm && self.replay_next_llm.swap(false, Ordering::SeqCst) {
+            let recorded = self
+                .first_llm
+                .lock_recover()
+                .clone()
+                .expect("first LLM outcome was journaled before redrive");
+            if let Err(error) = lash_core::facade_support::validate_replayed_effect_envelope(
+                &recorded.envelope,
+                &canonical,
+                lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+                None,
+            ) {
+                self.mismatch_count.fetch_add(1, Ordering::SeqCst);
+                return Err(error);
+            }
+            self.replayed_llm_calls.fetch_add(1, Ordering::SeqCst);
+            return Ok(recorded.outcome);
+        }
+
+        if is_llm {
+            let ordinal = self.new_llm_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if ordinal == self.fail_on_new_llm_call {
+                return Err(lash_core::RuntimeEffectControllerError::foreign(
+                    "test_projection_cold_restart",
+                    "injected cold restart after the first mid-turn completion",
+                ));
+            }
+        }
+
+        let outcome = if matches!(
+            &envelope.command,
+            lash_core::RuntimeEffectCommand::PeekAwaitEvent { .. }
+        ) {
+            lash_core::RuntimeEffectOutcome::PeekAwaitEvent { resolution: None }
+        } else {
+            local_executor.execute(envelope).await?
+        };
+        if is_llm {
+            self.first_llm
+                .lock_recover()
+                .get_or_insert(RecordedProjectionLlm {
+                    envelope: canonical,
+                    outcome: outcome.clone(),
+                });
+        }
+        Ok(outcome)
+    }
+}
+
 fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::Text {
@@ -95,6 +263,208 @@ fn sqlite_messages(
         .iter()
         .filter_map(|node| node.message())
         .collect()
+}
+
+#[tokio::test]
+async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redrive() -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "rolling-history-projection-redrive";
+    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+        dir.path().join("sessions"),
+    ));
+    let provider_requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let provider_call = Arc::new(AtomicUsize::new(0));
+    let checkpointed_projection_bases = Arc::new(StdMutex::new(Vec::new()));
+    let checkpoint_probe = Arc::new(crate::plugins::StaticPluginFactory::new(
+        "rolling-history-checkpoint-probe",
+        lash_core::facade_support::PluginSpec::new().with_checkpoint(Arc::new({
+            let checkpointed_projection_bases = Arc::clone(&checkpointed_projection_bases);
+            move |context| {
+                let checkpointed_projection_bases = Arc::clone(&checkpointed_projection_bases);
+                Box::pin(async move {
+                    if context.checkpoint == lash_core::CheckpointKind::AfterWork {
+                        checkpointed_projection_bases
+                            .lock_recover()
+                            .push(context.state.last_prompt_usage().cloned());
+                    }
+                    Ok(Vec::new())
+                })
+            }
+        })),
+    ));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("rolling-history-projection-redrive-test")
+        .complete({
+            let provider_requests = Arc::clone(&provider_requests);
+            let provider_call = Arc::clone(&provider_call);
+            move |request| {
+                let provider_requests = Arc::clone(&provider_requests);
+                let provider_call = Arc::clone(&provider_call);
+                async move {
+                    provider_requests.lock_recover().push(
+                        serde_json::to_string(&request.messages).expect("serialize messages"),
+                    );
+                    let ordinal = provider_call.fetch_add(1, Ordering::SeqCst);
+                    Ok(match ordinal {
+                        0 => response_with_usage("prime response", 30_000),
+                        1 => LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "projection-redrive-call".to_string(),
+                                tool_name: "app_lookup".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            }],
+                            usage: lash_core::llm::types::LlmUsage {
+                                input_tokens: 1,
+                                output_tokens: 1,
+                                ..Default::default()
+                            },
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        },
+                        2 => response_with_usage("redriven response", 2),
+                        3 => response_with_usage("fresh response", 3),
+                        other => panic!("unexpected provider call {other}"),
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let controller = Arc::new(ProjectionReplayController::failing_on_new_llm_call(3));
+    let effect_host = Arc::new(
+        crate::durability::NativeEffectHost::new(Arc::clone(&controller) as Arc<_>)
+            .allow_process_lifetime_completion_keys(),
+    );
+
+    let build_core = |store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>| {
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(provider.clone())
+            .model(model_spec("rolling-history-redrive-model", None, 40_000))
+            .tools(Arc::new(AppTools))
+            .plugin(Arc::new(
+                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            ))
+            .plugin(checkpoint_probe.clone())
+            .store_factory(store_factory.clone())
+            .effect_host(effect_host.clone())
+            .build(crate::testing::runtime_lease_owner())
+    };
+
+    let core = build_core(store_factory.clone())?;
+    let session = core.session(session_id).open().await?;
+    session
+        .turn(TurnInput::text("prime request"))
+        .turn_id("projection-prime")
+        .run()
+        .await?;
+    let mut restart_state = session.admin().state().persist_current().await?;
+    controller.clear_journal();
+
+    let interrupted = session
+        .turn(TurnInput::text("threshold request"))
+        .turn_id("projection-redrive")
+        .run()
+        .await;
+    assert!(
+        interrupted.is_err(),
+        "the first drive must stop after persisting its changed mid-turn usage"
+    );
+    assert!(
+        !provider_requests.lock_recover()[1].contains("prime request"),
+        "the original threshold drive must prune the prior turn"
+    );
+    let checkpoint_usage = checkpointed_projection_bases
+        .lock_recover()
+        .first()
+        .cloned()
+        .expect("AfterWork checkpoint usage");
+    let mut persisted_turn_state = restart_state.turn_state();
+    persisted_turn_state.last_prompt_usage = checkpoint_usage;
+    let persisted_turn_state: lash_core::PersistedTurnState =
+        serde_json::from_value(serde_json::to_value(persisted_turn_state)?)?;
+    restart_state.last_prompt_usage = persisted_turn_state.last_prompt_usage;
+    let authority = restart_state.authority.clone();
+    let mut restart_snapshot = restart_state.to_snapshot();
+    restart_snapshot.checkpoint_ref = None;
+    let mut fresh_restart_state = RuntimeSessionState::new(restart_snapshot.policy.clone());
+    fresh_restart_state.apply_snapshot(&restart_snapshot);
+    fresh_restart_state.authority = authority;
+    drop(session);
+    drop(core);
+
+    let reopened_core =
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(provider.clone())
+            .model(model_spec("rolling-history-redrive-model", None, 40_000))
+            .tools(Arc::new(AppTools))
+            .plugin(Arc::new(
+                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            ))
+            .plugin(checkpoint_probe.clone())
+            .effect_host(effect_host.clone())
+            .build(crate::testing::runtime_lease_owner())?;
+    let reopened = reopened_core
+        .session(session_id)
+        .open_with_state(fresh_restart_state)
+        .await?;
+    let restored_projection_basis = reopened.read_view().last_prompt_usage().cloned();
+    controller.begin_redrive();
+    reopened
+        .turn(TurnInput::text("threshold request"))
+        .turn_id("projection-redrive")
+        .run()
+        .await?;
+    assert!(
+        !provider_requests.lock_recover()[2].contains("prime request"),
+        "the cold redrive must reconstruct the same provider-visible history window"
+    );
+
+    assert_eq!(
+        restored_projection_basis
+            .as_ref()
+            .map(|usage| usage.context_budget_tokens),
+        Some(30_001),
+        "cold reopen must restore the last completed turn's projection basis"
+    );
+    assert_eq!(
+        checkpointed_projection_bases
+            .lock_recover()
+            .iter()
+            .map(|usage| usage.as_ref().map(|usage| usage.context_budget_tokens))
+            .collect::<Vec<_>>(),
+        vec![Some(30_001), Some(30_001)],
+        "the durable AfterWork checkpoint must keep the pinned basis after a low-usage provider call"
+    );
+    assert!(
+        controller.replayed_llm_calls.load(Ordering::SeqCst) >= 1,
+        "the cold drive must replay an already-journaled provider call"
+    );
+    assert_eq!(controller.mismatch_count.load(Ordering::SeqCst), 0);
+
+    controller.clear_journal();
+    reopened
+        .turn(TurnInput::text("fresh request"))
+        .turn_id("projection-fresh")
+        .run()
+        .await?;
+
+    let requests = provider_requests.lock_recover();
+    assert_eq!(requests.len(), 4, "replay must not re-buy the first call");
+    assert!(
+        !requests[1].contains("prime request"),
+        "the threshold turn must prune using its high prior-turn usage"
+    );
+    assert!(
+        !requests[2].contains("prime request"),
+        "every provider call in the redriven turn must keep the pinned projection"
+    );
+    assert!(
+        requests[3].contains("prime request"),
+        "a fresh turn must use the latest completed turn's low usage"
+    );
+
+    Ok(())
 }
 
 #[tokio::test]

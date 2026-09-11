@@ -522,7 +522,7 @@ impl LashRuntime {
             turn:
                 PreparedLogicalTurn {
                     messages,
-                    previous_prompt_usage: _previous_prompt_usage,
+                    previous_prompt_usage,
                     protocol_turn_options,
                     protocol_extension,
                     turn_context,
@@ -650,6 +650,11 @@ impl LashRuntime {
         }
         // `prepare_turn_preamble` has returned and dropped its read-view frame
         // before this clone, avoiding a transient second graph owner.
+        // Restore the basis captured before preparation cleared the resident
+        // value. TurnBoundary is the state persisted by a host continuation;
+        // keeping this value stable prevents a mid-turn call from changing the
+        // rolling-history projection when the logical turn is redriven.
+        self.state.last_prompt_usage = previous_prompt_usage;
         let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
@@ -718,6 +723,7 @@ impl LashRuntime {
             session_id: self.state.session_id.clone(),
             turn_index,
             turn_pipeline,
+            latest_prompt_usage: None,
             llm_stream_summaries: HashMap::new(),
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
