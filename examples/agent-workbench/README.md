@@ -31,12 +31,20 @@ just agent-workbench-status 3000
 just agent-workbench-logs 3000
 just agent-workbench-logs-follow 3000
 just agent-workbench-restart 3000
+just agent-workbench-reset 3000
 just agent-workbench-down 3000
 ```
 
-`restart` replaces only the workbench web process and preserves the Restate and
-managed Postgres containers. `down` stops the workbench and every container the
+`restart` refuses safely because replacing the only host behind a replayable Restate
+deployment is not supported by this launcher. `reset` is explicitly destructive: for a wholly
+launcher-owned disposable stack, it clears the Restate journals and corresponding SQLite/data
+directory or managed Postgres state, then starts fresh. It refuses legacy, external, mixed, or
+ambiguous ownership. `down` stops the workbench and every exactly identified container the
 entrypoint started.
+
+Durability scenarios that require state to survive a process replacement remain blocked until a
+separately verified immutable same-configuration host-restart mechanism exists. Do not use
+`agent-workbench-reset` for them; it deliberately deletes the evidence they assert survives.
 
 ## Sessions and dialects
 
@@ -200,10 +208,11 @@ preview and the resident `tools.search` contract. Search results persist full
 execution grants in `<data-dir>/deferred-tool-grants.db`; the RLM factory's
 production `DeferredToolResolver` authorizes only those stored call paths. The
 search tool's own description states the handshake constraint: discovered
-operations become callable in the next code block. Grants remain available in
-later turns and after `just agent-workbench-restart` reopens the same data
-directory. See [`runbooks/workbench-deferred-tools`](../../runbooks/workbench-deferred-tools/runbook.md)
-for the real-model, three-layer restart check.
+operations become callable in the next code block. Grants remain available in later turns.
+Persistence across a cold process replacement remains the required contract, but its live step is
+currently blocked by the launcher lifecycle constraint above. See
+[`runbooks/workbench-deferred-tools`](../../runbooks/workbench-deferred-tools/runbook.md) for the
+preserved three-layer acceptance gates.
 
 ### Durable approval is host policy
 

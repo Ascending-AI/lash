@@ -14,6 +14,10 @@ agent-workbench-up port='3030':
 agent-workbench-restart port='3030':
   ./scripts/agent-workbench-dev.sh restart --port "{{port}}"
 
+# Destructive: available only for a wholly launcher-owned disposable stack.
+agent-workbench-reset port='3030':
+  ./scripts/agent-workbench-dev.sh restart --reset-dev-state --port "{{port}}"
+
 agent-workbench-status port='3030':
   ./scripts/agent-workbench-dev.sh status --port "{{port}}"
 

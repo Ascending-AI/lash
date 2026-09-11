@@ -387,6 +387,7 @@ jobs:
           python3 scripts/test_ci_workspace_cache.py
           python3 scripts/test_ci_artifact_provenance.py
           bash scripts/test-worktree-gate-env.sh
+          bash scripts/test-agent-workbench-dev-reset.sh
           bash scripts/test-dev-script-process-identity.sh
           bash scripts/test-ci-reclaim-disk.sh
 
