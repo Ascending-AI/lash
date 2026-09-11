@@ -166,7 +166,7 @@ async fn the_native_substrate_supports_groups_through_the_scoped_host_view() {
 
     let host = native_host();
     let scoped = host
-        .scoped(crate::ExecutionScope::runtime_operation("fig1535-scoped"))
+        .scoped(crate::ExecutionScope::runtime_operation(SCOPE))
         .expect("scoped controller");
     assert!(
         scoped.controller().supports_effect_groups(),

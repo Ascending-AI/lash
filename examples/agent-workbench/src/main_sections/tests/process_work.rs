@@ -547,8 +547,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(record.outcome.is_none());
     let registration_digest = record
         .registration_fingerprint
-        .strip_prefix("process-registration-definition:v2:blake3:")
-        .expect("process registration uses the v2 BLAKE3 definition-fingerprint family");
+        .strip_prefix("process-registration-definition:v5:blake3:")
+        .expect("process registration uses the v5 BLAKE3 definition-fingerprint family");
     assert_eq!(registration_digest.len(), 64);
     assert!(
         registration_digest

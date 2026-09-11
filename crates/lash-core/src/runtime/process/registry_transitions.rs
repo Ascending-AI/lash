@@ -1253,7 +1253,7 @@ mod tests {
     }
 
     #[test]
-    fn a_version_absent_v1_wake_delivery_is_refused() {
+    fn a_version_absent_v2_wake_delivery_is_refused() {
         let mut payload: serde_json::Value =
             serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
         payload
@@ -1270,10 +1270,10 @@ mod tests {
         assert!(matches!(
             error,
             PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
-                if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == 1
+                if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == 2
         ));
         assert_eq!(
-            1 + 1,
+            2 + 1,
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             "wake delivery predecessor adjacency pin"
         );
@@ -1283,7 +1283,7 @@ mod tests {
     fn a_future_wake_delivery_version_is_refused_with_expected_and_found() {
         let mut payload: serde_json::Value =
             serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
-        payload["version"] = serde_json::json!(3);
+        payload["version"] = serde_json::json!(4);
         let error = WakeDeliveryRow {
             delivery_json: serde_json::to_string(&payload).expect("future wake delivery JSON"),
             ..wake_row()
@@ -1295,7 +1295,7 @@ mod tests {
             matches!(
                 &error,
                 PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
-                    if *expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && *found == 3
+                    if *expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && *found == 4
             ),
             "unexpected refusal: {error}"
         );

@@ -128,14 +128,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     );
     assert_field_schema(
         DEFERRED_LINK_KEY_FIELDS,
-        &[
-            "session_id",
-            "turn_id",
-            "turn_index",
-            "protocol_iteration",
-            "effect_id",
-            "replay_key",
-        ],
+        &["address"],
         &[serialized_fields(&link_key)],
     );
     assert_field_schema(

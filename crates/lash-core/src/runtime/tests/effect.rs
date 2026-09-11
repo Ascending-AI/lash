@@ -259,11 +259,8 @@ pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &TurnId,
 ) -> ScopedEffectController<'a> {
-    ScopedEffectController::borrowed(
-        controller,
-        ExecutionScope::turn("effect-test-session", turn_id),
-    )
-    .expect("scoped effect controller")
+    ScopedEffectController::borrowed(controller, ExecutionScope::turn("root", turn_id))
+        .expect("scoped effect controller")
 }
 
 #[async_trait::async_trait]
@@ -2211,8 +2208,8 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
         .map(|record| record.replay_key)
         .collect::<Vec<_>>();
     assert_eq!(replay_keys.len(), 2);
-    assert!(replay_keys[0].starts_with("direct:v2:blake3:"));
-    assert!(replay_keys[1].starts_with("direct:v2:blake3:"));
+    assert!(replay_keys[0].starts_with("direct:v3:blake3:"));
+    assert!(replay_keys[1].starts_with("direct:v3:blake3:"));
     assert_ne!(replay_keys[0], replay_keys[1]);
 }
 

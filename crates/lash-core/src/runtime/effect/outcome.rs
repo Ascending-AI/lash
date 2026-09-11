@@ -659,7 +659,7 @@ mod tests {
         );
 
         assert_eq!(invocation.attribution.session_id.as_deref(), Some("s"));
-        assert!(invocation.replay_key().starts_with("direct:v2:blake3:"));
+        assert!(invocation.replay_key().starts_with("direct:v3:blake3:"));
     }
 
     #[test]

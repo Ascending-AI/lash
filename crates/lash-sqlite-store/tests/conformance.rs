@@ -766,15 +766,16 @@ async fn sqlite_artifact_store_satisfies_conformance() {
     .await;
 }
 
-fn exec_envelope(replay_key: &str, code: &str) -> RuntimeEffectEnvelope {
+fn exec_envelope(
+    scope: ExecutionScope,
+    attribution: lash_core::RuntimeAttribution,
+    replay_key: &str,
+    code: &str,
+) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                durable_turn_scope("effect-session", "effect-turn"),
-                replay_key,
-            )
-            .expect("valid SQLite effect address"),
-            lash_core::RuntimeAttribution::for_turn("effect-session", "effect-turn", 1, 0),
+            lash_core::EffectAddress::new(scope, replay_key).expect("valid SQLite effect address"),
+            attribution,
             replay_key,
         ),
         RuntimeEffectCommand::ExecCode {
@@ -1993,7 +1994,20 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
         async move {
             controller
                 .execute_effect(
-                    exec_envelope("injected-clock-effect", "first"),
+                    exec_envelope(
+                        durable_turn_scope(
+                            "injected-clock-effect-session",
+                            "injected-clock-effect-turn",
+                        ),
+                        lash_core::RuntimeAttribution::for_turn(
+                            "injected-clock-effect-session",
+                            "injected-clock-effect-turn",
+                            1,
+                            0,
+                        ),
+                        "injected-clock-effect",
+                        "first",
+                    ),
                     RuntimeEffectLocalExecutor::testing(move |_| async move {
                         let _ = entered_tx.send(());
                         executor_release.notified().await;
@@ -2178,9 +2192,14 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_replays_without_local_executor() {
-    let (_controller_dir, controller) =
-        open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
-    let envelope = exec_envelope("exec-replay", "first");
+    let scope = durable_turn_scope("session", "turn");
+    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
+    let envelope = exec_envelope(
+        scope,
+        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
+        "exec-replay",
+        "first",
+    );
     let first = controller
         .execute_effect(envelope.clone(), returning_executor("recorded"))
         .await

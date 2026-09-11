@@ -1468,7 +1468,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 58,
+            actual: 59,
             expected: 41,
         }
     ));
