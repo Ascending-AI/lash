@@ -14,8 +14,8 @@ use self::facade_ops::ToolRegistryFacadeOps;
 use self::facade_ops::ToolStateFacadeOps;
 
 mod state;
-pub(crate) use state::ToolSourceExecutor;
 pub use state::{PLUGIN_TOOL_SOURCE_ID, ToolSourceHandle, ToolState, ToolStateEntry};
+pub(crate) use state::{ToolSourceCapture, ToolSourceExecutor};
 mod sources;
 use sources::{OrchestratingToolSource, ToolBinding, ToolProviderSource};
 mod registry_types;
@@ -34,6 +34,8 @@ use rebind::{
     manifest_with_compact_contract, reconcile_tool_state_entries, validate_unique_manifests,
 };
 #[cfg(test)]
+mod pinning_tests;
+#[cfg(test)]
 mod tests;
 
 /// Project every catalog member to a JSON record for host-owned discovery
@@ -47,6 +49,7 @@ where
         .into_iter()
         .map(|entry| {
             let manifest = entry.manifest;
+            let compact_contract = entry.contract.compact_contract(&manifest);
             let mut projected = serde_json::json!({
                 "id": manifest.id,
                 "name": manifest.name,
@@ -55,12 +58,10 @@ where
                 "activation": manifest.activation,
                 "inline": manifest.inline,
             });
-            if let Some(contract) = manifest.compact_contract {
-                projected
-                    .as_object_mut()
-                    .expect("projected tool catalog entry is an object")
-                    .insert("contract".to_string(), serde_json::json!(contract));
-            }
+            projected
+                .as_object_mut()
+                .expect("projected tool catalog entry is an object")
+                .insert("contract".to_string(), serde_json::json!(compact_contract));
             projected
         })
         .collect()

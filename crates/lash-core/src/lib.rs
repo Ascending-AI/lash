@@ -587,6 +587,7 @@ pub mod facade_support {
     pub use lash_sansio::SchemaResolutionError;
     pub use lash_sansio::SchemaResolutionRequest;
     pub use lash_sansio::SessionStreamEvent;
+    pub use lash_sansio::ToolCatalogBuildError;
     pub use lash_sansio::TurnFinish;
     pub use lash_sansio::TurnOutcome;
     pub use lash_sansio::TurnStop;
@@ -712,9 +713,9 @@ pub use lash_sansio::{
     PruneState, SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy,
     SessionAppendNode, TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
     ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCancellation, ToolCatalog, ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition,
-    ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
-    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
+    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
+    ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
+    ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
     ToolIntentParentEndAction, ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest,
     ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause, TurnId,
     TurnOutputSource,

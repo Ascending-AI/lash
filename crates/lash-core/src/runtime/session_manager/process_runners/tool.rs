@@ -81,10 +81,10 @@ impl RuntimeSessionServices {
         let await_parent_invocation = parent_invocation.clone();
         let turn_cancel_wait = crate::runtime::TurnCancelWait::unobserved(cancellation.clone());
         let run_context = ProcessRunContext::builder(self)
-            .tool_catalog(
+            .tool_surface(
                 self.current
                     .plugins
-                    .resolved_tool_catalog(&self.current.session_id)?,
+                    .pin_resolved_tool_surface(&self.current.session_id)?,
             )
             .scoped_effect_controller(scoped_effect_controller)
             .causal_invocation(parent_invocation.clone())

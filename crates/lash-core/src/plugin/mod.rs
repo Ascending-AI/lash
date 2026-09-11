@@ -22,7 +22,7 @@ pub mod runtime_host;
 mod runtime_impl;
 mod services;
 mod session_obj;
-pub(crate) use session_obj::plugin_lifecycle_hook_issue;
+pub(crate) use session_obj::{ResolvedToolSurface, plugin_lifecycle_hook_issue};
 pub(crate) mod session_types;
 mod state;
 use state::PluginStateRegistry;

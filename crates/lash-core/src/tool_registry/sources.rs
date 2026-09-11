@@ -18,6 +18,13 @@ impl ToolSourceExecutor for OrchestratingToolSource {
         "orchestrating"
     }
 
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self::new(self.definition.clone())))
+    }
+
     fn source_key(&self) -> ToolSourceKey {
         ToolSourceKey::Orchestrating(self.definition.manifest().id)
     }
@@ -82,7 +89,7 @@ fn resolve_contract_for_indexed_manifest(
 
 /// One or more providers behind a single registry source, indexed by tool id:
 /// an unknown id is refused here rather than delegated to a provider.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct ToolProviderIndex {
     by_id: BTreeMap<ToolId, (ToolManifest, usize)>,
     by_name: BTreeMap<String, ToolId>,
@@ -132,15 +139,65 @@ impl ToolProviderIndex {
 
 pub(super) struct ToolProviderSource {
     id: String,
-    tools: RwLock<ToolProviderIndex>,
+    tools: Arc<RwLock<ToolProviderIndex>>,
     providers: Vec<Arc<dyn ToolProvider>>,
+}
+
+struct ToolProviderSourceCapture {
+    id: String,
+    index: ToolProviderIndex,
+    live_tools: Arc<RwLock<ToolProviderIndex>>,
+    providers: Vec<Arc<dyn ToolProvider>>,
+}
+
+impl ToolSourceCapture for ToolProviderSourceCapture {
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        self.index
+            .by_id
+            .values()
+            .map(|(manifest, _)| manifest.clone())
+            .collect()
+    }
+
+    fn freeze(
+        self: Box<Self>,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        let mut index = self.index.clone();
+        let advertised_ids = index.by_id.keys().cloned().collect();
+        for id in known_resident_ids {
+            if index.by_id.contains_key(id) {
+                continue;
+            }
+            for (provider_idx, provider) in self.providers.iter().enumerate() {
+                if let Some(manifest) = provider.resolve_manifest_by_id(id) {
+                    if manifest.id != *id {
+                        return Err(ReconfigureError::Validation(format!(
+                            "source `{}` resolved tool id `{id}` with mismatched manifest id `{}`",
+                            ToolSourceKey::Leaf(self.id.clone()),
+                            manifest.id,
+                        )));
+                    }
+                    index.insert(manifest, provider_idx);
+                    break;
+                }
+            }
+        }
+        *self.live_tools.write_recover() = index.clone();
+        Ok(Arc::new(PinnedToolProviderSource::new(
+            self.id.clone(),
+            index,
+            advertised_ids,
+            &self.providers,
+        )))
+    }
 }
 
 impl ToolProviderSource {
     pub(super) fn new(id: impl Into<String>, providers: Vec<Arc<dyn ToolProvider>>) -> Self {
         Self {
             id: id.into(),
-            tools: RwLock::new(ToolProviderIndex::default()),
+            tools: Arc::new(RwLock::new(ToolProviderIndex::default())),
             providers,
         }
     }
@@ -190,6 +247,22 @@ impl ToolProviderSource {
 impl ToolSourceExecutor for ToolProviderSource {
     fn id(&self) -> &str {
         &self.id
+    }
+
+    fn capture_execution_source(&self) -> Result<Box<dyn ToolSourceCapture>, ReconfigureError> {
+        Ok(Box::new(ToolProviderSourceCapture {
+            id: self.id.clone(),
+            index: ToolProviderIndex::from_providers(&self.providers),
+            live_tools: Arc::clone(&self.tools),
+            providers: self.providers.clone(),
+        }))
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        self.capture_execution_source()?.freeze(known_resident_ids)
     }
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
@@ -303,6 +376,186 @@ impl ToolSourceExecutor for ToolProviderSource {
         };
         self.providers[provider_idx]
             .execute_internal_by_id(tool_id, args, context)
+            .await
+    }
+}
+
+#[derive(Clone)]
+struct PinnedProviderRoute {
+    manifest: ToolManifest,
+    provider: Arc<dyn ToolProvider>,
+}
+
+#[derive(Clone)]
+struct PinnedToolProviderSource {
+    id: String,
+    routes: BTreeMap<ToolId, PinnedProviderRoute>,
+    by_name: BTreeMap<String, ToolId>,
+    advertised_ids: BTreeSet<ToolId>,
+}
+
+impl PinnedToolProviderSource {
+    fn new(
+        id: String,
+        index: ToolProviderIndex,
+        advertised_ids: BTreeSet<ToolId>,
+        providers: &[Arc<dyn ToolProvider>],
+    ) -> Self {
+        let routes = index
+            .by_id
+            .into_iter()
+            .map(|(id, (manifest, provider_idx))| {
+                let provider = Arc::clone(&providers[provider_idx]);
+                (id, PinnedProviderRoute { manifest, provider })
+            })
+            .collect();
+        Self {
+            id,
+            routes,
+            by_name: index.by_name,
+            advertised_ids,
+        }
+    }
+
+    fn route(&self, id: &ToolId) -> Option<&PinnedProviderRoute> {
+        self.routes.get(id)
+    }
+
+    fn route_by_name(&self, name: &str) -> Option<&PinnedProviderRoute> {
+        self.route(self.by_name.get(name)?)
+    }
+}
+
+/// Resident-only view of a provider group captured by one advertisement.
+///
+/// The source layer has already resolved each id to a provider and manifest.
+/// Execution preserves the provider's authoritative by-id override; the
+/// sealed invocation context gives only the default trait implementation the
+/// captured source name, so it need not rematerialize a later advertisement.
+/// Grant-authorized deferred calls retain the original live source.
+#[async_trait::async_trait]
+impl ToolSourceExecutor for PinnedToolProviderSource {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(self.clone()))
+    }
+
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        self.routes
+            .iter()
+            .filter(|(id, _)| self.advertised_ids.contains(*id))
+            .map(|(_, route)| route.manifest.clone())
+            .collect()
+    }
+
+    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
+        self.route_by_name(name).map(|route| route.manifest.clone())
+    }
+
+    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+        self.route(id).map(|route| route.manifest.clone())
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        let route = self.route_by_name(name)?;
+        resolve_contract_for_indexed_manifest(route.provider.as_ref(), &route.manifest)
+    }
+
+    fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
+        let route = self.route(id)?;
+        resolve_contract_for_indexed_manifest(route.provider.as_ref(), &route.manifest)
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        let Some(route) = self.route(&call.tool_id) else {
+            return Err(ToolOutcome::err_fmt(format_args!(
+                "Unknown tool id: {}",
+                call.tool_id
+            )));
+        };
+        route.provider.prepare_tool_call(call).await
+    }
+
+    async fn execute(
+        &self,
+        tool: &str,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> ToolOutcome {
+        let Some(route) = self.route_by_name(tool) else {
+            return ToolOutcome::err_fmt(format_args!("Unknown tool: {tool}"));
+        };
+        route
+            .provider
+            .execute(ToolCall {
+                name: &route.manifest.name,
+                args,
+                context,
+            })
+            .await
+    }
+
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
+        self.route(tool_id)
+            .is_some_and(|route| route.provider.attempt_may_defer(tool_id))
+    }
+
+    async fn execute_attempt_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> crate::ToolAttemptOutcome {
+        let Some(route) = self.route(tool_id) else {
+            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(
+                format_args!("Unknown tool id: {tool_id}"),
+            ));
+        };
+        let captured =
+            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
+        route
+            .provider
+            .execute_attempt_by_id(tool_id, args, &captured)
+            .await
+    }
+
+    async fn execute_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::AttemptContext<'_>,
+    ) -> ToolOutcome {
+        let Some(route) = self.route(tool_id) else {
+            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
+        };
+        let captured =
+            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
+        route.provider.execute_by_id(tool_id, args, &captured).await
+    }
+
+    async fn execute_internal_by_id(
+        &self,
+        tool_id: &ToolId,
+        args: &serde_json::Value,
+        context: &crate::InternalProcessContext<'_>,
+    ) -> ToolOutcome {
+        let Some(route) = self.route(tool_id) else {
+            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
+        };
+        let captured =
+            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
+        route
+            .provider
+            .execute_internal_by_id(tool_id, args, &captured)
             .await
     }
 }

@@ -13,11 +13,35 @@ use crate::plugin::PluginError;
 #[derive(Clone)]
 pub struct InternalProcessContext<'run> {
     context: super::ToolContext<'run>,
+    captured_resident_route: Option<super::CapturedResidentRoute>,
 }
 
 impl<'run> InternalProcessContext<'run> {
     pub(crate) fn new(context: super::ToolContext<'run>) -> Self {
-        Self { context }
+        Self {
+            context,
+            captured_resident_route: None,
+        }
+    }
+
+    pub(crate) fn with_captured_resident_route(
+        &self,
+        tool_id: crate::ToolId,
+        source_name: String,
+    ) -> Self {
+        let mut captured = self.clone();
+        captured.captured_resident_route = Some(super::CapturedResidentRoute {
+            tool_id,
+            source_name,
+        });
+        captured
+    }
+
+    pub(super) fn captured_resident_name(&self, tool_id: &crate::ToolId) -> Option<&str> {
+        self.captured_resident_route
+            .as_ref()
+            .filter(|route| route.tool_id == *tool_id)
+            .map(|route| route.source_name.as_str())
     }
 
     /// Construct the runtime-only context in an integrator test.
@@ -74,12 +98,17 @@ impl<'run> InternalProcessContext<'run> {
             .scoped()
             .scope_id()
             .to_string();
-        crate::AttemptContext::from_tool_context(
+        let attempt = crate::AttemptContext::from_tool_context(
             &self.context,
             scope_id,
             None,
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
-        )
+        );
+        match &self.captured_resident_route {
+            Some(route) => attempt
+                .with_captured_resident_route(route.tool_id.clone(), route.source_name.clone()),
+            None => attempt,
+        }
     }
 }
 

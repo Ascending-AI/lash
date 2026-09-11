@@ -201,17 +201,7 @@ mod catalogue_tests {
             tool("search_tools", "tools", "search"),
             tool("grep", "files", "grep"),
         ];
-        let contracts = definitions
-            .iter()
-            .map(|tool| (tool.name().to_string(), Arc::new(tool.contract())))
-            .collect();
-        let surface = lash_core::ToolCatalog::from_tools(
-            definitions
-                .into_iter()
-                .map(|tool| tool.manifest())
-                .collect(),
-            contracts,
-        );
+        let surface = lash_core::ToolCatalog::from_tool_definitions(definitions);
 
         let preamble = build_rlm_preamble(
             lash_core::ProtocolBuildInput {
@@ -245,17 +235,7 @@ mod catalogue_tests {
     #[test]
     fn rlm_preamble_uses_lashlang_host_environment_abilities() {
         let definitions = vec![tool("grep", "files", "grep")];
-        let contracts = definitions
-            .iter()
-            .map(|tool| (tool.name().to_string(), Arc::new(tool.contract())))
-            .collect();
-        let surface = lash_core::ToolCatalog::from_tools(
-            definitions
-                .into_iter()
-                .map(|tool| tool.manifest())
-                .collect(),
-            contracts,
-        );
+        let surface = lash_core::ToolCatalog::from_tool_definitions(definitions);
 
         let preamble = build_rlm_preamble(
             lash_core::ProtocolBuildInput {
