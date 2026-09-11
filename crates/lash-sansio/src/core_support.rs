@@ -14,7 +14,7 @@ use crate::{
     ConversationRecord, MediaType, Message, MessageSequence, ModelEffortValidationCategory,
     ModelToolReturn, ModelToolReturnPart, PromptContribution, PromptFingerprint, ProtocolEvent,
     SessionAppendNode, ToolCancellation, ToolCatalog, ToolContract, ToolDefinition, ToolFailure,
-    ToolFailureClass, ToolManifest, ToolRetryPolicy, ToolValue,
+    ToolFailureClass, ToolId, ToolManifest, ToolRetryPolicy, ToolValue,
 };
 
 /// Reserved BLAKE3 domains used by workspace hash owners. Entries are
@@ -248,10 +248,12 @@ impl SessionAppendNodeCoreSupport for SessionAppendNode {
     }
 }
 
-pub trait ToolCatalogCoreSupport {
+pub trait ToolCatalogCoreSupport: Sized {
     fn from_tool_definitions(tools: Vec<ToolDefinition>) -> Self;
-    fn from_tools(tools: Vec<ToolManifest>, contracts: BTreeMap<String, Arc<ToolContract>>)
-    -> Self;
+    fn from_tools(
+        tools: Vec<ToolManifest>,
+        contracts: BTreeMap<ToolId, Arc<ToolContract>>,
+    ) -> Result<Self, crate::ToolCatalogBuildError>;
     fn tool_names(&self) -> Arc<Vec<String>>;
     fn tool_names_fingerprint(&self) -> PromptFingerprint;
     fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>>;
@@ -268,8 +270,8 @@ impl ToolCatalogCoreSupport for ToolCatalog {
 
     fn from_tools(
         tools: Vec<ToolManifest>,
-        contracts: BTreeMap<String, Arc<ToolContract>>,
-    ) -> Self {
+        contracts: BTreeMap<ToolId, Arc<ToolContract>>,
+    ) -> Result<Self, crate::ToolCatalogBuildError> {
         ToolCatalog::from_tools(tools, contracts)
     }
 

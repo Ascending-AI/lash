@@ -1,6 +1,44 @@
 use super::*;
 
 impl ToolRegistry {
+    /// Verify that every effective resident definition retains an executable
+    /// route in this pinned registry. This inspects only the admitted surface
+    /// and its captured source arcs; it never prepares or executes a call.
+    pub(crate) fn validate_resident_catalog_routes(
+        &self,
+        catalog: &crate::ToolCatalog,
+    ) -> Result<(), crate::PluginError> {
+        for definition in &catalog.tools {
+            let tool_id = &definition.manifest.id;
+            let name = &definition.manifest.name;
+            let unavailable = |reason: String| crate::PluginError::ResidentToolRouteUnavailable {
+                tool_id: tool_id.clone(),
+                name: name.clone(),
+                reason,
+            };
+            let source_key = {
+                let state = self.state.read_recover();
+                let entry = state.surface.get(tool_id).ok_or_else(|| {
+                    unavailable("the id is absent from the pinned surface".into())
+                })?;
+                if !entry.is_member() {
+                    return Err(unavailable(
+                        "the pinned surface does not admit the id as a member".into(),
+                    ));
+                }
+                entry.binding.source_key().cloned().ok_or_else(|| {
+                    unavailable("the pinned entry is not bound to a live source".into())
+                })?
+            };
+            if !self.sources.read_recover().contains_key(&source_key) {
+                return Err(unavailable(format!(
+                    "bound source `{source_key}` is absent from the pinned registry"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn resolve_catalog_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         let (manifest, source) = {
             let authority = self.inner.read_recover();

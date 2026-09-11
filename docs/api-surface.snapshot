@@ -3437,6 +3437,17 @@ lash::plugins::PluginError::Registration
 lash::plugins::PluginError::Registration::0
 lash::plugins::PluginError::ReservedProcessEvent
 lash::plugins::PluginError::ReservedProcessEvent::event_type
+lash::plugins::PluginError::ResidentToolContractUnavailable
+lash::plugins::PluginError::ResidentToolContractUnavailable::name
+lash::plugins::PluginError::ResidentToolContractUnavailable::tool_id
+lash::plugins::PluginError::ResidentToolDuplicateId
+lash::plugins::PluginError::ResidentToolDuplicateId::tool_id
+lash::plugins::PluginError::ResidentToolDuplicateName
+lash::plugins::PluginError::ResidentToolDuplicateName::name
+lash::plugins::PluginError::ResidentToolRouteUnavailable
+lash::plugins::PluginError::ResidentToolRouteUnavailable::name
+lash::plugins::PluginError::ResidentToolRouteUnavailable::reason
+lash::plugins::PluginError::ResidentToolRouteUnavailable::tool_id
 lash::plugins::PluginError::Runtime
 lash::plugins::PluginError::Runtime::0
 lash::plugins::PluginError::RuntimeEffectController
@@ -4037,7 +4048,6 @@ lash::plugins::ToolCatalog::from_tools
 lash::plugins::ToolCatalog::has_callable_tool
 lash::plugins::ToolCatalog::inline_tools
 lash::plugins::ToolCatalog::model_tool_specs
-lash::plugins::ToolCatalog::resolve_contract
 lash::plugins::ToolCatalog::tool_names
 lash::plugins::ToolCatalog::tool_names_fingerprint
 lash::plugins::ToolCatalog::tools
@@ -9235,6 +9245,7 @@ lash::tools::ToolCancellation::runtime
 lash::tools::ToolCancellation::source
 lash::tools::ToolCancellation::to_json_value
 lash::tools::ToolCatalogEntry
+lash::tools::ToolCatalogEntry::contract
 lash::tools::ToolCatalogEntry::manifest
 lash::tools::ToolChildExecutionTraceHook
 lash::tools::ToolChildExecutionTraceHook::child_process_started

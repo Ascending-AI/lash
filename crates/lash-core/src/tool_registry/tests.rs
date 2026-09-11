@@ -2039,14 +2039,13 @@ fn project_tool_catalog_projects_all_members_with_catalog_metadata() {
             serde_json::json!({}),
         )
     }
-    let catalog = project_tool_catalog([
+    let catalog = project_tool_catalog(["read_file", "search_tools"].map(|name| {
+        let definition = member_fixture(name);
         crate::ToolCatalogEntry {
-            manifest: member_fixture("read_file").manifest(),
-        },
-        crate::ToolCatalogEntry {
-            manifest: member_fixture("search_tools").manifest(),
-        },
-    ]);
+            manifest: definition.manifest,
+            contract: Arc::new(definition.contract),
+        }
+    }));
     assert_eq!(catalog.len(), 2);
     assert_eq!(catalog[0]["name"], serde_json::json!("read_file"));
     assert_eq!(
@@ -2072,10 +2071,11 @@ fn project_tool_catalog_preserves_dynamic_output_contracts() {
             serde_json::json!({}),
         )
     }
+    let definition = member_fixture("llm_query")
+        .with_output_from_input_schema("output", Some(serde_json::json!({ "type": "string" })));
     let catalog = project_tool_catalog([crate::ToolCatalogEntry {
-        manifest: member_fixture("llm_query")
-            .with_output_from_input_schema("output", Some(serde_json::json!({ "type": "string" })))
-            .manifest(),
+        manifest: definition.manifest,
+        contract: Arc::new(definition.contract),
     }]);
 
     assert_eq!(

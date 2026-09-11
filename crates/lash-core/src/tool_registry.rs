@@ -47,6 +47,7 @@ where
         .into_iter()
         .map(|entry| {
             let manifest = entry.manifest;
+            let compact_contract = entry.contract.compact_contract(&manifest);
             let mut projected = serde_json::json!({
                 "id": manifest.id,
                 "name": manifest.name,
@@ -55,12 +56,10 @@ where
                 "activation": manifest.activation,
                 "inline": manifest.inline,
             });
-            if let Some(contract) = manifest.compact_contract {
-                projected
-                    .as_object_mut()
-                    .expect("projected tool catalog entry is an object")
-                    .insert("contract".to_string(), serde_json::json!(contract));
-            }
+            projected
+                .as_object_mut()
+                .expect("projected tool catalog entry is an object")
+                .insert("contract".to_string(), serde_json::json!(compact_contract));
             projected
         })
         .collect()

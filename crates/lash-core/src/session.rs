@@ -304,7 +304,9 @@ impl Session {
         let tools = provider.tool_manifests();
         let contract_provider = Arc::clone(&provider);
         let resolve_contract: lash_sansio::ToolContractResolver =
-            Arc::new(move |name: &str| contract_provider.resolve_contract(name));
+            Arc::new(move |manifest: &crate::ToolManifest| {
+                contract_provider.resolve_contract_by_id(&manifest.id)
+            });
         let tool_catalog = Arc::new(self.plugins().resolve_tool_catalog(
             crate::plugin::ToolCatalogContext {
                 session_id: SessionId::from(session_id.to_string()),
@@ -315,6 +317,7 @@ impl Session {
                 extensions: self.plugins().extensions().clone(),
             },
         )?);
+        tool_registry.validate_resident_catalog_routes(&tool_catalog)?;
         let input = crate::ProtocolBuildInput {
             tool_catalog: Arc::clone(&tool_catalog),
             plugin_extensions: self.plugins().extensions().clone(),
@@ -540,6 +543,89 @@ mod tool_catalog_cache_tests {
         manifest_reads: Arc<AtomicUsize>,
     }
 
+    struct AdmissionProbeProvider {
+        contract_available: bool,
+        prepare_calls: Arc<AtomicUsize>,
+    }
+
+    impl AdmissionProbeProvider {
+        fn definition() -> crate::ToolDefinition {
+            crate::ToolDefinition::raw(
+                "tool:resident",
+                "resident",
+                "resident admission probe",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": { "pinned": { "type": "string" } },
+                    "required": ["pinned"],
+                    "additionalProperties": false
+                }),
+                serde_json::json!({ "type": "string" }),
+            )
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for AdmissionProbeProvider {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            vec![Self::definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (self.contract_available && name == "resident")
+                .then(|| Arc::new(Self::definition().contract()))
+        }
+
+        async fn prepare_tool_call(
+            &self,
+            call: crate::ToolPrepareCall<'_>,
+        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
+            self.prepare_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::PreparedToolCall::identity(
+                call.tool_id,
+                call.pending,
+            ))
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("resident"))
+        }
+    }
+
+    fn admission_probe_plugins(
+        provider: Arc<dyn ToolProvider>,
+        tool_access: crate::SessionToolAccess,
+    ) -> Arc<crate::PluginSession> {
+        let mut factories = crate::testing::test_standard_protocol_factories();
+        factories.push(Arc::new(StaticPluginFactory::new(
+            "admission_probe",
+            crate::PluginSpec::new().with_tool_provider(provider),
+        )));
+        crate::PluginHost::new(factories)
+            .build_session_with_parent(
+                "admission-probe",
+                None,
+                crate::plugin::SessionCreationConfig {
+                    authority: crate::plugin::SessionAuthorityContext {
+                        tool_access,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .expect("plugin session")
+    }
+
+    async fn admission_probe_session(provider: Arc<dyn ToolProvider>) -> Session {
+        let plugins = admission_probe_plugins(provider, crate::SessionToolAccess::default());
+        Session::new(
+            crate::RuntimeServices::new(plugins),
+            &SessionId::from("admission-probe"),
+        )
+        .await
+        .expect("runtime session")
+    }
+
     impl CountingDynamicProvider {
         fn definition(name: &str) -> crate::ToolDefinition {
             crate::ToolDefinition::raw(
@@ -714,5 +800,129 @@ mod tool_catalog_cache_tests {
             reads_before_pin + 4,
             "each of four request pins enumerated the live source exactly once"
         );
+    }
+
+    #[tokio::test]
+    async fn effective_member_without_contract_is_refused_before_prepare() {
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let session = admission_probe_session(Arc::new(AdmissionProbeProvider {
+            contract_available: false,
+            prepare_calls: Arc::clone(&prepare_calls),
+        }))
+        .await;
+
+        let error = match session.pin_tool_surface(
+            &SessionId::from("admission-probe"),
+            &crate::SessionToolAccess::default(),
+            None,
+        ) {
+            Ok(_) => panic!("missing resident contract must be refused before advertisement"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            crate::PluginError::ResidentToolContractUnavailable { ref tool_id, ref name }
+                if tool_id.as_str() == "tool:resident" && name == "resident"
+        ));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn restricted_definition_uses_id_route_and_missing_route_is_refused_before_prepare() {
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let session = admission_probe_session(Arc::new(AdmissionProbeProvider {
+            contract_available: true,
+            prepare_calls: Arc::clone(&prepare_calls),
+        }))
+        .await;
+        let renamed = crate::ToolDefinition::raw(
+            "tool:resident",
+            "resident_alias",
+            "authority-owned alias",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "authority": { "type": "string" } },
+                "required": ["authority"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "string" }),
+        );
+        let renamed_surface = session
+            .pin_tool_surface(
+                &SessionId::from("admission-probe"),
+                &crate::SessionToolAccess {
+                    tools: vec![renamed],
+                    hidden_tools: Default::default(),
+                },
+                None,
+            )
+            .expect("the same ToolId retains its pinned route under an authority-owned alias");
+        let entry = &renamed_surface.tool_catalog().tools[0];
+        assert_eq!(entry.manifest.name, "resident_alias");
+        assert!(
+            entry
+                .contract
+                .input_schema
+                .canonical()
+                .pointer("/properties/authority")
+                .is_some()
+        );
+
+        let missing = crate::ToolDefinition::raw(
+            "tool:missing-route",
+            "missing_route",
+            "no resident execution route",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        );
+        let error = match session.pin_tool_surface(
+            &SessionId::from("admission-probe"),
+            &crate::SessionToolAccess {
+                tools: vec![missing],
+                hidden_tools: Default::default(),
+            },
+            None,
+        ) {
+            Ok(_) => panic!("missing resident route must be refused before advertisement"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            crate::PluginError::ResidentToolRouteUnavailable { ref tool_id, ref name, .. }
+                if tool_id.as_str() == "tool:missing-route" && name == "missing_route"
+        ));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn plugin_session_refuses_missing_resident_route_before_advertisement() {
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let missing = crate::ToolDefinition::raw(
+            "tool:missing-route",
+            "missing_route",
+            "no resident execution route",
+            crate::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "string" }),
+        );
+        let plugins = admission_probe_plugins(
+            Arc::new(AdmissionProbeProvider {
+                contract_available: true,
+                prepare_calls: Arc::clone(&prepare_calls),
+            }),
+            crate::SessionToolAccess {
+                tools: vec![missing],
+                hidden_tools: Default::default(),
+            },
+        );
+
+        let error = plugins
+            .resolved_tool_catalog(&SessionId::from("admission-probe"))
+            .expect_err("direct plugin-session consumers must refuse a missing resident route");
+        assert!(matches!(
+            error,
+            crate::PluginError::ResidentToolRouteUnavailable { ref tool_id, ref name, .. }
+                if tool_id.as_str() == "tool:missing-route" && name == "missing_route"
+        ));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
     }
 }

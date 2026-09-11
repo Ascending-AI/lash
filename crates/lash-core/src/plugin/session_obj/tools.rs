@@ -1,5 +1,5 @@
 use crate::SessionId;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::*;
@@ -12,15 +12,20 @@ impl PluginSession {
         let tools = self.tools.tool_manifests();
         let contract_provider = Arc::clone(&self.tools);
         let resolve_contract: lash_sansio::ToolContractResolver =
-            Arc::new(move |name: &str| contract_provider.resolve_contract(name));
-        Ok(Arc::new(self.resolve_tool_catalog(ToolCatalogContext {
+            Arc::new(move |manifest: &ToolManifest| {
+                contract_provider.resolve_contract_by_id(&manifest.id)
+            });
+        let catalog = self.resolve_tool_catalog(ToolCatalogContext {
             session_id: SessionId::from(session_id.to_string()),
             tools,
             resolve_contract: Some(Arc::clone(&resolve_contract)),
             tool_access: self.tool_access.clone(),
             subagent: self.subagent.clone(),
             extensions: self.extensions.clone(),
-        })?))
+        })?;
+        self.tool_registry
+            .validate_resident_catalog_routes(&catalog)?;
+        Ok(Arc::new(catalog))
     }
 
     /// Project every Tool Catalog member to a JSON record for host-owned
@@ -58,20 +63,17 @@ impl PluginSession {
         let (tools, resolve_contract) = if ctx.tool_access.tools.is_empty() {
             (ctx.tools, ctx.resolve_contract)
         } else {
-            let contracts = ctx
-                .tool_access
-                .tools
-                .iter()
-                .map(|tool| (tool.name().to_string(), Arc::new(tool.contract())))
-                .collect::<BTreeMap<_, _>>();
+            let definitions = Arc::new(ctx.tool_access.tools.clone());
             (
-                ctx.tool_access
-                    .tools
-                    .iter()
-                    .map(|tool| tool.manifest())
-                    .collect(),
-                Some(Arc::new(move |name: &str| contracts.get(name).cloned())
-                    as lash_sansio::ToolContractResolver),
+                definitions.iter().map(|tool| tool.manifest()).collect(),
+                Some(Arc::new(move |manifest: &ToolManifest| {
+                    definitions
+                        .iter()
+                        .find(|tool| {
+                            tool.manifest.id == manifest.id && tool.manifest.name == manifest.name
+                        })
+                        .map(|tool| Arc::new(tool.contract()))
+                }) as lash_sansio::ToolContractResolver),
             )
         };
         let authority_hidden_tools = tools
@@ -84,10 +86,21 @@ impl PluginSession {
                 remove: authority_hidden_tools.into_iter().collect(),
             });
         }
-        Ok(crate::build_tool_catalog(crate::ToolCatalogBuildInput {
+        crate::build_tool_catalog(crate::ToolCatalogBuildInput {
             tools,
             resolve_contract,
             contributions,
-        }))
+        })
+        .map_err(|err| match err {
+            lash_sansio::ToolCatalogBuildError::MissingContract { tool_id, name } => {
+                PluginError::ResidentToolContractUnavailable { tool_id, name }
+            }
+            lash_sansio::ToolCatalogBuildError::DuplicateId { tool_id } => {
+                PluginError::ResidentToolDuplicateId { tool_id }
+            }
+            lash_sansio::ToolCatalogBuildError::DuplicateName { name } => {
+                PluginError::ResidentToolDuplicateName { name }
+            }
+        })
     }
 }
