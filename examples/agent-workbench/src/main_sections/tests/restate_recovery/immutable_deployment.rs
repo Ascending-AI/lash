@@ -18,7 +18,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
 
     let a_dir = tempfile::tempdir().expect("create fixture A data directory");
     let a_path = a_dir.path().to_path_buf();
-    record_fixture_owned_data_dir(&a_path);
     let a_sessions = WorkbenchSessions::persistent(a_path.join("session-id"))
         .expect("open fixture A persistent session selection");
     let a_active_turns = ActiveTurns::persistent(a_path.join("active-turns.json"))
@@ -135,7 +134,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
 
     let b_dir = tempfile::tempdir().expect("create fixture B data directory");
     let b_path = b_dir.path().to_path_buf();
-    record_fixture_owned_data_dir(&b_path);
     let b_provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let b_provider_calls_for_provider = Arc::clone(&b_provider_calls);
     let provider_b = lash::testing::TestProvider::builder()
