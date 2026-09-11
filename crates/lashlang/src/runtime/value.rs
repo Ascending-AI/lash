@@ -387,19 +387,6 @@ pub trait ProjectedHostDescriptor: Send + Sync {
     ) -> ProjectedFuture<'_, ProjectedReadResponse> {
         Box::pin(async { ProjectedReadResponse::Missing })
     }
-
-    fn read_many(
-        &self,
-        requests: Vec<ProjectedReadRequest>,
-    ) -> ProjectedFuture<'_, Vec<ProjectedReadResponse>> {
-        Box::pin(async move {
-            let mut responses = Vec::with_capacity(requests.len());
-            for request in requests {
-                responses.push(self.read_one(request).await);
-            }
-            responses
-        })
-    }
 }
 
 impl ProjectedValue {
