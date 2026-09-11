@@ -28,6 +28,7 @@ reset_committed=0
 reset_destructive_started=0
 reset_finalization_active=0
 reset_finalization_phase=""
+start_finalization_phase=""
 reset_recovery_command=""
 created_restate_ingress_service_lease_this_attempt=0
 created_restate_admin_service_lease_this_attempt=0
@@ -609,10 +610,53 @@ path_overlaps_reset_finalization() {
   return 1
 }
 
+path_overlaps_start_finalization() {
+  local path="$1" file
+  for file in "$launcher_lock_root"/*-start-finalizing; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    regular_private_file "$file" || return 0
+    if ! (
+      start_finalization_schema="" start_finalization_phase=""
+      start_finalization_data_dir="" start_finalization_state_dir=""
+      # shellcheck disable=SC1090
+      source "$file"
+      [[ "$start_finalization_schema" = 1 \
+        && "$start_finalization_phase" =~ ^(retired|data-removed)$ \
+        && "$start_finalization_data_dir" = /* \
+        && "$start_finalization_state_dir" = /* ]]
+    ); then
+      return 0
+    fi
+    if (
+      start_finalization_schema="" start_finalization_data_dir=""
+      start_finalization_state_dir=""
+      # shellcheck disable=SC1090
+      source "$file"
+      [[ "$start_finalization_schema" = 1 \
+        && ( "$path" = "$start_finalization_data_dir" \
+          || "$path" = "$start_finalization_data_dir/"* \
+          || "$start_finalization_data_dir" = "$path/"* \
+          || "$path" = "$start_finalization_state_dir" \
+          || "$path" = "$start_finalization_state_dir/"* \
+          || "$start_finalization_state_dir" = "$path/"* ) ]]
+    ); then
+      return 0
+    fi
+  done
+  return 1
+}
+
 require_exclusive_data_path_for_start() {
+  if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
+    die "requested workbench identity has a startup cleanup awaiting finalization"
+  fi
   if path_overlaps_reset_finalization "$data_dir" \
     || path_overlaps_reset_finalization "$state_dir"; then
     die "application or run path overlaps a reset awaiting finalization"
+  fi
+  if path_overlaps_start_finalization "$data_dir" \
+    || path_overlaps_start_finalization "$state_dir"; then
+    die "application or run path overlaps a startup cleanup awaiting finalization"
   fi
   if path_overlaps_reset_owner "$data_dir"; then
     die "application data path overlaps another launcher-owned disposable stack"
@@ -1578,22 +1622,208 @@ remove_matching_service_leases() {
 
 finalize_orphaned_service_receipt() {
   local component="$1" receipt_file="$2" marker_file="$3"
-  local receipt marker="" name="" schema phase receipt_component token id extra
+  local receipt marker="" name="" schema phase receipt_component token id extra observation
   receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
   read -r schema phase receipt_component token id extra <<<"$receipt"
-  [[ -n "$receipt" && -z "$extra" && "$phase" = retired \
+  [[ -n "$receipt" && -z "$extra" && "$phase" =~ ^(prepared|retired)$ \
     && "$receipt_component" = "$component" ]] || return 1
   if [[ -e "$marker_file" || -L "$marker_file" ]]; then
     marker="$(read_container_marker "$marker_file" 2>/dev/null || true)"
     read -r name _ _ _ <<<"$marker"
     [[ "$marker" = "$name $id $token $component" ]] || return 1
   fi
-  [[ "$(container_identity_observation "$id" "$id" "$token" "$component")" = retired ]] \
-    || return 1
+  observation="$(container_identity_observation "$id" "$id" "$token" "$component")"
+  [[ "$observation" = retired ]] || return 1
+  if [[ "$phase" = prepared ]]; then
+    write_service_retirement_receipt \
+      "$receipt_file" retired "$component" "$token" "$id" || true
+    receipt="$(read_service_retirement_receipt "$receipt_file" 2>/dev/null || true)"
+    [[ "$receipt" = "2 retired $component $token $id" ]] || return 1
+  fi
   remove_matching_service_leases "$component" "$token" "$id" || return 1
   remove_exact_private_record "$marker_file" "$marker" read_container_marker \
     "$component ownership marker" || return 1
   printf '%s\n' "$token"
+}
+
+load_start_finalization_receipt() {
+  local file="$1"
+  regular_private_file "$file" || return 1
+  start_finalization_schema="" start_finalization_phase=""
+  start_finalization_state_key="" start_finalization_state_dir=""
+  start_finalization_data_dir="" start_finalization_data_hash=""
+  start_finalization_data_identity="" start_finalization_token=""
+  start_finalization_owner_record="" start_finalization_data_record=""
+  start_finalization_restate_record="" start_finalization_postgres_record=""
+  # shellcheck disable=SC1090
+  source "$file" || return 1
+  [[ "$start_finalization_schema" = 1 \
+    && "$start_finalization_phase" =~ ^(retired|data-removed)$ \
+    && "$start_finalization_state_key" = "$state_key" \
+    && "$start_finalization_state_dir" = "$state_dir" \
+    && "$start_finalization_data_dir" = "$data_dir" \
+    && "$start_finalization_data_hash" = "$data_path_hash" \
+    && "$start_finalization_data_identity" =~ ^[0-9]+:[0-9]+$ \
+    && "$start_finalization_token" =~ ^[0-9a-fA-F-]{36}$ \
+    && "$file" = "$launcher_lock_root/$launcher_lock_hash-$state_key-start-finalizing" ]] \
+    || return 1
+
+  local owner_schema owner_token owner_key owner_hash owner_extra
+  read -r owner_schema owner_token owner_key owner_hash owner_extra \
+    <<<"$start_finalization_owner_record"
+  [[ "$owner_schema" = 1 && "$owner_token" = "$start_finalization_token" \
+    && "$owner_key" = "$state_key" && "$owner_hash" = "$data_path_hash" \
+    && -z "$owner_extra" ]] || return 1
+
+  local data_schema data_token data_hash data_identity data_extra
+  read -r data_schema data_token data_hash data_identity data_extra \
+    <<<"$start_finalization_data_record"
+  [[ "$data_schema" = 1 && "$data_token" = "$start_finalization_token" \
+    && "$data_hash" = "$data_path_hash" \
+    && "$data_identity" = "$start_finalization_data_identity" \
+    && -z "$data_extra" ]] || return 1
+
+  local record record_schema phase component token id extra found=0 expected_component
+  for expected_component in restate postgres; do
+    if [[ "$expected_component" = restate ]]; then
+      record="$start_finalization_restate_record"
+    else
+      record="$start_finalization_postgres_record"
+    fi
+    [[ -n "$record" ]] || continue
+    read -r record_schema phase component token id extra <<<"$record"
+    [[ "$record_schema" = 2 && "$phase" = retired \
+      && "$component" = "$expected_component" \
+      && "$token" = "$start_finalization_token" \
+      && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]] || return 1
+    found=1
+  done
+  (( found ))
+}
+
+write_start_finalization_receipt() {
+  local phase="$1" token="$2" owner_record="$3" data_record="$4"
+  local restate_record="$5" postgres_record="$6" publication=create content data_identity
+  [[ "$phase" =~ ^(retired|data-removed)$ ]] || return 1
+  data_identity="$(stat -c '%d:%i' "$data_dir")" || return 1
+  content="$({
+    printf 'start_finalization_schema=1\n'
+    printf 'start_finalization_phase=%q\n' "$phase"
+    printf 'start_finalization_state_key=%q\n' "$state_key"
+    printf 'start_finalization_state_dir=%q\n' "$state_dir"
+    printf 'start_finalization_data_dir=%q\n' "$data_dir"
+    printf 'start_finalization_data_hash=%q\n' "$data_path_hash"
+    printf 'start_finalization_data_identity=%q\n' "$data_identity"
+    printf 'start_finalization_token=%q\n' "$token"
+    printf 'start_finalization_owner_record=%q\n' "$owner_record"
+    printf 'start_finalization_data_record=%q\n' "$data_record"
+    printf 'start_finalization_restate_record=%q\n' "$restate_record"
+    printf 'start_finalization_postgres_record=%q\n' "$postgres_record"
+  })" || return 1
+  if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
+    regular_private_file "$start_finalization_file" || return 1
+    [[ "$(cat -- "$start_finalization_file")" = "$content" ]] || return 1
+    return 0
+  fi
+  printf '%s\n' "$content" | publish_private_record "$publication" "$start_finalization_file" \
+    || {
+      regular_private_file "$start_finalization_file" \
+        && [[ "$(cat -- "$start_finalization_file")" = "$content" ]]
+    }
+}
+
+promote_start_finalization_receipt() {
+  load_start_finalization_receipt "$start_finalization_file" || return 1
+  [[ "$start_finalization_phase" = retired ]] || return 1
+  local content
+  content="$(sed 's/^start_finalization_phase=.*/start_finalization_phase=data-removed/' \
+    "$start_finalization_file")" || return 1
+  printf '%s\n' "$content" | publish_private_record replace "$start_finalization_file" || true
+  load_start_finalization_receipt "$start_finalization_file" \
+    && [[ "$start_finalization_phase" = data-removed ]]
+}
+
+remove_start_finalization_receipt() {
+  local expected_hash="$1"
+  regular_private_file "$start_finalization_file" || return 1
+  [[ "$(sha256sum "$start_finalization_file" | awk '{print $1}')" = "$expected_hash" ]] \
+    || return 1
+  rm -f -- "$start_finalization_file" || return 1
+  [[ ! -e "$start_finalization_file" && ! -L "$start_finalization_file" ]]
+}
+
+finalize_start_finalization_receipt() {
+  load_start_finalization_receipt "$start_finalization_file" || return 1
+  local restate_id=- postgres_id=- record phase component token id extra
+  for record in "$start_finalization_restate_record" \
+    "$start_finalization_postgres_record"; do
+    [[ -n "$record" ]] || continue
+    read -r _ phase component token id extra <<<"$record"
+    [[ "$(container_identity_observation "$id" "$id" "$token" "$component")" = retired ]] \
+      || return 1
+    if [[ "$component" = restate ]]; then
+      restate_id="$id"
+    else
+      postgres_id="$id"
+    fi
+  done
+  [[ ! -e "$restate_marker_file" && ! -L "$restate_marker_file" \
+    && ! -e "$postgres_marker_file" && ! -L "$postgres_marker_file" ]] || return 1
+  owned_service_lease_remains "$start_finalization_token" "$restate_id" "$postgres_id" \
+    && return 1
+  if [[ -e "$run_owner_file" || -L "$run_owner_file" ]]; then
+    [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" \
+      = "$start_finalization_owner_record" ]] || return 1
+  fi
+  if [[ -e "$data_creation_receipt_file" || -L "$data_creation_receipt_file" ]]; then
+    [[ "$(read_data_creation_receipt "$data_creation_receipt_file" 2>/dev/null || true)" \
+      = "$start_finalization_data_record" ]] || return 1
+  fi
+  if [[ -e "$restate_service_retirement_receipt_file" \
+    || -L "$restate_service_retirement_receipt_file" ]]; then
+    [[ "$(read_service_retirement_receipt "$restate_service_retirement_receipt_file" \
+      2>/dev/null || true)" = "$start_finalization_restate_record" ]] || return 1
+  fi
+  if [[ -e "$postgres_service_retirement_receipt_file" \
+    || -L "$postgres_service_retirement_receipt_file" ]]; then
+    [[ "$(read_service_retirement_receipt "$postgres_service_retirement_receipt_file" \
+      2>/dev/null || true)" = "$start_finalization_postgres_record" ]] || return 1
+  fi
+
+  if [[ "$start_finalization_phase" = retired ]]; then
+    if [[ -e "$data_dir" || -L "$data_dir" ]]; then
+      [[ -d "$data_dir" && ! -L "$data_dir" \
+        && "$data_dir" != / && "$data_dir" != "$repo_root" \
+        && "$(stat -c '%d:%i' "$data_dir" 2>/dev/null || true)" \
+          = "$start_finalization_data_identity" ]] || return 1
+      ! path_has_symlink_component "$configured_data_dir" || return 1
+      rm -rf -- "$data_dir" || return 1
+    fi
+    [[ ! -e "$data_dir" && ! -L "$data_dir" ]] || return 1
+    promote_start_finalization_receipt || return 1
+  fi
+  [[ "$start_finalization_phase" = data-removed \
+    && ! -e "$data_dir" && ! -L "$data_dir" ]] || return 1
+
+  remove_exact_private_record "$run_owner_file" "$start_finalization_owner_record" \
+    read_run_owner "orphan startup run-footprint record" || return 1
+  if [[ -n "$start_finalization_postgres_record" ]]; then
+    remove_exact_private_record "$postgres_service_retirement_receipt_file" \
+      "$start_finalization_postgres_record" read_service_retirement_receipt \
+      "Postgres retirement receipt" || return 1
+  fi
+  if [[ -n "$start_finalization_restate_record" ]]; then
+    remove_exact_private_record "$restate_service_retirement_receipt_file" \
+      "$start_finalization_restate_record" read_service_retirement_receipt \
+      "Restate retirement receipt" || return 1
+  fi
+  local finalization_hash
+  finalization_hash="$(sha256sum "$start_finalization_file" | awk '{print $1}')" \
+    || return 1
+  if ! remove_start_finalization_receipt "$finalization_hash"; then
+    [[ ! -e "$start_finalization_file" && ! -L "$start_finalization_file" ]] \
+      || return 1
+  fi
 }
 
 finalize_orphaned_start_attempt() {
@@ -1605,6 +1835,10 @@ finalize_orphaned_start_attempt() {
   local owner_file="$state_dir/.agent-workbench-dev-run-owner-$key"
   local owner_record="" schema token="" owner_token owner_key owner_hash extra recovered_token
   local restate_receipt_record="" postgres_receipt_record="" has_service_receipt=0
+  if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
+    finalize_start_finalization_receipt
+    return
+  fi
   if [[ -e "$owner_file" || -L "$owner_file" ]]; then
     owner_record="$(read_run_owner "$owner_file" 2>/dev/null || true)"
     read -r schema owner_token owner_key owner_hash extra <<<"$owner_record"
@@ -1658,41 +1892,32 @@ finalize_orphaned_start_attempt() {
     recovered_token="$(finalize_orphaned_service_receipt \
       restate "$restate_receipt" "$restate_marker")" || return 1
     [[ "$recovered_token" = "$token" ]] || return 1
+    restate_receipt_record="$(read_service_retirement_receipt "$restate_receipt" \
+      2>/dev/null || true)"
   fi
   if [[ -e "$postgres_receipt" || -L "$postgres_receipt" ]]; then
     recovered_token="$(finalize_orphaned_service_receipt \
       postgres "$postgres_receipt" "$postgres_marker")" || return 1
     [[ "$recovered_token" = "$token" ]] || return 1
+    postgres_receipt_record="$(read_service_retirement_receipt "$postgres_receipt" \
+      2>/dev/null || true)"
   fi
   if (( ! allow_data_cleanup )); then
     log "retained exact startup cleanup authority; retry targeted down with the original data/run settings"
     return 1
   fi
-  if (( allow_data_cleanup )) && [[ -e "$data_creation_receipt_file" \
-    || -L "$data_creation_receipt_file" ]]; then
-    local creation_record creation_schema creation_token creation_hash creation_identity creation_extra
-    creation_record="$(read_data_creation_receipt "$data_creation_receipt_file" 2>/dev/null || true)"
-    read -r creation_schema creation_token creation_hash creation_identity creation_extra <<<"$creation_record"
-    [[ -n "$creation_record" && -z "$creation_extra" && "$creation_token" = "$token" \
-      && "$creation_hash" = "$data_path_hash" \
-      && "$creation_identity" = "$(stat -c '%d:%i' "$data_dir" 2>/dev/null || true)" \
-      && "$data_dir" != / && "$data_dir" != "$repo_root" ]] || return 1
-    ! path_has_symlink_component "$configured_data_dir" || return 1
-    rm -rf -- "$data_dir" || return 1
-    [[ ! -e "$data_dir" && ! -L "$data_dir" ]] || return 1
-  fi
-  if [[ -e "$owner_file" || -L "$owner_file" ]]; then
-    remove_exact_private_record "$owner_file" "$owner_record" read_run_owner \
-      "orphan startup run-footprint record" || return 1
-  fi
-  if [[ -n "$postgres_receipt_record" ]]; then
-    remove_exact_private_record "$postgres_receipt" "$postgres_receipt_record" \
-      read_service_retirement_receipt "Postgres retirement receipt" || return 1
-  fi
-  if [[ -n "$restate_receipt_record" ]]; then
-    remove_exact_private_record "$restate_receipt" "$restate_receipt_record" \
-      read_service_retirement_receipt "Restate retirement receipt" || return 1
-  fi
+  local creation_record creation_schema creation_token creation_hash creation_identity creation_extra
+  creation_record="$(read_data_creation_receipt "$data_creation_receipt_file" 2>/dev/null || true)"
+  read -r creation_schema creation_token creation_hash creation_identity creation_extra <<<"$creation_record"
+  [[ -n "$owner_record" && "$creation_schema" = 1 \
+    && -n "$creation_record" && -z "$creation_extra" \
+    && "$creation_token" = "$token" && "$creation_hash" = "$data_path_hash" \
+    && "$creation_identity" = "$(stat -c '%d:%i' "$data_dir" 2>/dev/null || true)" \
+    && "$data_dir" != / && "$data_dir" != "$repo_root" ]] || return 1
+  ! path_has_symlink_component "$configured_data_dir" || return 1
+  write_start_finalization_receipt retired "$token" "$owner_record" "$creation_record" \
+    "$restate_receipt_record" "$postgres_receipt_record" || return 1
+  finalize_start_finalization_receipt
 }
 
 stop_stack_from_meta() (
@@ -1900,6 +2125,15 @@ stop_stack_from_meta() (
 
 stop_target() {
   if [[ ! -e "$meta_file" && ! -L "$meta_file" ]]; then
+    if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
+      finalize_start_finalization_receipt || {
+        log "refusing teardown: retained startup finalization authority is incomplete or changed"
+        log "retry exact cleanup with the same data/run settings: scripts/agent-workbench-dev.sh down --addr $workbench_addr"
+        return 1
+      }
+      log "completed cleanup of the exact retired startup attempt"
+      return 0
+    fi
     if [[ -e "$teardown_transaction_file" || -L "$teardown_transaction_file" ]]; then
       finalize_orphaned_teardown_transaction "$teardown_transaction_file" "$state_key"
       return
@@ -2048,6 +2282,10 @@ cleanup_start_attempt() {
   if (( reset_finalization_active )); then
     log "reset finalization remains retryable; retaining its authoritative ownership receipt"
     return 1
+  fi
+  if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
+    finalize_start_finalization_receipt
+    return
   fi
   if (( process_observation_uncertain )); then
     log "startup cleanup retained the host and dependent resources after unknown process observation"
@@ -2281,6 +2519,11 @@ write_reset_recovery_file() {
 
 stop_all_known() {
   local found=0 failed=0 file key expected_meta
+  if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
+    found=1
+    log "retained exact startup finalization authority; retry targeted down with the original data/run settings"
+    failed=1
+  fi
   for file in "$state_dir"/workbench-*.meta; do
     [[ -e "$file" ]] || continue
     found=1
@@ -3666,6 +3909,7 @@ case "$action" in
     postgres_service_lease_file="$launcher_lock_root/postgres-$postgres_service_hash.lease"
     reset_recovery_file="$launcher_lock_root/$launcher_lock_hash-$state_key-recover.sh"
     reset_finalization_file="$launcher_lock_root/$launcher_lock_hash-$state_key-reset-finalizing"
+    start_finalization_file="$launcher_lock_root/$launcher_lock_hash-$state_key-start-finalizing"
     if [[ -e "$launcher_lock_file" ]] && ! regular_private_file "$launcher_lock_file"; then
       die "unsafe launcher lock file $launcher_lock_file"
     fi

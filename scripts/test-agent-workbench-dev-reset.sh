@@ -31,6 +31,10 @@ cleanup_fixture_runtime_resources() {
     [[ -f "$file" && ! -L "$file" ]] || continue
     grep -Fq "$fixture_root" "$file" && rm -f "$file"
   done
+  for file in "$runtime_root"/*-start-finalizing; do
+    [[ -f "$file" && ! -L "$file" ]] || continue
+    grep -Fq "$fixture_root" "$file" && rm -f "$file"
+  done
 }
 
 cleanup() {
@@ -1153,15 +1157,130 @@ fi
   && -f "$lease_public_retry_receipt" && -d "$test_tmp/data-lease-public-retry" ]] \
   || fail "public startup cleanup changed a mismatched lease or its retained authority"
 printf '%s\n' "$lease_public_retry_record" > "$lease_public_retry_ingress_file"
-run_launcher "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" down \
+lease_public_retry_key="127.0.0.1_${lease_public_retry_port}"
+lease_public_retry_finalization="$launcher_runtime_root/$lock_hash-$lease_public_retry_key-start-finalizing"
+printf 'retained partial-cleanup state\n' > "$test_tmp/data-lease-public-retry/sentinel"
+if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $AGENT_WORKBENCH_DATA_DIR" ]]; then command rm -rf -- "$AGENT_WORKBENCH_DATA_DIR/run" "$AGENT_WORKBENCH_DATA_DIR/.agent-workbench-dev-attempt-owner"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
+  > "$test_tmp/lease-public-retry-partial.log" 2>&1; then
+  fail "public startup cleanup ignored a partial data deletion"
+fi
+[[ -f "$test_tmp/data-lease-public-retry/sentinel" \
+  && ! -e "$lease_public_retry_receipt" \
+  && -f "$lease_public_retry_finalization" ]] \
+  || fail "partial startup cleanup did not preserve independent finalization authority"
+grep -Fq 'start_finalization_phase=retired' "$lease_public_retry_finalization" \
+  || fail "partial startup cleanup did not retain its incomplete data phase"
+lease_public_retry_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-lease-public-retry" 3091 \
+  AGENT_WORKBENCH_RUN_DIR="$test_tmp/lease-public-retry-borrower-run" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3091 \
+  > "$test_tmp/lease-public-retry-borrower.log" 2>&1; then
+  fail "borrower ignored startup finalization authority for the same data path"
+fi
+[[ ! -e "$test_tmp/lease-public-retry-borrower-run" \
+  && "$(<"$mock_state/build-count")" = "$lease_public_retry_builds_before" ]] \
+  || fail "startup finalization borrower refusal mutated candidate state"
+if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
+  MOCK_START_FINALIZATION="$lease_public_retry_finalization" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_START_FINALIZATION" ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
+  > "$test_tmp/lease-public-retry-final-clear.log" 2>&1; then
+  fail "public startup cleanup ignored retained finalization authority"
+fi
+[[ ! -e "$test_tmp/data-lease-public-retry" \
+  && -f "$lease_public_retry_finalization" ]] \
+  || fail "pre-unlink failure did not retain data-removed startup authority"
+grep -Fq 'start_finalization_phase=data-removed' "$lease_public_retry_finalization" \
+  || fail "pre-unlink failure lost completed startup data progress"
+grep -Fq "down --addr 127.0.0.1:$lease_public_retry_port" \
+  "$test_tmp/lease-public-retry-final-clear.log" \
+  || fail "retained startup finalization did not report its exact public retry command"
+launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
+  MOCK_START_FINALIZATION="$lease_public_retry_finalization" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-f -- $MOCK_START_FINALIZATION" ]]; then command rm -f -- "$MOCK_START_FINALIZATION"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$lease_public_retry_port" \
   > "$test_tmp/lease-public-retry-second.log" 2>&1
 [[ ! -e "$lease_public_retry_ingress_file" && ! -e "$lease_public_retry_receipt" \
-  && ! -e "$test_tmp/data-lease-public-retry" ]] \
+  && ! -e "$test_tmp/data-lease-public-retry" \
+  && ! -e "$lease_public_retry_finalization" ]] \
   || fail "fault-free public down did not complete retained startup lease cleanup"
 run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" up \
   > "$test_tmp/lease-public-retry-fresh-up.log" 2>&1
 run_launcher "$test_tmp/data-lease-public-retry-fresh" "$lease_public_retry_port" down \
   > "$test_tmp/lease-public-retry-fresh-down.log" 2>&1
+
+external_start_finalization_port=3168
+external_start_finalization_data="$test_tmp/data-external-start-finalization"
+external_start_finalization_run="$test_tmp/run-external-start-finalization"
+external_start_finalization_key="127.0.0.1_${external_start_finalization_port}"
+external_start_finalization_admin=$((19070 + (external_start_finalization_port - 3030) * 10))
+external_start_finalization_ingress=$((8080 + (external_start_finalization_port - 3030) * 10))
+external_start_finalization_admin_hash="$(printf '%s' "loopback:$external_start_finalization_admin" | sha256sum | awk '{print $1}')"
+external_start_finalization_ingress_hash="$(printf '%s' "loopback:$external_start_finalization_ingress" | sha256sum | awk '{print $1}')"
+external_start_finalization_lease="$launcher_runtime_root/restate-ingress-$external_start_finalization_ingress_hash.lease"
+external_start_finalization_receipt="$launcher_runtime_root/$lock_hash-$external_start_finalization_key-start-finalizing"
+rm -f "$mock_state/record-create-failed"
+if launcher_env "$external_start_finalization_data" "$external_start_finalization_port" \
+  AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
+  MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
+  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$external_start_finalization_admin_hash.lease" \
+  'BASH_FUNC_rm%%=() { if [[ "${@: -1}" = *restate-ingress-*.lease ]]; then return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$external_start_finalization_port" \
+  > "$test_tmp/external-start-finalization-first.log" 2>&1; then
+  fail "external-run startup ignored persistent lease cleanup failure"
+fi
+printf 'external-run retained data\n' > "$external_start_finalization_data/sentinel"
+if launcher_env "$external_start_finalization_data" "$external_start_finalization_port" \
+  AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
+  MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
+  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
+  'BASH_FUNC_rm%%=() { if [[ "$*" = "-rf -- $AGENT_WORKBENCH_DATA_DIR" ]]; then command rm -f -- "$AGENT_WORKBENCH_DATA_DIR/.agent-workbench-dev-attempt-owner"; return 1; fi; command rm "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
+  > "$test_tmp/external-start-finalization-partial.log" 2>&1; then
+  fail "external-run cleanup ignored a partial data deletion"
+fi
+[[ -f "$external_start_finalization_data/sentinel" \
+  && -f "$external_start_finalization_run/restate-$external_start_finalization_key.service-retired" \
+  && -f "$external_start_finalization_receipt" ]] \
+  || fail "external run path did not retain independent startup finalization authority"
+if launcher_env "$test_tmp/data-external-start-finalization-mismatch" \
+  "$external_start_finalization_port" \
+  AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
+  MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
+  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
+  > "$test_tmp/external-start-finalization-mismatch.log" 2>&1; then
+  fail "external-run recovery accepted a mismatched data context"
+fi
+[[ -f "$external_start_finalization_data/sentinel" \
+  && -f "$external_start_finalization_receipt" ]] \
+  || fail "mismatched external-run recovery mutated retained owned state"
+external_start_finalization_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-external-start-finalization-borrower" \
+  "$external_start_finalization_port" \
+  AGENT_WORKBENCH_RUN_DIR="$test_tmp/run-external-start-finalization-borrower" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$external_start_finalization_port" \
+  > "$test_tmp/external-start-finalization-borrower.log" 2>&1; then
+  fail "fresh launcher reused an identity with pending startup finalization"
+fi
+[[ ! -e "$test_tmp/data-external-start-finalization-borrower" \
+  && ! -e "$test_tmp/run-external-start-finalization-borrower" \
+  && "$(<"$mock_state/build-count")" = "$external_start_finalization_builds_before" ]] \
+  || fail "same-identity startup finalization refusal mutated borrower state"
+launcher_env "$external_start_finalization_data" "$external_start_finalization_port" \
+  AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
+  MOCK_PID_FILE="$external_start_finalization_run/workbench-$external_start_finalization_key.pid" \
+  MOCK_RESTATE_MARKER="$external_start_finalization_run/restate-$external_start_finalization_key.container" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$external_start_finalization_port" \
+  > "$test_tmp/external-start-finalization-second.log" 2>&1
+[[ ! -e "$external_start_finalization_data" \
+  && ! -e "$external_start_finalization_lease" \
+  && ! -e "$external_start_finalization_receipt" \
+  && ! -e "$external_start_finalization_run/restate-$external_start_finalization_key.service-retired" ]] \
+  || fail "fault-free exact external-run down did not finish startup finalization"
 
 postgres_lease_retry_port=3092
 postgres_lease_retry_service=$((55432 + (postgres_lease_retry_port - 3030) * 10))
@@ -1190,6 +1309,83 @@ launcher_env "$test_tmp/data-postgres-lease-fresh" "$postgres_lease_retry_port" 
   AGENT_WORKBENCH_POSTGRES=1 \
   bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$postgres_lease_retry_port" \
   > "$test_tmp/postgres-lease-fresh-down.log" 2>&1
+
+prepared_restate_port=3164
+prepared_restate_admin=$((19070 + (prepared_restate_port - 3030) * 10))
+prepared_restate_admin_hash="$(printf '%s' "loopback:$prepared_restate_admin" | sha256sum | awk '{print $1}')"
+prepared_restate_data="$test_tmp/data-prepared-restate"
+rm -f "$mock_state/record-create-failed"
+if launcher_env "$prepared_restate_data" "$prepared_restate_port" \
+  MOCK_RECORD_CREATE_FAIL_MATCH="restate-admin-$prepared_restate_admin_hash.lease" \
+  'BASH_FUNC_python3%%=() { if [[ "${@: -1}" = *restate-*.service-retired && "${@: -2:1}" = replace ]]; then return 1; fi; command python3 "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$prepared_restate_port" \
+  > "$test_tmp/prepared-restate-first.log" 2>&1; then
+  fail "startup ignored persistent Restate retirement promotion failure"
+fi
+prepared_restate_key="127.0.0.1_${prepared_restate_port}"
+prepared_restate_receipt="$prepared_restate_data/run/restate-$prepared_restate_key.service-retired"
+prepared_restate_record="$(<"$prepared_restate_receipt")"
+read -r _ _ _ _ prepared_restate_id <<<"$prepared_restate_record"
+[[ "$prepared_restate_record" = '2 prepared restate '* \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$prepared_restate_port" ]] \
+  || fail "Restate promotion failure did not retain exact prepared absent-engine proof"
+if launcher_env "$prepared_restate_data" "$prepared_restate_port" \
+  MOCK_UNKNOWN_CONTAINER_ID="$prepared_restate_id" \
+  'BASH_FUNC_docker%%=() { if [[ "$1" = inspect && "${@: -1}" = "$MOCK_UNKNOWN_CONTAINER_ID" ]]; then printf "temporary inspect failure\n" >&2; return 1; fi; command docker "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_restate_port" \
+  > "$test_tmp/prepared-restate-unknown.log" 2>&1; then
+  fail "public recovery inferred Restate absence from unknown observation"
+fi
+[[ "$(<"$prepared_restate_receipt")" = "$prepared_restate_record" \
+  && -d "$prepared_restate_data" ]] \
+  || fail "unknown Restate observation changed prepared authority or dependent data"
+if launcher_env "$prepared_restate_data" "$prepared_restate_port" \
+  MOCK_MISMATCH_CONTAINER_ID="$prepared_restate_id" \
+  'BASH_FUNC_docker%%=() { if [[ "$1" = inspect && "${@: -1}" = "$MOCK_MISMATCH_CONTAINER_ID" ]]; then printf "%s %s %s\n" "$MOCK_MISMATCH_CONTAINER_ID" 00000000-0000-0000-0000-000000000000 restate; return 0; fi; command docker "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_restate_port" \
+  > "$test_tmp/prepared-restate-mismatch.log" 2>&1; then
+  fail "public recovery accepted changed Restate labels"
+fi
+[[ "$(<"$prepared_restate_receipt")" = "$prepared_restate_record" \
+  && -d "$prepared_restate_data" ]] \
+  || fail "mismatched Restate identity changed prepared authority or dependent data"
+printf '2 prepared restate 00000000-0000-0000-0000-000000000000 %s\n' \
+  "$prepared_restate_id" > "$prepared_restate_receipt"
+if run_launcher "$prepared_restate_data" "$prepared_restate_port" down \
+  > "$test_tmp/prepared-restate-receipt-mismatch.log" 2>&1; then
+  fail "public recovery accepted a changed prepared Restate receipt"
+fi
+[[ -d "$prepared_restate_data" ]] \
+  || fail "changed prepared Restate receipt permitted dependent data deletion"
+printf '%s\n' "$prepared_restate_record" > "$prepared_restate_receipt"
+run_launcher "$prepared_restate_data" "$prepared_restate_port" down \
+  > "$test_tmp/prepared-restate-second.log" 2>&1
+[[ ! -e "$prepared_restate_data" ]] \
+  || fail "fault-free public down did not reconcile prepared Restate retirement"
+
+prepared_postgres_port=3166
+prepared_postgres_data="$test_tmp/data-prepared-postgres"
+prepared_pid_failure='BASH_FUNC_printf%%=() { if [[ "${FUNCNAME[1]-}" = write_pid_file ]]; then return 1; fi; builtin printf "$@"; }'
+if launcher_env "$prepared_postgres_data" "$prepared_postgres_port" \
+  AGENT_WORKBENCH_POSTGRES=1 "$prepared_pid_failure" \
+  'BASH_FUNC_python3%%=() { if [[ "${@: -1}" = *postgres-*.service-retired && "${@: -2:1}" = replace ]]; then return 1; fi; command python3 "$@"; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$prepared_postgres_port" \
+  > "$test_tmp/prepared-postgres-first.log" 2>&1; then
+  fail "startup ignored persistent Postgres retirement promotion failure"
+fi
+prepared_postgres_key="127.0.0.1_${prepared_postgres_port}"
+prepared_postgres_receipt="$prepared_postgres_data/run/postgres-$prepared_postgres_key.service-retired"
+[[ -f "$prepared_postgres_receipt" \
+  && "$(<"$prepared_postgres_receipt")" = '2 prepared postgres '* \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$prepared_postgres_port" \
+  && -d "$prepared_postgres_data" ]] \
+  || fail "Postgres promotion failure did not retain exact prepared absent-engine proof"
+launcher_env "$prepared_postgres_data" "$prepared_postgres_port" \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$prepared_postgres_port" \
+  > "$test_tmp/prepared-postgres-second.log" 2>&1
+[[ ! -e "$prepared_postgres_data" ]] \
+  || fail "fault-free public down did not reconcile prepared Postgres retirement"
 service_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
 
 partial_ready_port=3085
