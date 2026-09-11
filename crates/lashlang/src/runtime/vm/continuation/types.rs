@@ -299,6 +299,15 @@ pub enum ContinuationError {
         push_ip: usize,
         end_ip: usize,
     },
+    #[error(
+        "continuation handler chain for frame {frame_depth} is not the chain the compiled program installs at instruction {anchor} (expected digest {expected:#018x}, found {found:#018x})"
+    )]
+    HandlerChainMismatch {
+        frame_depth: usize,
+        anchor: usize,
+        expected: u64,
+        found: u64,
+    },
     #[error("continuation handler {handler} is not nested inside handler {outer}: {reason}")]
     HandlerNestingNotMonotonic {
         handler: usize,
