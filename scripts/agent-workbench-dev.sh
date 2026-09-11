@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+configured_data_dir="${AGENT_WORKBENCH_DATA_DIR:-.agent-workbench}"
+data_dir_existed_before_invocation=0
+if [[ -e "$configured_data_dir" || -L "$configured_data_dir" ]]; then
+  data_dir_existed_before_invocation=1
+fi
+data_dir_created_this_attempt=$((1 - data_dir_existed_before_invocation))
 state_dir="${AGENT_WORKBENCH_RUN_DIR:-.agent-workbench/run}"
 mkdir -p "$state_dir"
+
+started_workbench_this_attempt=0
+started_restate_this_attempt=0
+started_postgres_this_attempt=0
+start_attempt_active=0
+reset_committed=0
+reset_destructive_started=0
+reset_recovery_command=""
 
 log() {
   printf '[agent-workbench] %s\n' "$*" >&2
@@ -21,14 +36,17 @@ usage() {
 Usage:
   scripts/agent-workbench-dev.sh [up] [--port PORT | --addr HOST:PORT]
   scripts/agent-workbench-dev.sh foreground [--port PORT | --addr HOST:PORT]
-  scripts/agent-workbench-dev.sh restart [--port PORT | --addr HOST:PORT]
+  scripts/agent-workbench-dev.sh restart --reset-dev-state [--port PORT | --addr HOST:PORT]
   scripts/agent-workbench-dev.sh status [--port PORT | --addr HOST:PORT]
   scripts/agent-workbench-dev.sh logs [--port PORT | --addr HOST:PORT] [-f]
   scripts/agent-workbench-dev.sh down [--port PORT | --addr HOST:PORT]
 
 Defaults:
   up is detached and idempotent.
-  restart replaces only the workbench process and preserves managed services.
+  restart refuses unless --reset-dev-state is present. The explicit reset is
+  destructive: it replaces a wholly launcher-owned disposable stack, including
+  its Restate journals and corresponding application data. External, mixed,
+  legacy, or ambiguous ownership is refused before anything is stopped.
   down stops the workbench and any Restate or Postgres container it started.
   AGENT_WORKBENCH_POSTGRES=1 starts a port-isolated managed Postgres container
   unless AGENT_WORKBENCH_DATABASE_URL points at an existing database.
@@ -44,15 +62,35 @@ USAGE
 }
 
 url_host_port() {
-  local url="${1#*://}"
-  url="${url%%/*}"
-  url="${url##*@}"
-  local host="${url%:*}"
-  local port="${url##*:}"
-  if [[ -z "$host" || -z "$port" || "$host" = "$port" ]]; then
-    die "expected URL with explicit host and port, got '$1'"
-  fi
-  printf '%s %s\n' "$host" "$port"
+  local parsed=""
+  parsed="$(python3 -c '
+import sys
+from urllib.parse import urlsplit
+
+try:
+    url = urlsplit(sys.argv[1])
+    host = url.hostname
+    port = url.port
+except ValueError:
+    raise SystemExit(1)
+if url.scheme not in {"http", "https", "postgres", "postgresql"} or not host or port is None:
+    raise SystemExit(1)
+print(f"{host} {port}")
+' "$1")" || die "expected URL with explicit host and port"
+  printf '%s\n' "$parsed"
+}
+
+url_is_diagnostic_safe() {
+  python3 -c '
+import sys
+from urllib.parse import urlsplit
+
+try:
+    url = urlsplit(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(1 if url.username or url.password or url.query or url.fragment else 0)
+' "$1"
 }
 
 addr_host_port() {
@@ -106,7 +144,7 @@ register_deployment() {
   local admin_url="$1"
   local endpoint_url="$2"
   local payload
-  payload="$(printf '{"uri":%s,"force":true,"breaking":true}' "$(json_string "$endpoint_url")")"
+  payload="$(printf '{"uri":%s,"force":false,"breaking":false}' "$(json_string "$endpoint_url")")"
   local deadline=$((SECONDS + 60))
   local last_response=""
   until last_response="$(
@@ -124,6 +162,57 @@ register_deployment() {
     sleep 1
   done
   require_workbench_alive "after Restate deployment registration"
+}
+
+deployment_uri_registered() {
+  local admin_url="$1"
+  local endpoint_url="$2"
+  local response
+  response="$(
+    curl --http2-prior-knowledge -fsS \
+      "${admin_url%/}/deployments"
+  )" || return 2
+  printf '%s' "$response" | python3 -c '
+import json
+import sys
+
+target = sys.argv[1]
+normalized_target = target.rstrip("/")
+
+try:
+    document = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(2)
+if not isinstance(document, dict) or not isinstance(document.get("deployments"), list):
+    raise SystemExit(2)
+for deployment in document["deployments"]:
+    if not isinstance(deployment, dict):
+        raise SystemExit(2)
+    uri = deployment.get("uri")
+    if isinstance(uri, str) and uri.rstrip("/") == normalized_target:
+        raise SystemExit(0)
+raise SystemExit(1)
+' "$endpoint_url"
+}
+
+require_unused_deployment_uri() {
+  local admin_url="$1"
+  local endpoint_url="$2"
+  local status=0
+  deployment_uri_registered "$admin_url" "$endpoint_url" || status=$?
+  case "$status" in
+    0)
+      log "Restate deployment URI is already registered: $endpoint_url"
+      return 1
+      ;;
+    1)
+      return 0
+      ;;
+    *)
+      log "could not verify that Restate deployment URI is unused: $endpoint_url"
+      return 1
+      ;;
+  esac
 }
 
 open_browser() {
@@ -189,6 +278,102 @@ write_pid_file() {
   local file="$1" pid="$2" start_time
   start_time="$(process_start_time "$pid")" || return 1
   printf '%s %s\n' "$pid" "$start_time" > "$file"
+}
+
+new_ownership_token() {
+  local token=""
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    token="$(< /proc/sys/kernel/random/uuid)"
+  fi
+  [[ "$token" =~ ^[0-9a-fA-F-]{36}$ ]] \
+    || die "could not create a launcher ownership token"
+  printf '%s\n' "$token"
+}
+
+regular_private_file() {
+  local file="$1"
+  [[ -f "$file" && ! -L "$file" ]] || return 1
+  [[ "$(stat -c '%u' "$file" 2>/dev/null || true)" = "$(id -u)" ]] || return 1
+  local mode
+  mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (( (8#$mode & 0022) == 0 ))
+}
+
+private_owned_directory() {
+  local directory="$1"
+  [[ -d "$directory" && ! -L "$directory" ]] || return 1
+  [[ "$(stat -c '%u' "$directory" 2>/dev/null || true)" = "$(id -u)" ]] || return 1
+  local mode
+  mode="$(stat -c '%a' "$directory" 2>/dev/null || true)"
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (( (8#$mode & 0022) == 0 ))
+}
+
+path_has_symlink_component() {
+  local path="$1"
+  local absolute
+  if [[ "$path" = /* ]]; then
+    absolute="$path"
+  else
+    absolute="$repo_root/$path"
+  fi
+  local current="/"
+  local component
+  IFS='/' read -r -a components <<<"${absolute#/}"
+  for component in "${components[@]}"; do
+    [[ -n "$component" && "$component" != "." ]] || continue
+    if [[ "$component" = ".." ]]; then
+      current="$(dirname "$current")"
+      continue
+    fi
+    current="${current%/}/$component"
+    [[ ! -L "$current" ]] || return 0
+  done
+  return 1
+}
+
+write_container_marker() {
+  local file="$1" name="$2" id="$3" component="$4"
+  printf '%s %s %s %s\n' "$name" "$id" "$ownership_token" "$component" > "$file"
+  chmod 600 "$file"
+}
+
+read_container_marker() {
+  local file="$1"
+  regular_private_file "$file" || return 1
+  local name id token component extra
+  read -r name id token component extra < "$file" || return 1
+  [[ -n "$name" && "$id" =~ ^[0-9a-fA-F]{12,64}$ ]] || return 1
+  [[ "$token" =~ ^[0-9a-fA-F-]{36}$ && -n "$component" && -z "$extra" ]] || return 1
+  printf '%s %s %s %s\n' "$name" "$id" "$token" "$component"
+}
+
+container_identity_matches() {
+  local name="$1" expected_id="$2" expected_token="$3" expected_component="$4"
+  local actual=""
+  actual="$(docker inspect --format '{{.Id}} {{index .Config.Labels "com.lash.agent-workbench.owner"}} {{index .Config.Labels "com.lash.agent-workbench.component"}}' "$name" 2>/dev/null || true)"
+  [[ "$actual" = "$expected_id $expected_token $expected_component" ]]
+}
+
+stop_owned_container_file() {
+  local file="$1" expected_component="$2"
+  [[ -e "$file" ]] || return 0
+  local record name id token component
+  record="$(read_container_marker "$file" 2>/dev/null || true)"
+  if [[ -z "$record" ]]; then
+    log "refusing to stop $expected_component: ownership marker is legacy or invalid at $file"
+    return 1
+  fi
+  read -r name id token component <<<"$record"
+  if [[ "$component" != "$expected_component" ]] \
+    || ! container_identity_matches "$name" "$id" "$token" "$component"; then
+    log "refusing to stop $expected_component: container identity does not match $file"
+    return 1
+  fi
+  log "stopping $expected_component container $name"
+  docker rm -fv "$id" >/dev/null
+  rm -f "$file"
 }
 
 remove_stale_pid_file() {
@@ -270,8 +455,12 @@ stop_pid_file() {
 
   log "stopping process $pid"
   if ! signal_verified_process TERM "$pid" "$start_time"; then
-    remove_stale_pid_file "$file"
-    return
+    if [[ ! -e "/proc/$pid" ]]; then
+      remove_stale_pid_file "$file"
+      return
+    fi
+    log "process identity changed or could not be signaled; refusing cleanup for PID $pid"
+    return 1
   fi
   for _ in {1..30}; do
     pid_identity_matches "$pid" "$start_time" || break
@@ -281,6 +470,15 @@ stop_pid_file() {
     log "process $pid did not exit; sending SIGKILL"
     if ! signal_verified_process KILL "$pid" "$start_time"; then
       log "process identity changed before SIGKILL; refusing to signal PID $pid"
+      return 1
+    fi
+    for _ in {1..30}; do
+      pid_identity_matches "$pid" "$start_time" || break
+      sleep 0.1
+    done
+    if pid_identity_matches "$pid" "$start_time"; then
+      log "process $pid still exists after SIGKILL; refusing cleanup"
+      return 1
     fi
   fi
 
@@ -288,33 +486,86 @@ stop_pid_file() {
 }
 
 stop_started_restate() {
-  if [[ -f "$restate_marker_file" ]]; then
-    local container
-    container="$(cat "$restate_marker_file")"
-    if [[ -n "$container" ]]; then
-      log "stopping Restate container $container"
-      docker rm -f "$container" >/dev/null 2>&1 || true
-    fi
-    rm -f "$restate_marker_file"
-  fi
+  stop_owned_container_file "$restate_marker_file" restate
 }
 
 stop_started_postgres() {
-  if [[ -f "$postgres_marker_file" ]]; then
-    local container
-    container="$(cat "$postgres_marker_file")"
-    if [[ -n "$container" ]]; then
-      log "stopping Postgres container $container"
-      docker rm -f "$container" >/dev/null 2>&1 || true
-    fi
-    rm -f "$postgres_marker_file"
-  fi
+  stop_owned_container_file "$postgres_marker_file" postgres
 }
 
 stop_target() {
   stop_pid_file "$pid_file"
   stop_started_restate
   stop_started_postgres
+}
+
+remove_attempt_reset_ownership() {
+  if [[ "${created_reset_ownership_this_attempt:-0}" = 1 ]]; then
+    rm -f "$reset_file" "$data_owner_file"
+    created_reset_ownership_this_attempt=0
+  fi
+}
+
+cleanup_start_attempt() {
+  if (( started_workbench_this_attempt )); then
+    stop_pid_file "$pid_file" || true
+    started_workbench_this_attempt=0
+  fi
+  if (( started_postgres_this_attempt )); then
+    stop_started_postgres || true
+    started_postgres_this_attempt=0
+  fi
+  if (( started_restate_this_attempt )); then
+    stop_started_restate || true
+    started_restate_this_attempt=0
+  fi
+  remove_attempt_reset_ownership
+  if (( data_dir_created_this_attempt )) \
+    && [[ "$data_dir" != / && "$data_dir" != "$repo_root" ]] \
+    && ! path_has_symlink_component "$configured_data_dir"; then
+    rm -rf -- "$data_dir"
+    rm -f "$pid_file" "$meta_file" "$log_file" "$reset_file" \
+      "$restate_marker_file" "$postgres_marker_file"
+  fi
+}
+
+cleanup_failed_attempt() {
+  local status=$?
+  if (( status != 0 && start_attempt_active )); then
+    cleanup_start_attempt
+    if (( reset_committed )); then
+      write_reset_recovery_file
+      log "the disposable dev state was reset, but replacement startup failed"
+      log "stack is stopped; recovery command saved at $reset_recovery_file"
+    elif (( reset_destructive_started )); then
+      log "disposable reset started but did not complete; the stack may be partially stopped"
+      log "no unverified or external resource was removed"
+    fi
+  fi
+  return "$status"
+}
+trap cleanup_failed_attempt EXIT
+
+build_reset_recovery_command() {
+  printf -v reset_recovery_command \
+    'AGENT_WORKBENCH_RUN_DIR=%q AGENT_WORKBENCH_DATA_DIR=%q AGENT_WORKBENCH_RESTATE_ADDR=%q AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=%q RESTATE_INGRESS_URL=%q RESTATE_ADMIN_URL=%q AGENT_WORKBENCH_RESTATE_NODE_PORT=%q AGENT_WORKBENCH_RESTATE_CONTAINER=%q' \
+    "$state_dir" "$data_dir" "$restate_endpoint_addr" "$(endpoint_url)" \
+    "$restate_ingress_url" "$restate_admin_url" "$restate_node_port" "$restate_container"
+  if [[ "$owned_store_backend" = postgres ]]; then
+    printf -v reset_recovery_command '%s AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_HOST=%q AGENT_WORKBENCH_POSTGRES_PORT=%q AGENT_WORKBENCH_POSTGRES_CONTAINER=%q' \
+      "$reset_recovery_command" "$postgres_host" "$postgres_port" "$postgres_container"
+  fi
+  printf -v reset_recovery_command '%s %q up --addr %q' \
+    "$reset_recovery_command" "$repo_root/scripts/agent-workbench-dev.sh" "$workbench_addr"
+}
+
+write_reset_recovery_file() {
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'exec %s\n' "$reset_recovery_command"
+  } > "$reset_recovery_file"
+  chmod 600 "$reset_recovery_file"
 }
 
 stop_all_known() {
@@ -327,23 +578,11 @@ stop_all_known() {
   done
   for file in "$state_dir"/restate-*.container; do
     [[ -e "$file" ]] || continue
-    local container
-    container="$(cat "$file")"
-    if [[ -n "$container" ]]; then
-      log "stopping Restate container $container"
-      docker rm -f "$container" >/dev/null 2>&1 || true
-    fi
-    rm -f "$file"
+    stop_owned_container_file "$file" restate || true
   done
   for file in "$state_dir"/postgres-*.container; do
     [[ -e "$file" ]] || continue
-    local container
-    container="$(cat "$file")"
-    if [[ -n "$container" ]]; then
-      log "stopping Postgres container $container"
-      docker rm -f "$container" >/dev/null 2>&1 || true
-    fi
-    rm -f "$file"
+    stop_owned_container_file "$file" postgres || true
   done
   if (( ! found )); then
     log "no managed workbench processes found"
@@ -373,16 +612,24 @@ ensure_restate() {
   fi
 
   command -v docker >/dev/null 2>&1 || die "Restate is not running and docker is unavailable"
+  if docker inspect "$restate_container" >/dev/null 2>&1; then
+    die "Restate container name $restate_container already exists but is not a ready launcher-owned service"
+  fi
   log "starting Restate container $restate_container from $restate_image"
-  docker rm -f "$restate_container" >/dev/null 2>&1 || true
-  docker run -d \
+  local container_id
+  container_id="$(docker run -d \
     --name "$restate_container" \
     --network host \
+    --label "com.lash.agent-workbench.owner=$ownership_token" \
+    --label 'com.lash.agent-workbench.component=restate' \
     -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
     -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
     -e RESTATE_BIND_PORT="$restate_node_port" \
-    "$restate_image" >/dev/null
-  printf '%s\n' "$restate_container" > "$restate_marker_file"
+    "$restate_image")"
+  [[ "$container_id" =~ ^[0-9a-fA-F]{12,64}$ ]] \
+    || die "Docker returned an invalid Restate container id"
+  write_container_marker "$restate_marker_file" "$restate_container" "$container_id" restate
+  started_restate_this_attempt=1
 
   if ! wait_tcp "Restate ingress" "$ingress_host" "$ingress_port" 60; then
     docker logs "$restate_container" >&2 || true
@@ -404,16 +651,24 @@ ensure_postgres() {
   fi
 
   command -v docker >/dev/null 2>&1 || die "Postgres is not running and docker is unavailable"
+  if docker inspect "$postgres_container" >/dev/null 2>&1; then
+    die "Postgres container name $postgres_container already exists but is not a ready launcher-owned service"
+  fi
   log "starting Postgres container $postgres_container from $postgres_image"
-  docker rm -f "$postgres_container" >/dev/null 2>&1 || true
-  docker run -d \
+  local container_id
+  container_id="$(docker run -d \
     --name "$postgres_container" \
     --network host \
+    --label "com.lash.agent-workbench.owner=$ownership_token" \
+    --label 'com.lash.agent-workbench.component=postgres' \
     -e POSTGRES_USER=lash \
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
-    "$postgres_image" -p "$postgres_port" >/dev/null
-  printf '%s\n' "$postgres_container" > "$postgres_marker_file"
+    "$postgres_image" -p "$postgres_port")"
+  [[ "$container_id" =~ ^[0-9a-fA-F]{12,64}$ ]] \
+    || die "Docker returned an invalid Postgres container id"
+  write_container_marker "$postgres_marker_file" "$postgres_container" "$container_id" postgres
+  started_postgres_this_attempt=1
 
   if ! wait_tcp "Postgres" "$postgres_host" "$postgres_port" 60; then
     docker logs "$postgres_container" >&2 || true
@@ -439,11 +694,175 @@ write_meta() {
     printf 'restate_endpoint_addr=%q\n' "$restate_endpoint_addr"
     printf 'restate_ingress_url=%q\n' "$restate_ingress_url"
     printf 'restate_admin_url=%q\n' "$restate_admin_url"
+    printf 'deployment_url=%q\n' "$(endpoint_url)"
     printf 'store_backend=%q\n' "$store_backend"
+    printf 'data_dir=%q\n' "$data_dir"
+    printf 'database_fingerprint=%q\n' "$database_fingerprint"
+    printf 'ownership_token=%q\n' "$ownership_token"
     printf 'postgres_host=%q\n' "$postgres_host"
     printf 'postgres_port=%q\n' "$postgres_port"
     printf 'log_file=%q\n' "$log_file"
   } > "$meta_file"
+  chmod 600 "$meta_file"
+}
+
+write_reset_metadata() {
+  local pid_record restate_record postgres_record=""
+  pid_record="$(pid_file_identity "$pid_file")" || return 1
+  restate_record="$(read_container_marker "$restate_marker_file")" || return 1
+  if [[ "$store_backend" = postgres ]]; then
+    postgres_record="$(read_container_marker "$postgres_marker_file")" || return 1
+  fi
+  {
+    printf 'reset_schema=1\n'
+    printf 'owned_token=%q\n' "$ownership_token"
+    printf 'owned_state_key=%q\n' "$state_key"
+    printf 'owned_workbench_addr=%q\n' "$workbench_addr"
+    printf 'owned_restate_endpoint_addr=%q\n' "$restate_endpoint_addr"
+    printf 'owned_restate_ingress_url=%q\n' "$restate_ingress_url"
+    printf 'owned_restate_admin_url=%q\n' "$restate_admin_url"
+    printf 'owned_deployment_url=%q\n' "$(endpoint_url)"
+    printf 'owned_restate_node_port=%q\n' "$restate_node_port"
+    printf 'owned_data_dir=%q\n' "$data_dir"
+    printf 'owned_data_identity=%q\n' "$(stat -c '%d:%i' "$data_dir")"
+    printf 'owned_store_backend=%q\n' "$store_backend"
+    printf 'owned_database_fingerprint=%q\n' "$database_fingerprint"
+    printf 'owned_pid_record=%q\n' "$pid_record"
+    printf 'owned_restate_record=%q\n' "$restate_record"
+    printf 'owned_postgres_record=%q\n' "$postgres_record"
+  } > "$reset_file"
+  chmod 600 "$reset_file"
+  {
+    printf 'data_owner_schema=1\n'
+    printf 'data_owner_token=%q\n' "$ownership_token"
+    printf 'data_owner_state_key=%q\n' "$state_key"
+    printf 'data_owner_path=%q\n' "$data_dir"
+  } > "$data_owner_file"
+  chmod 600 "$data_owner_file"
+}
+
+data_owner_matches() {
+  regular_private_file "$data_owner_file" || return 1
+  (
+    data_owner_schema="" data_owner_token="" data_owner_state_key="" data_owner_path=""
+    # shellcheck disable=SC1090
+    source "$data_owner_file"
+    [[ "$data_owner_schema" = 1 \
+      && "$data_owner_token" = "$owned_token" \
+      && "$data_owner_state_key" = "$state_key" \
+      && "$data_owner_path" = "$owned_data_dir" ]]
+  )
+}
+
+prepare_reset_ownership() {
+  created_reset_ownership_this_attempt=0
+  if (( ! started_restate_this_attempt )); then
+    log "reset unavailable: Restate was not created by this launcher run"
+    return 0
+  fi
+  if (( data_dir_existed_before_invocation )); then
+    log "reset unavailable: application data directory predated this launcher run"
+    return 0
+  fi
+  if [[ "$store_backend" = postgres ]]; then
+    if (( database_url_explicit || ! started_postgres_this_attempt )); then
+      log "reset unavailable: Postgres is external or was not created by this launcher run"
+      return 0
+    fi
+  elif [[ "$store_backend" != sqlite ]]; then
+    log "reset unavailable: unsupported application store backend $store_backend"
+    return 0
+  fi
+  if path_has_symlink_component "$configured_data_dir"; then
+    log "reset unavailable: application data path contains a symlink"
+    return 0
+  fi
+  [[ "$data_dir" != / && "$data_dir" != "$repo_root" ]] \
+    || die "refusing unsafe resettable application data directory $data_dir"
+  created_reset_ownership_this_attempt=1
+  write_reset_metadata \
+    || die "could not record complete disposable-stack ownership before registration"
+}
+
+validate_run_metadata() {
+  regular_private_file "$meta_file" || return 1
+  (
+    unset workbench_addr workbench_url restate_endpoint_addr restate_ingress_url
+    unset restate_admin_url deployment_url store_backend data_dir database_fingerprint ownership_token
+    # shellcheck disable=SC1090
+    source "$meta_file"
+    [[ "$workbench_addr" = "$owned_workbench_addr" \
+      && "$restate_endpoint_addr" = "$owned_restate_endpoint_addr" \
+      && "$restate_ingress_url" = "$owned_restate_ingress_url" \
+      && "$restate_admin_url" = "$owned_restate_admin_url" \
+      && "$deployment_url" = "$owned_deployment_url" \
+      && "$store_backend" = "$owned_store_backend" \
+      && "$data_dir" = "$owned_data_dir" \
+      && "$database_fingerprint" = "$owned_database_fingerprint" \
+      && "$ownership_token" = "$owned_token" ]]
+  )
+}
+
+validate_reset_ownership() {
+  regular_private_file "$reset_file" \
+    || die "reset refused: missing, legacy, or unsafe ownership record $reset_file"
+  reset_schema="" owned_token="" owned_state_key="" owned_workbench_addr=""
+  owned_restate_endpoint_addr="" owned_restate_ingress_url=""
+  owned_restate_admin_url="" owned_deployment_url="" owned_restate_node_port="" owned_data_dir=""
+  owned_data_identity=""
+  owned_store_backend="" owned_database_fingerprint="" owned_pid_record=""
+  owned_restate_record="" owned_postgres_record=""
+  # shellcheck disable=SC1090
+  source "$reset_file"
+  [[ "$reset_schema" = 1 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
+    || die "reset refused: invalid ownership record $reset_file"
+  [[ "$owned_state_key" = "$state_key" \
+    && "$owned_workbench_addr" = "$workbench_addr" \
+    && "$owned_restate_endpoint_addr" = "$restate_endpoint_addr" \
+    && "$owned_restate_ingress_url" = "$restate_ingress_url" \
+    && "$owned_restate_admin_url" = "$restate_admin_url" \
+    && "$owned_deployment_url" = "$(endpoint_url)" \
+    && "$owned_restate_node_port" = "$restate_node_port" \
+    && "$owned_data_dir" = "$data_dir" \
+    && "$owned_data_identity" = "$(stat -c '%d:%i' "$data_dir" 2>/dev/null || true)" \
+    && "$owned_store_backend" = "$store_backend" \
+    && "$owned_database_fingerprint" = "$database_fingerprint" ]] \
+    || die "reset refused: current settings do not match the owned disposable stack"
+  [[ "$owned_data_dir" != / && "$owned_data_dir" != "$repo_root" ]] \
+    || die "reset refused: unsafe application data directory $owned_data_dir"
+  path_has_symlink_component "$configured_data_dir" \
+    && die "reset refused: application data path contains a symlink"
+  [[ "$(realpath -m -- "$configured_data_dir")" = "$owned_data_dir" ]] \
+    || die "reset refused: application data path does not resolve to the owned directory"
+  data_owner_matches \
+    || die "reset refused: application data ownership does not match launcher metadata"
+  [[ "$(pid_file_identity "$pid_file" 2>/dev/null || true)" = "$owned_pid_record" ]] \
+    || die "reset refused: workbench PID identity is missing or changed"
+  validate_run_metadata \
+    || die "reset refused: run metadata does not match disposable-stack ownership"
+
+  local name id token component
+  read -r name id token component <<<"$owned_restate_record"
+  [[ "$name" = "$restate_container" \
+    && "$token" = "$owned_token" && "$component" = restate \
+    && "$(read_container_marker "$restate_marker_file" 2>/dev/null || true)" = "$owned_restate_record" ]] \
+    || die "reset refused: Restate ownership marker does not match"
+  container_identity_matches "$name" "$id" "$token" "$component" \
+    || die "reset refused: Restate container identity does not match"
+
+  if [[ "$owned_store_backend" = postgres ]]; then
+    (( ! database_url_explicit )) \
+      || die "reset refused: explicit database URL is external or ambiguous"
+    read -r name id token component <<<"$owned_postgres_record"
+    [[ "$name" = "$postgres_container" \
+      && "$token" = "$owned_token" && "$component" = postgres \
+      && "$(read_container_marker "$postgres_marker_file" 2>/dev/null || true)" = "$owned_postgres_record" ]] \
+      || die "reset refused: Postgres ownership marker does not match"
+    container_identity_matches "$name" "$id" "$token" "$component" \
+      || die "reset refused: Postgres container identity does not match"
+  elif [[ "$owned_store_backend" != sqlite || -n "$agent_workbench_database_url" ]]; then
+    die "reset refused: application database ownership is external or ambiguous"
+  fi
 }
 
 start_detached() {
@@ -463,20 +882,23 @@ start_detached() {
     "AGENT_WORKBENCH_DATABASE_URL=$agent_workbench_database_url"
     "RESTATE_INGRESS_URL=$restate_ingress_url"
     "RESTATE_ADMIN_URL=$restate_admin_url"
+    "AGENT_WORKBENCH_DATA_DIR=$data_dir"
   )
-  if [[ -n "${AGENT_WORKBENCH_DATA_DIR:-}" ]]; then
-    workbench_env+=("AGENT_WORKBENCH_DATA_DIR=$AGENT_WORKBENCH_DATA_DIR")
-  fi
   printf '\n[%s] starting agent-workbench at %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$workbench_url" >> "$log_file"
   if command -v setsid >/dev/null 2>&1; then
-    setsid env "${workbench_env[@]}" \
-      "$workbench_bin" >> "$log_file" 2>&1 < /dev/null &
+    (
+      exec {launcher_lock_fd}>&-
+      exec setsid env "${workbench_env[@]}" "$workbench_bin"
+    ) >> "$log_file" 2>&1 < /dev/null &
   else
-    nohup env "${workbench_env[@]}" \
-      "$workbench_bin" >> "$log_file" 2>&1 < /dev/null &
+    (
+      exec {launcher_lock_fd}>&-
+      exec nohup env "${workbench_env[@]}" "$workbench_bin"
+    ) >> "$log_file" 2>&1 < /dev/null &
   fi
   local pid="$!"
   write_pid_file "$pid_file" "$pid" || die "could not record process identity for $pid"
+  started_workbench_this_attempt=1
   write_meta
   log "started process $pid; log: $log_file"
 }
@@ -488,7 +910,7 @@ wait_workbench_ready() {
     require_workbench_alive "before becoming ready"
     if (( SECONDS >= deadline )); then
       tail_log
-      stop_target
+      cleanup_start_attempt
       die "workbench did not become healthy at $workbench_url/healthz"
     fi
     sleep 1
@@ -503,7 +925,7 @@ wait_workbench_endpoint_ready() {
     require_workbench_alive "while waiting for its Restate endpoint"
     if (( SECONDS >= deadline )); then
       tail_log
-      stop_target
+      cleanup_start_attempt
       die "workbench Restate endpoint did not become ready at $restate_endpoint_addr"
     fi
     sleep 1
@@ -515,29 +937,84 @@ run_up() {
   if ! ensure_ports_available; then
     return
   fi
+  start_attempt_active=1
   ensure_restate
+  local deployment_url
+  deployment_url="$(endpoint_url)"
+  if ! require_unused_deployment_uri "$restate_admin_url" "$deployment_url"; then
+    cleanup_start_attempt
+    die "refusing to replace an existing Restate deployment; use restart --reset-dev-state only for a wholly launcher-owned disposable stack"
+  fi
   ensure_postgres
   start_detached
   wait_workbench_ready 90
   wait_workbench_endpoint_ready 90
-  local deployment_url
-  deployment_url="$(endpoint_url)"
+  prepare_reset_ownership
   log "registering Restate deployment $deployment_url"
   if ! register_deployment "$restate_admin_url" "$deployment_url"; then
     tail_log
-    stop_target
+    cleanup_start_attempt
     die "failed to register Restate deployment $deployment_url through $restate_admin_url"
   fi
+  start_attempt_active=0
   require_workbench_alive "before reporting ready"
   log "ready: $workbench_url"
   open_browser "$workbench_url"
+}
+
+run_reset_dev_state() {
+  validate_reset_ownership
+
+  build_reset_recovery_command
+  reset_destructive_started=1
+  start_attempt_active=1
+  log "resetting wholly launcher-owned disposable stack at $workbench_addr"
+
+  stop_pid_file "$pid_file"
+  stop_owned_container_file "$restate_marker_file" restate
+  if [[ "$owned_store_backend" = postgres ]]; then
+    stop_owned_container_file "$postgres_marker_file" postgres
+  fi
+
+  [[ "$owned_data_identity" = "$(stat -c '%d:%i' "$owned_data_dir" 2>/dev/null || true)" ]] \
+    || die "reset stopped before data deletion: application data directory identity changed"
+  data_owner_matches \
+    || die "reset stopped before data deletion: application ownership marker changed"
+  path_has_symlink_component "$configured_data_dir" \
+    && die "reset stopped before data deletion: application data path became a symlink"
+  [[ "$(realpath -m -- "$configured_data_dir")" = "$owned_data_dir" ]] \
+    || die "reset stopped before data deletion: application data path changed"
+  rm -rf -- "$owned_data_dir"
+  rm -f "$pid_file" "$meta_file" "$log_file" "$reset_file" \
+    "$restate_marker_file" "$postgres_marker_file"
+  mkdir -p "$state_dir"
+  reset_committed=1
+
+  ownership_token="$(new_ownership_token)"
+  data_dir_existed_before_invocation=0
+  data_dir_created_this_attempt=1
+  started_workbench_this_attempt=0
+  started_restate_this_attempt=0
+  started_postgres_this_attempt=0
+  created_reset_ownership_this_attempt=0
+  log "disposable dev state cleared; starting a fresh stack"
+  run_up
+  rm -f "$reset_recovery_file"
 }
 
 run_foreground() {
   if ! ensure_ports_available; then
     return
   fi
+  start_attempt_active=1
   ensure_restate
+
+  local deployment_url
+  deployment_url="$(endpoint_url)"
+  if ! require_unused_deployment_uri "$restate_admin_url" "$deployment_url"; then
+    cleanup_start_attempt
+    die "refusing to replace an existing Restate deployment at $deployment_url"
+  fi
   ensure_postgres
 
   local started_pid="" started_start_time=""
@@ -550,8 +1027,12 @@ run_foreground() {
       fi
       wait "$started_pid" >/dev/null 2>&1 || true
     fi
-    stop_started_restate
-    stop_started_postgres
+    if (( started_restate_this_attempt )); then
+      stop_started_restate || true
+    fi
+    if (( started_postgres_this_attempt )); then
+      stop_started_postgres || true
+    fi
   }
   trap cleanup_foreground EXIT INT TERM
 
@@ -566,10 +1047,8 @@ run_foreground() {
     "AGENT_WORKBENCH_DATABASE_URL=$agent_workbench_database_url"
     "RESTATE_INGRESS_URL=$restate_ingress_url"
     "RESTATE_ADMIN_URL=$restate_admin_url"
+    "AGENT_WORKBENCH_DATA_DIR=$data_dir"
   )
-  if [[ -n "${AGENT_WORKBENCH_DATA_DIR:-}" ]]; then
-    workbench_env+=("AGENT_WORKBENCH_DATA_DIR=$AGENT_WORKBENCH_DATA_DIR")
-  fi
   env "${workbench_env[@]}" cargo run -p agent-workbench --profile judged "${feature_args[@]}" &
   started_pid="$!"
   write_pid_file "$pid_file" "$started_pid" || die "could not record process identity for $started_pid"
@@ -578,8 +1057,6 @@ run_foreground() {
 
   wait_workbench_ready 90
   wait_workbench_endpoint_ready 90
-  local deployment_url
-  deployment_url="$(endpoint_url)"
   log "registering Restate deployment $deployment_url"
   register_deployment "$restate_admin_url" "$deployment_url" \
     || die "failed to register Restate deployment $deployment_url through $restate_admin_url"
@@ -588,6 +1065,7 @@ run_foreground() {
   log "ready: $workbench_url"
   open_browser "$workbench_url"
   wait "$started_pid"
+  start_attempt_active=0
 }
 
 run_status_one() {
@@ -673,6 +1151,7 @@ port_override=""
 addr_override=""
 explicit_target=""
 follow_logs=0
+reset_dev_state=0
 while (($#)); do
   case "$1" in
     --port)
@@ -691,6 +1170,10 @@ while (($#)); do
       follow_logs=1
       shift
       ;;
+    --reset-dev-state)
+      reset_dev_state=1
+      shift
+      ;;
     [0-9]*)
       port_override="$1"
       explicit_target=1
@@ -705,6 +1188,10 @@ while (($#)); do
       ;;
   esac
 done
+
+if (( reset_dev_state )) && [[ "$action" != restart ]]; then
+  die "--reset-dev-state is valid only with restart"
+fi
 
 if [[ -n "$addr_override" ]]; then
   workbench_addr="$addr_override"
@@ -747,9 +1234,21 @@ restate_admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:${AGENT_WORKBENCH_RESTA
 restate_image="${AGENT_WORKBENCH_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
 restate_node_port="${AGENT_WORKBENCH_RESTATE_NODE_PORT:-$default_restate_node_port}"
 configured_endpoint_url="${AGENT_WORKBENCH_RESTATE_ENDPOINT_URL:-}"
+url_is_diagnostic_safe "$restate_ingress_url" \
+  || die "RESTATE_INGRESS_URL must not contain credentials, a query, or a fragment"
+url_is_diagnostic_safe "$restate_admin_url" \
+  || die "RESTATE_ADMIN_URL must not contain credentials, a query, or a fragment"
+if [[ -n "$configured_endpoint_url" ]]; then
+  url_is_diagnostic_safe "$configured_endpoint_url" \
+    || die "AGENT_WORKBENCH_RESTATE_ENDPOINT_URL must not contain credentials, a query, or a fragment"
+fi
 
 postgres_requested="${AGENT_WORKBENCH_POSTGRES:-0}"
 agent_workbench_database_url="${AGENT_WORKBENCH_DATABASE_URL:-}"
+database_url_explicit=0
+if [[ -n "$agent_workbench_database_url" ]]; then
+  database_url_explicit=1
+fi
 postgres_enabled=0
 case "$postgres_requested" in
   1|true|True|TRUE|yes|Yes|YES) postgres_enabled=1 ;;
@@ -766,6 +1265,9 @@ postgres_container="${AGENT_WORKBENCH_POSTGRES_CONTAINER:-lash-agent-workbench-d
 if (( postgres_enabled )) && [[ -z "$agent_workbench_database_url" ]]; then
   agent_workbench_database_url="postgres://lash:lash@$postgres_host:$postgres_port/lash"
 elif [[ -n "$agent_workbench_database_url" ]]; then
+  if [[ "$action" = restart && "$reset_dev_state" = 1 ]]; then
+    die "reset refused: explicit database URL is external or ambiguous"
+  fi
   read -r postgres_host postgres_port < <(url_host_port "$agent_workbench_database_url")
 fi
 
@@ -809,6 +1311,10 @@ store_backend="sqlite"
 if (( postgres_enabled )); then
   store_backend="postgres"
 fi
+database_fingerprint=""
+if [[ -n "$agent_workbench_database_url" ]]; then
+  database_fingerprint="$(printf '%s' "$agent_workbench_database_url" | sha256sum | awk '{print $1}')"
+fi
 
 workbench_wait_host="$workbench_host"
 endpoint_wait_host="$endpoint_host"
@@ -819,6 +1325,8 @@ if [[ "$endpoint_wait_host" = "0.0.0.0" ]]; then
   endpoint_wait_host="127.0.0.1"
 fi
 workbench_url="http://$workbench_wait_host:$workbench_port"
+data_dir="$(realpath -m -- "$configured_data_dir")"
+ownership_token="$(new_ownership_token)"
 
 state_key="$(printf '%s' "$workbench_addr" | tr -c 'A-Za-z0-9_.-' '_')"
 pid_file="$state_dir/workbench-$state_key.pid"
@@ -826,6 +1334,31 @@ meta_file="$state_dir/workbench-$state_key.meta"
 log_file="$state_dir/workbench-$state_key.log"
 restate_marker_file="$state_dir/restate-$state_key.container"
 postgres_marker_file="$state_dir/postgres-$state_key.container"
+reset_file="$state_dir/reset-$state_key.meta"
+data_owner_file="$data_dir/.agent-workbench-dev-reset-owner"
+created_reset_ownership_this_attempt=0
+
+case "$action" in
+  up|start|foreground|run|restart|down|stop)
+    command -v flock >/dev/null 2>&1 || die "flock is required for launcher lifecycle operations"
+    launcher_lock_hash="$(printf '%s' "$repo_root" | sha256sum | awk '{print $1}')"
+    launcher_lock_root="${XDG_RUNTIME_DIR:-/tmp}/lash-agent-workbench-$UID"
+    if [[ ! -e "$launcher_lock_root" ]]; then
+      mkdir -m 700 -- "$launcher_lock_root"
+    fi
+    private_owned_directory "$launcher_lock_root" \
+      || die "unsafe launcher lock directory $launcher_lock_root"
+    launcher_lock_file="$launcher_lock_root/$launcher_lock_hash.lock"
+    reset_recovery_file="$launcher_lock_root/$launcher_lock_hash-$state_key-recover.sh"
+    if [[ -e "$launcher_lock_file" ]] && ! regular_private_file "$launcher_lock_file"; then
+      die "unsafe launcher lock file $launcher_lock_file"
+    fi
+    exec {launcher_lock_fd}>"$launcher_lock_file"
+    chmod 600 "$launcher_lock_file"
+    flock -n "$launcher_lock_fd" \
+      || die "another launcher lifecycle command is already running for this workbench checkout"
+    ;;
+esac
 
 case "$action" in
   up|start)
@@ -835,8 +1368,10 @@ case "$action" in
     run_foreground
     ;;
   restart)
-    stop_pid_file "$pid_file"
-    run_up
+    if (( ! reset_dev_state )); then
+      die "restart cannot replace a replayable deployment; use restart --reset-dev-state only for a wholly launcher-owned disposable stack"
+    fi
+    run_reset_dev_state
     ;;
   status)
     if [[ -z "$explicit_target" ]]; then
