@@ -126,13 +126,13 @@ These versions move together in the FIG-2828 cutover:
 | Process wake-delivery format | 2 | 3 |
 | Append-request identity encoding | 3 | 4 |
 | RLM snapshot | 17 | 18 |
-| SQLite durable core | 54 | 55 |
+| SQLite durable core | 55 | 56 |
 | SQLite process registry | 32 | 33 |
 | SQLite effect journal | 17 | 18 |
-| PostgreSQL component | 83 | 84 |
+| PostgreSQL component | 84 | 85 |
 | Session-head metadata | 7 | 8 |
 | Session-node body | 12 | 13 |
-| Durable-read fixture | 59 | 60 |
+| Durable-read fixture | 60 | 61 |
 
 Journal identity remains v2 for all five execution-scope variants, and process-transfer identity
 remains v1. Those unchanged byte contracts are separate from the affected formats above.
@@ -140,7 +140,7 @@ remains v1. Those unchanged byte contracts are separate from the affected format
 This release is a fresh-trust-domain redeployment boundary. Do not perform a rolling upgrade or
 mix old and new hosts, workers, Restate handlers, or remote peers. Drain in-flight work, stop the
 old deployment, and provision the replacement SQLite/PostgreSQL stores and Restate state from
-this build together; PostgreSQL component 83 has no migration to 84 and the replacement database
+this build together; PostgreSQL component 84 has no migration to 85 and the replacement database
 must be created from this build's `schema.sql`. Reset the tombstones, await-event revocation
 ledger, effect journal, and Restate state as one operation, then start every producer and consumer
 on the same build. Old affected encodings must refuse; there is no compatibility alias or

@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub(super) bindings: BTreeMap<String, Binding>,
+    pub(super) static_trigger_bindings: BTreeMap<String, StaticTriggerBinding>,
     pub(super) process_body: bool,
     pub(super) expected_return: Option<TypeExpr>,
     pub(super) span: Option<Span>,
@@ -12,23 +13,52 @@ impl Scope {
     pub(super) fn new(process_body: bool, span: Option<Span>) -> Self {
         Self {
             bindings: BTreeMap::new(),
+            static_trigger_bindings: BTreeMap::new(),
             process_body,
             expected_return: None,
             span,
         }
     }
 
-    pub(super) fn bind(&mut self, name: &str, binding: Binding) -> Option<Binding> {
-        self.bindings.insert(name.to_string(), binding)
+    pub(super) fn bind(&mut self, name: &str, binding: Binding) -> PreviousBinding {
+        PreviousBinding {
+            binding: self.bindings.insert(name.to_string(), binding),
+            static_trigger: self.static_trigger_bindings.remove(name),
+        }
     }
 
-    pub(super) fn restore(&mut self, name: &str, previous: Option<Binding>) {
-        match previous {
+    pub(super) fn restore(&mut self, name: &str, previous: PreviousBinding) {
+        match previous.binding {
             Some(binding) => {
                 self.bindings.insert(name.to_string(), binding);
             }
             None => {
                 self.bindings.remove(name);
+            }
+        }
+        match previous.static_trigger {
+            Some(binding) => {
+                self.static_trigger_bindings
+                    .insert(name.to_string(), binding);
+            }
+            None => {
+                self.static_trigger_bindings.remove(name);
+            }
+        }
+    }
+
+    pub(super) fn set_static_trigger_binding(
+        &mut self,
+        name: &str,
+        binding: Option<StaticTriggerBinding>,
+    ) {
+        match binding {
+            Some(binding) => {
+                self.static_trigger_bindings
+                    .insert(name.to_string(), binding);
+            }
+            None => {
+                self.static_trigger_bindings.remove(name);
             }
         }
     }
@@ -53,6 +83,22 @@ impl Scope {
                 join_optional_bindings(left.bindings.get(&name), right.bindings.get(&name));
             self.bindings.insert(name, binding);
         }
+        let static_names = left
+            .static_trigger_bindings
+            .keys()
+            .chain(right.static_trigger_bindings.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        self.static_trigger_bindings.clear();
+        for name in static_names {
+            if let (Some(left), Some(right)) = (
+                left.static_trigger_bindings.get(&name),
+                right.static_trigger_bindings.get(&name),
+            ) && left == right
+            {
+                self.static_trigger_bindings.insert(name, left.clone());
+            }
+        }
     }
 
     pub(super) fn widen_loop(&mut self, before: Scope, after_one_pass: Scope) {
@@ -60,7 +106,7 @@ impl Scope {
     }
 
     pub(super) fn binding_type(&self, name: &AstString) -> Option<TypeExpr> {
-        self.get(name).map(|binding| binding_type(Some(&binding)))
+        self.get(name).map(|binding| binding_type(&binding))
     }
 
     pub(super) fn update_path(
@@ -76,10 +122,17 @@ impl Scope {
         };
         let updated = update_binding_path(binding, &target.steps, value_ty, self.span)?;
         self.bind(target.root.as_str(), updated);
+        self.static_trigger_bindings.remove(target.root.as_str());
         Ok(())
     }
 }
 
+pub(super) struct PreviousBinding {
+    binding: Option<Binding>,
+    static_trigger: Option<StaticTriggerBinding>,
+}
+
+#[derive(Clone, Debug)]
 pub(super) struct Completion {
     pub(super) finishes: Vec<TypeExpr>,
     pub(super) can_fallthrough: bool,
@@ -92,28 +145,33 @@ impl Completion {
             can_fallthrough: true,
         }
     }
+
+    pub(super) fn terminal(finishes: Vec<TypeExpr>) -> Self {
+        Self {
+            finishes,
+            can_fallthrough: false,
+        }
+    }
 }
 
 pub(super) fn any_binding() -> Binding {
     Binding::Value(TypeExpr::Any)
 }
 
-pub(super) fn binding_type(binding: Option<&Binding>) -> TypeExpr {
+pub(super) fn binding_type(binding: &Binding) -> TypeExpr {
     match binding {
-        Some(Binding::Value(ty)) => ty.clone(),
-        Some(Binding::SchemaWitness { .. }) => TypeExpr::Any,
-        Some(Binding::Resource { resource_type }) => TypeExpr::Ref(resource_type.as_str().into()),
-        None => TypeExpr::Any,
+        Binding::Value(ty) => ty.clone(),
+        Binding::SchemaWitness { .. } => TypeExpr::Any,
+        Binding::Resource { resource_type } => TypeExpr::Ref(resource_type.as_str().into()),
     }
 }
 
 fn join_optional_bindings(left: Option<&Binding>, right: Option<&Binding>) -> Binding {
     match (left, right) {
         (Some(left), Some(right)) if left == right => left.clone(),
-        (Some(left), Some(right)) => Binding::Value(union_type(vec![
-            binding_type(Some(left)),
-            binding_type(Some(right)),
-        ])),
+        (Some(left), Some(right)) => {
+            Binding::Value(union_type(vec![binding_type(left), binding_type(right)]))
+        }
         // A binding created on only one path is not definitely initialized.
         (Some(_), None) | (None, Some(_)) | (None, None) => any_binding(),
     }

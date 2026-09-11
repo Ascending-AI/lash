@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::runtime::{Clock, SystemClock};
 use lash_sansio::sync::RwLockExt;
 use std::fmt::{Debug, Display};
@@ -27,20 +28,31 @@ pub enum RefreshCause {
 #[error("{kind}")]
 pub struct CredentialError {
     pub kind: CredentialErrorKind,
-    pub retryable: bool,
 }
 
 impl CredentialError {
-    pub const fn new(kind: CredentialErrorKind, retryable: bool) -> Self {
-        Self { kind, retryable }
+    pub const fn new(kind: CredentialErrorKind) -> Self {
+        Self { kind }
     }
 
     pub const fn invalid_grant() -> Self {
-        Self::new(CredentialErrorKind::InvalidGrant, false)
+        Self::new(CredentialErrorKind::InvalidGrant)
     }
 
     pub const fn transient() -> Self {
-        Self::new(CredentialErrorKind::Transient, true)
+        Self::new(CredentialErrorKind::Transient)
+    }
+
+    pub const fn is_retryable(&self) -> bool {
+        self.kind.transport_classification().2.is_retryable()
+    }
+
+    pub fn into_transport_error(self) -> LlmTransportError {
+        let (code, failure_kind, retry_verdict) = self.kind.transport_classification();
+        LlmTransportError::new(self.to_string())
+            .with_kind(failure_kind)
+            .with_code(code)
+            .with_retry_verdict(retry_verdict)
     }
 }
 
@@ -53,6 +65,30 @@ pub enum CredentialErrorKind {
     Transient,
     #[error("credential refresh failed")]
     Other,
+}
+
+impl CredentialErrorKind {
+    const fn transport_classification(
+        self,
+    ) -> (&'static str, ProviderFailureKind, TransportRetryVerdict) {
+        match self {
+            Self::InvalidGrant => (
+                "credential_invalid_grant",
+                ProviderFailureKind::Auth,
+                TransportRetryVerdict::Forbidden,
+            ),
+            Self::Transient => (
+                "credential_refresh_transient",
+                ProviderFailureKind::Transport,
+                TransportRetryVerdict::RetryableTransient,
+            ),
+            Self::Other => (
+                "credential_refresh_failed",
+                ProviderFailureKind::Auth,
+                TransportRetryVerdict::Forbidden,
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -304,6 +340,49 @@ mod tests {
     use std::time::Instant;
     use tokio::sync::{Barrier, Notify};
 
+    #[test]
+    fn credential_error_policy_classifies_all_kinds() {
+        let cases = [
+            (
+                CredentialErrorKind::InvalidGrant,
+                false,
+                ProviderFailureKind::Auth,
+                TransportRetryVerdict::Forbidden,
+                "credential_invalid_grant",
+                "credential refresh was rejected; sign in again",
+            ),
+            (
+                CredentialErrorKind::Transient,
+                true,
+                ProviderFailureKind::Transport,
+                TransportRetryVerdict::RetryableTransient,
+                "credential_refresh_transient",
+                "credential refresh failed transiently",
+            ),
+            (
+                CredentialErrorKind::Other,
+                false,
+                ProviderFailureKind::Auth,
+                TransportRetryVerdict::Forbidden,
+                "credential_refresh_failed",
+                "credential refresh failed",
+            ),
+        ];
+
+        for (kind, retryable, failure_kind, retry_verdict, code, message) in cases {
+            let error = CredentialError::new(kind);
+            assert_eq!(error.is_retryable(), retryable);
+
+            let transport = error.into_transport_error();
+            assert_eq!(transport.kind, failure_kind);
+            assert_eq!(transport.retry_verdict, retry_verdict);
+            assert_eq!(transport.is_retryable(), retryable);
+            assert!(transport.retry_verdict_is_classified());
+            assert_eq!(transport.code.as_deref(), Some(code));
+            assert_eq!(transport.message, message);
+        }
+    }
+
     #[derive(Clone)]
     struct TestCredential {
         secret: String,
@@ -527,6 +606,6 @@ mod tests {
         });
         let error = manager(refresher, 200).lease().await.unwrap_err();
         assert_eq!(error.kind, CredentialErrorKind::InvalidGrant);
-        assert!(!error.retryable);
+        assert!(!error.is_retryable());
     }
 }

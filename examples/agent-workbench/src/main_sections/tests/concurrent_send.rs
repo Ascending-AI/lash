@@ -224,7 +224,7 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
     let dead_lease =
         lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
             &store,
-            &SessionId::from(session_id.clone()),
+            &session_id,
             &dead_incarnation,
             "new-turn-within-dead-lease-ttl-commits-under-head-cas-executor",
             ABANDONED_LEASE_TTL_MS,
@@ -380,7 +380,7 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
     let dead_lease =
         lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
             &store,
-            &SessionId::from(session_id.clone()),
+            &session_id,
             &dead_boot,
             "same-turn-successor-within-dead-lease-ttl-commits-under-head-cas-executor",
             ABANDONED_LEASE_TTL_MS,
@@ -799,7 +799,7 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
     state.restate_ingress_url = spawn_slow_session_delete_retention_restate().await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&SessionId::from(old_session_id.clone()))
+        .open_session(&old_session_id)
         .await
         .expect("materialize the session before the slow delete");
 
@@ -809,7 +809,7 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
         reset_chat(
             State(state.clone()),
             Query(SessionQuery {
-                session_id: Some(SessionId::from(old_session_id.clone())),
+                session_id: Some(old_session_id.clone()),
             }),
         ),
     );
@@ -833,7 +833,7 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
     let Json(replacement) = Box::pin(reset_chat(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     ))
     .await
@@ -854,14 +854,14 @@ async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_liv
     state.restate_ingress_url = spawn_ambiguous_session_delete_restate().await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&SessionId::from(old_session_id.clone()))
+        .open_session(&old_session_id)
         .await
         .expect("materialize the session before the ambiguous delete");
 
     let error = Box::pin(reset_chat(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     ))
     .await
@@ -939,11 +939,11 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
     let mut state = queued_send_test_state(data_dir.path(), provider).await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&SessionId::from(old_session_id.clone()))
+        .open_session(&old_session_id)
         .await
         .expect("materialize the session before simulated deletion");
     state.restate_ingress_url = spawn_tombstone_then_fail_session_delete_restate(
-        SessionId::from(old_session_id.clone()),
+        old_session_id.clone(),
         Arc::clone(&state.session_store_factory),
     )
     .await;
@@ -951,7 +951,7 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
     let Json(snapshot) = Box::pin(reset_chat(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     ))
     .await
@@ -962,7 +962,7 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
     let state_error = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     )
     .await
@@ -971,7 +971,7 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
     let turn_error = send_turn(
         State(state),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id)),
+            session_id: Some(old_session_id),
         }),
         Json(TurnRequest {
             text: "tombstone fence probe".to_string(),
@@ -1048,7 +1048,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
     let Json(replacement) = Box::pin(reset_chat(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(retired_session_id.clone())),
+            session_id: Some(retired_session_id.clone()),
         }),
     ))
     .await
@@ -1082,14 +1082,14 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
     state.restate_ingress_url = restate_ingress_url;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&SessionId::from(old_session_id.clone()))
+        .open_session(&old_session_id)
         .await
         .expect("materialize the old session before its failed delete");
 
     let reset = Box::pin(reset_chat(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     ))
     .await;
@@ -1097,7 +1097,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
         let state_status = if app_state(
             State(state.clone()),
             Query(SessionQuery {
-                session_id: Some(SessionId::from(old_session_id.clone())),
+                session_id: Some(old_session_id.clone()),
             }),
         )
         .await
@@ -1110,7 +1110,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
         let turn_status = if send_turn(
             State(state.clone()),
             Query(SessionQuery {
-                session_id: Some(SessionId::from(old_session_id.clone())),
+                session_id: Some(old_session_id.clone()),
             }),
             Json(TurnRequest {
                 text: "still-live fence probe".to_string(),
@@ -1133,7 +1133,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
     }
     let error = reset.expect_err("terminal delete failure must be operator-visible");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains(&old_session_id));
+    assert!(error.message.contains(old_session_id.as_str()));
     assert!(error.message.contains("remains live"));
     assert_eq!(state.current_session_id(), old_session_id);
     let response = error.into_response();
@@ -1146,14 +1146,14 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
         body.pointer("/error")
             .and_then(Value::as_str)
             .is_some_and(|message| {
-                message.contains(&old_session_id) && message.contains("remains live")
+                message.contains(old_session_id.as_str()) && message.contains("remains live")
             })
     );
 
     let _ = app_state(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     )
     .await
@@ -1161,7 +1161,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
     let _ = send_turn(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
         Json(TurnRequest {
             text: "retry after visible delete failure".to_string(),
@@ -1282,10 +1282,7 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
     assert!(
         state
             .active_turns
-            .try_insert_for_idle_session(
-                &SessionId::from(session_id.clone()),
-                &TurnId::from("queued-race-owner")
-            )
+            .try_insert_for_idle_session(&session_id, &TurnId::from("queued-race-owner"))
             .is_claimed()
     );
     let (released, condition) = &*release;
@@ -1297,26 +1294,16 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
         .expect("send task")
         .expect("the losing send is queued");
     assert!(accepted.queued);
-    assert_eq!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id.clone()))
-            .len(),
-        1
-    );
-    assert!(product_user_rows(&state, &SessionId::from(session_id.clone())).is_empty());
-    assert_eq!(
-        product_ingress_receipts(&state, &SessionId::from(session_id.clone())).len(),
-        1
-    );
+    assert_eq!(state.active_turns.for_session(&session_id).len(), 1);
+    assert!(product_user_rows(&state, &session_id).is_empty());
+    assert_eq!(product_ingress_receipts(&state, &session_id).len(), 1);
     assert!(matches!(
         restate_requests.try_recv(),
         Err(mpsc::error::TryRecvError::Empty)
     ));
-    state.active_turns.remove(
-        &SessionId::from(session_id),
-        &TurnId::from("queued-race-owner"),
-    );
+    state
+        .active_turns
+        .remove(&session_id, &TurnId::from("queued-race-owner"));
 }
 
 #[tokio::test]
@@ -1331,24 +1318,21 @@ async fn failed_manual_queued_submission_releases_claim_and_can_retry() {
     state.restate_ingress_url = spawn_failing_restate_ingress().await;
     let session_id = state.current_session_id();
     let session = state
-        .open_session(&SessionId::from(session_id.clone()))
+        .open_session(&session_id)
         .await
         .expect("open manual queued failure session");
     let store = state
         .session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,
             policy: session.policy_snapshot(),
         })
         .await
         .expect("open manual queued failure store");
     let batch = store
-        .enqueue_queued_work(queued_work_test_draft(
-            &SessionId::from(session_id.clone()),
-            "manual-queued-failure",
-        ))
+        .enqueue_queued_work(queued_work_test_draft(&session_id, "manual-queued-failure"))
         .await
         .expect("enqueue manual queued failure batch");
 
@@ -1359,12 +1343,7 @@ async fn failed_manual_queued_submission_releases_claim_and_can_retry() {
     )
     .await
     .expect_err("the first manual submission fails");
-    assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id))
-            .is_empty()
-    );
+    assert!(state.active_turns.for_session(&session_id).is_empty());
 
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
@@ -1393,14 +1372,14 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
     let state = queued_send_test_state(data_dir.path(), provider).await;
     let session_id = state.current_session_id();
     let session = state
-        .open_session(&SessionId::from(session_id.clone()))
+        .open_session(&session_id)
         .await
         .expect("open automatic queued failure session");
     let store = state
         .session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,
             policy: session.policy_snapshot(),
         })
@@ -1408,7 +1387,7 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
         .expect("open automatic queued failure store");
     store
         .enqueue_queued_work(queued_work_test_draft(
-            &SessionId::from(session_id.clone()),
+            &session_id,
             "automatic-queued-failure",
         ))
         .await
@@ -1422,17 +1401,12 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
     };
     lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
         &failed,
-        Some(&SessionId::from(session_id.clone())),
+        Some(&session_id),
         "automatic_failure",
     )
     .await
     .expect_err("the first automatic submission fails");
-    assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id.clone()))
-            .is_empty()
-    );
+    assert!(state.active_turns.for_session(&session_id).is_empty());
 
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let retry = WorkbenchQueuedWorkSubmitter {
@@ -1444,7 +1418,7 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
     };
     lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
         &retry,
-        Some(&SessionId::from(session_id)),
+        Some(&session_id),
         "automatic_retry",
     )
     .await
@@ -1530,17 +1504,14 @@ async fn a_panicked_turn_submission_cleans_up_and_publishes_failure() {
     .expect_err("the panicked admission is an API failure");
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id.clone()))
-            .is_empty(),
+        state.active_turns.for_session(&session_id).is_empty(),
         "the panic guard must release the active turn"
     );
     assert!(
-        product_user_rows(&state, &SessionId::from(session_id.clone())).is_empty(),
+        product_user_rows(&state, &session_id).is_empty(),
         "the panic guard must retire the optimistic user row"
     );
-    let failures = product_event_rows(&state, &SessionId::from(session_id));
+    let failures = product_event_rows(&state, &session_id);
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].1, PUBLIC_TURN_FAILURE_MESSAGE);
     assert!(matches!(
@@ -1595,13 +1566,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     entered_rx
         .recv_timeout(Duration::from_secs(5))
         .expect("the send reaches its committed admission boundary");
-    assert_eq!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id.clone()))
-            .len(),
-        1
-    );
+    assert_eq!(state.active_turns.for_session(&session_id).len(), 1);
     request.abort();
     let (released, condition) = &*release;
     *released.lock().unwrap_or_else(|error| error.into_inner()) = true;
@@ -1626,14 +1591,14 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     let turn_id = TurnId::from(turn_id);
     let first = Box::pin(run_workbench_turn_attempt(
         &state,
-        &SessionId::from(session_id.clone()),
+        &session_id,
         &turn_id,
         "committed before disconnect",
     ))
     .await;
     crate::restate::terminalize_turn_execution(
         &state,
-        &SessionId::from(session_id.clone()),
+        &session_id,
         &turn_id,
         "test.dropped_send.failed",
         Ok(first),
@@ -1641,10 +1606,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     .await
     .expect("the detached submission completes normally");
     assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id))
-            .is_empty(),
+        state.active_turns.for_session(&session_id).is_empty(),
         "terminalization must retire the detached turn"
     );
 
@@ -1732,7 +1694,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
             .await;
             crate::restate::terminalize_turn_execution(
                 &state,
-                &SessionId::from(session_id),
+                &session_id,
                 &first_turn_id,
                 "test.workbench_turn.failed",
                 Ok(result),
@@ -1786,23 +1748,20 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         "a queued send must not submit a second concurrent turn workflow"
     );
     assert_eq!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id.clone()))
-            .len(),
+        state.active_turns.for_session(&session_id).len(),
         1,
         "a queued send must not register a second active turn"
     );
 
     assert_eq!(
-        product_user_rows(&state, &SessionId::from(session_id.clone()))
+        product_user_rows(&state, &session_id)
             .into_iter()
             .map(|(_, text)| text)
             .collect::<Vec<_>>(),
         vec!["first send".to_string()],
         "a queued send must not broadcast an optimistic user row it never committed"
     );
-    let receipts = product_ingress_receipts(&state, &SessionId::from(session_id.clone()));
+    let receipts = product_ingress_receipts(&state, &session_id);
     assert_eq!(
         receipts
             .iter()
@@ -1874,10 +1833,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         .await
         .expect("drain the queued send")
         .expect("the queued send runs as a turn");
-    state.track_turn(
-        &SessionId::from(session_id.clone()),
-        &TurnId::from("test-drained-queued-turn"),
-    );
+    state.track_turn(&session_id, &TurnId::from("test-drained-queued-turn"));
     crate::restate::record_turn_output(
         &state,
         &session,
@@ -1890,7 +1846,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     .expect("record the drained turn");
     crate::restate::settle_workbench_turn(
         &state,
-        &SessionId::from(session_id),
+        &session_id,
         &TurnId::from("test-drained-queued-turn"),
     )
     .await
@@ -1967,7 +1923,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
                 .await;
             let terminalized = crate::restate::terminalize_turn_execution(
                 &state,
-                &SessionId::from(session_id),
+                &session_id,
                 &turn_id,
                 "restate_user_turn.failed",
                 Ok(result),
@@ -1999,7 +1955,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         "agent-workbench-test-boot"
     );
     assert_eq!(
-        product_user_rows(&state, &SessionId::from(session_id.clone()))
+        product_user_rows(&state, &session_id)
             .into_iter()
             .map(|(_, text)| text)
             .collect::<Vec<_>>(),
@@ -2032,7 +1988,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
     assert_eq!(error_evidence, None);
     assert!(terminalized.is_ok(), "the admitted holder must complete");
 
-    let failure_rows = product_event_rows(&state, &SessionId::from(session_id.clone()));
+    let failure_rows = product_event_rows(&state, &session_id);
     assert!(
         failure_rows
             .iter()
@@ -2041,7 +1997,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
     );
     let done = state
         .event_tx
-        .snapshot(&SessionId::from(session_id.clone()))
+        .snapshot(&session_id)
         .events
         .into_iter()
         .filter_map(|event| match event.item {
@@ -2057,16 +2013,13 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         "the admitted holder completes exactly once"
     );
     assert!(
-        product_user_rows(&state, &SessionId::from(session_id.clone()))
+        product_user_rows(&state, &session_id)
             .iter()
             .any(|(_, text)| text == "admitted send"),
         "the admitted holder's committed user row remains visible"
     );
     assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(session_id))
-            .is_empty(),
+        state.active_turns.for_session(&session_id).is_empty(),
         "the completed holder must not stay active"
     );
 

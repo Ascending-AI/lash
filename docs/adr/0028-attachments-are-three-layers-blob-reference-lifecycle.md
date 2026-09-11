@@ -80,16 +80,26 @@ the two sides meet inside one transaction rather than across two reads.
 Per digest the state is `Free`, `Condemned`, `Deleting`, or `Reclaimed`, and every
 transition is a conditional mutation with no timestamp anywhere in it. The writer's `put`
 goes through `AttachmentManifest::begin_attachment_write`, which records the
-write-ahead intent *and* resolves the condemnation in one mutation: it revokes a
-`Condemned` digest and takes it back, and against a `Deleting` digest it records
-nothing and retries, because bytes written into an in-flight delete are lost
-bytes. The sweep condemns before deleting
+write-ahead intent *and* resolves the condemnation in one mutation: it claims a
+`Condemned` or `Reclaimed` digest with a unique write token, and against a
+`Deleting` digest or a phase owned by another writer it records nothing and
+retries, because bytes written into an in-flight delete are lost bytes. The
+sweep condemns before deleting
 (`AttachmentRootSet::condemn_attachment`, refused if any root or intent exists),
 arms the delete (`arm_attachment_delete`, refused if a writer revoked), issues
 the physical delete only for an armed digest, then records `Reclaimed` after
-success. `Reclaimed` is the durable byte-absence fact: adoption refuses it, while
-a fresh put clears it with its write-ahead intent before restoring the bytes.
-A failed or abandoned delete still releases to `Free`. Whoever loses a CAS
+success. A fenced final `HEAD` that finds the bytes already absent records the
+same fact without issuing a redundant delete. `Reclaimed` is the durable
+byte-absence fact: adoption refuses it, while a fresh put claims it with its
+write-ahead intent, restores the bytes, and clears it only through a
+token-matched completion. The token is durably associated with the session whose
+uncommitted manifest intent belongs to that restoring attempt. A failed put
+releases only its own token and uncommitted intent. It always preserves
+`Reclaimed`, because that phase is durable byte-absence evidence. It preserves
+`Condemned` unless the same intent became a committed root while the token was
+held; that newer root supersedes the old unarmed condemnation before the older
+sweep can arm it. A failed or abandoned delete still releases to `Free`.
+Whoever loses a CAS
 yields: a writer parks and retries, and a sweep that meets a peer's condemnation
 defers the digest to the next sweep. Nothing waits on a
 lease or a TTL, and no SQL/blob-store atomicity is needed, because the
@@ -101,17 +111,27 @@ appears. No transition, and above all no reclamation, is ever authorized by
 elapsed time.
 Clearing a condemnation left behind by a sweeper that died mid-delete is host
 policy under ADR 0014, exposed as
-`AttachmentRootSet::release_attachment_condemnation`; lash expires nothing on a
+`AttachmentRootSet::release_attachment_condemnation`. That operation removes
+only tokenless `Condemned` or `Deleting` state, so an older sweep cannot revoke a
+restoring writer that won the digest meanwhile. The separate
+`recover_abandoned_attachment_write` lever clears a writer token and its
+associated uncommitted intent, but only after the host establishes that the
+writer is no longer running. It applies the same newer-root rule as failed-put
+settlement: preserve `Reclaimed`; preserve `Condemned` when the associated intent
+is still uncommitted, otherwise retire that old condemnation to `Free`. A fresh
+re-put then claims any retained phase normally. lash expires neither state on a
 timer.
 
-The freshness re-check survives as what it always was, a cheap pre-filter, and it
-now runs while the digest is condemned, which is exactly the window a writer can
-still revoke.
+The freshness re-check survives as what it always was, a cheap pre-filter. It
+now runs only after the sweep arms the digest as `Deleting`; writers arriving in
+that window record no intent and retry after the sweep settles the phase.
 
-Answering `Fenced` is a claim about six methods across two traits —
-`AttachmentManifest::begin_attachment_write` plus the root set's `fence`,
+Answering `Fenced` is a claim about nine methods across two traits —
+`AttachmentManifest::begin_attachment_write`, `complete_attachment_write`, and
+`abort_attachment_write` plus the root set's `fence`,
 `condemn_attachment`, `arm_attachment_delete`, and
-`reclaim_attachment_condemnation` and `release_attachment_condemnation` — and a partial implementation is worse than
+`reclaim_attachment_condemnation`, `release_attachment_condemnation`, and
+`recover_abandoned_attachment_write` — and a partial implementation is worse than
 none, because it silences the warning while keeping the loss. The sweep
 downgrades its own report to `BestEffort` when a self-declared fenced authority
 cannot condemn, but it cannot detect a missing writer half; that one is on the
@@ -207,9 +227,11 @@ manifest root or graph state. The receiver's root then follows the same
 owner-level retention rule as any other attachment.
 
 The `Reclaimed` phase changes the allowed values of durable condemnation rows,
-so PostgreSQL component 83 and SQLite session schema 54 are reject-and-recreate
-boundaries. The phase remains bounded to one row per distinct reclaimed digest
-and is cleared on re-put; no host blob access enters a store transaction.
+so PostgreSQL component 84 and SQLite session schema 55 are reject-and-recreate
+boundaries. The phase remains bounded to one row per distinct reclaimed digest.
+A restoring put holds an opaque token and its manifest session association in
+that row and clears them only after the
+backend put succeeds; no host blob access enters a store transaction.
 
 The schema-free mechanism retains a deleted owner's committed manifest rows
 while any of that owner's graph nodes remain retained by a head, child, or pin.

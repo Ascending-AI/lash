@@ -15,16 +15,14 @@ pub(crate) async fn session_events_with_shutdown(
     Query(query): Query<ProductEventsQuery>,
     mut shutdown: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<Response, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(
-                &SessionQuery {
-                    session_id: query.session_id.clone(),
-                },
-                "api.events",
-            )
-            .await?,
-    );
+    let session_id = state
+        .admit_session(
+            &SessionQuery {
+                session_id: query.session_id.clone(),
+            },
+            "api.events",
+        )
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
@@ -91,16 +89,14 @@ pub(crate) async fn session_observations_with_shutdown(
     Query(query): Query<EventsQuery>,
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<Response, AppError> {
-    let session_id = SessionId::from(
-        state
-            .admit_session(
-                &SessionQuery {
-                    session_id: query.session_id.clone(),
-                },
-                "api.observations",
-            )
-            .await?,
-    );
+    let session_id = state
+        .admit_session(
+            &SessionQuery {
+                session_id: query.session_id.clone(),
+            },
+            "api.observations",
+        )
+        .await?;
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {

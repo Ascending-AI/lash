@@ -14,10 +14,7 @@ use super::recoverable_chat_tests::{
 fn reset_session_rotation_replaces_workbench_session_id() {
     let ids = WorkbenchSessions::fresh();
     let original = ids.current();
-    let (new, replaced_current) = ids.replace(
-        &SessionId::from(original.clone()),
-        lash::rlm::RlmDialect::Lashlang,
-    );
+    let (new, replaced_current) = ids.replace(&original, lash::rlm::RlmDialect::Lashlang);
     assert!(replaced_current);
     assert_eq!(ids.current(), new);
     assert_ne!(original, new);
@@ -29,10 +26,7 @@ fn reset_session_rotation_replaces_workbench_session_id() {
 fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
     let ids = WorkbenchSessions::fresh();
     let retired = ids.current();
-    ids.ensure(
-        &SessionId::from(retired.clone()),
-        lash::rlm::RlmDialect::Lashlang,
-    );
+    ids.ensure(&retired, lash::rlm::RlmDialect::Lashlang);
     let selected = "workbench-selected-during-delete";
     ids.record(
         SessionId::from(selected.to_string()),
@@ -42,16 +36,13 @@ fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
     ids.select(&SessionId::from(selected))
         .expect("select competing session");
 
-    let (replacement, replaced_current) = ids.replace(
-        &SessionId::from(retired.clone()),
-        lash::rlm::RlmDialect::Lashlang,
-    );
+    let (replacement, replaced_current) = ids.replace(&retired, lash::rlm::RlmDialect::Lashlang);
 
     assert!(!replaced_current);
     assert_eq!(ids.current(), selected);
-    assert!(ids.entry(&SessionId::from(retired.clone())).is_none());
+    assert!(ids.entry(&retired).is_none());
     assert_eq!(
-        ids.entry(&SessionId::from(replacement))
+        ids.entry(&replacement)
             .expect("replacement keeps retired roster slot")
             .name,
         retired
@@ -68,7 +59,7 @@ fn replacing_an_unrostered_session_records_its_replacement() {
 
     assert!(!replaced_current);
     let entry = ids
-        .entry(&SessionId::from(replacement))
+        .entry(&replacement)
         .expect("replacement joins the roster");
     assert_eq!(entry.name, retired);
     assert_eq!(entry.dialect, lash::rlm::RlmDialect::Typescript);
@@ -136,15 +127,13 @@ fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
         let state = recoverable_chat_test_state(data_dir.path(), 16).await;
         let session_id = state.current_session_id();
         let query = SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         };
         state
             .admit_session(&query, "api.state")
             .await
             .expect("live");
-        state
-            .active_turns
-            .begin_retirement(&SessionId::from(session_id.clone()));
+        state.active_turns.begin_retirement(&session_id);
 
         let error = state
             .admit_session(&query, "api.state")
@@ -152,10 +141,7 @@ fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
             .expect_err("a retiring session refuses use");
         assert_eq!(error.status, StatusCode::CONFLICT);
         assert_eq!(error.verdict, AppErrorVerdict::Terminal);
-        assert_eq!(
-            error.message,
-            retiring_session_message(&SessionId::from(session_id.clone()))
-        );
+        assert_eq!(error.message, retiring_session_message(&session_id));
         assert_eq!(
             state
                 .admit_session_for_delete(&query, "api.session.delete")
@@ -167,29 +153,16 @@ fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
         // An ambiguous outcome keeps the mark; a definitive failure follows the
         // durable fact, which says the session is live.
         state
-            .settle_retirement_mark(
-                &SessionId::from(session_id.clone()),
-                &Err(AppError::internal("ambiguous")),
-            )
+            .settle_retirement_mark(&session_id, &Err(AppError::internal("ambiguous")))
             .await;
         assert_eq!(
-            state
-                .active_turns
-                .retirement(&SessionId::from(session_id.clone())),
+            state.active_turns.retirement(&session_id),
             Some(SessionRetirement::Retiring)
         );
         state
-            .settle_retirement_mark(
-                &SessionId::from(session_id.clone()),
-                &Err(AppError::conflict("remains live")),
-            )
+            .settle_retirement_mark(&session_id, &Err(AppError::conflict("remains live")))
             .await;
-        assert_eq!(
-            state
-                .active_turns
-                .retirement(&SessionId::from(session_id.clone())),
-            None
-        );
+        assert_eq!(state.active_turns.retirement(&session_id), None);
         state
             .admit_session(&query, "api.state")
             .await
@@ -197,12 +170,12 @@ fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
 
         // Once the durable tombstone exists, a delete retry is refused like any
         // other use.
-        retire_workbench_session(&state, &SessionId::from(session_id.clone())).await;
+        retire_workbench_session(&state, &session_id).await;
         let error = state
             .admit_session_for_delete(&query, "api.session.delete")
             .await
             .expect_err("a tombstoned session refuses the delete");
-        assert_deleted_session_conflict(&error, &SessionId::from(session_id));
+        assert_deleted_session_conflict(&error, &session_id);
     });
 }
 
@@ -242,7 +215,7 @@ async fn a_delete_that_lands_between_admission_and_claim_refuses_the_send_inner(
             send_turn(
                 State(state),
                 Query(SessionQuery {
-                    session_id: Some(SessionId::from(old_session_id)),
+                    session_id: Some(old_session_id),
                 }),
                 Json(TurnRequest {
                     text: "send that loses to the delete".to_string(),
@@ -261,16 +234,14 @@ async fn a_delete_that_lands_between_admission_and_claim_refuses_the_send_inner(
     let Json(snapshot) = Box::pin(reset_chat(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     ))
     .await
     .expect("the delete completes while the send is held at the claim");
     assert_ne!(snapshot.settings.session_id, old_session_id);
     assert_eq!(
-        state
-            .active_turns
-            .retirement(&SessionId::from(old_session_id.clone())),
+        state.active_turns.retirement(&old_session_id),
         Some(SessionRetirement::Retired)
     );
     let delete_request = restate_requests
@@ -292,12 +263,9 @@ async fn a_delete_that_lands_between_admission_and_claim_refuses_the_send_inner(
         .await
         .expect("send task")
         .expect_err("the send released after the delete is refused at the claim");
-    assert_deleted_session_conflict(&error, &SessionId::from(old_session_id.clone()));
+    assert_deleted_session_conflict(&error, &old_session_id);
     assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(old_session_id))
-            .is_empty(),
+        state.active_turns.for_session(&old_session_id).is_empty(),
         "a refused send leaves no active-turn claim behind"
     );
     assert!(
@@ -382,11 +350,7 @@ finish (await handle)?
         .expect("submitted turn id")
         .to_string();
     let turn_id = TurnId::from(turn_id);
-    assert!(
-        state
-            .active_turns
-            .contains(&SessionId::from(old_session_id.clone()), &turn_id)
-    );
+    assert!(state.active_turns.contains(&old_session_id, &turn_id));
     let session = state
         .core
         .session(old_session_id.clone())
@@ -416,7 +380,7 @@ finish (await handle)?
     let Json(snapshot) = Box::pin(reset_chat(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
     ))
     .await
@@ -435,16 +399,9 @@ finish (await handle)?
     );
     assert_ne!(snapshot.settings.session_id, old_session_id);
     assert_eq!(state.current_session_id(), snapshot.settings.session_id);
-    assert!(
-        state
-            .active_turns
-            .for_session(&SessionId::from(old_session_id.clone()))
-            .is_empty()
-    );
+    assert!(state.active_turns.for_session(&old_session_id).is_empty());
     assert_eq!(
-        state
-            .active_turns
-            .retirement(&SessionId::from(old_session_id.clone())),
+        state.active_turns.retirement(&old_session_id),
         Some(SessionRetirement::Retired)
     );
     let delete_request = restate_requests
@@ -461,7 +418,7 @@ finish (await handle)?
     let error = send_turn(
         State(state.clone()),
         Query(SessionQuery {
-            session_id: Some(SessionId::from(old_session_id.clone())),
+            session_id: Some(old_session_id.clone()),
         }),
         Json(TurnRequest {
             text: "must not be admitted".to_string(),
@@ -472,7 +429,7 @@ finish (await handle)?
     )
     .await
     .expect_err("the retired id is refused after the delete");
-    assert_deleted_session_conflict(&error, &SessionId::from(old_session_id));
+    assert_deleted_session_conflict(&error, &old_session_id);
 }
 
 // FIG-2359: every session-bound route resolves its id through the one
@@ -486,10 +443,10 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
         let data_dir = tempfile::tempdir().expect("route sweep tempdir");
         let state = recoverable_chat_test_state(data_dir.path(), 16).await;
         let session_id = state.current_session_id();
-        retire_workbench_session(&state, &SessionId::from(session_id.clone())).await;
+        retire_workbench_session(&state, &session_id).await;
 
         let query = || SessionQuery {
-            session_id: Some(SessionId::from(session_id.clone())),
+            session_id: Some(session_id.clone()),
         };
         type RouteCall<'a> =
             std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + 'a>>;
@@ -505,7 +462,7 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
                         State(state.clone()),
                         Query(ProductEventsQuery {
                             cursor: None,
-                            session_id: Some(SessionId::from(session_id.clone())),
+                            session_id: Some(session_id.clone()),
                         }),
                     )
                     .map_ok(drop),
@@ -518,7 +475,7 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
                         State(state.clone()),
                         Query(EventsQuery {
                             cursor: None,
-                            session_id: Some(SessionId::from(session_id.clone())),
+                            session_id: Some(session_id.clone()),
                         }),
                     )
                     .map_ok(drop),
@@ -681,7 +638,7 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
                     select_session(
                         State(state.clone()),
                         Json(SessionSelectRequest {
-                            session_id: SessionId::from(session_id.clone()),
+                            session_id: session_id.clone(),
                         }),
                     )
                     .map_ok(drop),
@@ -700,7 +657,7 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
             );
             assert_eq!(
                 error.message,
-                deleted_session_message(&SessionId::from(session_id.clone())),
+                deleted_session_message(&session_id),
                 "{route} must return the shared refusal message"
             );
             assert_eq!(

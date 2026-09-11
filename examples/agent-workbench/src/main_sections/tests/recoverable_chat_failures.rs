@@ -47,7 +47,7 @@ async fn workbench_provider_failure_emits_only_fixed_public_product_copy() {
     .await
     .expect("project provider failure through the production recorder");
 
-    let serialized = serde_json::to_string(&state.event_tx.snapshot(&SessionId::from(session_id)))
+    let serialized = serde_json::to_string(&state.event_tx.snapshot(&session_id))
         .expect("serialize provider failure projection");
     assert!(serialized.contains(PUBLIC_TURN_FAILURE_MESSAGE));
     assert!(!serialized.contains(INTERNAL_PROVIDER_FAILURE));

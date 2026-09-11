@@ -28,7 +28,9 @@ impl GoogleOAuthProvider {
             stop_sequences: GenerationOptionOutcome::applied(
                 !req.generation.stop_sequences.is_empty(),
             ),
-            cache: lash_llm_transport::cache_intent_disposition(req, None),
+            // Cloud Code reports cached-token usage, but Lash emits no
+            // prompt-cache directive in this request dialect.
+            cache: lash_llm_transport::cache_intent_disposition(req, false),
         }
     }
 
@@ -104,6 +106,7 @@ impl GoogleOAuthProvider {
             ResponseMetadataCapture::from_response(&self.options, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
+                response_started: true,
                 request_body: request_body.clone(),
                 http_summary: Some(format!("HTTP POST {url} (stream)")),
                 execution_evidence: provider_request_id.clone().map(|provider_request_id| {
@@ -506,7 +509,7 @@ impl Provider for GoogleOAuthProvider {
                 })
                 .await
                 .map_err(|error| match error {
-                    CredentialExecuteError::Credential(error) => credential_transport_error(error),
+                    CredentialExecuteError::Credential(error) => error.into_transport_error(),
                     CredentialExecuteError::Call(error) => error,
                     // Unknown failures cannot establish that replay is safe.
                     _ => LlmTransportError::new(error.to_string())

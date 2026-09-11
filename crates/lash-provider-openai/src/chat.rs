@@ -10,6 +10,7 @@ pub(crate) struct CacheBreakpointDiagnostics {
     pub(crate) requested: usize,
     pub(crate) emitted: usize,
     pub(crate) dropped: usize,
+    pub(crate) cache_control_emitted: bool,
 }
 
 impl OpenAiCompatibleProvider {
@@ -312,6 +313,7 @@ impl OpenAiCompatibleProvider {
                 requested,
                 emitted: 0,
                 dropped: requested,
+                cache_control_emitted: false,
             };
         };
         let extended_ttl = matches!(dialect, CacheControlDialect::Anthropic);
@@ -322,6 +324,7 @@ impl OpenAiCompatibleProvider {
                 requested,
                 emitted: 0,
                 dropped: requested,
+                cache_control_emitted: false,
             };
         };
 
@@ -329,33 +332,33 @@ impl OpenAiCompatibleProvider {
             let applied_explicit_breakpoint = messages.iter_mut().rev().any(|message| {
                 Self::add_cache_control_to_marked_text_content(message, &cache_control)
             });
-            if !applied_explicit_breakpoint {
-                for message in messages.iter_mut().rev() {
-                    if matches!(
+            let fallback_emitted = !applied_explicit_breakpoint
+                && messages.iter_mut().rev().any(|message| {
+                    matches!(
                         message.get("role").and_then(Value::as_str),
                         Some("user" | "assistant" | "system" | "developer")
                     ) && Self::add_cache_control_to_text_content(message, &cache_control)
-                    {
-                        break;
-                    }
-                }
-            }
+                });
             Self::strip_internal_cache_markers(messages);
             let emitted = usize::from(applied_explicit_breakpoint);
             return CacheBreakpointDiagnostics {
                 requested,
                 emitted,
                 dropped: requested.saturating_sub(emitted),
+                cache_control_emitted: applied_explicit_breakpoint || fallback_emitted,
             };
         }
 
+        let mut cache_control_emitted = false;
         if req.instructions.is_some()
             && let Some(message) = messages.first_mut()
         {
-            Self::add_cache_control_to_text_content(message, &cache_control);
+            cache_control_emitted |=
+                Self::add_cache_control_to_text_content(message, &cache_control);
         }
         if let Some(last_tool) = tools.last_mut() {
             last_tool["cache_control"] = cache_control.clone();
+            cache_control_emitted = true;
         }
         let mut applied_explicit_breakpoint = false;
         for message in messages.iter_mut().rev() {
@@ -365,6 +368,7 @@ impl OpenAiCompatibleProvider {
             ) && Self::add_cache_control_to_marked_text_content(message, &cache_control)
             {
                 applied_explicit_breakpoint = true;
+                cache_control_emitted = true;
                 break;
             }
         }
@@ -375,6 +379,7 @@ impl OpenAiCompatibleProvider {
                     Some("user" | "assistant" | "system" | "developer")
                 ) && Self::add_cache_control_to_text_content(message, &cache_control)
                 {
+                    cache_control_emitted = true;
                     break;
                 }
             }
@@ -385,9 +390,11 @@ impl OpenAiCompatibleProvider {
             requested,
             emitted,
             dropped: requested.saturating_sub(emitted),
+            cache_control_emitted,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn build_chat_request_body(
         &self,
         req: &LlmRequest,

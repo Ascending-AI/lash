@@ -113,7 +113,7 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     .await
     .expect("settle bare prose turn");
     drop(session);
-    let (assistant_texts, _) = settled_assistant_rows(&state, &SessionId::from(session_id)).await;
+    let (assistant_texts, _) = settled_assistant_rows(&state, &session_id).await;
     assert_eq!(
         assistant_texts,
         vec![BARE_PROSE_REPLY.to_string()],
@@ -213,8 +213,7 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     .await
     .expect("settle reasoned prose turn");
     drop(session);
-    let (assistant_texts, reasoning_rows) =
-        settled_assistant_rows(&state, &SessionId::from(session_id)).await;
+    let (assistant_texts, reasoning_rows) = settled_assistant_rows(&state, &session_id).await;
     assert_eq!(
         assistant_texts,
         vec![REASONED_REPLY.to_string()],
@@ -305,8 +304,7 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     .await
     .expect("settle mid-turn prose turn");
     drop(session);
-    let (assistant_texts, reasoning_rows) =
-        settled_assistant_rows(&state, &SessionId::from(session_id)).await;
+    let (assistant_texts, reasoning_rows) = settled_assistant_rows(&state, &session_id).await;
     assert_eq!(
         assistant_texts,
         vec![FINAL_REPLY.to_string()],

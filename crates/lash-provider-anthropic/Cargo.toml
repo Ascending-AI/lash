@@ -40,6 +40,7 @@ uuid = { workspace = true, features = ["v4"] }
 # a bare `cargo test -p lash-internal-provider-anthropic` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).
 lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = ".", features = ["testing"] }
+lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
 proptest = "1"
 tokio = { workspace = true, features = ["rt", "time"] }

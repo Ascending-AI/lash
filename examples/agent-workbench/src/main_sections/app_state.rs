@@ -122,7 +122,7 @@ impl AppState {
         .await
     }
 
-    pub(crate) fn current_session_id(&self) -> String {
+    pub(crate) fn current_session_id(&self) -> SessionId {
         self.sessions.current()
     }
 
@@ -164,16 +164,11 @@ impl AppState {
     }
 
     pub(crate) fn trace(&self, name: &str, payload: Value) {
-        self.trace_for_session(&SessionId::from(self.current_session_id()), name, payload);
+        self.trace_for_session(&self.current_session_id(), name, payload);
     }
 
     pub(crate) fn trace_for_session(&self, session_id: &SessionId, name: &str, payload: Value) {
-        emit_workbench_trace(
-            &self.trace_sink,
-            Some(SessionId::from(session_id.to_string())),
-            name,
-            payload,
-        );
+        emit_workbench_trace(&self.trace_sink, Some(session_id.clone()), name, payload);
     }
 
     pub(crate) fn session_admission_error(
@@ -423,13 +418,13 @@ impl AppState {
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
         let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
-        policy.session_id = Some(SessionId::from(session_id.to_string()));
+        policy.session_id = Some(session_id.clone());
         policy.model = model_spec_from_selection(self.selected_model());
         let store = self
             .session_store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy,
             })
@@ -573,7 +568,7 @@ impl AppState {
         role: impl Into<String>,
         text: impl Into<String>,
     ) -> ChatMessage {
-        self.push_message_for_session(&SessionId::from(self.current_session_id()), role, text)
+        self.push_message_for_session(&self.current_session_id(), role, text)
     }
 
     pub(crate) fn push_message_for_session(
@@ -752,7 +747,7 @@ pub(crate) struct WorkbenchSessionEntry {
 /// every ad-hoc `?session_id=` tab reads.
 #[derive(Clone, Debug)]
 pub(crate) struct WorkbenchSessions {
-    pub(crate) current: Arc<Mutex<String>>,
+    pub(crate) current: Arc<Mutex<SessionId>>,
     pub(crate) path: Option<Arc<PathBuf>>,
     pub(crate) roster: Arc<Mutex<BTreeMap<SessionId, WorkbenchSessionEntry>>>,
     pub(crate) roster_path: Option<Arc<PathBuf>>,
@@ -771,7 +766,7 @@ impl WorkbenchSessions {
 
     pub(crate) fn persistent(path: PathBuf) -> AnyhowResult<Self> {
         let current = match std::fs::read_to_string(&path) {
-            Ok(session_id) if !session_id.trim().is_empty() => session_id,
+            Ok(session_id) if !session_id.trim().is_empty() => SessionId::from(session_id),
             Ok(_) => new_session_id(),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => new_session_id(),
             Err(err) => {
@@ -803,7 +798,7 @@ impl WorkbenchSessions {
         Ok(ids)
     }
 
-    pub(crate) fn current(&self) -> String {
+    pub(crate) fn current(&self) -> SessionId {
         self.current.lock_recover().clone()
     }
 
@@ -813,7 +808,7 @@ impl WorkbenchSessions {
         &self,
         retired_session_id: &SessionId,
         fallback_dialect: lash::rlm::RlmDialect,
-    ) -> (String, bool) {
+    ) -> (SessionId, bool) {
         let replacement_session_id = new_session_id();
         // Roster then current is the shared lock order with `select`: removing
         // the retired row and conditionally moving the pointer are one local
@@ -826,9 +821,9 @@ impl WorkbenchSessions {
             .unwrap_or_else(|| (retired_session_id.to_string(), fallback_dialect));
         let now_ms = chrono::Utc::now().timestamp_millis();
         roster.insert(
-            SessionId::from(replacement_session_id.clone()),
+            replacement_session_id.clone(),
             WorkbenchSessionEntry {
-                session_id: SessionId::from(replacement_session_id.clone()),
+                session_id: replacement_session_id.clone(),
                 name,
                 dialect,
                 created_at_ms: now_ms,
@@ -836,9 +831,9 @@ impl WorkbenchSessions {
             },
         );
         let mut current = self.current.lock_recover();
-        let replaced_current = current.as_str() == retired_session_id.as_str();
+        let replaced_current = *current == *retired_session_id;
         if replaced_current {
-            *current = replacement_session_id.to_string();
+            *current = replacement_session_id.clone();
         }
         drop(current);
         self.persist_roster(&roster);
@@ -850,12 +845,12 @@ impl WorkbenchSessions {
     }
 
     #[cfg(test)]
-    pub(crate) fn rotate(&self) -> (String, String) {
+    pub(crate) fn rotate(&self) -> (SessionId, SessionId) {
         let old = self.current();
         let dialect = self
-            .dialect_for(&SessionId::from(old.clone()))
+            .dialect_for(&old)
             .unwrap_or(lash::rlm::RlmDialect::Lashlang);
-        let (new, replaced_current) = self.replace(&SessionId::from(old.clone()), dialect);
+        let (new, replaced_current) = self.replace(&old, dialect);
         debug_assert!(replaced_current);
         (old, new)
     }
@@ -896,11 +891,7 @@ impl WorkbenchSessions {
         if self.roster.lock_recover().contains_key(session_id) {
             return;
         }
-        self.record(
-            SessionId::from(session_id.to_string()),
-            session_id.to_string(),
-            dialect,
-        );
+        self.record(session_id.clone(), session_id.to_string(), dialect);
     }
 
     pub(crate) fn touch(&self, session_id: &SessionId) {
@@ -962,7 +953,7 @@ impl WorkbenchSessions {
     pub(crate) fn select(&self, session_id: &SessionId) -> Option<WorkbenchSessionEntry> {
         let roster = self.roster.lock_recover();
         let entry = roster.get(session_id)?.clone();
-        *self.current.lock_recover() = session_id.to_string();
+        *self.current.lock_recover() = session_id.clone();
         drop(roster);
         self.persist();
         self.touch(session_id);
@@ -994,7 +985,7 @@ impl WorkbenchSessions {
         };
         let temporary = path.with_extension("tmp");
         let current = self.current();
-        std::fs::write(&temporary, current)
+        std::fs::write(&temporary, current.as_str())
             .unwrap_or_else(|err| panic!("write session id `{}`: {err}", temporary.display()));
         std::fs::rename(&temporary, path).unwrap_or_else(|err| {
             panic!(
@@ -1006,8 +997,11 @@ impl WorkbenchSessions {
     }
 }
 
-pub(crate) fn new_session_id() -> String {
-    format!("{SESSION_ID_PREFIX}-{}", uuid::Uuid::new_v4().simple())
+pub(crate) fn new_session_id() -> SessionId {
+    SessionId::from(format!(
+        "{SESSION_ID_PREFIX}-{}",
+        uuid::Uuid::new_v4().simple()
+    ))
 }
 
 pub(crate) fn model_spec_for_request(
@@ -1526,7 +1520,7 @@ pub(crate) fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str,
 
 pub(crate) fn deleted_session_message(session_id: &SessionId) -> String {
     lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: session_id.clone(),
     })
     .to_string()
 }
@@ -1641,7 +1635,7 @@ mod app_error_tests {
         let error = AppError::session_open(lash::EmbedError::Session(lash::SessionError::Store {
             context: format!("failed to bind session `{session_id}` to its store"),
             source: lash::persistence::StoreError::SessionDeleted {
-                session_id: SessionId::from(session_id.to_string()),
+                session_id: SessionId::from(session_id),
             },
         }));
         let response = error.into_response();

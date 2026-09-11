@@ -1827,8 +1827,10 @@ lash::persistence::AttachmentIntent::owner_id
 lash::persistence::AttachmentIntent::owner_kind
 lash::persistence::AttachmentIntent::session_id
 lash::persistence::AttachmentManifest
+lash::persistence::AttachmentManifest::abort_attachment_write
 lash::persistence::AttachmentManifest::begin_attachment_write
 lash::persistence::AttachmentManifest::commit_refs
+lash::persistence::AttachmentManifest::complete_attachment_write
 lash::persistence::AttachmentManifest::forget
 lash::persistence::AttachmentManifest::forget_aged_uncommitted_intents
 lash::persistence::AttachmentManifest::has_live_ref_for_id
@@ -1869,6 +1871,7 @@ lash::persistence::AttachmentRootSet::fence
 lash::persistence::AttachmentRootSet::has_live_attachment_ref
 lash::persistence::AttachmentRootSet::live_attachment_refs
 lash::persistence::AttachmentRootSet::reclaim_attachment_condemnation
+lash::persistence::AttachmentRootSet::recover_abandoned_attachment_write
 lash::persistence::AttachmentRootSet::release_attachment_condemnation
 lash::persistence::AttachmentStore
 lash::persistence::AttachmentStore::delete
@@ -1898,7 +1901,15 @@ lash::persistence::AttachmentStorePersistence::Durable
 lash::persistence::AttachmentStorePersistence::Ephemeral
 lash::persistence::AttachmentWriteFence
 lash::persistence::AttachmentWriteFence::Granted
+lash::persistence::AttachmentWriteFence::Granted::0
 lash::persistence::AttachmentWriteFence::ReclamationInFlight
+lash::persistence::AttachmentWritePermit
+lash::persistence::AttachmentWritePermit::ordinary
+lash::persistence::AttachmentWritePermit::restoring
+lash::persistence::AttachmentWritePermit::rollback_token
+lash::persistence::AttachmentWriteToken
+lash::persistence::AttachmentWriteToken::as_hex
+lash::persistence::AttachmentWriteToken::new
 lash::persistence::BlobRef
 lash::persistence::BlobRef::0
 lash::persistence::BlobRef::as_str
@@ -2407,6 +2418,7 @@ lash::persistence::RuntimePersistenceDecorator::abandon_queued_work_claim
 lash::persistence::RuntimePersistenceDecorator::abandon_queued_work_claims
 lash::persistence::RuntimePersistenceDecorator::abandon_turn_input_claim
 lash::persistence::RuntimePersistenceDecorator::abandon_turn_input_claims
+lash::persistence::RuntimePersistenceDecorator::abort_attachment_write
 lash::persistence::RuntimePersistenceDecorator::admit_and_bind_session
 lash::persistence::RuntimePersistenceDecorator::admit_session_state
 lash::persistence::RuntimePersistenceDecorator::begin_attachment_write
@@ -2422,6 +2434,7 @@ lash::persistence::RuntimePersistenceDecorator::claim_ready_queued_work
 lash::persistence::RuntimePersistenceDecorator::claim_ready_queued_work_by_batch_ids
 lash::persistence::RuntimePersistenceDecorator::commit_refs
 lash::persistence::RuntimePersistenceDecorator::commit_runtime_state
+lash::persistence::RuntimePersistenceDecorator::complete_attachment_write
 lash::persistence::RuntimePersistenceDecorator::defer_orphaned_active_turn_inputs
 lash::persistence::RuntimePersistenceDecorator::enqueue_pending_turn_input
 lash::persistence::RuntimePersistenceDecorator::enqueue_queued_work

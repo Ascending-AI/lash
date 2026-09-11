@@ -489,6 +489,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             .complete(|request| async move {
                 let stream = request.stream_events.expect("stream events");
                 stream.send(LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
+                    response_started: true,
                     request_body: Some("{\"model\":\"rlm-evidence\"}".to_string()),
                     http_summary: Some(
                         "HTTP POST https://provider.test/v1/responses (stream)".to_string(),

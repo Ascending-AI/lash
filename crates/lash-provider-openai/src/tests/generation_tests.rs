@@ -53,7 +53,7 @@ fn stop_sequences_reach_chat_but_are_omitted_by_responses_and_codex() {
         .expect("chat body");
     assert_eq!(chat["stop"], json!(["</lashlang>"]));
     assert_eq!(
-        crate::common::generation_disposition(&req, &chat).stop_sequences,
+        crate::common::generation_disposition(&req, &chat, false).stop_sequences,
         lash_core::GenerationOptionOutcome::Applied
     );
 
@@ -62,7 +62,7 @@ fn stop_sequences_reach_chat_but_are_omitted_by_responses_and_codex() {
         .expect("responses body");
     assert!(responses.get("stop").is_none());
     assert_eq!(
-        crate::common::generation_disposition(&req, &responses).stop_sequences,
+        crate::common::generation_disposition(&req, &responses, false).stop_sequences,
         lash_core::GenerationOptionOutcome::OmittedUnsupported
     );
 

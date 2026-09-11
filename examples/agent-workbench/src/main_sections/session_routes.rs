@@ -1,5 +1,4 @@
 use super::*;
-use lash::SessionId;
 
 // The session-management routes: the roster the selector renders, the
 // create-with-a-dialect flow, and the durable selection a query-less `/api/`
@@ -26,8 +25,8 @@ pub(crate) async fn list_sessions(
         rostered.insert(
             0,
             state.sessions.unrostered_entry(
-                SessionId::from(current_session_id.clone()),
-                state.requested_dialect(&SessionId::from(current_session_id.clone())),
+                current_session_id.clone(),
+                state.requested_dialect(&current_session_id),
             ),
         );
     }
@@ -45,7 +44,7 @@ pub(crate) async fn list_sessions(
     }
     Ok(Json(SessionListResponse {
         sessions,
-        current_session_id: SessionId::from(current_session_id.clone()),
+        current_session_id: current_session_id.clone(),
         dialects: lash::rlm::RlmDialect::ALL
             .iter()
             .map(|dialect| dialect.language_id())
@@ -76,7 +75,7 @@ pub(crate) async fn create_session(
     };
     let session_id = new_session_id();
     let name = match request.name.as_deref().map(str::trim) {
-        None | Some("") => session_id.clone(),
+        None | Some("") => session_id.to_string(),
         Some(name) if name.chars().count() > MAX_SESSION_NAME_CHARS => {
             return Err(AppError::bad_request(format!(
                 "session name must be at most {MAX_SESSION_NAME_CHARS} characters"
@@ -89,27 +88,19 @@ pub(crate) async fn create_session(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
         })?;
-    let entry = state
-        .sessions
-        .record(SessionId::from(session_id.clone()), name, dialect);
+    let entry = state.sessions.record(session_id.clone(), name, dialect);
     // Open once so the session exists for the selector and the first `/api/state`
     // poll, through the same builder every route uses.
     drop(
         state
-            .open_session(&SessionId::from(session_id.clone()))
+            .open_session(&session_id)
             .await
-            .map_err(|error| {
-                state.session_admission_error(
-                    &SessionId::from(session_id.clone()),
-                    "api.sessions",
-                    error,
-                )
-            })?,
+            .map_err(|error| state.session_admission_error(&session_id, "api.sessions", error))?,
     );
     state.trace_for_session(
-        &SessionId::from(session_id.clone()),
+        &session_id,
         "api.sessions.created",
         json!({
             "session_id": session_id,
@@ -119,11 +110,8 @@ pub(crate) async fn create_session(
     );
     Ok(Json(SessionSummary {
         current: session_id == state.current_session_id(),
-        dialect: state
-            .recorded_dialect(&SessionId::from(session_id.clone()))
-            .await?
-            .language_id(),
-        session_id: SessionId::from(session_id.clone()),
+        dialect: state.recorded_dialect(&session_id).await?.language_id(),
+        session_id: session_id.clone(),
         name: entry.name,
         created_at_ms: entry.created_at_ms,
         last_active_ms: entry.last_active_ms,
@@ -150,26 +138,20 @@ pub(crate) async fn select_session(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::Observe {
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session_id.clone(),
         })?;
-    let entry = state
-        .sessions
-        .select(&SessionId::from(session_id.clone()))
-        .ok_or_else(|| {
-            AppError::not_found(format!("session `{session_id}` is not on the roster"))
-        })?;
+    let entry = state.sessions.select(&session_id).ok_or_else(|| {
+        AppError::not_found(format!("session `{session_id}` is not on the roster"))
+    })?;
     state.trace_for_session(
-        &SessionId::from(session_id.clone()),
+        &session_id,
         "api.sessions.selected",
         json!({ "session_id": session_id }),
     );
     Ok(Json(SessionSummary {
         current: true,
-        dialect: state
-            .recorded_dialect(&SessionId::from(session_id.clone()))
-            .await?
-            .language_id(),
-        session_id: SessionId::from(session_id.clone()),
+        dialect: state.recorded_dialect(&session_id).await?.language_id(),
+        session_id: session_id.clone(),
         name: entry.name,
         created_at_ms: entry.created_at_ms,
         last_active_ms: entry.last_active_ms,
