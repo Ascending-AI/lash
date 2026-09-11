@@ -11,7 +11,8 @@ if [[ -e "$configured_data_dir" || -L "$configured_data_dir" ]]; then
   data_dir_existed_before_invocation=1
 fi
 data_dir_created_this_attempt=$((1 - data_dir_existed_before_invocation))
-state_dir="${AGENT_WORKBENCH_RUN_DIR:-.agent-workbench/run}"
+configured_state_dir="${AGENT_WORKBENCH_RUN_DIR:-.agent-workbench/run}"
+state_dir="$(realpath -m -- "$configured_state_dir")"
 
 started_workbench_this_attempt=0
 started_workbench_pid=""
@@ -23,6 +24,12 @@ start_attempt_active=0
 reset_committed=0
 reset_destructive_started=0
 reset_recovery_command=""
+created_restate_service_lease_this_attempt=0
+created_postgres_service_lease_this_attempt=0
+created_run_owner_this_attempt=0
+restate_service_lease_record=""
+postgres_service_lease_record=""
+run_owner_record=""
 
 log() {
   printf '[agent-workbench] %s\n' "$*" >&2
@@ -335,26 +342,111 @@ path_has_symlink_component() {
   return 1
 }
 
-data_path_overlaps_reset_owner() {
-  local candidate="$data_dir"
+path_overlaps_reset_owner() {
+  local path="$1"
+  local candidate="$path"
   while [[ "$candidate" != / ]]; do
     [[ -e "$candidate/.agent-workbench-dev-reset-owner" ]] && return 0
     candidate="$(dirname "$candidate")"
   done
 
-  [[ -d "$data_dir" ]] || return 1
+  [[ -d "$path" ]] || return 1
   local descendant=""
   descendant="$(
-    find -P "$data_dir" -xdev -mindepth 2 \
+    find -P "$path" -xdev -mindepth 2 \
       -name .agent-workbench-dev-reset-owner -print -quit 2>/dev/null
   )" || return 0
   [[ -n "$descendant" ]]
 }
 
+path_contains_reset_footprint_record() {
+  local path="$1"
+  [[ -d "$path" ]] || return 1
+  local record=""
+  record="$(
+    find -P "$path" -xdev -mindepth 1 \
+      \( -name '.agent-workbench-dev-run-owner-*' \
+      -o -name 'restate-*.lease' -o -name 'postgres-*.lease' \
+      -o -name '*-recover.sh' \) \
+      -print -quit 2>/dev/null
+  )" || return 0
+  [[ -n "$record" ]]
+}
+
+path_contains_path() {
+  local parent="$1" child="$2"
+  [[ "$child" = "$parent" || "$child" = "$parent/"* ]]
+}
+
 require_exclusive_data_path_for_start() {
-  if data_path_overlaps_reset_owner; then
+  if path_overlaps_reset_owner "$data_dir"; then
     die "application data path overlaps another launcher-owned disposable stack"
   fi
+  if path_contains_reset_footprint_record "$data_dir"; then
+    die "application data path encloses another launcher-owned reset footprint"
+  fi
+  if path_contains_path "$data_dir" "$launcher_lock_root"; then
+    die "application data path encloses launcher private runtime state"
+  fi
+  if path_overlaps_reset_owner "$state_dir"; then
+    die "launcher run path overlaps another launcher-owned disposable stack"
+  fi
+  if path_overlaps_reset_owner "$launcher_lock_root"; then
+    die "launcher private runtime path overlaps another launcher-owned disposable stack"
+  fi
+}
+
+read_service_lease() {
+  local file="$1"
+  regular_private_file "$file" || return 1
+  local schema component token id extra
+  read -r schema component token id extra < "$file" || return 1
+  [[ "$schema" = 1 && "$component" =~ ^(restate|postgres)$ \
+    && "$token" =~ ^[0-9a-fA-F-]{36}$ \
+    && "$id" =~ ^[0-9a-fA-F]{12,64}$ && -z "$extra" ]] || return 1
+  printf '%s %s %s %s\n' "$schema" "$component" "$token" "$id"
+}
+
+read_run_owner() {
+  local file="$1"
+  regular_private_file "$file" || return 1
+  local schema token key data_hash extra
+  read -r schema token key data_hash extra < "$file" || return 1
+  [[ "$schema" = 1 && "$token" =~ ^[0-9a-fA-F-]{36}$ \
+    && -n "$key" && "$data_hash" =~ ^[0-9a-f]{64}$ && -z "$extra" ]] || return 1
+  printf '%s %s %s %s\n' "$schema" "$token" "$key" "$data_hash"
+}
+
+write_run_owner() {
+  [[ ! -e "$run_owner_file" && ! -L "$run_owner_file" ]] || return 1
+  printf '1 %s %s %s\n' "$ownership_token" "$state_key" "$data_path_hash" > "$run_owner_file"
+  chmod 600 "$run_owner_file"
+}
+
+claim_run_footprint() {
+  write_run_owner || die "launcher run path is already reserved by another workbench stack"
+  run_owner_record="1 $ownership_token $state_key $data_path_hash"
+  created_run_owner_this_attempt=1
+}
+
+write_service_lease() {
+  local file="$1" component="$2" id="$3"
+  [[ ! -e "$file" && ! -L "$file" ]] || return 1
+  printf '1 %s %s %s\n' "$component" "$ownership_token" "$id" > "$file"
+  chmod 600 "$file"
+}
+
+remove_service_lease() {
+  local file="$1" expected="$2"
+  [[ "$(read_service_lease "$file" 2>/dev/null || true)" = "$expected" ]] \
+    || return 1
+  rm -f "$file"
+}
+
+require_service_unreserved() {
+  local file="$1" component="$2"
+  [[ ! -e "$file" && ! -L "$file" ]] \
+    || die "$component service is reserved by another launcher-owned disposable stack"
 }
 
 write_container_marker() {
@@ -549,10 +641,33 @@ stop_started_postgres() {
   stop_owned_container_file "$postgres_marker_file" postgres
 }
 
+stop_persisted_service() {
+  local marker_file="$1" component="$2" lease_file="$3"
+  [[ -e "$marker_file" ]] || return 0
+  local record name id token marker_component expected_lease
+  record="$(read_container_marker "$marker_file" 2>/dev/null || true)"
+  if [[ -z "$record" ]]; then
+    log "refusing to stop $component: ownership marker is legacy or invalid at $marker_file"
+    return 1
+  fi
+  read -r name id token marker_component <<<"$record"
+  expected_lease="1 $component $token $id"
+  if [[ "$marker_component" != "$component" \
+    || "$(read_service_lease "$lease_file" 2>/dev/null || true)" != "$expected_lease" ]]; then
+    log "refusing to stop $component: service lease does not prove exclusive ownership"
+    return 1
+  fi
+  stop_owned_container_file "$marker_file" "$component" || return 1
+  remove_service_lease "$lease_file" "$expected_lease" || {
+    log "removed the owned $component container but could not clear its exact service lease"
+    return 1
+  }
+}
+
 stop_target() {
   stop_pid_file "$pid_file"
-  stop_started_restate
-  stop_started_postgres
+  stop_persisted_service "$restate_marker_file" restate "$restate_service_lease_file"
+  stop_persisted_service "$postgres_marker_file" postgres "$postgres_service_lease_file"
 }
 
 remove_attempt_reset_ownership() {
@@ -575,18 +690,55 @@ cleanup_start_attempt() {
     return 1
   fi
   if (( started_restate_this_attempt )); then
+    if (( created_restate_service_lease_this_attempt )) \
+      && [[ "$(read_service_lease "$restate_service_lease_file" 2>/dev/null || true)" \
+        != "$restate_service_lease_record" ]]; then
+      log "startup cleanup could not verify its exact Restate service lease; retaining application state and ownership metadata"
+      return 1
+    fi
     if ! stop_started_restate; then
       log "startup cleanup could not remove the exact owned Restate engine; retaining application state and ownership metadata"
       return 1
     fi
     started_restate_this_attempt=0
+    if (( created_restate_service_lease_this_attempt )); then
+      if ! remove_service_lease "$restate_service_lease_file" "$restate_service_lease_record"; then
+        log "startup cleanup could not clear the exact Restate service lease; retaining application state and ownership metadata"
+        return 1
+      fi
+      created_restate_service_lease_this_attempt=0
+    fi
   fi
   if (( started_postgres_this_attempt )); then
+    if (( created_postgres_service_lease_this_attempt )) \
+      && [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
+        != "$postgres_service_lease_record" ]]; then
+      log "startup cleanup could not verify its exact Postgres service lease; retaining application state and ownership metadata"
+      return 1
+    fi
     if ! stop_started_postgres; then
       log "startup cleanup could not remove the exact owned Postgres store; retaining application state and ownership metadata"
       return 1
     fi
     started_postgres_this_attempt=0
+    if (( created_postgres_service_lease_this_attempt )); then
+      if ! remove_service_lease "$postgres_service_lease_file" "$postgres_service_lease_record"; then
+        log "startup cleanup could not clear the exact Postgres service lease; retaining application state and ownership metadata"
+        return 1
+      fi
+      created_postgres_service_lease_this_attempt=0
+    fi
+  fi
+  if (( created_run_owner_this_attempt )); then
+    if ! [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$run_owner_record" ]]; then
+      log "startup cleanup could not verify its exact run-footprint record; retaining application state and ownership metadata"
+      return 1
+    fi
+    if ! rm -f "$run_owner_file"; then
+      log "startup cleanup could not clear its exact run-footprint record; retaining application state and ownership metadata"
+      return 1
+    fi
+    created_run_owner_this_attempt=0
   fi
   if (( data_dir_created_this_attempt )) \
     && [[ "$data_dir" != / && "$data_dir" != "$repo_root" ]] \
@@ -697,6 +849,7 @@ ensure_ports_available() {
 }
 
 ensure_restate() {
+  require_service_unreserved "$restate_service_lease_file" Restate
   if tcp_ready "$ingress_host" "$ingress_port" && tcp_ready "$admin_host" "$admin_port"; then
     external_restate_used_this_attempt=1
     log "using existing Restate at ingress=$restate_ingress_url admin=$restate_admin_url"
@@ -733,10 +886,15 @@ ensure_restate() {
     stop_started_restate
     die "Restate admin did not become ready at $restate_admin_url"
   fi
+  write_service_lease "$restate_service_lease_file" restate "$container_id" \
+    || die "could not reserve the launcher-created Restate service"
+  restate_service_lease_record="1 restate $ownership_token $container_id"
+  created_restate_service_lease_this_attempt=1
 }
 
 ensure_postgres() {
   (( postgres_enabled )) || return 0
+  require_service_unreserved "$postgres_service_lease_file" Postgres
   if tcp_ready "$postgres_host" "$postgres_port"; then
     log "using existing Postgres at $postgres_host:$postgres_port"
     return
@@ -767,6 +925,10 @@ ensure_postgres() {
     stop_started_postgres
     die "Postgres did not become ready at $postgres_host:$postgres_port"
   fi
+  write_service_lease "$postgres_service_lease_file" postgres "$container_id" \
+    || die "could not reserve the launcher-created Postgres service"
+  postgres_service_lease_record="1 postgres $ownership_token $container_id"
+  created_postgres_service_lease_this_attempt=1
 }
 
 endpoint_url() {
@@ -805,8 +967,16 @@ write_reset_metadata() {
   if [[ "$store_backend" = postgres ]]; then
     postgres_record="$(read_container_marker "$postgres_marker_file")" || return 1
   fi
+  [[ "$(read_service_lease "$restate_service_lease_file" 2>/dev/null || true)" \
+    = "$restate_service_lease_record" ]] || return 1
+  if [[ "$store_backend" = postgres ]]; then
+    [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
+      = "$postgres_service_lease_record" ]] || return 1
+  fi
+  [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$run_owner_record" ]] \
+    || return 1
   {
-    printf 'reset_schema=2\n'
+    printf 'reset_schema=3\n'
     printf 'owned_token=%q\n' "$ownership_token"
     printf 'owned_state_key=%q\n' "$state_key"
     printf 'owned_workbench_addr=%q\n' "$workbench_addr"
@@ -822,10 +992,13 @@ write_reset_metadata() {
     printf 'owned_pid_record=%q\n' "$pid_record"
     printf 'owned_restate_record=%q\n' "$restate_record"
     printf 'owned_postgres_record=%q\n' "$postgres_record"
+    printf 'owned_restate_service_lease=%q\n' "$restate_service_lease_record"
+    printf 'owned_postgres_service_lease=%q\n' "$postgres_service_lease_record"
+    printf 'owned_run_owner=%q\n' "$run_owner_record"
   } > "$reset_file"
   chmod 600 "$reset_file"
   {
-    printf 'data_owner_schema=2\n'
+    printf 'data_owner_schema=3\n'
     printf 'data_owner_token=%q\n' "$ownership_token"
     printf 'data_owner_state_key=%q\n' "$state_key"
     printf 'data_owner_path=%q\n' "$data_dir"
@@ -841,7 +1014,7 @@ data_owner_matches() {
     data_owner_state_dir=""
     # shellcheck disable=SC1090
     source "$data_owner_file"
-    [[ "$data_owner_schema" = 2 \
+    [[ "$data_owner_schema" = 3 \
       && "$data_owner_token" = "$owned_token" \
       && "$data_owner_state_key" = "$state_key" \
       && "$data_owner_path" = "$owned_data_dir" \
@@ -907,9 +1080,11 @@ validate_reset_ownership() {
   owned_data_identity=""
   owned_store_backend="" owned_database_fingerprint="" owned_pid_record=""
   owned_restate_record="" owned_postgres_record=""
+  owned_restate_service_lease="" owned_postgres_service_lease=""
+  owned_run_owner=""
   # shellcheck disable=SC1090
   source "$reset_file"
-  [[ "$reset_schema" = 2 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
+  [[ "$reset_schema" = 3 && "$owned_token" =~ ^[0-9a-fA-F-]{36}$ ]] \
     || die "reset refused: invalid ownership record $reset_file"
   [[ "$owned_state_key" = "$state_key" \
     && "$owned_workbench_addr" = "$workbench_addr" \
@@ -935,6 +1110,9 @@ validate_reset_ownership() {
     || die "reset refused: workbench PID identity is missing or changed"
   validate_run_metadata \
     || die "reset refused: run metadata does not match disposable-stack ownership"
+  [[ "$owned_run_owner" = "1 $owned_token $state_key $data_path_hash" \
+    && "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$owned_run_owner" ]] \
+    || die "reset refused: run-footprint ownership does not match launcher metadata"
 
   local name id token component
   read -r name id token component <<<"$owned_restate_record"
@@ -944,6 +1122,9 @@ validate_reset_ownership() {
     || die "reset refused: Restate ownership marker does not match"
   container_identity_matches "$name" "$id" "$token" "$component" \
     || die "reset refused: Restate container identity does not match"
+  [[ "$owned_restate_service_lease" = "1 restate $owned_token $id" \
+    && "$(read_service_lease "$restate_service_lease_file" 2>/dev/null || true)" = "$owned_restate_service_lease" ]] \
+    || die "reset refused: Restate service lease does not prove exclusive ownership"
 
   if [[ "$owned_store_backend" = postgres ]]; then
     (( ! database_url_explicit )) \
@@ -955,6 +1136,9 @@ validate_reset_ownership() {
       || die "reset refused: Postgres ownership marker does not match"
     container_identity_matches "$name" "$id" "$token" "$component" \
       || die "reset refused: Postgres container identity does not match"
+    [[ "$owned_postgres_service_lease" = "1 postgres $owned_token $id" \
+      && "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" = "$owned_postgres_service_lease" ]] \
+      || die "reset refused: Postgres service lease does not prove exclusive ownership"
   elif [[ "$owned_store_backend" != sqlite || -n "$agent_workbench_database_url" ]]; then
     die "reset refused: application database ownership is external or ambiguous"
   fi
@@ -1040,6 +1224,7 @@ run_up() {
   require_exclusive_data_path_for_start
   mkdir -p "$state_dir"
   start_attempt_active=1
+  claim_run_footprint
   ensure_restate
   local deployment_url
   deployment_url="$(endpoint_url)"
@@ -1075,9 +1260,17 @@ run_reset_dev_state() {
 
   stop_pid_file "$pid_file"
   stop_owned_container_file "$restate_marker_file" restate
+  remove_service_lease "$restate_service_lease_file" "$owned_restate_service_lease" \
+    || die "reset stopped before data deletion: Restate service lease changed"
   if [[ "$owned_store_backend" = postgres ]]; then
     stop_owned_container_file "$postgres_marker_file" postgres
+    remove_service_lease "$postgres_service_lease_file" "$owned_postgres_service_lease" \
+      || die "reset stopped before data deletion: Postgres service lease changed"
   fi
+  [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$owned_run_owner" ]] \
+    || die "reset stopped before data deletion: run-footprint ownership changed"
+  rm -f "$run_owner_file" \
+    || die "reset stopped before data deletion: could not clear run-footprint ownership"
 
   [[ "$owned_data_identity" = "$(stat -c '%d:%i' "$owned_data_dir" 2>/dev/null || true)" ]] \
     || die "reset stopped before data deletion: application data directory identity changed"
@@ -1103,6 +1296,12 @@ run_reset_dev_state() {
   external_restate_used_this_attempt=0
   started_postgres_this_attempt=0
   created_reset_ownership_this_attempt=0
+  created_restate_service_lease_this_attempt=0
+  created_postgres_service_lease_this_attempt=0
+  created_run_owner_this_attempt=0
+  restate_service_lease_record=""
+  postgres_service_lease_record=""
+  run_owner_record=""
   log "disposable dev state cleared; starting a fresh stack"
   run_up
   rm -f "$reset_recovery_file"
@@ -1115,6 +1314,7 @@ run_foreground() {
   require_exclusive_data_path_for_start
   mkdir -p "$state_dir"
   start_attempt_active=1
+  claim_run_footprint
   ensure_restate
 
   local deployment_url
@@ -1140,14 +1340,43 @@ run_foreground() {
       return 1
     fi
     if (( started_restate_this_attempt )); then
+      if (( created_restate_service_lease_this_attempt )) \
+        && [[ "$(read_service_lease "$restate_service_lease_file" 2>/dev/null || true)" \
+          != "$restate_service_lease_record" ]]; then
+        log "foreground cleanup could not verify its exact Restate service lease; retaining application state"
+        return 1
+      fi
       if ! stop_started_restate; then
         log "foreground cleanup could not remove the exact owned Restate engine; retaining application state"
         return 1
       fi
+      if (( created_restate_service_lease_this_attempt )) \
+        && ! remove_service_lease "$restate_service_lease_file" "$restate_service_lease_record"; then
+        log "foreground cleanup could not clear the exact Restate service lease; retaining application state"
+        return 1
+      fi
     fi
     if (( started_postgres_this_attempt )); then
+      if (( created_postgres_service_lease_this_attempt )) \
+        && [[ "$(read_service_lease "$postgres_service_lease_file" 2>/dev/null || true)" \
+          != "$postgres_service_lease_record" ]]; then
+        log "foreground cleanup could not verify its exact Postgres service lease; retaining application state"
+        return 1
+      fi
       if ! stop_started_postgres; then
         log "foreground cleanup could not remove the exact owned Postgres store; retaining application state"
+        return 1
+      fi
+      if (( created_postgres_service_lease_this_attempt )) \
+        && ! remove_service_lease "$postgres_service_lease_file" "$postgres_service_lease_record"; then
+        log "foreground cleanup could not clear the exact Postgres service lease; retaining application state"
+        return 1
+      fi
+    fi
+    if (( created_run_owner_this_attempt )); then
+      if [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" != "$run_owner_record" ]] \
+        || ! rm -f "$run_owner_file"; then
+        log "foreground cleanup could not clear its exact run-footprint record; retaining application state"
         return 1
       fi
     fi
@@ -1455,13 +1684,21 @@ restate_marker_file="$state_dir/restate-$state_key.container"
 postgres_marker_file="$state_dir/postgres-$state_key.container"
 reset_file="$state_dir/reset-$state_key.meta"
 data_owner_file="$data_dir/.agent-workbench-dev-reset-owner"
+data_path_hash="$(printf '%s' "$data_dir" | sha256sum | awk '{print $1}')"
+run_owner_file="$state_dir/.agent-workbench-dev-run-owner-$state_key"
 created_reset_ownership_this_attempt=0
 
 case "$action" in
   up|start|foreground|run|restart|down|stop)
     command -v flock >/dev/null 2>&1 || die "flock is required for launcher lifecycle operations"
     launcher_lock_hash="$(printf '%s' "$repo_root" | sha256sum | awk '{print $1}')"
-    launcher_lock_root="${XDG_RUNTIME_DIR:-/tmp}/lash-agent-workbench-$UID"
+    launcher_lock_root="$(realpath -m -- "${XDG_RUNTIME_DIR:-/tmp}/lash-agent-workbench-$UID")"
+    if path_contains_path "$data_dir" "$launcher_lock_root"; then
+      die "application data path encloses launcher private runtime state"
+    fi
+    if path_overlaps_reset_owner "$launcher_lock_root"; then
+      die "launcher private runtime path overlaps another launcher-owned disposable stack"
+    fi
     if [[ ! -e "$launcher_lock_root" ]]; then
       mkdir -m 700 -- "$launcher_lock_root"
     fi
@@ -1469,6 +1706,10 @@ case "$action" in
       || die "unsafe launcher lock directory $launcher_lock_root"
     launcher_lock_file="$launcher_lock_root/$launcher_lock_hash.lock"
     launcher_data_lock_file="$launcher_lock_root/data-ownership.lock"
+    restate_service_hash="$(printf '%s' "$ingress_host:$ingress_port|$admin_host:$admin_port" | sha256sum | awk '{print $1}')"
+    postgres_service_hash="$(printf '%s' "$postgres_host:$postgres_port" | sha256sum | awk '{print $1}')"
+    restate_service_lease_file="$launcher_lock_root/restate-$restate_service_hash.lease"
+    postgres_service_lease_file="$launcher_lock_root/postgres-$postgres_service_hash.lease"
     reset_recovery_file="$launcher_lock_root/$launcher_lock_hash-$state_key-recover.sh"
     if [[ -e "$launcher_lock_file" ]] && ! regular_private_file "$launcher_lock_file"; then
       die "unsafe launcher lock file $launcher_lock_file"

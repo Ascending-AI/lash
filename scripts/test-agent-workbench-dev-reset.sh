@@ -742,7 +742,7 @@ fi
   || fail "nested data refusal mutated the existing stack"
 
 shared_reset_file="$data_shared/run/reset-127.0.0.1_${port_shared_owner}.meta"
-sed -i 's/^reset_schema=2$/reset_schema=1/' "$shared_reset_file"
+sed -i 's/^reset_schema=3$/reset_schema=2/' "$shared_reset_file"
 if run_launcher "$data_shared" "$port_shared_owner" restart --reset-dev-state \
   > "$test_tmp/legacy-exclusive-lease-refusal.log" 2>&1; then
   fail "pre-exclusivity reset record unexpectedly authorized deletion"
@@ -770,6 +770,250 @@ fi
   && "$(<"$owned_child_pid_file")" = "$owned_child_pid_record" \
   && -f "$data_owned_child/owned-child-state" ]] \
   || fail "parent data refusal mutated the existing child stack"
+
+data_run_owner="$test_tmp/data-run-owner"
+port_run_owner=3070
+run_launcher "$data_run_owner" "$port_run_owner" up > "$test_tmp/run-owner-up.log" 2>&1
+run_owner_pid_file="$data_run_owner/run/workbench-127.0.0.1_${port_run_owner}.pid"
+run_owner_pid_record="$(<"$run_owner_pid_file")"
+printf 'run owner state\n' > "$data_run_owner/run-owner-state"
+run_owner_builds_before="$(<"$mock_state/build-count")"
+run_owner_containers_before="$(<"$mock_state/container-counter")"
+if launcher_env "$test_tmp/data-run-consumer" 3072 \
+  AGENT_WORKBENCH_RUN_DIR="$data_run_owner/run" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3072 \
+  > "$test_tmp/shared-run-refusal.log" 2>&1; then
+  fail "disjoint data with a run directory inside owned data unexpectedly started"
+fi
+[[ ! -e "$test_tmp/data-run-consumer" \
+  && "$(<"$mock_state/build-count")" = "$run_owner_builds_before" \
+  && "$(<"$mock_state/container-counter")" = "$run_owner_containers_before" \
+  && "$(<"$run_owner_pid_file")" = "$run_owner_pid_record" \
+  && -f "$data_run_owner/run-owner-state" ]] \
+  || fail "shared-run refusal changed the owner or candidate footprint"
+grep -Fq 'run path overlaps another launcher-owned disposable stack' \
+  "$test_tmp/shared-run-refusal.log" \
+  || fail "shared-run refusal did not identify the complete-footprint conflict"
+
+foreign_runtime_dir="$data_run_owner/private-runtime"
+if launcher_env "$test_tmp/data-runtime-consumer" 3072 \
+  XDG_RUNTIME_DIR="$foreign_runtime_dir" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3072 \
+  > "$test_tmp/shared-runtime-refusal.log" 2>&1; then
+  fail "launcher private runtime unexpectedly started inside owned data"
+fi
+[[ ! -e "$foreign_runtime_dir" && ! -e "$test_tmp/data-runtime-consumer" \
+  && "$(<"$run_owner_pid_file")" = "$run_owner_pid_record" \
+  && -f "$data_run_owner/run-owner-state" ]] \
+  || fail "private-runtime overlap refusal changed the owner or candidate footprint"
+grep -Fq 'private runtime path overlaps another launcher-owned disposable stack' \
+  "$test_tmp/shared-runtime-refusal.log" \
+  || fail "private-runtime refusal did not identify the recovery/lease footprint conflict"
+
+enclosing_runtime_data="$test_tmp/data-enclosing-private-runtime"
+if launcher_env "$enclosing_runtime_data" 3072 \
+  XDG_RUNTIME_DIR="$enclosing_runtime_data" \
+  AGENT_WORKBENCH_RUN_DIR="$test_tmp/enclosing-runtime-run" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3072 \
+  > "$test_tmp/enclosing-runtime-refusal.log" 2>&1; then
+  fail "application data unexpectedly enclosed its launcher private runtime"
+fi
+[[ ! -e "$enclosing_runtime_data" && ! -e "$test_tmp/enclosing-runtime-run" \
+  && "$(<"$run_owner_pid_file")" = "$run_owner_pid_record" \
+  && -f "$data_run_owner/run-owner-state" ]] \
+  || fail "enclosing-runtime refusal changed the owner or candidate footprint"
+grep -Fq 'application data path encloses launcher private runtime state' \
+  "$test_tmp/enclosing-runtime-refusal.log" \
+  || fail "enclosing-runtime refusal did not identify the recursive deletion risk"
+
+run_footprint_parent="$test_tmp/run-footprint-parent"
+run_footprint_dir="$run_footprint_parent/owner-run"
+run_footprint_data="$test_tmp/data-run-footprint-owner"
+port_run_footprint_owner=3071
+launcher_env "$run_footprint_data" "$port_run_footprint_owner" \
+  AGENT_WORKBENCH_RUN_DIR="$run_footprint_dir" \
+  MOCK_PID_FILE="$run_footprint_dir/workbench-127.0.0.1_${port_run_footprint_owner}.pid" \
+  MOCK_EXTERNAL_PORTS='8490 19480' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_run_footprint_owner" \
+  > "$test_tmp/run-footprint-owner-up.log" 2>&1
+run_footprint_pid_file="$run_footprint_dir/workbench-127.0.0.1_${port_run_footprint_owner}.pid"
+run_footprint_pid_record="$(<"$run_footprint_pid_file")"
+[[ ! -e "$run_footprint_data/.agent-workbench-dev-reset-owner" ]] \
+  || fail "external-engine run unexpectedly claimed reset ownership"
+printf 'external run footprint state\n' > "$run_footprint_data/run-footprint-state"
+run_footprint_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$run_footprint_parent" 3073 \
+  AGENT_WORKBENCH_RUN_DIR="$test_tmp/run-footprint-candidate-run" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3073 \
+  > "$test_tmp/enclosing-run-footprint-refusal.log" 2>&1; then
+  fail "candidate data unexpectedly enclosed another stack's external run footprint"
+fi
+[[ ! -e "$test_tmp/run-footprint-candidate-run" \
+  && "$(<"$mock_state/build-count")" = "$run_footprint_builds_before" \
+  && "$(<"$run_footprint_pid_file")" = "$run_footprint_pid_record" \
+  && -f "$run_footprint_data/run-footprint-state" ]] \
+  || fail "enclosing-run-footprint refusal changed the owner or candidate state"
+grep -Fq 'application data path encloses another launcher-owned reset footprint' \
+  "$test_tmp/enclosing-run-footprint-refusal.log" \
+  || fail "enclosing-run-footprint refusal did not identify the recursive deletion risk"
+
+default_repo="$test_tmp/default-path-repo"
+mkdir -p "$default_repo/scripts"
+cp "$repo_root/scripts/agent-workbench-dev.sh" "$default_repo/scripts/agent-workbench-dev.sh"
+default_data="$default_repo/.agent-workbench"
+default_owner_port=3074
+env PATH="$mock_bin:$PATH" MOCK_STATE="$mock_state" \
+  MOCK_PID_FILE="$default_data/run/workbench-127.0.0.1_${default_owner_port}.pid" \
+  XDG_RUNTIME_DIR="$test_tmp/runtime" CARGO_TARGET_DIR="$test_tmp/target-$default_owner_port" \
+  RESTATE_ADMIN_URL=http://127.0.0.1:19510/v2 AGENT_WORKBENCH_OPEN=0 \
+  AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
+  bash "$default_repo/scripts/agent-workbench-dev.sh" up --port "$default_owner_port" \
+  > "$test_tmp/default-owner-up.log" 2>&1
+default_owner_pid_file="$default_data/run/workbench-127.0.0.1_${default_owner_port}.pid"
+default_owner_pid_record="$(<"$default_owner_pid_file")"
+default_consumer_data="$test_tmp/default-run-custom-data"
+default_consumer_port=3076
+default_builds_before="$(<"$mock_state/build-count")"
+if env PATH="$mock_bin:$PATH" MOCK_STATE="$mock_state" \
+  MOCK_PID_FILE="$default_data/run/workbench-127.0.0.1_${default_consumer_port}.pid" \
+  XDG_RUNTIME_DIR="$test_tmp/runtime" CARGO_TARGET_DIR="$test_tmp/target-$default_consumer_port" \
+  AGENT_WORKBENCH_DATA_DIR="$default_consumer_data" \
+  RESTATE_ADMIN_URL=http://127.0.0.1:19530/v2 AGENT_WORKBENCH_OPEN=0 \
+  AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
+  bash "$default_repo/scripts/agent-workbench-dev.sh" up --port "$default_consumer_port" \
+  > "$test_tmp/default-run-custom-data-refusal.log" 2>&1; then
+  fail "custom data with the default run directory inside owned data unexpectedly started"
+fi
+[[ ! -e "$default_consumer_data" \
+  && "$(<"$mock_state/build-count")" = "$default_builds_before" \
+  && "$(<"$default_owner_pid_file")" = "$default_owner_pid_record" ]] \
+  || fail "default-run overlap refusal changed the owner or custom data path"
+
+data_service_owner="$test_tmp/data-service-owner"
+port_service_owner=3078
+run_launcher "$data_service_owner" "$port_service_owner" up \
+  > "$test_tmp/service-owner-up.log" 2>&1
+service_owner_pid_file="$data_service_owner/run/workbench-127.0.0.1_${port_service_owner}.pid"
+service_owner_pid_record="$(<"$service_owner_pid_file")"
+service_owner_restate_marker="$data_service_owner/run/restate-127.0.0.1_${port_service_owner}.container"
+read -r _ service_owner_restate_id _ _ < "$service_owner_restate_marker"
+printf 'service owner state\n' > "$data_service_owner/service-owner-state"
+service_deployments_before="$(<"$mock_state/deployments")"
+service_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
+service_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-shared-engine-consumer" 3080 \
+  RESTATE_INGRESS_URL=http://127.0.0.1:8560 \
+  RESTATE_ADMIN_URL=http://127.0.0.1:19550/v2 \
+  AGENT_WORKBENCH_RESTATE_NODE_PORT=19551 \
+  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-shared-engine-name \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3080 \
+  > "$test_tmp/shared-engine-refusal.log" 2>&1; then
+  fail "second launcher unexpectedly borrowed a reset-owned Restate engine"
+fi
+[[ ! -e "$test_tmp/data-shared-engine-consumer" \
+  && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
+  && -f "$data_service_owner/service-owner-state" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_service_owner" \
+  && "$(<"$mock_state/deployments")" = "$service_deployments_before" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_rm_before" \
+  && "$(<"$mock_state/build-count")" = "$service_builds_before" ]] \
+  || fail "shared Restate refusal changed the owner, engine, deployment, or candidate state"
+grep -Fq 'Restate service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/shared-engine-refusal.log" \
+  || fail "shared Restate refusal did not identify the exclusive service lease"
+
+data_nonreset_service_owner="$test_tmp/data-nonreset-service-owner"
+mkdir -p "$data_nonreset_service_owner"
+port_nonreset_service_owner=3086
+run_launcher "$data_nonreset_service_owner" "$port_nonreset_service_owner" up \
+  > "$test_tmp/nonreset-service-owner-up.log" 2>&1
+nonreset_service_pid_file="$data_nonreset_service_owner/run/workbench-127.0.0.1_${port_nonreset_service_owner}.pid"
+nonreset_service_pid_record="$(<"$nonreset_service_pid_file")"
+[[ ! -e "$data_nonreset_service_owner/.agent-workbench-dev-reset-owner" ]] \
+  || fail "pre-existing application data unexpectedly became reset-owned"
+nonreset_service_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$test_tmp/data-nonreset-service-consumer" 3088 \
+  RESTATE_INGRESS_URL=http://127.0.0.1:8640 \
+  RESTATE_ADMIN_URL=http://127.0.0.1:19630/v2 \
+  AGENT_WORKBENCH_RESTATE_NODE_PORT=19631 \
+  AGENT_WORKBENCH_RESTATE_CONTAINER=alternate-nonreset-engine-name \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3088 \
+  > "$test_tmp/nonreset-shared-engine-refusal.log" 2>&1; then
+  fail "second launcher unexpectedly borrowed a non-resettable managed Restate engine"
+fi
+[[ "$(<"$nonreset_service_pid_file")" = "$nonreset_service_pid_record" \
+  && ! -e "$test_tmp/data-nonreset-service-consumer" \
+  && "$(<"$mock_state/build-count")" = "$nonreset_service_builds_before" ]] \
+  || fail "non-resettable service refusal changed the owner or candidate state"
+grep -Fq 'Restate service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/nonreset-shared-engine-refusal.log" \
+  || fail "non-resettable service refusal did not identify the persistent service lease"
+
+data_database_owner="$test_tmp/data-database-owner"
+port_database_owner=3082
+launcher_env "$data_database_owner" "$port_database_owner" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_database_owner" \
+  > "$test_tmp/database-owner-up.log" 2>&1
+database_owner_pid_file="$data_database_owner/run/workbench-127.0.0.1_${port_database_owner}.pid"
+database_owner_pid_record="$(<"$database_owner_pid_file")"
+database_owner_postgres_marker="$data_database_owner/run/postgres-127.0.0.1_${port_database_owner}.container"
+read -r _ database_owner_postgres_id _ _ < "$database_owner_postgres_marker"
+printf 'database owner state\n' > "$data_database_owner/database-owner-state"
+database_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
+if launcher_env "$test_tmp/data-shared-database-consumer" 3084 \
+  AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_PORT=15952 \
+  AGENT_WORKBENCH_POSTGRES_CONTAINER=alternate-shared-database-name \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port 3084 \
+  > "$test_tmp/shared-database-refusal.log" 2>&1; then
+  fail "second launcher unexpectedly borrowed a reset-owned managed Postgres"
+fi
+[[ "$(<"$database_owner_pid_file")" = "$database_owner_pid_record" \
+  && -f "$data_database_owner/database-owner-state" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_database_owner" \
+  && ! -e "$test_tmp/data-shared-database-consumer" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$((database_rm_before + 1))" ]] \
+  || fail "shared Postgres refusal changed the owner or retained candidate state"
+! grep -Fq "rm $database_owner_postgres_id postgres" "$mock_state/docker-rm.log" \
+  || fail "shared Postgres refusal removed the owner's exact database container"
+grep -Fq 'Postgres service is reserved by another launcher-owned disposable stack' \
+  "$test_tmp/shared-database-refusal.log" \
+  || fail "shared Postgres refusal did not identify the exclusive service lease"
+
+database_lease_hash="$(printf '%s' '127.0.0.1:15952' | sha256sum | awk '{print $1}')"
+database_lease_file="$test_tmp/runtime/lash-agent-workbench-$UID/postgres-$database_lease_hash.lease"
+rm -f "$database_lease_file"
+database_reset_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
+if launcher_env "$data_database_owner" "$port_database_owner" AGENT_WORKBENCH_POSTGRES=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_database_owner" \
+  > "$test_tmp/missing-database-lease-refusal.log" 2>&1; then
+  fail "reset trusted an exact Postgres ID without its exclusive service lease"
+fi
+[[ "$(<"$database_owner_pid_file")" = "$database_owner_pid_record" \
+  && -f "$data_database_owner/database-owner-state" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_database_owner" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$database_reset_rm_before" ]] \
+  || fail "missing Postgres lease refusal changed the owned stack"
+grep -Fq 'Postgres service lease does not prove exclusive ownership' \
+  "$test_tmp/missing-database-lease-refusal.log" \
+  || fail "missing Postgres lease refusal did not explain the exclusivity proof failure"
+
+service_lease_hash="$(printf '%s' '127.0.0.1:8560|127.0.0.1:19550' | sha256sum | awk '{print $1}')"
+service_lease_file="$test_tmp/runtime/lash-agent-workbench-$UID/restate-$service_lease_hash.lease"
+rm -f "$service_lease_file"
+service_reset_rm_before="$(wc -l < "$mock_state/docker-rm.log")"
+if run_launcher "$data_service_owner" "$port_service_owner" restart --reset-dev-state \
+  > "$test_tmp/missing-service-lease-refusal.log" 2>&1; then
+  fail "reset trusted an immutable container ID without its exclusive service lease"
+fi
+[[ "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" \
+  && -f "$data_service_owner/service-owner-state" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_service_owner" \
+  && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_reset_rm_before" ]] \
+  || fail "missing service-lease refusal changed the owned stack"
+grep -Fq 'service lease does not prove exclusive ownership' \
+  "$test_tmp/missing-service-lease-refusal.log" \
+  || fail "missing service-lease refusal did not explain the exclusivity proof failure"
 
 data_ownership_lock="$test_tmp/runtime/lash-agent-workbench-$UID/data-ownership.lock"
 exec 10> "$data_ownership_lock"
