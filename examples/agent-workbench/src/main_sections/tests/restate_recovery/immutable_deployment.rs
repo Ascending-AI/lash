@@ -212,17 +212,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
     .await;
     assert!(admitted_b.completed_successfully());
 
-    if mutate_reused_endpoint {
-        wait_for_restate_invocation_success_admin(
-            &admin_url,
-            &invocation_a,
-            Duration::from_secs(12),
-            "mutable endpoint replacement changed fixture A's admitted configuration",
-        )
-        .await;
-        unreachable!("mutable endpoint replacement unexpectedly preserved fixture A");
-    }
-
     let a_sessions = WorkbenchSessions::persistent(a_path.join("session-id"))
         .expect("reopen fixture A persistent session selection");
     let a_active_turns = ActiveTurns::persistent(a_path.join("active-turns.json"))
@@ -242,16 +231,39 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
         a_restart_lease_timings,
     )
     .await;
-    endpoint_a = LiveRestateEndpoint::restart(
-        endpoint_a_addr,
-        harness_a.state.clone(),
-        harness_a.process_deployment,
-        harness_a.process_worker,
-        deployment_a.clone(),
-    )
-    .await;
-    wait_for_restate_invocation_success(&harness_a.state, &invocation_a, Duration::from_secs(30))
+    if mutate_reused_endpoint {
+        wait_for_restate_invocation_success_admin(
+            &admin_url,
+            &invocation_a,
+            Duration::from_secs(12),
+            "mutable endpoint replacement changed fixture A's admitted configuration",
+        )
         .await;
+    } else {
+        endpoint_a = LiveRestateEndpoint::restart(
+            endpoint_a_addr,
+            harness_a.state.clone(),
+            harness_a.process_deployment,
+            harness_a.process_worker,
+            deployment_a.clone(),
+        )
+        .await;
+        wait_for_restate_invocation_success(
+            &harness_a.state,
+            &invocation_a,
+            Duration::from_secs(30),
+        )
+        .await;
+    }
+    assert!(
+        a_provider_calls.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+        "fixture A's admitted invocation must retry through fixture A's provider"
+    );
+    assert_eq!(
+        b_provider_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "fixture A's admitted invocation must not reach fixture B's provider"
+    );
     wait_for_workbench_message(
         &harness_a.state,
         "fixture A completed",
@@ -292,16 +304,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
         env_bytes_after, env_bytes_before,
         "fixture A retry reconstructed different process environment bytes"
     );
-    assert!(
-        a_provider_calls.load(std::sync::atomic::Ordering::SeqCst) >= 3,
-        "fixture A must re-enter the interrupted provider call after transport retry"
-    );
-    assert_eq!(
-        b_provider_calls.load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "fixture A retry must not reach fixture B's provider"
-    );
-
     endpoint_a
         .stop_after_producers_closed_and_drained(&harness_a.state, Duration::from_secs(30))
         .await;

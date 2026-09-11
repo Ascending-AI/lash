@@ -149,20 +149,24 @@ impl LiveRestateEndpoint {
         self
     }
 
-    pub(crate) async fn stop(&mut self) {
+    fn request_shutdown_and_join(&mut self) {
+        let already_panicking = std::thread::panicking();
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
-        if let Some(thread) = self.thread.take() {
-            tokio::time::timeout(
-                Duration::from_secs(20),
-                tokio::task::spawn_blocking(move || thread.join()),
-            )
-            .await
-            .unwrap_or_else(|_| panic!("Restate endpoint {} did not stop", self.endpoint_url))
-            .expect("join owned Restate endpoint runtime thread")
-            .expect("owned Restate endpoint runtime thread");
+        if let Some(thread) = self.thread.take()
+            && let Err(payload) = thread.join()
+        {
+            if already_panicking {
+                eprintln!("owned Restate endpoint runtime panicked during failure cleanup");
+            } else {
+                std::panic::resume_unwind(payload);
+            }
         }
+    }
+
+    pub(crate) async fn stop(&mut self) {
+        self.request_shutdown_and_join();
         assert!(
             tokio::net::TcpStream::connect(self.addr).await.is_err(),
             "owned Restate endpoint listener {} remained open after shutdown",
@@ -220,12 +224,9 @@ impl LiveRestateEndpoint {
 
 impl Drop for LiveRestateEndpoint {
     fn drop(&mut self) {
-        if let Some(shutdown) = self.shutdown.take() {
-            let _ = shutdown.send(());
-        }
-        // A panic may prevent the async stop path from joining. The shutdown
-        // signal still makes the owned thread and runtime retire promptly.
-        let _ = self.thread.take();
+        // Failure cleanup must finish before outer TempDir owners unwind and
+        // remove storage that Restate can still replay against.
+        self.request_shutdown_and_join();
     }
 }
 

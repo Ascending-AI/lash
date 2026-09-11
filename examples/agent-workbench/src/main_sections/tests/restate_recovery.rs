@@ -1793,12 +1793,23 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
-    let endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
+    let base_endpoint_bind: SocketAddr = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_BIND")
         .unwrap_or_else(|_| "127.0.0.1:19081".to_string())
         .parse()
         .expect("valid workbench E2E endpoint bind");
-    let endpoint_url = std::env::var("AGENT_WORKBENCH_E2E_ENDPOINT_URL")
-        .unwrap_or_else(|_| format!("http://{endpoint_bind}"));
+    let port_offset = match backend {
+        "sqlite" => 0,
+        "postgres" => 1,
+        other => panic!("unsupported recovery E2E backend `{other}`"),
+    };
+    let endpoint_bind = SocketAddr::new(
+        base_endpoint_bind.ip(),
+        base_endpoint_bind
+            .port()
+            .checked_add(port_offset)
+            .expect("recovery E2E endpoint port range"),
+    );
+    let endpoint_url = format!("http://{endpoint_bind}");
     let data_dir = std::env::temp_dir().join(format!(
         "agent-workbench-recovery-{backend}-e2e-{}",
         uuid::Uuid::new_v4()
@@ -1901,7 +1912,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .await
         .expect("reopen recovery session catalog");
     let driver = lash_restate::RestateTurnDeployment::new(ingress_url)
-        .turn_work_driver(stores.session_store_factory);
+        .turn_work_driver(Arc::clone(&stores.session_store_factory));
     let receipt = driver
         .request_cancel(
             lash::TurnCancelRequest::new(
@@ -1971,10 +1982,54 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         done_count, 1,
         "owner replacement and Restate redelivery must settle the product projection once"
     );
+    wait_for_restate_deployment_and_unpinned_invocations_drained(
+        &admin_url,
+        &deployment_id,
+        Duration::from_secs(30),
+    )
+    .await;
     replacement.kill().await.expect("stop replacement child");
     replacement.wait().await.expect("reap replacement child");
+    assert!(
+        tokio::net::TcpStream::connect(endpoint_bind).await.is_err(),
+        "recovery E2E endpoint {endpoint_bind} remained open after child teardown"
+    );
+    drop(driver);
+    drop(stores);
     println!("workbench ingress-owner restart gate passed: backend={backend}");
-    let _ = std::fs::remove_dir_all(data_dir);
+    std::fs::remove_dir_all(&data_dir).expect("remove drained recovery E2E data directory");
+    assert!(!data_dir.exists());
+}
+
+async fn wait_for_restate_deployment_and_unpinned_invocations_drained(
+    admin_url: &str,
+    deployment_id: &str,
+    timeout: Duration,
+) {
+    let admin =
+        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let open = admin
+            .open_invocations_by_deployment()
+            .await
+            .expect("query recovery E2E Restate deployment drain")
+            .into_iter()
+            .filter(|row| {
+                row.pinned_deployment_id.is_none()
+                    || row.pinned_deployment_id.as_deref() == Some(deployment_id)
+            })
+            .map(|row| row.open_count)
+            .sum::<u64>();
+        if open == 0 {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "recovery E2E deployment {deployment_id} retained {open} pinned/unpinned Restate invocations within {timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 fn spawn_recovery_e2e_child(
