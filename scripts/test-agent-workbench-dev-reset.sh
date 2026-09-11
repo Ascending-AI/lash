@@ -111,6 +111,15 @@ case "$command" in
       [[ -f "$file" && "$file" != *container-counter && "$file" != *container-ports-* ]] || continue
       read -r actual_id token component < "$file"
       if [[ "$actual_id" = "$id" ]]; then
+        printf 'rm %s %s\n' "$id" "$component" >> "$MOCK_STATE/docker-rm-attempt.log"
+        if [[ "${MOCK_RM_FAIL_COMPONENT:-}" = "$component" \
+          && "$id" != "${MOCK_RM_ALLOW_ID:-}" ]]; then
+          failure_marker="$MOCK_STATE/docker-rm-failed-$component"
+          if [[ "${MOCK_RM_FAIL_MODE:-always}" = always || ! -e "$failure_marker" ]]; then
+            : > "$failure_marker"
+            exit 1
+          fi
+        fi
         found="$file"
         printf 'rm %s %s\n' "$id" "$component" >> "$MOCK_STATE/docker-rm.log"
         rm -f "$file" "$MOCK_STATE/journal-$id"
@@ -142,6 +151,16 @@ mkdir -p "$CARGO_TARGET_DIR/judged"
 cat > "$CARGO_TARGET_DIR/judged/agent-workbench" <<'BIN'
 #!/usr/bin/env bash
 trap 'exit 0' TERM INT
+mkdir -p "$AGENT_WORKBENCH_DATA_DIR"
+printf 'attempt application state\n' > "$AGENT_WORKBENCH_DATA_DIR/attempt-app-state"
+{
+  printf 'AGENT_WORKBENCH_ADDR=%s\n' "$AGENT_WORKBENCH_ADDR"
+  printf 'AGENT_WORKBENCH_RESTATE_ADDR=%s\n' "$AGENT_WORKBENCH_RESTATE_ADDR"
+  printf 'AGENT_WORKBENCH_DATABASE_URL=%s\n' "$AGENT_WORKBENCH_DATABASE_URL"
+  printf 'RESTATE_INGRESS_URL=%s\n' "$RESTATE_INGRESS_URL"
+  printf 'RESTATE_ADMIN_URL=%s\n' "$RESTATE_ADMIN_URL"
+  printf 'AGENT_WORKBENCH_DATA_DIR=%s\n' "$AGENT_WORKBENCH_DATA_DIR"
+} > "$MOCK_STATE/workbench-env-${AGENT_WORKBENCH_ADDR##*:}"
 while :; do sleep 1; done
 BIN
 chmod +x "$CARGO_TARGET_DIR/judged/agent-workbench"
@@ -177,7 +196,10 @@ elif [[ "$url" = */deployments ]]; then
   printf '%s\n' "$payload" >> "$MOCK_STATE/registration-payloads"
   uri="$(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin)["uri"])')"
   printf '%s\n' "$uri" >> "$MOCK_STATE/deployments"
-  if [[ "${MOCK_POST_KILL:-0}" = 1 && -f "$MOCK_PID_FILE" ]]; then
+  if [[ "${MOCK_POST_REMOVE_PID:-0}" = 1 && -f "$MOCK_PID_FILE" ]]; then
+    cp "$MOCK_PID_FILE" "$MOCK_STATE/removed-pid-record"
+    rm -f "$MOCK_PID_FILE" "${MOCK_PID_FILE%.pid}.meta"
+  elif [[ "${MOCK_POST_KILL:-0}" = 1 && -f "$MOCK_PID_FILE" ]]; then
     read -r pid _ < "$MOCK_PID_FILE"
     kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
     for _ in {1..100}; do
@@ -195,6 +217,7 @@ chmod +x "$mock_bin"/*
 : > "$mock_state/deployments"
 : > "$mock_state/registration-payloads"
 : > "$mock_state/docker-rm.log"
+: > "$mock_state/docker-rm-attempt.log"
 
 launcher_env() {
   local data_dir="$1" port="$2"
@@ -383,6 +406,42 @@ recovery_file="$(sed -n 's/^\[agent-workbench\] stack is stopped; recovery comma
   || fail "recovery command is not private"
 grep -Fq 'agent-workbench-dev.sh up --addr 127.0.0.1:3032' "$recovery_file" \
   || fail "saved recovery command does not target the reset stack"
+env PATH="$mock_bin:$PATH" \
+  MOCK_STATE="$mock_state" \
+  MOCK_PID_FILE="$pid_file" \
+  XDG_RUNTIME_DIR="$test_tmp/runtime" \
+  CARGO_TARGET_DIR="$test_tmp/target-$port_sqlite" \
+  AGENT_WORKBENCH_RUN_DIR="$test_tmp/wrong-run" \
+  AGENT_WORKBENCH_DATA_DIR="$test_tmp/wrong-data" \
+  AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:65501 \
+  AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=http://127.0.0.1:65501 \
+  RESTATE_INGRESS_URL=http://127.0.0.1:65502 \
+  RESTATE_ADMIN_URL=http://127.0.0.1:65503/v1 \
+  AGENT_WORKBENCH_RESTATE_NODE_PORT=65504 \
+  AGENT_WORKBENCH_RESTATE_CONTAINER=wrong-restate-container \
+  AGENT_WORKBENCH_DATABASE_URL=postgres://wrong.invalid/wrong \
+  AGENT_WORKBENCH_POSTGRES=1 \
+  AGENT_WORKBENCH_OPEN=0 \
+  AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
+  bash "$recovery_file" \
+  > "$test_tmp/recovery-success.log" 2>&1
+pid_identity "$pid_file" || fail "saved recovery script did not start a healthy replacement"
+assert_count 4 "$mock_state/registration-payloads"
+[[ ! -e "$recovery_file" ]] || fail "successful recovery retained a stale recovery script"
+expected_recovery_env="$test_tmp/expected-recovery-env"
+cat > "$expected_recovery_env" <<EOF
+AGENT_WORKBENCH_ADDR=127.0.0.1:3032
+AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:9101
+AGENT_WORKBENCH_DATABASE_URL=
+RESTATE_INGRESS_URL=http://127.0.0.1:8100
+RESTATE_ADMIN_URL=http://127.0.0.1:19090/v2
+AGENT_WORKBENCH_DATA_DIR=$data_sqlite
+EOF
+cmp -s "$expected_recovery_env" "$mock_state/workbench-env-$port_sqlite" \
+  || fail "saved recovery script did not transmit the original stack settings"
+[[ -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_sqlite" \
+  && ! -e "$mock_state/container-wrong-restate-container" ]] \
+  || fail "saved recovery script did not restore the original container identity"
 
 data_postgres="$test_tmp/data-postgres"
 port_postgres=3034
@@ -444,5 +503,143 @@ if launcher_env "$test_tmp/data-secret-url" 3040 \
 fi
 ! grep -Fq 'diagnostic-secret' "$test_tmp/secret-url-refusal.log" \
   || fail "credential-bearing URL was exposed in diagnostics"
+
+data_missing_pid="$test_tmp/data-missing-pid"
+port_missing_pid=3042
+if launcher_env "$data_missing_pid" "$port_missing_pid" MOCK_POST_REMOVE_PID=1 \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_missing_pid" \
+  > "$test_tmp/missing-pid-cleanup.log" 2>&1; then
+  fail "post-registration PID metadata loss unexpectedly succeeded"
+fi
+read -r removed_pid removed_start < "$mock_state/removed-pid-record"
+removed_current="$(awk '{print $22}' "/proc/$removed_pid/stat" 2>/dev/null || true)"
+[[ "$removed_current" != "$removed_start" ]] \
+  || fail "cleanup lost process metadata and left the owned workbench running"
+grep -Fq "stopping process $removed_pid" "$test_tmp/missing-pid-cleanup.log" \
+  || fail "cleanup did not use its retained exact process identity"
+[[ ! -e "$data_missing_pid" ]] \
+  || fail "successful exact process and engine retirement retained attempt application state"
+[[ ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_missing_pid" ]] \
+  || fail "successful cleanup after PID metadata loss retained Restate"
+
+data_failed_process="$test_tmp/data-failed-process"
+port_failed_process=3050
+process_rm_attempts_before="$(wc -l < "$mock_state/docker-rm-attempt.log")"
+if launcher_env "$data_failed_process" "$port_failed_process" \
+  MOCK_POST_REMOVE_PID=1 'BASH_FUNC_kill%%=() { return 1; }' \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_failed_process" \
+  > "$test_tmp/failed-process-retirement.log" 2>&1; then
+  fail "startup with persistently failed process retirement unexpectedly succeeded"
+fi
+read -r failed_process_pid failed_process_start < "$mock_state/removed-pid-record"
+failed_process_current="$(awk '{print $22}' "/proc/$failed_process_pid/stat" 2>/dev/null || true)"
+[[ "$failed_process_current" = "$failed_process_start" \
+  && -f "$data_failed_process/attempt-app-state" \
+  && -f "$data_failed_process/.agent-workbench-dev-reset-owner" \
+  && -f "$data_failed_process/run/reset-127.0.0.1_${port_failed_process}.meta" ]] \
+  || fail "failed process retirement did not retain its live process and application state"
+[[ "$(wc -l < "$mock_state/docker-rm-attempt.log")" = "$process_rm_attempts_before" ]] \
+  || fail "failed process retirement attempted to remove its Restate engine"
+grep -Fq 'startup cleanup could not stop the owned workbench' \
+  "$test_tmp/failed-process-retirement.log" \
+  || fail "failed process retirement did not report its retained state"
+kill -- "-$failed_process_pid" >/dev/null 2>&1 \
+  || kill "$failed_process_pid" >/dev/null 2>&1 \
+  || fail "test could not stop its retained mock workbench"
+for _ in {1..100}; do
+  failed_process_current="$(awk '{print $22}' "/proc/$failed_process_pid/stat" 2>/dev/null || true)"
+  [[ "$failed_process_current" != "$failed_process_start" ]] && break
+  sleep 0.01
+done
+[[ "$failed_process_current" != "$failed_process_start" ]] \
+  || fail "retained mock workbench did not stop during test cleanup"
+
+data_failed_retirement="$test_tmp/data-failed-retirement"
+port_failed_retirement=3044
+rm_attempts_before_failure="$(wc -l < "$mock_state/docker-rm-attempt.log")"
+if launcher_env "$data_failed_retirement" "$port_failed_retirement" \
+  AGENT_WORKBENCH_POSTGRES=1 MOCK_POST_KILL=1 \
+  MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=always \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_failed_retirement" \
+  > "$test_tmp/failed-retirement.log" 2>&1; then
+  fail "startup with persistently failed Restate retirement unexpectedly succeeded"
+fi
+failed_state_key="127.0.0.1_${port_failed_retirement}"
+[[ -f "$data_failed_retirement/attempt-app-state" \
+  && -f "$data_failed_retirement/.agent-workbench-dev-reset-owner" \
+  && -f "$data_failed_retirement/run/reset-$failed_state_key.meta" ]] \
+  || fail "failed Restate retirement deleted application state or ownership metadata"
+[[ -f "$data_failed_retirement/run/restate-$failed_state_key.container" \
+  && -f "$data_failed_retirement/run/postgres-$failed_state_key.container" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_failed_retirement" \
+  && -f "$mock_state/container-lash-agent-workbench-dev-postgres-$port_failed_retirement" ]] \
+  || fail "failed Restate retirement discarded exact engine or store ownership evidence"
+grep -Fq 'startup cleanup is incomplete; retained its application state and ownership metadata' \
+  "$test_tmp/failed-retirement.log" \
+  || fail "failed Restate retirement did not report retained partial state"
+read -r _ failed_restate_id _ _ \
+  < "$data_failed_retirement/run/restate-$failed_state_key.container"
+read -r _ failed_postgres_id _ _ \
+  < "$data_failed_retirement/run/postgres-$failed_state_key.container"
+mapfile -t failed_retirement_attempts \
+  < <(tail -n "+$((rm_attempts_before_failure + 1))" "$mock_state/docker-rm-attempt.log")
+[[ "${#failed_retirement_attempts[@]}" = 2 \
+  && "${failed_retirement_attempts[0]}" = "rm $failed_restate_id restate" \
+  && "${failed_retirement_attempts[1]}" = "rm $failed_restate_id restate" ]] \
+  || fail "failed Restate retirement did not make the bounded exact-ID retry"
+! grep -Fq "rm $failed_postgres_id postgres" "$mock_state/docker-rm.log" \
+  || fail "failed Restate retirement removed its dependent Postgres store"
+
+data_retry_cleanup="$test_tmp/data-retry-cleanup"
+port_retry_cleanup=3046
+rm -f "$mock_state/docker-rm-failed-restate"
+rm_log_before_retry="$(wc -l < "$mock_state/docker-rm.log")"
+if launcher_env "$data_retry_cleanup" "$port_retry_cleanup" \
+  AGENT_WORKBENCH_POSTGRES=1 MOCK_POST_KILL=1 \
+  MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=once \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_retry_cleanup" \
+  > "$test_tmp/retry-cleanup.log" 2>&1; then
+  fail "post-registration process failure unexpectedly succeeded"
+fi
+[[ ! -e "$data_retry_cleanup" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-restate-$port_retry_cleanup" \
+  && ! -e "$mock_state/container-lash-agent-workbench-dev-postgres-$port_retry_cleanup" ]] \
+  || fail "successful exact-ID cleanup retry retained attempt state"
+mapfile -t retry_removals < <(tail -n "+$((rm_log_before_retry + 1))" "$mock_state/docker-rm.log")
+[[ "${#retry_removals[@]}" = 2 \
+  && "${retry_removals[0]}" = *' restate' \
+  && "${retry_removals[1]}" = *' postgres' ]] \
+  || fail "cleanup retry did not prove Restate retirement before Postgres removal"
+
+data_reset_failed_retirement="$test_tmp/data-reset-failed-retirement"
+port_reset_failed_retirement=3048
+run_launcher "$data_reset_failed_retirement" "$port_reset_failed_retirement" up \
+  > "$test_tmp/reset-failed-retirement-up.log" 2>&1
+reset_failure_state_key="127.0.0.1_${port_reset_failed_retirement}"
+read -r _ reset_old_restate_id _ _ \
+  < "$data_reset_failed_retirement/run/restate-$reset_failure_state_key.container"
+if launcher_env "$data_reset_failed_retirement" "$port_reset_failed_retirement" \
+  MOCK_POST_KILL=1 MOCK_RM_FAIL_COMPONENT=restate MOCK_RM_FAIL_MODE=always \
+  MOCK_RM_ALLOW_ID="$reset_old_restate_id" \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+    --port "$port_reset_failed_retirement" \
+  > "$test_tmp/reset-failed-retirement.log" 2>&1; then
+  fail "replacement with persistently failed Restate retirement unexpectedly succeeded"
+fi
+[[ -f "$data_reset_failed_retirement/attempt-app-state" \
+  && -f "$data_reset_failed_retirement/.agent-workbench-dev-reset-owner" \
+  && -f "$data_reset_failed_retirement/run/reset-$reset_failure_state_key.meta" \
+  && -f "$data_reset_failed_retirement/run/restate-$reset_failure_state_key.container" ]] \
+  || fail "replacement retirement failure deleted new application state or ownership metadata"
+grep -Fq 'replacement cleanup is incomplete; retained its application state and ownership metadata' \
+  "$test_tmp/reset-failed-retirement.log" \
+  || fail "replacement retirement failure falsely reported a stopped stack"
+! grep -Fq 'stack is stopped' "$test_tmp/reset-failed-retirement.log" \
+  || fail "replacement retirement failure claimed its retained engine was stopped"
+replacement_recovery_file="$(sed -n \
+  's/^\[agent-workbench\] recovery command saved at \([^;]*\);.*/\1/p' \
+  "$test_tmp/reset-failed-retirement.log")"
+[[ -f "$replacement_recovery_file" && "$(stat -c '%a' "$replacement_recovery_file")" = 600 ]] \
+  || fail "replacement retirement failure did not retain private recovery evidence"
 
 printf '%s\n' 'agent-workbench explicit reset lifecycle checks passed'

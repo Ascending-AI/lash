@@ -15,6 +15,8 @@ state_dir="${AGENT_WORKBENCH_RUN_DIR:-.agent-workbench/run}"
 mkdir -p "$state_dir"
 
 started_workbench_this_attempt=0
+started_workbench_pid=""
+started_workbench_start_time=""
 started_restate_this_attempt=0
 started_postgres_this_attempt=0
 start_attempt_active=0
@@ -372,8 +374,14 @@ stop_owned_container_file() {
     return 1
   fi
   log "stopping $expected_component container $name"
-  docker rm -fv "$id" >/dev/null
-  rm -f "$file"
+  if ! docker rm -fv "$id" >/dev/null; then
+    log "could not remove the exact owned $expected_component container $name"
+    return 1
+  fi
+  if ! rm -f "$file"; then
+    log "removed the owned $expected_component container but could not clear its ownership marker at $file"
+    return 1
+  fi
 }
 
 remove_stale_pid_file() {
@@ -442,22 +450,21 @@ cleanup_stale_pid() {
   remove_stale_pid_file "$pid_file"
 }
 
-stop_pid_file() {
-  local file="$1"
-  [[ -e "$file" ]] || return 0
-  local record="" pid="" start_time=""
-  record="$(pid_file_identity "$file" 2>/dev/null || true)"
-  if [[ -z "$record" ]]; then
-    remove_stale_pid_file "$file"
-    return
+stop_process_identity() {
+  local pid="$1" start_time="$2"
+  if ! pid_identity_matches "$pid" "$start_time"; then
+    local current_start_time=""
+    current_start_time="$(process_start_time "$pid" 2>/dev/null || true)"
+    if [[ -z "$current_start_time" || "$current_start_time" != "$start_time" ]]; then
+      return 0
+    fi
+    log "process identity could not be verified; refusing cleanup for PID $pid"
+    return 1
   fi
-  read -r pid start_time <<<"$record"
-
   log "stopping process $pid"
   if ! signal_verified_process TERM "$pid" "$start_time"; then
     if [[ ! -e "/proc/$pid" ]]; then
-      remove_stale_pid_file "$file"
-      return
+      return 0
     fi
     log "process identity changed or could not be signaled; refusing cleanup for PID $pid"
     return 1
@@ -481,8 +488,32 @@ stop_pid_file() {
       return 1
     fi
   fi
+}
+
+stop_pid_file() {
+  local file="$1"
+  [[ -e "$file" ]] || return 0
+  local record="" pid="" start_time=""
+  record="$(pid_file_identity "$file" 2>/dev/null || true)"
+  if [[ -z "$record" ]]; then
+    remove_stale_pid_file "$file"
+    return
+  fi
+  read -r pid start_time <<<"$record"
+
+  stop_process_identity "$pid" "$start_time" || return 1
 
   rm -f "$file" "${file%.pid}.meta"
+}
+
+stop_attempt_workbench() {
+  if [[ -n "$started_workbench_pid" && -n "$started_workbench_start_time" ]]; then
+    stop_process_identity "$started_workbench_pid" "$started_workbench_start_time" \
+      || return 1
+    rm -f "$pid_file" "$meta_file"
+    return 0
+  fi
+  stop_pid_file "$pid_file"
 }
 
 stop_started_restate() {
@@ -508,38 +539,63 @@ remove_attempt_reset_ownership() {
 
 cleanup_start_attempt() {
   if (( started_workbench_this_attempt )); then
-    stop_pid_file "$pid_file" || true
+    if ! stop_attempt_workbench; then
+      log "startup cleanup could not stop the owned workbench; retaining its engine, application state, and ownership metadata"
+      return 1
+    fi
     started_workbench_this_attempt=0
   fi
-  if (( started_postgres_this_attempt )); then
-    stop_started_postgres || true
-    started_postgres_this_attempt=0
-  fi
   if (( started_restate_this_attempt )); then
-    stop_started_restate || true
+    if ! stop_started_restate; then
+      log "startup cleanup could not remove the exact owned Restate engine; retaining application state and ownership metadata"
+      return 1
+    fi
     started_restate_this_attempt=0
   fi
-  remove_attempt_reset_ownership
+  if (( started_postgres_this_attempt )); then
+    if ! stop_started_postgres; then
+      log "startup cleanup could not remove the exact owned Postgres store; retaining application state and ownership metadata"
+      return 1
+    fi
+    started_postgres_this_attempt=0
+  fi
   if (( data_dir_created_this_attempt )) \
     && [[ "$data_dir" != / && "$data_dir" != "$repo_root" ]] \
     && ! path_has_symlink_component "$configured_data_dir"; then
-    rm -rf -- "$data_dir"
+    if ! rm -rf -- "$data_dir"; then
+      log "startup cleanup could not remove the owned application data directory; retaining remaining ownership metadata"
+      return 1
+    fi
     rm -f "$pid_file" "$meta_file" "$log_file" "$reset_file" \
       "$restate_marker_file" "$postgres_marker_file"
   fi
+  remove_attempt_reset_ownership
 }
 
 cleanup_failed_attempt() {
   local status=$?
   if (( status != 0 && start_attempt_active )); then
-    cleanup_start_attempt
+    local cleanup_complete=1
+    if ! cleanup_start_attempt; then
+      log "startup cleanup did not complete; retrying only the same verified attempt resources"
+      if ! cleanup_start_attempt; then
+        cleanup_complete=0
+      fi
+    fi
     if (( reset_committed )); then
       write_reset_recovery_file
       log "the disposable dev state was reset, but replacement startup failed"
-      log "stack is stopped; recovery command saved at $reset_recovery_file"
+      if (( cleanup_complete )); then
+        log "stack is stopped; recovery command saved at $reset_recovery_file"
+      else
+        log "replacement cleanup is incomplete; retained its application state and ownership metadata"
+        log "recovery command saved at $reset_recovery_file; run it only after the retained attempt is safely retired"
+      fi
     elif (( reset_destructive_started )); then
       log "disposable reset started but did not complete; the stack may be partially stopped"
       log "no unverified or external resource was removed"
+    elif (( ! cleanup_complete )); then
+      log "startup cleanup is incomplete; retained its application state and ownership metadata"
     fi
   fi
   return "$status"
@@ -547,10 +603,15 @@ cleanup_failed_attempt() {
 trap cleanup_failed_attempt EXIT
 
 build_reset_recovery_command() {
+  local postgres_setting=0
+  if [[ "$owned_store_backend" = postgres ]]; then
+    postgres_setting=1
+  fi
   printf -v reset_recovery_command \
-    'AGENT_WORKBENCH_RUN_DIR=%q AGENT_WORKBENCH_DATA_DIR=%q AGENT_WORKBENCH_RESTATE_ADDR=%q AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=%q RESTATE_INGRESS_URL=%q RESTATE_ADMIN_URL=%q AGENT_WORKBENCH_RESTATE_NODE_PORT=%q AGENT_WORKBENCH_RESTATE_CONTAINER=%q' \
+    'env AGENT_WORKBENCH_RUN_DIR=%q AGENT_WORKBENCH_DATA_DIR=%q AGENT_WORKBENCH_RESTATE_ADDR=%q AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=%q RESTATE_INGRESS_URL=%q RESTATE_ADMIN_URL=%q AGENT_WORKBENCH_RESTATE_NODE_PORT=%q AGENT_WORKBENCH_RESTATE_CONTAINER=%q AGENT_WORKBENCH_DATABASE_URL=%q AGENT_WORKBENCH_POSTGRES=%q' \
     "$state_dir" "$data_dir" "$restate_endpoint_addr" "$(endpoint_url)" \
-    "$restate_ingress_url" "$restate_admin_url" "$restate_node_port" "$restate_container"
+    "$restate_ingress_url" "$restate_admin_url" "$restate_node_port" "$restate_container" \
+    "" "$postgres_setting"
   if [[ "$owned_store_backend" = postgres ]]; then
     printf -v reset_recovery_command '%s AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_POSTGRES_HOST=%q AGENT_WORKBENCH_POSTGRES_PORT=%q AGENT_WORKBENCH_POSTGRES_CONTAINER=%q' \
       "$reset_recovery_command" "$postgres_host" "$postgres_port" "$postgres_container"
@@ -898,6 +959,9 @@ start_detached() {
   fi
   local pid="$!"
   write_pid_file "$pid_file" "$pid" || die "could not record process identity for $pid"
+  started_workbench_pid="$pid"
+  started_workbench_start_time="$(process_start_time "$pid")" \
+    || die "could not retain process identity for $pid"
   started_workbench_this_attempt=1
   write_meta
   log "started process $pid; log: $log_file"
@@ -910,7 +974,7 @@ wait_workbench_ready() {
     require_workbench_alive "before becoming ready"
     if (( SECONDS >= deadline )); then
       tail_log
-      cleanup_start_attempt
+      cleanup_start_attempt || true
       die "workbench did not become healthy at $workbench_url/healthz"
     fi
     sleep 1
@@ -925,7 +989,7 @@ wait_workbench_endpoint_ready() {
     require_workbench_alive "while waiting for its Restate endpoint"
     if (( SECONDS >= deadline )); then
       tail_log
-      cleanup_start_attempt
+      cleanup_start_attempt || true
       die "workbench Restate endpoint did not become ready at $restate_endpoint_addr"
     fi
     sleep 1
@@ -942,7 +1006,7 @@ run_up() {
   local deployment_url
   deployment_url="$(endpoint_url)"
   if ! require_unused_deployment_uri "$restate_admin_url" "$deployment_url"; then
-    cleanup_start_attempt
+    cleanup_start_attempt || true
     die "refusing to replace an existing Restate deployment; use restart --reset-dev-state only for a wholly launcher-owned disposable stack"
   fi
   ensure_postgres
@@ -953,11 +1017,12 @@ run_up() {
   log "registering Restate deployment $deployment_url"
   if ! register_deployment "$restate_admin_url" "$deployment_url"; then
     tail_log
-    cleanup_start_attempt
+    cleanup_start_attempt || true
     die "failed to register Restate deployment $deployment_url through $restate_admin_url"
   fi
-  start_attempt_active=0
   require_workbench_alive "before reporting ready"
+  start_attempt_active=0
+  rm -f "$reset_recovery_file"
   log "ready: $workbench_url"
   open_browser "$workbench_url"
 }
@@ -994,6 +1059,8 @@ run_reset_dev_state() {
   data_dir_existed_before_invocation=0
   data_dir_created_this_attempt=1
   started_workbench_this_attempt=0
+  started_workbench_pid=""
+  started_workbench_start_time=""
   started_restate_this_attempt=0
   started_postgres_this_attempt=0
   created_reset_ownership_this_attempt=0
@@ -1012,7 +1079,7 @@ run_foreground() {
   local deployment_url
   deployment_url="$(endpoint_url)"
   if ! require_unused_deployment_uri "$restate_admin_url" "$deployment_url"; then
-    cleanup_start_attempt
+    cleanup_start_attempt || true
     die "refusing to replace an existing Restate deployment at $deployment_url"
   fi
   ensure_postgres
@@ -1020,18 +1087,24 @@ run_foreground() {
   local started_pid="" started_start_time=""
   cleanup_foreground() {
     if [[ -n "$started_pid" ]]; then
-      if pid_identity_matches "$started_pid" "$started_start_time"; then
-        kill "$started_pid" >/dev/null 2>&1 || true
-      else
-        log "process identity changed before foreground cleanup; refusing to signal PID $started_pid"
+      if ! stop_process_identity "$started_pid" "$started_start_time"; then
+        log "foreground cleanup could not stop the owned workbench; retaining its engine and application state"
+        return 1
       fi
+      rm -f "$pid_file" "$meta_file"
       wait "$started_pid" >/dev/null 2>&1 || true
     fi
     if (( started_restate_this_attempt )); then
-      stop_started_restate || true
+      if ! stop_started_restate; then
+        log "foreground cleanup could not remove the exact owned Restate engine; retaining application state"
+        return 1
+      fi
     fi
     if (( started_postgres_this_attempt )); then
-      stop_started_postgres || true
+      if ! stop_started_postgres; then
+        log "foreground cleanup could not remove the exact owned Postgres store; retaining application state"
+        return 1
+      fi
     fi
   }
   trap cleanup_foreground EXIT INT TERM
