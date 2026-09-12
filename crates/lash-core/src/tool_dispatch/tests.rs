@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+mod attachment_normalization;
 mod directives;
 mod intent_drain;
 mod internal_activation;

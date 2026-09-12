@@ -154,7 +154,7 @@ fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolOutcome {
     failure
 }
 
-async fn normalize_tool_result_attachments(
+pub(super) async fn normalize_tool_result_attachments(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,
     result: &mut ToolOutcome,
@@ -163,17 +163,19 @@ async fn normalize_tool_result_attachments(
         return;
     };
     let sources = output.attachments();
-    for source in sources {
-        let producer = crate::AttachmentProducer::Tool {
-            tool_name: tool_name.to_string(),
-        };
+    let producer = crate::AttachmentProducer::Tool {
+        tool_name: tool_name.to_string(),
+    };
+    for source in &sources {
         if let Err(error) = context
             .attachment_source_policy
-            .authorize(&producer, &source)
+            .authorize(&producer, source)
         {
             *result = attachment_failure("attachment_source_policy_denied", error);
             return;
         }
+    }
+    for source in sources {
         let crate::AttachmentSource::Inline { media_type, bytes } = &source else {
             continue;
         };

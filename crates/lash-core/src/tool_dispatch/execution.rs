@@ -156,7 +156,7 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let orchestration_context =
         crate::tool_provider::orchestration::OrchestrationContext::new(tool_context);
-    let result = std::panic::AssertUnwindSafe(async {
+    let mut result = std::panic::AssertUnwindSafe(async {
         let Some(registry) = context.tool_registry.as_deref() else {
             return ToolOutcome::err_fmt("orchestrating registration is missing its tool registry");
         };
@@ -175,6 +175,7 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
             message,
         ))
     });
+    super::retry::normalize_tool_result_attachments(context, &tool_name, &mut result).await;
     let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
     let result = finalize_tool_result_with_execution_context(
         context,
@@ -226,7 +227,7 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let internal_context = crate::InternalProcessContext::new(tool_context);
-    let result = std::panic::AssertUnwindSafe(context.tools.execute_internal_by_id(
+    let mut result = std::panic::AssertUnwindSafe(context.tools.execute_internal_by_id(
         &prepared.tool_id,
         &prepared.args,
         &internal_context,
@@ -242,6 +243,7 @@ pub(crate) async fn execute_internal_process_tool<'run>(
             message,
         ))
     });
+    super::retry::normalize_tool_result_attachments(context, &tool_name, &mut result).await;
     let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
     let result = finalize_tool_result_with_execution_context(
         context,
