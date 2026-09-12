@@ -115,6 +115,7 @@ impl RuntimeTurnDriver<'_> {
             );
         }
         self.ensure_queued_work_cost_is_bounded(&request)?;
+        self.reasoning_streamed = false;
         let (result, text_streamed, call_record) = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx, cancel)
             .await
@@ -205,10 +206,15 @@ impl RuntimeTurnDriver<'_> {
         if let Ok(response) = &result {
             let usage = crate::runtime::effect::token_usage_from_llm(&response.usage);
             self.latest_prompt_usage = normalize_prompt_usage(&usage);
-            if !text_streamed {
-                let prose_projector = self.session.plugins().assistant_prose_projector();
-                emit_semantic_response_parts(event_tx, response, prose_projector.as_deref()).await;
-            }
+            let prose_projector = self.session.plugins().assistant_prose_projector();
+            emit_semantic_response_parts(
+                event_tx,
+                response,
+                prose_projector.as_deref(),
+                text_streamed,
+                self.reasoning_streamed,
+            )
+            .await;
         }
         // Name the request that stopped the call before the machine decides a
         // cancelled terminal reason, so its outcome carries real evidence.

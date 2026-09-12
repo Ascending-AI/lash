@@ -193,6 +193,7 @@ pub struct ProcessLocalExecution {
 pub(crate) struct TurnEffectStateUpdate {
     pub(crate) policy: crate::RuntimeSessionPolicy,
     pub(crate) llm_stream_summaries: HashMap<usize, crate::runtime::LlmStreamSummary>,
+    pub(crate) reasoning_streamed: bool,
     pub(crate) next_llm_ordinal: usize,
     pub(crate) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(crate) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
@@ -605,6 +606,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             ),
             latest_prompt_usage: driver.latest_prompt_usage.clone(),
             llm_stream_summaries: driver.llm_stream_summaries.clone(),
+            reasoning_streamed: driver.reasoning_streamed,
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
             next_llm_ordinal: driver.next_llm_ordinal,
@@ -1265,6 +1267,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         *runner.update.lock_recover() = Some(TurnEffectStateUpdate {
             policy: runner.driver.policy,
             llm_stream_summaries: runner.driver.llm_stream_summaries,
+            reasoning_streamed: runner.driver.reasoning_streamed,
             next_llm_ordinal: runner.driver.next_llm_ordinal,
             pending_queue_claims: runner.driver.pending_queue_claims,
             pending_turn_input_claims: runner.driver.pending_turn_input_claims,

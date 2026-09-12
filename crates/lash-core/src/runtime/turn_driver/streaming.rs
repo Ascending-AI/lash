@@ -354,6 +354,7 @@ impl RuntimeTurnDriver<'_> {
         let attempt_started = self.host.core.clock.now();
         let mut assistant_prose_correlation = None;
         let mut reasoning_correlation = None;
+        let mut reasoning_streamed = false;
         let mut provider_reasoning_delta_open = false;
         let mut assistant_prose_attempt_correlations = Vec::new();
         let mut reasoning_attempt_correlations = Vec::new();
@@ -366,6 +367,7 @@ impl RuntimeTurnDriver<'_> {
             protocol_iteration,
             assistant_prose_correlation: &mut assistant_prose_correlation,
             reasoning_correlation: &mut reasoning_correlation,
+            reasoning_streamed: &mut reasoning_streamed,
             provider_reasoning_delta_open: &mut provider_reasoning_delta_open,
             assistant_prose_attempt_correlations: &mut assistant_prose_attempt_correlations,
             reasoning_attempt_correlations: &mut reasoning_attempt_correlations,
@@ -735,6 +737,7 @@ impl RuntimeTurnDriver<'_> {
             self.llm_stream_summaries
                 .insert(protocol_iteration, debug.summary);
         }
+        self.reasoning_streamed = reasoning_streamed;
         (result, text_streamed, call_record)
     }
 
@@ -1002,6 +1005,9 @@ impl RuntimeTurnDriver<'_> {
             *state.abort_requested = true;
         }
         for reasoning_delta in outcome.reasoning_deltas {
+            if !reasoning_delta.is_empty() {
+                *state.reasoning_streamed = true;
+            }
             fold_llm_stream_event(
                 state.stream_accumulator,
                 state.streamed_usage,
@@ -1083,6 +1089,7 @@ impl RuntimeTurnDriver<'_> {
                 *state.text_streamed = false;
                 *state.assistant_prose_correlation = None;
                 *state.reasoning_correlation = None;
+                *state.reasoning_streamed = false;
                 *state.provider_reasoning_delta_open = false;
             }
             LlmStreamEvent::Delta(delta) => {
@@ -1091,6 +1098,7 @@ impl RuntimeTurnDriver<'_> {
             }
             LlmStreamEvent::ReasoningDelta(delta) => {
                 if !delta.is_empty() {
+                    *state.reasoning_streamed = true;
                     *state.provider_reasoning_delta_open = true;
                     self.log_llm_stream_event(
                         state.debug,
@@ -1205,6 +1213,7 @@ impl RuntimeTurnDriver<'_> {
                         },
                     );
                     if publish_completed_text {
+                        *state.reasoning_streamed = true;
                         let correlation_id =
                             stream_correlation_id(state.reasoning_correlation, item_id);
                         remember_attempt_correlation(

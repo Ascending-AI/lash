@@ -154,6 +154,8 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
     event_tx: &mpsc::Sender<RuntimeStreamEvent>,
     response: &LlmResponse,
     prose_projector: Option<&dyn crate::plugin::AssistantProseProjectorPlugin>,
+    text_streamed: bool,
+    reasoning_streamed: bool,
 ) {
     let visible_parts = crate::visible_response_parts(response.parts.clone());
     let has_text_correlation_ids = visible_parts.iter().any(|part| {
@@ -171,7 +173,7 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
             LlmOutputPart::Text {
                 text,
                 response_meta,
-            } if has_text_correlation_ids && !text.is_empty() => {
+            } if !text_streamed && has_text_correlation_ids && !text.is_empty() => {
                 let text = project_assistant_prose(text, prose_projector);
                 if text.is_empty() {
                     continue;
@@ -189,7 +191,9 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
                 )
                 .await;
             }
-            LlmOutputPart::Reasoning { text, replay } if !text.is_empty() => {
+            LlmOutputPart::Reasoning { text, replay }
+                if !reasoning_streamed && !text.is_empty() =>
+            {
                 let correlation_id = replay
                     .as_ref()
                     .and_then(|meta| meta.item_id.clone())
@@ -208,7 +212,7 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
         }
     }
     let full_text = project_assistant_prose(&response.full_text(), prose_projector);
-    if !emitted_text && !full_text.is_empty() {
+    if !text_streamed && !emitted_text && !full_text.is_empty() {
         send_independent_turn_event(
             event_tx,
             TurnEvent::AssistantProseDelta {

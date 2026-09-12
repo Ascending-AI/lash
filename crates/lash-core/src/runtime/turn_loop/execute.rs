@@ -723,6 +723,7 @@ impl LashRuntime {
             turn_pipeline,
             latest_prompt_usage: None,
             llm_stream_summaries: HashMap::new(),
+            reasoning_streamed: false,
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
             next_llm_ordinal: 0,

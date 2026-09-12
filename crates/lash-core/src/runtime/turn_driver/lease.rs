@@ -78,6 +78,7 @@ impl<'run> RuntimeTurnDriver<'run> {
         if let Some(update) = update {
             self.policy = update.policy;
             self.llm_stream_summaries = update.llm_stream_summaries;
+            self.reasoning_streamed = update.reasoning_streamed;
             self.next_llm_ordinal = update.next_llm_ordinal;
             self.pending_queue_claims = update.pending_queue_claims;
             self.pending_turn_input_claims = update.pending_turn_input_claims;
