@@ -282,7 +282,18 @@ impl ToolRegistry {
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
         for id in removed_ids {
-            surface.remove(&id);
+            let previous = surface
+                .get(&id)
+                .expect("source-bound tool id was collected from this surface");
+            let orphan = ToolRegistryEntry::orphaned(
+                previous.manifest.clone(),
+                previous.registration_kind(),
+                previous.member,
+            );
+            let entry = surface
+                .get_mut(&id)
+                .expect("source-bound tool id was collected from this surface");
+            *entry = orphan;
         }
         surface.debug_assert_invariant();
         let public_changed = export_tool_state_entries(&surface) != previous;

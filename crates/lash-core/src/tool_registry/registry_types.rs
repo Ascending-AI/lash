@@ -24,12 +24,16 @@ impl ToolRegistryEntry {
         }
     }
 
-    pub(super) fn orphaned(manifest: ToolManifest, kind: ToolRegistrationKind) -> Self {
+    pub(super) fn orphaned(
+        manifest: ToolManifest,
+        kind: ToolRegistrationKind,
+        member: bool,
+    ) -> Self {
         Self {
             manifest,
             binding: ToolBinding::Orphaned,
             kind,
-            member: true,
+            member,
         }
     }
 
