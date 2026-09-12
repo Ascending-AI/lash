@@ -54,12 +54,12 @@ fn test_core_owner() -> lash::persistence::LeaseOwnerIdentity {
         "agent-workbench-test-boot",
     )
 }
+use lash_plugin_rolling_history::{
+    ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS, RollingHistoryPluginFactory,
+};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash_remote_protocol::{
     Envelope, RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,
-};
-use lash_standard_plugins::{
-    ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS, rolling_history::RollingHistoryPluginFactory,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

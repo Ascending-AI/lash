@@ -300,7 +300,7 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         .provider(rolling_history_provider(responses))
         .model(model_spec("rolling-history-model", None, 40_000))
         .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
         ))
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             dir.path().join("sessions"),
@@ -452,7 +452,7 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
             .model(model_spec("rolling-history-redrive-model", None, 40_000))
             .tools(Arc::new(AppTools))
             .plugin(Arc::new(
-                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
             ))
             .plugin(checkpoint_probe.clone())
             .store_factory(store_factory.clone())
@@ -508,7 +508,7 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
             .model(model_spec("rolling-history-redrive-model", None, 40_000))
             .tools(Arc::new(AppTools))
             .plugin(Arc::new(
-                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
             ))
             .plugin(checkpoint_probe.clone())
             .effect_host(effect_host.clone())
@@ -594,7 +594,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
         .provider(provider)
         .model(model_spec("rolling-history-model", None, 40_000))
         .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
         ))
         .store_factory(store_factory.clone())
         .trace_jsonl_path(trace_path.clone())
@@ -718,7 +718,7 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
             )]))
             .model(model_spec("rolling-history-model", None, 40_000))
             .plugin(Arc::new(
-                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
             ))
             .store_factory(store_factory.clone())
             .build(crate::testing::runtime_lease_owner())?;
@@ -760,7 +760,7 @@ async fn rolling_history_compaction_accepts_parent_turn_authority() -> Result<()
         ]))
         .model(model_spec("rolling-history-model", None, 40_000))
         .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
         ))
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             dir.path().join("sessions"),
@@ -823,7 +823,7 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
         ]))
         .model(model_spec("rolling-history-model", None, 40_000))
         .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
         ))
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             dir.path().join("sessions"),
@@ -897,7 +897,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         ]))
         .model(model_spec("attachment-prune-model", None, 100_000))
         .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
         ))
         .store_factory(store_factory.clone())
         .trace_jsonl_path(trace_path.clone())
@@ -1009,7 +1009,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         .provider(rolling_history_provider(responses))
         .model(model_spec("plugin-message-id-model", None, 40_000))
         .plugin(Arc::new(
-            lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
         ))
         .plugin(Arc::new(injection_plugin))
         .store_factory(store_factory.clone())
@@ -1071,7 +1071,7 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
     .provider(provider)
     .model(model_spec("rolling-history-rlm-model", None, 40_000))
     .plugin(Arc::new(
-        lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+        lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
     ))
     .store_factory(store_factory.clone())
     .build(crate::testing::runtime_lease_owner())?;
