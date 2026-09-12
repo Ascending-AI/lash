@@ -70,6 +70,13 @@ impl RlmSubagentToolsProvider {
             // by process id, so recovery may re-execute them (ADR 0019).
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                context
+                    .child_process_parent_scope()
+                    .await
+                    .map_err(|error| error.to_string())?,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_identity(
             lash_core::ProcessIdentity::new("subagent").with_label(Some("spawn".to_string())),

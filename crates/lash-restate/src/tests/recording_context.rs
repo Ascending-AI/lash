@@ -1201,6 +1201,10 @@ pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessR
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
@@ -1520,6 +1524,10 @@ pub(super) async fn process_reference_replay_endpoint()
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),

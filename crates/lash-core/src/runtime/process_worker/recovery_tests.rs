@@ -58,6 +58,7 @@ fn session_turn_registration(
         },
         RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     )
 }
 
@@ -358,135 +359,6 @@ fn late_bound_process_work_wiring(
     (registry, hub, wiring)
 }
 
-fn engine_registration(
-    id: impl Into<ProcessId>,
-    kind: &str,
-    env_ref: ProcessExecutionEnvRef,
-    payload: serde_json::Value,
-) -> ProcessRegistration {
-    ProcessRegistration::new(
-        id,
-        ProcessInput::Engine {
-            kind: kind.to_string(),
-            payload,
-        },
-        RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-    )
-    .with_execution_env_ref(Some(env_ref))
-}
-
-async fn terminal_count(registry: &Arc<dyn ProcessRegistry>) -> usize {
-    registry
-        .list_processes(&ProcessListFilter {
-            status: crate::ProcessStatusFilter::Any,
-            ..ProcessListFilter::default()
-        })
-        .await
-        .expect("list processes")
-        .into_iter()
-        .filter(ProcessRecord::is_terminal)
-        .count()
-}
-
-async fn wait_for_terminal_count(
-    registry: &Arc<dyn ProcessRegistry>,
-    expected: usize,
-    description: &str,
-) {
-    let result = tokio::time::timeout(Duration::from_secs(5), async {
-        while terminal_count(registry).await < expected {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
-    if result.is_err() {
-        let records = registry
-            .list_processes(&ProcessListFilter {
-                status: crate::ProcessStatusFilter::Any,
-                ..ProcessListFilter::default()
-            })
-            .await
-            .expect("list timed-out processes");
-        panic!(
-            "timed out waiting for {description}: {}",
-            records
-                .iter()
-                .map(|record| format!("{}={}", record.id, record.status.label()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-}
-
-fn native_worker(
-    registry: Arc<dyn ProcessRegistry>,
-    lease_owner: LeaseOwnerIdentity,
-) -> DurableProcessWorker {
-    native_worker_with_trigger_store(
-        registry,
-        lease_owner,
-        Arc::new(crate::InMemoryTriggerStore::default()),
-    )
-}
-
-fn native_worker_with_trigger_store(
-    registry: Arc<dyn ProcessRegistry>,
-    lease_owner: LeaseOwnerIdentity,
-    trigger_store: Arc<dyn TriggerStore>,
-) -> DurableProcessWorker {
-    let watched = crate::watch_process_registry(registry);
-    DurableProcessWorker::new(
-        DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            ),
-            Arc::new(InMemorySessionStoreFactory),
-            crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
-            lease_owner,
-        )
-        .with_trigger_store(trigger_store),
-    )
-    .expect("valid test native substrate config")
-}
-
-/// A worker whose trigger-delivery reconcile can re-enter the work driver: the
-/// driver's run handle drives this same worker, which is the shape the facade
-/// builds and the shape that produced the "a call reports its own admission as
-/// `Busy`" defect.
-fn reentrant_worker_with_trigger_store(
-    registry: Arc<dyn ProcessRegistry>,
-    lease_owner: LeaseOwnerIdentity,
-    trigger_store: Arc<dyn TriggerStore>,
-    run_handle: Arc<LateBoundProcessWork>,
-) -> DurableProcessWorker {
-    let (_driver_registry, _driver_hub, process_work) =
-        late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
-    let worker = DurableProcessWorker::new(
-        DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            ),
-            Arc::new(InMemorySessionStoreFactory),
-            crate::WorkerProcessWork::External(process_work),
-            Arc::new(crate::NoQueuedWork::new()),
-            lease_owner,
-        )
-        .with_trigger_store(trigger_store),
-    )
-    .expect("valid test native substrate config");
-    run_handle
-        .worker
-        .set(worker.clone())
-        .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
-    worker
-}
-
 /// End-to-end shape of the re-entrancy F1 came from: the reconcile registers a
 /// process and drives it through the work driver, then the outer pass's own
 /// scan sees that row already scheduled. The row belongs to this one call, so
@@ -547,6 +419,7 @@ fn registration_with_disposition(
         },
         disposition,
         crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     )
 }
 
@@ -915,6 +788,10 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             },
             RecoveryContract::Rerunnable,
             crate::ProcessOriginator::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         );
         if let Err(err) = context.start_process(request).await {
             return crate::ToolOutcome::err_fmt(format_args!(
@@ -986,7 +863,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
 
         if role == "launcher" {
             for root in 0..roots {
-                let registration = ProcessRegistration::session_start_draft(
+                let registration = crate::ProcessStartRequest::new(
                     format!("10-root-{root:03}"),
                     ProcessInput::Engine {
                         kind: self.kind().to_string(),
@@ -1000,6 +877,14 @@ impl crate::ProcessEngine for ProductionChainEngine {
                         }),
                     },
                     RecoveryContract::Rerunnable,
+                    runtime.trigger_actor(),
+                    crate::ProcessLifecyclePolicy::new(
+                        runtime
+                            .child_process_parent_scope()
+                            .await
+                            .expect("runtime parent"),
+                        crate::OnParentEnd::Abandon,
+                    ),
                 );
                 let reply = runtime
                     .start_child_process(registration, "test-chain", None)
@@ -1052,7 +937,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
         if level + 1 < nodes {
             let child_level = level + 1;
             let child_id = format!("{}-node-{root:03}-{child_level:02}", 20 + child_level);
-            let registration = ProcessRegistration::session_start_draft(
+            let registration = crate::ProcessStartRequest::new(
                 child_id.clone(),
                 ProcessInput::Engine {
                     kind: self.kind().to_string(),
@@ -1066,6 +951,14 @@ impl crate::ProcessEngine for ProductionChainEngine {
                     }),
                 },
                 RecoveryContract::Rerunnable,
+                runtime.trigger_actor(),
+                crate::ProcessLifecyclePolicy::new(
+                    runtime
+                        .child_process_parent_scope()
+                        .await
+                        .expect("runtime parent"),
+                    crate::OnParentEnd::Abandon,
+                ),
             );
             let reply = runtime
                 .start_child_process(registration, "test-chain", None)
@@ -1191,6 +1084,22 @@ async fn run_production_chain(
         .iter()
         .filter(|record| record.id != "00-chain-launcher")
     {
+        assert_eq!(record.lifecycle.on_parent_end, crate::OnParentEnd::Abandon);
+        let crate::ParentScope::Process {
+            process_id,
+            incarnation,
+        } = &record.lifecycle.parent
+        else {
+            panic!(
+                "a process-started child must retain its process parent: {}",
+                record.id
+            );
+        };
+        let parent = records
+            .iter()
+            .find(|candidate| candidate.id == process_id)
+            .expect("parent is retained in the chain");
+        assert_eq!(*incarnation, parent.incarnation);
         assert!(
             !matches!(
                 record.provenance.caused_by,
@@ -1326,6 +1235,10 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
             },
             RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register production session-turn process");
@@ -1400,6 +1313,10 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
                 },
                 RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref)),
         )
@@ -1768,6 +1685,10 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
             },
             RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("pre-register delivery process");

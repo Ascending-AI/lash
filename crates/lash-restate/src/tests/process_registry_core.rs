@@ -1297,6 +1297,10 @@ finish (await handle)?
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),

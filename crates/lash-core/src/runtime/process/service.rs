@@ -477,6 +477,10 @@ mod tests {
                             },
                             crate::RecoveryContract::ExternallyOwned,
                             ProcessProvenance::host(),
+                            crate::ProcessLifecyclePolicy::new(
+                                crate::ParentScope::Host,
+                                crate::OnParentEnd::Abandon,
+                            ),
                         ),
                         ProcessIncarnation::from_registration_sequence(1),
                     )
@@ -654,6 +658,10 @@ mod tests {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             ),
             ProcessIncarnation::from_registration_sequence(1),
         );

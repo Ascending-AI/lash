@@ -4,6 +4,12 @@ use crate::SessionId;
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PluginError {
+    /// A child requested cancellation on end of an already-ended parent.
+    #[error("cannot register process `{process_id}`: parent scope {parent:?} has ended")]
+    ParentEnded {
+        process_id: ProcessId,
+        parent: crate::ParentScope,
+    },
     /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String },
@@ -245,6 +251,7 @@ impl PluginError {
             | Self::ProcessNoLongerRetained { .. }
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }
+            | Self::ParentEnded { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }
             | Self::InvalidProcessWakeIdentity { .. }

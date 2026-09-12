@@ -44,19 +44,19 @@ pub use events::{
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
-    AbandonRequest, InMemoryProcessExecutionEnvStore, ObserverInheritance,
-    PROCESS_LEASE_SCHEMA_VERSION, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
+    AbandonRequest, InMemoryProcessExecutionEnvStore, ObserverInheritance, OnParentEnd,
+    PROCESS_LEASE_SCHEMA_VERSION, ParentScope, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessLeaseSchemaVersionError, ProcessListFilter, ProcessListMode, ProcessObserverBy,
-    ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRef,
-    ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
-    ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTombstone, RecoveryContract, SessionId, SessionScope, SessionScopeId, WaitKind,
-    WaitState, ensure_process_lease_schema_version, load_process_execution_env,
-    persist_process_execution_env, process_runtime_session_ids,
+    ProcessLeaseSchemaVersionError, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
+    ProcessObserverBy, ProcessOriginator, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    ProcessRef, ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance,
+    ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
+    ProcessStatusFilter, ProcessTombstone, RecoveryContract, SessionId, SessionScope,
+    SessionScopeId, WaitKind, WaitState, ensure_process_lease_schema_version,
+    load_process_execution_env, persist_process_execution_env, process_runtime_session_ids,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,

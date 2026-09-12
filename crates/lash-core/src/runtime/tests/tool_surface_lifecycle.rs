@@ -429,6 +429,10 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         );
         if process_id == "filtered-process" {
             registration = registration
@@ -679,6 +683,10 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "signal.ready".to_string(),
@@ -820,6 +828,10 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     },
                     crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
                 ),
                 options,
                 crate::ProcessOpScope::new(named_turn_scope(
@@ -860,6 +872,10 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .expect("register observer test process");
@@ -1767,6 +1783,7 @@ fn payload_gated_request(
         },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessOriginator::session(crate::SessionScope::new(session_id)),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     )
     .with_env_spec(crate::ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),

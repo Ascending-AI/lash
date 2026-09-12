@@ -849,7 +849,10 @@ impl ToolIntentIngress {
         let mut parent_end_policy = None;
         let command = match intent {
             lash_core::ToolIntent::StartProcess(intent) => {
-                parent_end_policy = Some(intent.on_parent_end);
+                parent_end_policy = Some(match intent.request.lifecycle.on_parent_end {
+                    lash_core::OnParentEnd::Abandon => lash_core::ProcessParentEndPolicy::Abandon,
+                    lash_core::OnParentEnd::Cancel => lash_core::ProcessParentEndPolicy::Cancel,
+                });
                 let mut request = intent.request;
                 request.id = lash_core::ProcessId::from(identity.replay_key.clone());
                 let env_spec = request.env_spec.clone();

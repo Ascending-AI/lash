@@ -1589,8 +1589,11 @@ impl crate::ToolProvider for ParentEndFailureIntentTool {
                         "cancelled-turn-parent-end-child",
                         crate::ProcessOriginator::host_scoped("parent-end-failure-witness"),
                         serde_json::json!({"witness": true}),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 },
             ))]),
         )

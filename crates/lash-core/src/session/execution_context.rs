@@ -638,15 +638,61 @@ impl<'run> RuntimeExecutionContext<'run> {
         .await
     }
 
+    pub(crate) fn child_process_query(&self) -> Option<Arc<dyn crate::ProcessQuery>> {
+        self.process_execution
+            .as_ref()
+            .and_then(|process| process.event_context.as_ref())
+            .map(|context| {
+                let query: Arc<dyn crate::ProcessQuery> = context.process_work.registry().clone();
+                query
+            })
+    }
+
+    /// Resolve the enclosing durable scope for a code-executor's child start.
+    pub async fn child_process_parent_scope(
+        &self,
+    ) -> Result<crate::ParentScope, crate::PluginError> {
+        if let Some(process) = &self.process_execution {
+            let context = process.event_context.as_ref().ok_or_else(|| {
+                crate::PluginError::Session(
+                    "child start requires process execution authority".to_string(),
+                )
+            })?;
+            let parent = context
+                .process_work
+                .registry()
+                .resolve_process_ref(&process.process_id)
+                .await?;
+            return Ok(crate::ParentScope::Process {
+                process_id: parent.process_id,
+                incarnation: parent.incarnation,
+            });
+        }
+        let turn_id = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .turn_id()
+            .cloned()
+            .ok_or_else(|| {
+                crate::PluginError::Session("child start requires a turn parent".to_string())
+            })?;
+        Ok(crate::ParentScope::Turn {
+            session_id: self.session_id.clone(),
+            turn_id,
+        })
+    }
+
     /// Starts a child process for code-executor implementors with the current execution context as
     /// causal provenance.
     pub async fn start_child_process(
         &self,
-        registration: crate::ProcessRegistration,
+        request: crate::ProcessStartRequest,
         _kind: impl Into<String>,
         _label: Option<String>,
     ) -> crate::ToolInvocationReply {
         let _phase = self.named_phase("process.start_child");
+        let registration = request.into_registration(None);
         let registration = match self
             .attach_captured_process_execution_env(registration)
             .await

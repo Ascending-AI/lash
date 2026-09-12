@@ -36,6 +36,10 @@ async fn ingress_core_with_effect_host_and_env_store(
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types(vec![lash_core::ProcessEventType {
                 name: EVENT.to_string(),
@@ -562,8 +566,11 @@ fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
             "ingress-start",
             lash_core::ProcessOriginator::host(),
             serde_json::Value::Null,
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ),
-        on_parent_end: Default::default(),
     }))
 }
 
@@ -584,6 +591,10 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -592,7 +603,6 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
                 ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
             },
         )),
-        on_parent_end: Default::default(),
     }))
 }
 
@@ -1465,16 +1475,53 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     Ok(())
 }
 
+#[test]
+fn ingress_start_without_lifecycle_is_refused_before_submission() {
+    let mut payload =
+        serde_json::to_value(start_intent(&SessionId::from(SESSION))).expect("encode intent");
+    fn remove_lifecycle(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                if object.remove("lifecycle").is_some() {
+                    return true;
+                }
+                object.values_mut().any(remove_lifecycle)
+            }
+            _ => false,
+        }
+    }
+    assert!(
+        remove_lifecycle(&mut payload),
+        "valid start had a required policy"
+    );
+    let error = serde_json::from_value::<lash_core::ToolIntent>(payload)
+        .expect_err("missing lifecycle must not decode");
+    assert!(error.to_string().contains("lifecycle"));
+}
+
 #[tokio::test]
-async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind() -> Result<()> {
+async fn ingress_start_process_cancel_is_retained_and_settled_after_scope_rebind() -> Result<()> {
     let (core, registry) = ingress_core().await?;
+    let parent = registry
+        .get_process(&ProcessId::from(PROCESS))
+        .await?
+        .expect("registered parent process");
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::process(PROCESS))?;
     let key = ingress.key("parent-end-retention", 0);
     let child_id = key.identity().replay_key.clone();
+    let mut intent = start_intent(&SessionId::from(SESSION));
+    let lash_core::ToolIntent::StartProcess(start) = &mut intent else {
+        unreachable!("start_intent always returns StartProcess")
+    };
+    start.request.lifecycle = lash_core::ProcessLifecyclePolicy::new(
+        lash_core::ParentScope::Process {
+            process_id: parent.id,
+            incarnation: parent.incarnation,
+        },
+        lash_core::OnParentEnd::Cancel,
+    );
 
-    let started = ingress
-        .submit(key, start_intent(&SessionId::from(SESSION)))
-        .await;
+    let started = ingress.submit(key, intent).await;
     assert!(matches!(
         started,
         crate::tools::ToolIntentIngressOutcome::Admitted {
@@ -1503,7 +1550,7 @@ async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind
             .await?
             .iter()
             .any(|event| event.event_type == "process.cancel_requested"),
-        "default Cancel reaches child"
+        "Process/Cancel reaches the child after rebuilding the ingress scope"
     );
     assert!(
         redriven_scope.settle_parent_end().await?.is_empty(),
@@ -1625,6 +1672,10 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -1633,7 +1684,6 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
                 ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
             },
         )),
-        on_parent_end: Default::default(),
     }))
 }
 

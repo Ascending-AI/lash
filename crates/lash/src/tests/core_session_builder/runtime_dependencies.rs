@@ -194,6 +194,10 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "builder.clock.wake".to_string(),
@@ -589,6 +593,10 @@ async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await?;
 
@@ -813,6 +821,10 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "fork.wake".to_string(),
@@ -950,6 +962,10 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register process that will be pruned during fork publication");
@@ -1051,6 +1067,10 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ),
             &[SessionId::from("fork-observer-source")],
         )
@@ -1202,6 +1222,10 @@ async fn duplicate_only_fork_intents_are_canonical(
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ),
             std::slice::from_ref(&source_session_id),
         )
@@ -1270,6 +1294,10 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await?;
     let store = factory
@@ -1376,6 +1404,10 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
                     },
                     lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 ))
                 .await?;
         }

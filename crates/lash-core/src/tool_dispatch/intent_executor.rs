@@ -370,7 +370,10 @@ async fn execute_one(
             }
             let parent_end = crate::ToolIntentParentEnd {
                 process_id: summary.id.clone(),
-                policy: intent.on_parent_end,
+                policy: match intent.request.lifecycle.on_parent_end {
+                    crate::OnParentEnd::Abandon => crate::ProcessParentEndPolicy::Abandon,
+                    crate::OnParentEnd::Cancel => crate::ProcessParentEndPolicy::Cancel,
+                },
             };
             Ok((
                 serde_json::to_value(summary).unwrap_or(serde_json::Value::Null),
@@ -459,6 +462,7 @@ fn error_code(error: &crate::PluginError) -> String {
         crate::PluginError::RuntimeEffectController(error) => error.code.as_str().to_string(),
         crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
         crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
+        crate::PluginError::ParentEnded { .. } => "process_parent_ended".to_string(),
         crate::PluginError::ProcessNoLongerRetained { .. } => {
             "process_no_longer_retained".to_string()
         }

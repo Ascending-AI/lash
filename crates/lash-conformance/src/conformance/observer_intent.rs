@@ -20,6 +20,10 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register fork observer process");

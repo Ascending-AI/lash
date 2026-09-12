@@ -47,6 +47,10 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Fi
                 "child-first-turn-process",
                 crate::ProcessOriginator::host(),
                 serde_json::json!({ "source": "first child turn" }),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             ))
             .await
         {

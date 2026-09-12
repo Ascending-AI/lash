@@ -19,8 +19,16 @@ mod fixture;
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/postgres-expected.json",
+];
+const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-8bbd7b94/postgres-expected.json",
+];
+const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-7861e438/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-ee717fab/postgres-expected.json",
 ];
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,7 +105,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 86);
+    assert_eq!(PostgresStorage::schema_version(), 87);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -257,7 +265,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          ALTER TABLE lash_turn_cancel_requests
              ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
          UPDATE lash_schema_versions
-            SET version = 86
+            SET version = 87
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)

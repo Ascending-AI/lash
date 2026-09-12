@@ -21,6 +21,10 @@ pub(super) async fn list_filters_match_extracted_and_json_fields(
                         subscription_revision: None,
                     }),
                 ),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(
                 ProcessIdentity::new("indexed-filter-kind")

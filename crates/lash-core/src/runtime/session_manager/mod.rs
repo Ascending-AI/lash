@@ -1017,6 +1017,10 @@ mod process_visibility_tests {
                         },
                         crate::RecoveryContract::ExternallyOwned,
                         crate::ProcessProvenance::host(),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     )
                     .with_extra_event_types([crate::ProcessEventType {
                         name: "signal.ready".to_string(),

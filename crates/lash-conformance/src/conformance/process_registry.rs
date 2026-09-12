@@ -1,6 +1,11 @@
 //! Cross-backend conformance for the durable process registry.
 
 use lash_sansio::ProcessId;
+mod event_replay;
+use event_replay::{
+    canonical_process_event_payload_replay, long_cancellation_reason_replay_is_backend_safe,
+};
+mod lifecycle;
 mod status_filters;
 use status_filters::list_filters_match_extracted_and_json_fields;
 
@@ -60,6 +65,7 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "process_registry");
     drop((first, second));
+    lifecycle::registration_contract(make()).await;
     super::hostile_input::process_namespace(make()).await;
     process_registry_conformance(make()).await;
 }
@@ -69,6 +75,7 @@ pub async fn process_registry_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableProcessRegistry,
 {
+    lifecycle::registration_contract(make().open).await;
     super::hostile_input::process_namespace(make().open).await;
     let handles = make();
     assert_fresh_instances(
@@ -98,6 +105,10 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register leased replay repair process");
@@ -403,6 +414,10 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_identity(
         ProcessIdentity::new("conformance")
@@ -755,6 +770,10 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register parent-end-plan process");
@@ -1085,61 +1104,6 @@ pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
     );
 }
 
-async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("canonical-process-event-payload-replay");
-    registry
-        .register_process(
-            registration(&process_id).with_extra_event_types([plain_event_type("signal.zero")]),
-        )
-        .await
-        .expect("register canonical-payload process");
-    let replay_key = format!("process:{process_id}:signal.zero:1");
-    let first = registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": -0.0}))
-                .with_replay_key(&replay_key),
-        )
-        .await
-        .expect("append negative-zero payload");
-    let replay = registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": 0.0}))
-                .with_replay_key(replay_key),
-        )
-        .await
-        .expect("canonical positive-zero retry must be idempotent");
-    assert_eq!(
-        replay.event.sequence, first.event.sequence,
-        "canonically equal zero payloads must share the replayed event"
-    );
-}
-
-async fn long_cancellation_reason_replay_is_backend_safe(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("long-cancellation-reason-replay");
-    registry
-        .register_process(registration(&process_id))
-        .await
-        .expect("register long-cancellation process");
-    let reason = (0..800)
-        .map(|index| format!("{index:08x}"))
-        .collect::<String>();
-    let request = ProcessEventAppendRequest::cancel_requested(&process_id, Some(reason));
-    let first = registry
-        .append_event(&process_id, request.clone())
-        .await
-        .expect("append cancellation with long reason");
-    let replay = registry
-        .append_event(&process_id, request)
-        .await
-        .expect("replay cancellation with long reason");
-    assert_eq!(
-        replay.event.sequence, first.event.sequence,
-        "long cancellation reason retries must remain idempotent on every backend"
-    );
-}
-
 async fn refolded_process_record_matches_stored_projection(
     writer: Arc<dyn ProcessRegistry>,
     reader: Arc<dyn ProcessRegistry>,
@@ -1155,6 +1119,10 @@ async fn refolded_process_record_matches_stored_projection(
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
                 "process-env:{process_id}"
@@ -1292,6 +1260,10 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_max_attempts(Some(1)),
         )
@@ -1483,6 +1455,10 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(
                 ProcessIdentity::new("waiting-recovery-worklist")
