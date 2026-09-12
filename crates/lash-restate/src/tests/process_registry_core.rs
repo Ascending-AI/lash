@@ -1367,6 +1367,14 @@ finish (await handle)?
             "first turn completed before the pending tool published its completion key: {turn:?}"
         ),
     };
+    first_turn.abort();
+    assert!(
+        first_turn
+            .await
+            .expect_err("the first invocation is crashed at the pending wait")
+            .is_cancelled(),
+        "the first invocation must stop at the injected crash boundary"
+    );
     let resolver = RestateRuntimeEffectController::new(Arc::clone(&context));
     assert_eq!(
         resolver
@@ -1378,11 +1386,6 @@ finish (await handle)?
             .expect("resolve pending replay-test tool"),
         ResolveOutcome::Accepted
     );
-    let first_turn = first_turn.await.expect("first turn task");
-    assert!(matches!(
-        first_turn.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
-    ));
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(1), signal_wait)
             .await
@@ -1473,7 +1476,7 @@ finish (await handle)?
         .reset_invocation_state_for_replay_preserving_durable_event(
             &RestateDurableWaitAddress::for_key(&completion_key).workflow_key,
         );
-    context.start_replay();
+    context.start_replay_allowing_journal_extension();
     let retry_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay = Box::pin(replay_test_runtime_with_plugins_and_registry(
@@ -1504,10 +1507,28 @@ finish (await handle)?
         "Restate replay must return the journaled scalar ToolAttempt instead of re-executing the provider"
     );
     let replayed_envelopes = context.recorded_runtime_effect_envelopes();
+    let appended_envelopes = replayed_envelopes
+        .iter()
+        .filter(|(name, _)| {
+            !first_recorded_envelopes
+                .iter()
+                .any(|(first_name, _)| first_name == name)
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
         replayed_envelopes.len(),
-        recorded_effect_count,
-        "replay must consume the journal rather than append another ToolAttempt record"
+        recorded_effect_count + 1,
+        "the resumed invocation may append only its previously uncommitted checkpoint"
+    );
+    assert_eq!(
+        appended_envelopes.len(),
+        1,
+        "the replay prefix must consume every pre-crash journal entry"
+    );
+    assert_eq!(
+        appended_envelopes[0].1.command.kind(),
+        RuntimeEffectKind::Checkpoint,
+        "only the post-wait checkpoint is new after the crash"
     );
     let replayed_scalar = replayed_envelopes
         .iter()

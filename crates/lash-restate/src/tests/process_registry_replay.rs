@@ -1,4 +1,5 @@
 use super::*;
+use lashlang::LashlangArtifactStore as _;
 
 #[tokio::test]
 pub(super) async fn restate_controller_replays_parent_shaped_start_await_suspend_flow() {
@@ -60,6 +61,15 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all()),
     )
     .expect("link lashlang module");
+    let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+    artifact_store
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("restate-serializable-input"),
+            &linked_module.artifact,
+        )
+        .await
+        .expect("publish serializable-input artifact");
+    let (process_env_store, process_env_ref) = lash_core::testing::process_execution_env_fixture();
     let process_ref = linked_module
         .artifact
         .process_ref("scan")
@@ -80,9 +90,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
-    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
-        "process-env:test:process-1",
-    )))
+    .with_execution_env_ref(Some(process_env_ref))
     .with_wake_session_id(Some(SessionId::from("session")));
 
     let outcome = host
@@ -96,7 +104,14 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
-            registry_local_executor(registry.clone()),
+            registry_local_executor(registry.clone())
+                .with_process_env_store(process_env_store)
+                .with_process_engines(lash_core::ProcessEngineRegistry::new().with_engine(
+                    Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
+                        artifact_store,
+                        lash_lashlang_runtime::LashlangSurface::default(),
+                    )),
+                )),
         )
         .await
         .expect("start");

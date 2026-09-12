@@ -35,7 +35,7 @@ impl ProcessLocalExecution {
             } => {
                 let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
                 let process_owner = crate::ArtifactOwner::process(registration.id.clone());
-                if let Some(env_spec) = env_spec.as_ref() {
+                let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                     let env_store = process_env_store.as_ref().ok_or_else(|| {
                         RuntimeEffectControllerError::foreign(
                             "process_env_store_unavailable",
@@ -47,27 +47,38 @@ impl ProcessLocalExecution {
                             "failed to encode process execution environment: {error}"
                         ))
                     })?;
-                    let env_ref = match crate::publish_process_execution_env(
+                    let bytes = env_spec.to_store_bytes().map_err(|error| {
+                        crate::PluginError::Session(format!(
+                            "failed to encode process execution environment: {error}"
+                        ))
+                    })?;
+                    let (env_ref, staged) = match crate::publish_process_execution_env(
                         env_store.as_ref(),
                         &staging_owner,
                         env_spec,
                     )
                     .await
                     {
-                        Ok(env_ref) => env_ref,
+                        Ok(env_ref) => (env_ref, true),
                         Err(publish_error) => {
-                            env_store
+                            match env_store
                                 .transfer_process_execution_env(
                                     &staging_owner,
                                     &process_owner,
                                     &expected_ref,
                                 )
                                 .await
-                                .map_err(|_| publish_error)?;
-                            expected_ref
+                            {
+                                Ok(()) => (expected_ref, true),
+                                Err(_) if artifact_owner_is_permanently_retired(&publish_error) => {
+                                    (expected_ref, false)
+                                }
+                                Err(_) => return Err(publish_error.into()),
+                            }
                         }
                     };
-                    registration = registration.with_execution_env_ref(Some(env_ref));
+                    registration = registration.with_execution_env_ref(Some(env_ref.clone()));
+                    Some((env_ref, bytes, staged))
                 } else if let Some(env_ref) = registration.env_ref.as_ref() {
                     let env_store = process_env_store.as_ref().ok_or_else(|| {
                         RuntimeEffectControllerError::foreign(
@@ -83,40 +94,54 @@ impl ProcessLocalExecution {
                                 "missing process execution env `{env_ref}`"
                             ))
                         })?;
-                    if let Err(publish_error) = env_store
+                    let staged = if let Err(publish_error) = env_store
                         .publish_process_execution_env(&staging_owner, env_ref, &bytes)
                         .await
                     {
-                        env_store
+                        match env_store
                             .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
                             .await
-                            .map_err(|_| publish_error)?;
-                    }
-                }
-                let env_ref = registration.env_ref.clone();
+                        {
+                            Ok(()) => true,
+                            Err(_) if artifact_owner_is_permanently_retired(&publish_error) => {
+                                false
+                            }
+                            Err(_) => return Err(publish_error.into()),
+                        }
+                    } else {
+                        true
+                    };
+                    Some((env_ref.clone(), bytes, staged))
+                } else {
+                    None
+                };
                 let engine_artifacts = match registration.input.as_ref() {
                     crate::ProcessInput::Engine { kind, payload } if process_engines.is_some() => {
                         let engine = process_engines
                             .as_ref()
                             .expect("checked above")
                             .require(kind)?;
-                        if let Err(protect_error) = engine
+                        let staged = if let Err(protect_error) = engine
                             .protect_start_artifacts(&staging_owner, payload)
                             .await
-                            && engine
+                        {
+                            if engine
                                 .transfer_start_artifacts(&staging_owner, &process_owner, payload)
                                 .await
                                 .is_err()
-                        {
-                            if let Some(env_store) = process_env_store.as_ref() {
-                                env_store
-                                    .retire_process_execution_env_owner(&staging_owner)
-                                    .await?;
+                            {
+                                if artifact_owner_is_permanently_retired(&protect_error) {
+                                    false
+                                } else {
+                                    return Err(protect_error.into());
+                                }
+                            } else {
+                                true
                             }
-                            engine.retire_artifact_owner(&staging_owner).await?;
-                            return Err(protect_error.into());
-                        }
-                        Some((engine, payload.clone()))
+                        } else {
+                            true
+                        };
+                        Some((engine, payload.clone(), staged))
                     }
                     _ => None,
                 };
@@ -134,31 +159,46 @@ impl ProcessLocalExecution {
                                 .retire_process_execution_env_owner(&staging_owner)
                                 .await?;
                         }
-                        if let Some((engine, _)) = engine_artifacts.as_ref() {
+                        if let Some((engine, _, _)) = engine_artifacts.as_ref() {
                             engine.retire_artifact_owner(&staging_owner).await?;
                         }
                         return Err(error.into());
                     }
                 };
-                if let (Some(env_store), Some(env_ref)) =
-                    (process_env_store.as_ref(), env_ref.as_ref())
+                if let (Some(env_store), Some((env_ref, bytes, staged))) =
+                    (process_env_store.as_ref(), env_artifacts.as_ref())
                 {
-                    env_store
-                        .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
-                        .await?;
-                    env_store
-                        .retire_process_execution_env_owner(&staging_owner)
-                        .await?;
+                    if *staged {
+                        env_store
+                            .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
+                            .await?;
+                        env_store
+                            .retire_process_execution_env_owner(&staging_owner)
+                            .await?;
+                    } else {
+                        env_store
+                            .publish_process_execution_env(&process_owner, env_ref, bytes)
+                            .await?;
+                    }
                 }
-                if let Some((engine, payload)) = engine_artifacts {
-                    engine
-                        .transfer_start_artifacts(
-                            &staging_owner,
-                            &crate::ArtifactOwner::process(record.id.clone()),
-                            &payload,
-                        )
-                        .await?;
-                    engine.retire_artifact_owner(&staging_owner).await?;
+                if let Some((engine, payload, staged)) = engine_artifacts {
+                    if staged {
+                        engine
+                            .transfer_start_artifacts(
+                                &staging_owner,
+                                &crate::ArtifactOwner::process(record.id.clone()),
+                                &payload,
+                            )
+                            .await?;
+                        engine.retire_artifact_owner(&staging_owner).await?;
+                    } else {
+                        engine
+                            .protect_start_artifacts(
+                                &crate::ArtifactOwner::process(record.id.clone()),
+                                &payload,
+                            )
+                            .await?;
+                    }
                 }
                 let _ = process_work
                     .admit_pending_processes("process_start")
@@ -377,6 +417,14 @@ impl ProcessLocalExecution {
         }
         outcome
     }
+}
+
+fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Session(message)
+            if message.contains("artifact owner has been permanently retired")
+    )
 }
 
 #[cfg(test)]

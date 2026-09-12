@@ -1200,7 +1200,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 18"));
+    assert!(message.contains("supports schema version 19"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1210,7 +1210,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
 #[tokio::test]
 async fn sqlite_effect_controller_rejects_retained_generation_17_schema_before_serving() {
     const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 17;
-    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 18);
+    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 2, 19);
 
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("retained-generation-17-effects.db");
@@ -1228,7 +1228,7 @@ async fn sqlite_effect_controller_rejects_retained_generation_17_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 18"));
+    assert!(message.contains("supports schema version 19"));
     assert!(message.contains("database reports version 17"));
 }
 
@@ -2303,8 +2303,8 @@ async fn sqlite_effect_host_retires_session_journal_rows() {
         })
         .expect("count scope fences");
     assert_eq!(
-        fences, 2,
-        "the process and the retired runtime operation each leave one permanent fence"
+        fences, 5,
+        "the three session scopes, process and retired runtime operation each leave one permanent fence"
     );
 }
 

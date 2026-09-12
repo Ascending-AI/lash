@@ -54,12 +54,12 @@ async fn inject_message_scopes_emission_to_requested_session() {
         .sessions
         .ensure(&SessionId::from(scoped_session_id), state.rlm_dialect);
 
-    let environment = lashlang::LashlangHostEnvironment::new(
+    let environment = lash::rlm::LashlangHostEnvironment::new(
         workbench_lashlang_resources(),
         workbench_lashlang_abilities(),
     );
-    let linked = lashlang::LinkedModule::link(
-        lashlang::parse(
+    let linked = lash::rlm::LinkedModule::link(
+        lash::rlm::parse(
             "process mail_listener(event: mail.Received) -> str { finish event.title }",
         )
         .expect("parse mail-listener process"),
@@ -69,7 +69,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
     let artifact_store = lash_sqlite_store::Store::open(&data_dir.path().join("artifacts.db"))
         .await
         .expect("open workbench Lashlang artifact store");
-    lashlang::LashlangArtifactStore::publish_module_artifact(
+    lash::persistence::LashlangArtifactStore::publish_module_artifact(
         &artifact_store,
         &lash::process::ArtifactOwner::host("mail-payload-test"),
         &linked.artifact,

@@ -1659,7 +1659,9 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
-            registry_local_executor(Arc::clone(&registry_a)),
+            registry_local_executor(Arc::clone(&registry_a))
+                .with_process_env_store(RECOVERY_PROCESS_ENV_STORE.clone()
+                    as Arc<dyn lash_core::ProcessExecutionEnvStore>),
         )
         .await
         .expect("schedule and run process through Restate endpoint");

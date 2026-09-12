@@ -11,6 +11,23 @@ pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, s
     );
 }
 
+/// Model the artifact-cleanup worker before asserting that a projected process
+/// tombstone is eligible for physical compaction.
+pub(crate) async fn acknowledge_pending_process_artifact_cleanup(
+    registry: &dyn crate::ProcessRegistry,
+) {
+    for cleanup in registry
+        .pending_process_artifact_cleanup()
+        .await
+        .expect("list pending process artifact cleanup")
+    {
+        registry
+            .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
+            .await
+            .expect("acknowledge process artifact cleanup");
+    }
+}
+
 /// A pair of [`ProcessRegistry`] handles opened against the same durable
 /// backing store.
 pub struct ReopenableProcessRegistry {

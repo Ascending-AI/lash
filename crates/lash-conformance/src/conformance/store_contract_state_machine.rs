@@ -3,7 +3,6 @@
 //! The generator lives here so every backend replays exactly the same operation
 //! language through the public trait-object contracts. Backend crates only
 //! provide fresh handles; they do not carry a `proptest` dependency.
-
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
 use crate::{
@@ -14,8 +13,7 @@ use crate::{
     fold_process_record, process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_sansio::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 use run_shape::{RunShape, RunShapeTotals};
@@ -131,7 +129,6 @@ pub enum StoreContractOp {
 }
 
 /// Stateful driver for the shared generated store-contract operation language.
-///
 /// This deliberately performs only the operation semantics and the small
 /// amount of bookkeeping needed by later operations (current authorities,
 /// leases, wake claims, and queue selections). The property harness layers its
@@ -2212,6 +2209,7 @@ async fn assert_prune_tombstone_watermark_safety(
             && encoded.get("input").is_none(),
         "Prune/tombstone/watermark safety: tombstone retained payload"
     );
+    acknowledge_pending_process_artifact_cleanup(registry.as_ref()).await;
     registry
         .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
         .await
@@ -2285,6 +2283,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .processes_changed_since(terminal_cursor, 1_000)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    acknowledge_pending_process_artifact_cleanup(registry.as_ref()).await;
 
     let fresh_base = registry
         .register_process(registration(

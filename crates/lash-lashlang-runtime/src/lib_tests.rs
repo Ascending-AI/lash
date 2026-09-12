@@ -1,5 +1,72 @@
 use super::*;
 
+/// Test-only read seam for malformed-artifact rejection. Production stores
+/// correctly refuse malformed publications, so the runtime oracle must inject
+/// corruption at the read boundary it is responsible for validating.
+struct ForgedReadArtifactStore {
+    inner: Arc<dyn LashlangArtifactStore>,
+    forged: Arc<lashlang::ModuleArtifact>,
+}
+
+#[async_trait::async_trait]
+impl LashlangArtifactStore for ForgedReadArtifactStore {
+    fn durability_tier(&self) -> lashlang::DurabilityTier {
+        self.inner.durability_tier()
+    }
+
+    async fn publish_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        artifact: &lashlang::ModuleArtifact,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.publish_module_artifact(owner, artifact).await
+    }
+
+    async fn retain_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.retain_module_artifact(owner, module_ref).await
+    }
+
+    async fn transfer_module_artifact(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner
+            .transfer_module_artifact(from, to, module_ref)
+            .await
+    }
+
+    async fn release_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.release_module_artifact(owner, module_ref).await
+    }
+
+    async fn retire_module_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.retire_module_artifact_owner(owner).await
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
+        if module_ref == &self.forged.module_ref {
+            return Ok(Some(Arc::clone(&self.forged)));
+        }
+        self.inner.get_module_artifact(module_ref).await
+    }
+}
+
 struct EveryNEffectsController(usize);
 
 #[async_trait::async_trait]
@@ -789,12 +856,12 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         .expect("handler declaration exists");
     process.params[0].name = "event".into();
     assert!(forged.verify().is_err(), "forged artifact must not verify");
-    store
-        .publish_module_artifact(&lash_core::ArtifactOwner::host("forged-test"), &forged)
-        .await
-        .expect("test store accepts public artifact values");
+    let forged_store: Arc<dyn LashlangArtifactStore> = Arc::new(ForgedReadArtifactStore {
+        inner: Arc::clone(&artifact_store),
+        forged: Arc::new(forged),
+    });
     let error = prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        forged_store,
         "parent:root",
         start_with(mismatching_identity),
     )
@@ -835,11 +902,10 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
         .expect("install declaration exists");
     process.params[0].name = "forged".into();
     assert!(forged.verify().is_err(), "forged artifact must not verify");
-    store
-        .publish_module_artifact(&lash_core::ArtifactOwner::host("forged-test"), &forged)
-        .await
-        .expect("test store accepts public artifact values");
-    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let artifact_store: Arc<dyn LashlangArtifactStore> = Arc::new(ForgedReadArtifactStore {
+        inner: store,
+        forged: Arc::new(forged),
+    });
     let mut args = lashlang::Record::new();
     args.insert("value".to_string(), lashlang::Value::String("value".into()));
     let start = lashlang::ProcessStart {

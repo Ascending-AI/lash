@@ -19,7 +19,9 @@ class PostgresJsonCarrierCoverageTest(unittest.TestCase):
         manifest = MODULE.json.loads(MODULE.MANIFEST.read_text(encoding="utf-8"))
         valid, errors = MODULE.validate(carriers, enrolled, manifest)
         self.assertTrue(valid, errors)
-        self.assertEqual(len(carriers), 24)
+        # FIG-677 adds the explicitly classified
+        # lash_process_artifact_cleanup.cleanup_json carrier.
+        self.assertEqual(len(carriers), 25)
 
     def test_unclassified_schema_carrier_fails(self) -> None:
         valid, errors = MODULE.validate(

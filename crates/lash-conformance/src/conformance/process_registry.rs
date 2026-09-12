@@ -2202,6 +2202,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         change,
         crate::ProcessChange::Deleted { tombstone } if tombstone.process_id == process_id
     )));
+    acknowledge_pending_process_artifact_cleanup(registry.as_ref()).await;
     assert!(
         registry
             .compact_process_tombstones(

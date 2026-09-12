@@ -1934,8 +1934,8 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
         .await
         .expect("count Postgres scope fences");
     assert_eq!(
-        fences, 2,
-        "the process and the retired runtime operation each leave one permanent fence"
+        fences, 5,
+        "the three session scopes, process and retired runtime operation each leave one permanent fence"
     );
 
     let scope = ExecutionScope::runtime_operation("postgres-effect-controller-conformance");

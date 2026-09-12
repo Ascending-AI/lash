@@ -208,8 +208,9 @@ fn prune_process_rows_conn(
     // json_each preserves the sorted candidate array's zero-based order, so
     // tombstone change sequences retain process-id ordering without one clock
     // update and insert per process.
-    conn.execute(
-        "INSERT INTO process_tombstones (
+    let inserted_tombstones = conn
+        .execute(
+            "INSERT INTO process_tombstones (
              process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
          )
          SELECT process.process_id,
@@ -220,9 +221,15 @@ fn prune_process_rows_conn(
          FROM json_each(?1) AS candidate
          JOIN processes AS process ON process.process_id = candidate.value
          ORDER BY CAST(candidate.key AS INTEGER)",
-        params![process_ids_json, pruned_at_ms, first_change_seq],
-    )
-    .map_err(process_sqlite_error)?;
+            params![process_ids_json, pruned_at_ms, first_change_seq],
+        )
+        .map_err(process_sqlite_error)?;
+    if inserted_tombstones != prunable.len() {
+        return Err(lash_core::PluginError::Session(format!(
+            "process prune candidate/tombstone divergence: expected {}, inserted {inserted_tombstones}",
+            prunable.len()
+        )));
+    }
 
     for process_id in prunable {
         let record_json: String = conn

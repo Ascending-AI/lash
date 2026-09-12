@@ -11,6 +11,7 @@ use crate::{
     ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     ProjectionWatermark, RecoveryContract, SessionScope, TriggerCommand, TriggerCommandOutcome,
     TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
+    acknowledge_pending_process_artifact_cleanup,
 };
 
 /// Fresh paired process and trigger stores for retention conformance.
@@ -404,6 +405,7 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
         .reclaimed_delivery_count,
         1
     );
+    acknowledge_pending_process_artifact_cleanup(handles.registry.as_ref()).await;
     assert_eq!(
         handles
             .registry

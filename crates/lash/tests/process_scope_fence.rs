@@ -83,6 +83,7 @@ fn core_with_all(
     trigger_store: Arc<dyn lash_core::TriggerStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
 ) -> LashCore {
+    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
     let provider = lash_core::testing::TestProvider::builder()
         .complete(|_request| async {
             Ok(lash::provider::LlmResponse {
@@ -99,6 +100,7 @@ fn core_with_all(
     LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .model(
             lash::ModelSpec::builder("mock-model")
                 .context_window_tokens(16_000)
@@ -112,9 +114,7 @@ fn core_with_all(
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
+        .process_env_store(process_env_store)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "process-fence-test-worker",
             "process-fence-test-boot",
@@ -562,16 +562,17 @@ async fn trigger_delivery_process_id(
     store: &dyn lash_core::TriggerStore,
     occurrence: &lash_core::TriggerOccurrenceRequest,
 ) -> String {
+    let (_, process_env_ref) = lash_core::testing::process_execution_env_fixture();
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/fence-reuse",
-        lash_core::ProcessExecutionEnvRef::new("process-env:fence-reuse"),
+        process_env_ref,
         "ui.button.pressed",
         occurrence.source_key.clone(),
         lash_core::ProcessInput::Engine {
-            kind: "fence-test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: json!({}),
         },
-        lash_core::ProcessIdentity::new("fence-test-engine"),
+        lash_core::ProcessIdentity::new("testing-fixture"),
     )
     .with_payload_schema(lash_core::LashSchema::any());
     let outcome = store

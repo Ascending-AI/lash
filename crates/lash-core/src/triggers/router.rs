@@ -1346,17 +1346,21 @@ mod tests {
         crate::LashSchema::any()
     }
 
-    fn trigger_process_draft(source_key: &str, process_name: &str) -> TriggerSubscriptionDraft {
+    fn trigger_process_draft(
+        source_key: &str,
+        process_name: &str,
+        env_ref: crate::ProcessExecutionEnvRef,
+    ) -> TriggerSubscriptionDraft {
         TriggerSubscriptionDraft::for_process(
             format!("test/{process_name}"),
-            crate::ProcessExecutionEnvRef::new(format!("process-env:{process_name}")),
+            env_ref,
             "ui.button.pressed",
             source_key,
             crate::ProcessInput::Engine {
-                kind: "test-engine".to_string(),
+                kind: "testing-fixture".to_string(),
                 payload: serde_json::json!({ "process": process_name }),
             },
-            crate::ProcessIdentity::new("test-engine").with_label(Some(process_name)),
+            crate::ProcessIdentity::new("testing-fixture").with_label(Some(process_name)),
         )
         .with_payload_schema(crate::LashSchema::any())
     }
@@ -1479,17 +1483,19 @@ mod tests {
         let store = Arc::new(InMemoryTriggerStore::default());
         let registry: Arc<dyn crate::ProcessRegistry> =
             Arc::new(crate::TestLocalProcessRegistry::default());
+        let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
         let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
         let subscription = register(
             store.as_ref(),
             "started-register",
-            trigger_process_draft(&source_key, "started"),
+            trigger_process_draft(&source_key, "started", env_ref),
         )
         .await;
         let router = TriggerRouter::new(
             store,
             crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
-        );
+        )
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
         let controller = crate::NativeRuntimeEffectController::default();
         let scoped_controller = crate::ScopedEffectController::borrowed(
             &controller,
@@ -1543,12 +1549,13 @@ mod tests {
     async fn session_trigger_process_is_observed_by_its_registrant() {
         let store = Arc::new(InMemoryTriggerStore::default());
         let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
         let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
         register_for_session(
             store.as_ref(),
             "session-register",
             &SessionId::from("session-owner"),
-            trigger_process_draft(&source_key, "session-owned"),
+            trigger_process_draft(&source_key, "session-owned", env_ref),
         )
         .await;
         let router = TriggerRouter::new(
@@ -1556,7 +1563,8 @@ mod tests {
             crate::testing::process_work_wiring_for_registry(
                 Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>
             ),
-        );
+        )
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
         let controller = crate::NativeRuntimeEffectController::default();
         let scoped_controller = crate::ScopedEffectController::borrowed(
             &controller,

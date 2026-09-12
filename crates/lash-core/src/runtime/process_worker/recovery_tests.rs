@@ -436,13 +436,17 @@ fn native_worker_with_trigger_store(
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
     let watched = crate::watch_process_registry(registry);
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    runtime_host.durability.process_env_store = process_env_store;
+    runtime_host.process_engines = crate::testing::process_engine_fixture();
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            ),
+            runtime_host,
             Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
@@ -465,13 +469,17 @@ fn reentrant_worker_with_trigger_store(
 ) -> DurableProcessWorker {
     let (_driver_registry, _driver_hub, process_work) =
         late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    runtime_host.durability.process_env_store = process_env_store;
+    runtime_host.process_engines = crate::testing::process_engine_fixture();
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            ),
+            runtime_host,
             Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::External(process_work),
             Arc::new(crate::NoQueuedWork::new()),
@@ -646,16 +654,17 @@ async fn seed_reserved_trigger_delivery(
 }
 
 fn recovery_test_trigger_draft(source_key: String) -> crate::TriggerSubscriptionDraft {
+    let (_, process_env_ref) = crate::testing::process_execution_env_fixture();
     crate::TriggerSubscriptionDraft::for_process(
         "recovery-test",
-        crate::ProcessExecutionEnvRef::new("process-env:test"),
+        process_env_ref,
         "ui.button.pressed",
         source_key,
         ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: serde_json::json!({ "target": "reconcile" }),
         },
-        crate::ProcessIdentity::new("test-engine"),
+        crate::ProcessIdentity::new("testing-fixture"),
     )
     .with_payload_schema(crate::LashSchema::any())
 }

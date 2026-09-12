@@ -789,8 +789,11 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         "facade compaction reconciles the delivery before removing its tombstone"
     );
     assert!(
-        registry.get_process(&orphaned_process_id).await?.is_none(),
-        "the reconciled tombstone is compacted"
+        matches!(
+            registry.get_process(&orphaned_process_id).await,
+            Ok(None) | Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
+        ),
+        "the reconciled tombstone is compacted and cannot become recoverable"
     );
     Ok(())
 }

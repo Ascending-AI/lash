@@ -61,12 +61,13 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // semantic-boundary receipt identity, 52 mediated plugin state, 53 the
     // persisted usage disposition, 54 preserves reclaimed attachment bytes,
     // 55 preserves the phase across restoring writes, 56 persists full effect
-    // addresses, and 57 pairs pending-input claim ids with their tokens.
+    // addresses, 57 pairs pending-input claim ids with their tokens, and 58
+    // retains exact process artifact-cleanup evidence until acknowledgement.
     // All are reject-and-recreate
     // boundaries, so the pin tracks the
     // current target while the refusal below still names a SHA-256-era
     // generation: nothing older than 45 may ever open, whatever the target is.
-    assert_eq!(expected, 57, "the pinned durable-core target changed");
+    assert_eq!(expected, 58, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 

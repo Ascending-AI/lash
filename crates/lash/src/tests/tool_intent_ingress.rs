@@ -49,6 +49,7 @@ async fn ingress_core_with_effect_host_and_env_store(
         .effect_host(effect_host)
         .provider(mock_provider())
         .model(mock_model_spec())
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -66,16 +67,18 @@ async fn register_ingress_trigger_subscription(
     store: &lash_core::facade_support::InMemoryTriggerStore,
 ) -> Result<lash_core::TriggerSubscriptionRecord> {
     use lash_core::TriggerStore as _;
+    let (_, process_env_ref) = lash_core::testing::process_execution_env_fixture();
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/intent-ingress-delivery",
-        lash_core::ProcessExecutionEnvRef::new("process-env:intent-ingress-delivery"),
+        process_env_ref,
         "intent.ingress.trigger",
         "intent-ingress-source",
         lash_core::ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: serde_json::json!({"process": "intent-ingress-delivery"}),
         },
-        lash_core::ProcessIdentity::new("test-engine").with_label(Some("intent-ingress-delivery")),
+        lash_core::ProcessIdentity::new("testing-fixture")
+            .with_label(Some("intent-ingress-delivery")),
     )
     .with_payload_schema(lash_core::LashSchema::any());
     let outcome = store
@@ -106,16 +109,16 @@ async fn ingress_core_with_trigger_store(
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let subscription = register_ingress_trigger_subscription(&store).await?;
     let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .effect_host(effect_host)
         .provider(mock_provider())
         .model(mock_model_spec())
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .process_env_store(Arc::new(
-            lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
-        ))
+        .process_env_store(process_env_store)
         .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
         .trigger_store(Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>)
         .build(crate::testing::runtime_lease_owner())?;

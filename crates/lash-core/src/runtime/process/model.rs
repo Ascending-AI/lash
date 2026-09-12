@@ -471,6 +471,9 @@ impl InMemoryProcessExecutionEnvStore {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+mod testing;
+
 #[async_trait::async_trait]
 impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
     async fn publish_process_execution_env(

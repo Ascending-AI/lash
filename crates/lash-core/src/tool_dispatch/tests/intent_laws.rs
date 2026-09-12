@@ -921,16 +921,17 @@ async fn register_trigger_intent_subscription_with_schema(
     payload_schema: crate::LashSchema,
 ) -> crate::TriggerSubscriptionRecord {
     use crate::TriggerStore as _;
+    let (_, process_env_ref) = crate::testing::process_execution_env_fixture();
     let draft = crate::TriggerSubscriptionDraft::for_process(
         "test/intent-trigger-delivery",
-        crate::ProcessExecutionEnvRef::new("process-env:intent-trigger-delivery"),
+        process_env_ref,
         "intent.trigger.emitted",
         "intent-law-source",
         crate::ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: json!({"process": "intent-trigger-delivery"}),
         },
-        crate::ProcessIdentity::new("test-engine").with_label(Some("intent-trigger-delivery")),
+        crate::ProcessIdentity::new("testing-fixture").with_label(Some("intent-trigger-delivery")),
     )
     .with_payload_schema(payload_schema);
     let outcome = store
@@ -980,12 +981,16 @@ fn trigger_intent_dispatch_context(
         recorded_trigger_intents(),
         calls,
     );
-    context.trigger_router = Some(crate::TriggerRouter::new(
-        Arc::clone(store) as Arc<dyn crate::TriggerStore>,
-        crate::testing::process_work_wiring_for_registry(
-            registry as Arc<dyn crate::ProcessRegistry>,
-        ),
-    ));
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
+    context.trigger_router = Some(
+        crate::TriggerRouter::new(
+            Arc::clone(store) as Arc<dyn crate::TriggerStore>,
+            crate::testing::process_work_wiring_for_registry(
+                registry as Arc<dyn crate::ProcessRegistry>,
+            ),
+        )
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture()),
+    );
     context
 }
 

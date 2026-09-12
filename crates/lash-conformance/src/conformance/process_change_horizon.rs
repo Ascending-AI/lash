@@ -71,6 +71,7 @@ pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused
         change,
         ProcessChange::Deleted { tombstone } if tombstone.process_id == process_id
     )));
+    acknowledge_pending_process_artifact_cleanup(registry.as_ref()).await;
     assert_eq!(
         registry
             .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
