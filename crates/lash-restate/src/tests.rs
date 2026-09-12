@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::controller::context::guard_restate_context_future;
+use crate::controller::journal_budget::JournaledEffectRecord;
 use crate::controller::{
     RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
     restate_effect_execution, restate_effect_name, restate_timer_turn_cancel_wait_request,

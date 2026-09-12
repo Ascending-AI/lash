@@ -769,26 +769,6 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
         literal_parent_end_frames,
         vec![
             serde_json::json!({
-                "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244:parent-end:process:parent-end:tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
-                "command": {
-                    "type": "process",
-                    "command": {
-                        "op": "parent_end",
-                        "identity": {
-                            "session_id": "restate-parent-end-replay",
-                            "execution_scope_id": "restate-parent-end-turn-1",
-                            "tool_call_id": "restate-parent-end-call",
-                            "intent_index": 0,
-                            "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
-                            "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
-                        },
-                        "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
-                        "policy": "cancel",
-                        "reason": "recorded start intent parent ended with cancel policy"
-                    }
-                }
-            }),
-            serde_json::json!({
                 "replay_key": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9:parent-end:process:parent-end:tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9",
                 "command": {
                     "type": "process",
@@ -803,6 +783,26 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                             "replay_key": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9"
                         },
                         "process_id": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9",
+                        "policy": "cancel",
+                        "reason": "recorded start intent parent ended with cancel policy"
+                    }
+                }
+            }),
+            serde_json::json!({
+                "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244:parent-end:process:parent-end:tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
+                "command": {
+                    "type": "process",
+                    "command": {
+                        "op": "parent_end",
+                        "identity": {
+                            "session_id": "restate-parent-end-replay",
+                            "execution_scope_id": "restate-parent-end-turn-1",
+                            "tool_call_id": "restate-parent-end-call",
+                            "intent_index": 0,
+                            "minting_emission_replay_key": "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1",
+                            "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
+                        },
+                        "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
                         "policy": "cancel",
                         "reason": "recorded start intent parent ended with cancel policy"
                     }
@@ -844,19 +844,6 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                     session_id: SessionId::from("restate-parent-end-replay"),
                     execution_scope_id: "restate-parent-end-turn-1".to_string(),
                     tool_call_id: "restate-parent-end-call".to_string(),
-                    intent_index: 0,
-                    replay_key: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
-                    minting_emission_replay_key: Some(
-                        "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
-                    ),
-                },
-                process_id: ProcessId::from("tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"),
-            },
-            lash_core::ToolIntentParentEndOutcome::Cancelled {
-                identity: lash_core::ToolIntentIdentity {
-                    session_id: SessionId::from("restate-parent-end-replay"),
-                    execution_scope_id: "restate-parent-end-turn-1".to_string(),
-                    tool_call_id: "restate-parent-end-call".to_string(),
                     intent_index: 1,
                     replay_key: "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9".to_string(),
                     minting_emission_replay_key: Some(
@@ -864,6 +851,19 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                     ),
                 },
                 process_id: ProcessId::from("tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9"),
+            },
+            lash_core::ToolIntentParentEndOutcome::Cancelled {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: SessionId::from("restate-parent-end-replay"),
+                    execution_scope_id: "restate-parent-end-turn-1".to_string(),
+                    tool_call_id: "restate-parent-end-call".to_string(),
+                    intent_index: 0,
+                    replay_key: "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244".to_string(),
+                    minting_emission_replay_key: Some(
+                        "restate-parent-end-replay:restate-parent-end-turn-1:1:0:tool_batch:2:child:0:restate-parent-end-call:attempt:1".to_string(),
+                    ),
+                },
+                process_id: ProcessId::from("tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"),
             },
         ]
     );

@@ -1379,58 +1379,6 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
     }
 }
 
-fn replace_nth_restate_frame(
-    current: &[u8],
-    historical: &[u8],
-    message_type: u16,
-    occurrence: usize,
-) -> Vec<u8> {
-    fn frames(input: &[u8]) -> Vec<(u16, &[u8])> {
-        let mut cursor = 0;
-        let mut frames = Vec::new();
-        while cursor < input.len() {
-            let header = u64::from_be_bytes(
-                input[cursor..cursor + 8]
-                    .try_into()
-                    .expect("complete Restate frame header"),
-            );
-            let kind = (header >> 48) as u16;
-            let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
-                .expect("Restate frame payload length");
-            let end = cursor + 8 + payload_len;
-            frames.push((kind, &input[cursor..end]));
-            cursor = end;
-        }
-        frames
-    }
-
-    let replacement = frames(historical)
-        .into_iter()
-        .filter(|(kind, _)| *kind == message_type)
-        .nth(occurrence)
-        .map(|(_, frame)| frame)
-        .expect("historical fixture contains the selected Restate frame");
-    let mut seen = 0;
-    let mut result = Vec::with_capacity(current.len().saturating_add(replacement.len()));
-    for (kind, frame) in frames(current) {
-        if kind == message_type {
-            if seen == occurrence {
-                result.extend_from_slice(replacement);
-            } else {
-                result.extend_from_slice(frame);
-            }
-            seen += 1;
-        } else {
-            result.extend_from_slice(frame);
-        }
-    }
-    assert!(
-        seen > occurrence,
-        "current fixture contains the selected Restate frame"
-    );
-    result
-}
-
 fn replace_equal_length_bytes(input: &[u8], from: &[u8], to: &[u8]) -> (Vec<u8>, usize) {
     assert_eq!(
         from.len(),
@@ -1452,75 +1400,207 @@ fn replace_equal_length_bytes(input: &[u8], from: &[u8], to: &[u8]) -> (Vec<u8>,
     (result, replacements)
 }
 
-/// Isolate the old process-reference identity fence from the earlier envelope
-/// and durable-wait shape changes. The current supported endpoint corpus is
-/// rebound byte-for-byte to the equal-length historical replay key, and only
-/// its second completion frame is replaced from the immutable v1 artifact.
-#[tokio::test]
-pub(super) async fn pre_cutover_process_reference_refuses_before_duplicate_effect() {
-    let historical_bytes =
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v1-full-drain.json");
-    let historical: ToolIntentJournalCorpusFixture = serde_json::from_slice(historical_bytes)
-        .expect("decode immutable v1 endpoint corpus fixture");
-    let current: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
-        "../../tests/fixtures/tool_intent_journals/v3-full-drain.json"
-    ))
-    .expect("decode current endpoint corpus fixture");
-    assert_eq!(
-        historical
-            .expected_output
-            .as_ref()
-            .and_then(serde_json::Value::as_array)
-            .map(Vec::len),
-        Some(1),
-        "the historical artifact must contain one actually recorded signal outcome"
-    );
+fn replace_nth_restate_frame_payload(
+    input: &[u8],
+    message_type: u16,
+    occurrence: usize,
+    from: &[u8],
+    to: &[u8],
+) -> Vec<u8> {
+    let mut result = input.to_vec();
+    let mut cursor = 0;
+    let mut seen = 0;
+    let mut replaced = false;
+    while cursor < input.len() {
+        let header = u64::from_be_bytes(
+            input[cursor..cursor + 8]
+                .try_into()
+                .expect("complete Restate frame header"),
+        );
+        let kind = (header >> 48) as u16;
+        let payload_len =
+            usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).expect("Restate frame payload length");
+        let end = cursor + 8 + payload_len;
+        if kind == message_type {
+            if seen == occurrence {
+                let (payload, replacements) =
+                    replace_equal_length_bytes(&input[cursor + 8..end], from, to);
+                assert_eq!(
+                    replacements, 1,
+                    "selected Restate frame must contain exactly one process-reference payload"
+                );
+                result[cursor + 8..end].copy_from_slice(&payload);
+                replaced = true;
+            }
+            seen += 1;
+        }
+        cursor = end;
+    }
+    assert!(replaced, "selected Restate frame occurrence must exist");
+    result
+}
 
-    let historical_replay_key = historical
-        .expected_output
-        .as_ref()
-        .and_then(serde_json::Value::as_array)
-        .and_then(|outcomes| outcomes.first())
-        .and_then(|outcome| outcome.pointer("/identity/replay_key"))
-        .and_then(serde_json::Value::as_str)
-        .expect("historical fixture records its tool-intent identity");
-    let current_replay_key = current
-        .expected_output
-        .as_ref()
-        .and_then(serde_json::Value::as_array)
-        .and_then(|outcomes| outcomes.first())
-        .and_then(|outcome| outcome.pointer("/identity/replay_key"))
-        .and_then(serde_json::Value::as_str)
-        .expect("current fixture records its tool-intent identity");
-    let (old_identity_witness, replacements) = replace_equal_length_bytes(
-        &current.invocation_body_bytes,
-        current_replay_key.as_bytes(),
-        historical_replay_key.as_bytes(),
-    );
+const PROCESS_REFERENCE_REPLAY_KEY: &str = "process-reference-cutover";
+const PROCESS_REFERENCE_REPLAY_TARGET: &str = "process-reference-cutover-target";
+
+#[restate_sdk::workflow]
+trait ProcessReferenceReplay {
+    async fn run(input: Json<()>) -> HandlerResult<Json<()>>;
+}
+
+pub(super) struct ProcessReferenceReplayImpl {
+    registry: Arc<dyn ProcessRegistry>,
+    process_ref: lash_core::ProcessRef,
+}
+
+impl ProcessReferenceReplay for ProcessReferenceReplayImpl {
+    async fn run(&self, ctx: WorkflowContext<'_>, Json(()): Json<()>) -> HandlerResult<Json<()>> {
+        let invocation = runtime_invocation(
+            RuntimeEffectKind::Process,
+            "process-reference-cutover-signal",
+        );
+        let envelope = RuntimeEffectEnvelope::new(
+            invocation.clone(),
+            RuntimeEffectCommand::process(ProcessCommand::Signal {
+                process_ref: self.process_ref.clone(),
+                signal_name: "resume".to_string(),
+                signal_id: "process-reference-cutover-signal".to_string(),
+                request: lash_core::ProcessEventAppendRequest::new(
+                    "signal.resume",
+                    serde_json::json!({"source": "process-reference-cutover"}),
+                ),
+            }),
+        )
+        .canonical_form()
+        .map(Arc::new)
+        .map_err(TerminalError::from_error)?;
+        let registry = Arc::clone(&self.registry);
+        let process_ref = self.process_ref.clone();
+        let recorded_envelope = Arc::clone(&envelope);
+        let Json(_recorded) = ctx
+            .run_json_send(restate_effect_name(&invocation), None, async move {
+                let result = registry
+                    .append_event_ref(
+                        &process_ref,
+                        lash_core::ProcessEventAppendRequest::new(
+                            "signal.resume",
+                            serde_json::json!({"source": "process-reference-cutover"}),
+                        ),
+                    )
+                    .await
+                    .expect("record process-reference witness effect");
+                JournaledEffectRecord::Recorded(RecordedRuntimeEffect {
+                    envelope: recorded_envelope,
+                    outcome: Ok(RuntimeEffectOutcome::Process {
+                        result: ProcessEffectOutcome::Signal {
+                            event: Box::new(result.event),
+                        },
+                    }),
+                })
+            })
+            .await?;
+        Ok(Json(()))
+    }
+}
+
+pub(super) async fn process_reference_replay_endpoint()
+-> (Endpoint, Arc<dyn ProcessRegistry>, lash_core::ProcessRef) {
+    let registry = process_registry();
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                PROCESS_REFERENCE_REPLAY_TARGET,
+                ProcessInput::External {
+                    metadata: serde_json::json!({"fixture": "process-reference-cutover"}),
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_extra_event_types([lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            }]),
+        )
+        .await
+        .expect("seed process-reference witness target");
+    let process_ref = registry
+        .resolve_process_ref(&ProcessId::from(PROCESS_REFERENCE_REPLAY_TARGET))
+        .await
+        .expect("resolve process-reference witness incarnation");
+    let endpoint = Endpoint::builder()
+        .bind(
+            ProcessReferenceReplayImpl {
+                registry: Arc::clone(&registry),
+                process_ref: process_ref.clone(),
+            }
+            .serve(),
+        )
+        .build();
+    (endpoint, registry, process_ref)
+}
+
+/// Isolate the old process-reference payload from every command-name cutover.
+/// The current endpoint supplies the complete journal; only its recorded
+/// effect completion is changed from `process_ref` to bare `process_id`.
+#[tokio::test]
+pub(super) async fn pre_cutover_process_reference_payload_refuses_before_effect_execution() {
+    let (capture_endpoint, capture_registry, process_ref) =
+        process_reference_replay_endpoint().await;
+    let captured = invoke_endpoint(
+        &capture_endpoint,
+        "ProcessReferenceReplay",
+        "run",
+        PROCESS_REFERENCE_REPLAY_KEY,
+        &(),
+    )
+    .await
+    .expect("capture the current process-reference RunCommand");
     assert_eq!(
-        replacements, 6,
-        "the current full-drain fixture must contain the pinned identity in its command and recorded effect"
-    );
-    let isolated = replace_nth_restate_frame(
-        &old_identity_witness,
-        &historical.invocation_body_bytes,
-        0x8011,
+        capture_registry
+            .events_after(&ProcessId::from(PROCESS_REFERENCE_REPLAY_TARGET), 0)
+            .await
+            .expect("read the captured witness effect")
+            .into_iter()
+            .filter(|event| event.event_type == "signal.resume")
+            .count(),
         1,
+        "the captured current journal must execute the witness effect once"
     );
-    let (endpoint, registry) = tool_intent_corpus_endpoint().await;
+    let current_replay =
+        encode_captured_run_command_replay(PROCESS_REFERENCE_REPLAY_KEY, &(), &captured, &[], &[])
+            .expect("complete the current process-reference journal");
+    let current_reference = format!(
+        "\\\"process_ref\\\":{{\\\"process_id\\\":\\\"{}\\\",\\\"incarnation\\\":{}}}",
+        process_ref.process_id,
+        process_ref.incarnation.registration_sequence(),
+    );
+    let mut pre_cutover_reference =
+        format!("\\\"process_id\\\":\\\"{}\\\"", process_ref.process_id,);
+    assert!(pre_cutover_reference.len() < current_reference.len());
+    pre_cutover_reference
+        .push_str(&" ".repeat(current_reference.len() - pre_cutover_reference.len()));
+    let isolated = replace_nth_restate_frame_payload(
+        &current_replay,
+        0x8011,
+        0,
+        current_reference.as_bytes(),
+        pre_cutover_reference.as_bytes(),
+    );
+    let (endpoint, registry, _) = process_reference_replay_endpoint().await;
     let response = invoke_endpoint_body(
         &endpoint,
-        "ToolIntentCorpusReplay",
+        "ProcessReferenceReplay",
         "run",
         bytes::Bytes::from(isolated),
     )
     .await
-    .expect("feed isolated old-identity witness through the current endpoint");
+    .expect("feed the isolated old payload through the current endpoint");
     let error = restate_output_failure_message(&response)
         .or_else(|| restate_error_message(&response))
         .unwrap_or_else(|| {
             panic!(
-                "old process reference must refuse loudly; messages={:?}; frames={:?}; output={:?}",
+                "old process-reference payload must refuse loudly; messages={:?}; frames={:?}; output={:?}",
                 restate_message_types(&response),
                 restate_command_frame_types(&response),
                 restate_output_json::<serde_json::Value>(&response)
@@ -1528,18 +1608,18 @@ pub(super) async fn pre_cutover_process_reference_refuses_before_duplicate_effec
         });
     assert!(
         error.contains("process_reference_format_cutover"),
-        "isolated old process reference must reach its identity guard: {error}"
+        "isolated old process-reference payload must reach its typed guard: {error}"
     );
     assert_eq!(
         registry
-            .events_after(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
+            .events_after(&ProcessId::from(PROCESS_REFERENCE_REPLAY_TARGET), 0)
             .await
             .expect("read the isolated refusal witness target")
             .into_iter()
             .filter(|event| event.event_type == "signal.resume")
             .count(),
-        1,
-        "the isolated journal may reconstruct its one committed signal but must not duplicate it"
+        0,
+        "the typed payload refusal must happen before the replay executes any effect"
     );
 }
 
