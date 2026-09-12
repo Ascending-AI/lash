@@ -884,6 +884,20 @@ fn continue_or_stop_after_nonterminal(
     }
     actions.push(DriverAction::AdvanceProtocolIteration);
 
+    let next_protocol_iteration = ctx.protocol_iteration() + 1;
+    let reached_turn_limit = ctx
+        .turn_budget()
+        .max_turns()
+        .is_some_and(|max_turns| next_protocol_iteration >= ctx.protocol_run_offset() + max_turns);
+    if reached_turn_limit {
+        // Final-turn-fresh doctrine: retry events, including no-progress
+        // feedback, are deliberately dropped at the turn limit.
+        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
+            TurnStop::MaxTurns,
+        )));
+        return Ok(());
+    }
+
     if progress == AttemptProgress::Stalled {
         let attempts = stalled_attempts(ctx, actions);
         let budget = ctx.no_progress_budget();
@@ -910,19 +924,7 @@ fn continue_or_stop_after_nonterminal(
         }
     }
 
-    let next_protocol_iteration = ctx.protocol_iteration() + 1;
-    let reached_turn_limit = ctx
-        .turn_budget()
-        .max_turns()
-        .is_some_and(|max_turns| next_protocol_iteration >= ctx.protocol_run_offset() + max_turns);
-    if reached_turn_limit {
-        // Final-turn-fresh doctrine: retry events, including the durable
-        // reasoning record, are deliberately dropped at the turn limit.
-        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-            TurnStop::MaxTurns,
-        )));
-        return Ok(());
-    } else if !retry_events.is_empty() {
+    if !retry_events.is_empty() {
         actions.push(DriverAction::AppendEvents(retry_events));
     }
 

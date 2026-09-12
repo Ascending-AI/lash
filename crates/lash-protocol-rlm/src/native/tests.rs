@@ -467,6 +467,61 @@ fn cell_driver_stops_at_budget_before_queued_provider_response() {
     );
 }
 
+fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(native: bool) {
+    let mut turn_config = config(native, RlmTermination::FinishRequired { schema: None });
+    turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
+    turn_config.no_progress_budget = lash_core::NoProgressBudget::bounded(1);
+    let mut machine = TurnMachine::new(turn_config, Vec::new(), Arc::new(Vec::new()), 0);
+
+    let initial = drain(&mut machine);
+    let effects = reply(
+        &mut machine,
+        &initial,
+        vec![text("prose without a finishing cell")],
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+            outcome: lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::MaxTurns
+            )
+        })
+    )));
+    assert_eq!(
+        machine
+            .events()
+            .iter()
+            .filter(|event| matches!(event, lash_core::SessionHistoryRecord::Conversation(_)))
+            .count(),
+        0,
+        "turn-budget exhaustion must not append no-progress conversation feedback"
+    );
+    let done_messages = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Done { messages, .. } => Some(messages),
+            _ => None,
+        })
+        .expect("simultaneous exhaustion finishes the turn");
+    assert!(
+        done_messages
+            .iter()
+            .all(|message| message.role != lash_core::MessageRole::System),
+        "turn-budget exhaustion must not append a synthetic system message"
+    );
+}
+
+#[test]
+fn native_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
+    assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(true);
+}
+
+#[test]
+fn cell_protocol_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
+    assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(false);
+}
+
 #[test]
 fn termination_and_trajectory_parity() {
     for termination in [

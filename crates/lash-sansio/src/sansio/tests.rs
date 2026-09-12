@@ -671,6 +671,166 @@ fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
     );
 }
 
+#[test]
+fn unbounded_turn_budget_never_schedules_a_limit_stop() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(CellEveryIterationDriver)),
+        vec![user_message("keep running")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects)
+        .expect("iteration zero provider call")
+        .0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let (exec_id, _) = find_exec_call(&effects).expect("iteration zero effect");
+    machine.handle_response(Response::ExecResult {
+        id: *exec_id,
+        result: Ok(empty_exec_response()),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("iteration checkpoint");
+    assert_eq!(checkpoint, CheckpointKind::AfterWork);
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: CheckpointDelivery::default(),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        find_llm_call(&effects).is_some(),
+        "iteration one provider call"
+    );
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::Emit(SessionStreamEvent::TurnOutcome {
+            outcome: TurnOutcome::Stopped(TurnStop::MaxTurns),
+        })
+    )));
+    assert!(find_done(&effects).is_none());
+}
+
+struct NoProgressFeedbackAtBudgetDriver;
+
+impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
+    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        if ctx.protocol_iteration() == 0 {
+            return vec![DriverAction::StartLlm {
+                request: ctx.project_llm_request(false),
+                driver_state: None,
+            }];
+        }
+        vec![
+            DriverAction::AppendEvents(vec![conversation_event(text_message(
+                MessageRole::System,
+                "synthetic no-progress feedback",
+            ))]),
+            DriverAction::Finish(TurnOutcome::Stopped(TurnStop::MaxTurns)),
+        ]
+    }
+
+    fn handle_llm_success(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _waiting: WaitingLlmState,
+        _llm_response: LlmResponse,
+        _text_streamed: bool,
+    ) -> Vec<DriverAction> {
+        vec![
+            DriverAction::AdvanceProtocolIteration,
+            DriverAction::StartCheckpoint {
+                checkpoint: CheckpointKind::AfterWork,
+                on_empty: CheckpointResumeAction::PrepareIteration,
+            },
+        ]
+    }
+
+    fn handle_tool_results(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _completed: Vec<CompletedToolCall>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+
+    fn handle_exec_result(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _waiting: WaitingExecState,
+        _result: Result<crate::ExecResponse, String>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn sansio_simultaneous_turn_and_no_progress_exhaustion_preempts_conversation_feedback() {
+    let mut config = test_config(Arc::new(NoProgressFeedbackAtBudgetDriver));
+    config.turn_budget = crate::TurnBudget::bounded(1);
+    config.no_progress_budget = crate::NoProgressBudget::bounded(1);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("run one attempt")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects)
+        .expect("iteration zero provider call")
+        .0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    let effects = drain_effects(&mut machine);
+    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("attempt checkpoint");
+    assert_eq!(checkpoint, CheckpointKind::AfterWork);
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: CheckpointDelivery::default(),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert_eq!(
+        effects.iter().find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        }),
+        Some(&TurnOutcome::Stopped(TurnStop::MaxTurns))
+    );
+    assert!(
+        machine
+            .events()
+            .iter()
+            .all(|event| !matches!(event, SessionHistoryRecord::Conversation(_)))
+    );
+    let (messages, iteration) = find_done(&effects).expect("typed terminal boundary");
+    assert_eq!(iteration, 1);
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.role != MessageRole::System),
+        "turn-budget exhaustion must preempt synthetic feedback"
+    );
+    assert!(
+        done_event_delta(&effects)
+            .expect("done delta")
+            .iter()
+            .all(|event| !matches!(event, SessionHistoryRecord::Conversation(_)))
+    );
+}
+
 struct ToolBatchDriver;
 
 impl ProtocolDriverHandle for ToolBatchDriver {
