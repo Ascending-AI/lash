@@ -897,23 +897,24 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
-            .push_node_record(lash_core::SessionNodeRecord {
-                node_id: "orphan-fork-child-node".to_string(),
-                parent_node_id,
-                timestamp: "2026-08-17T00:00:00Z".to_string(),
-                payload: lash_core::SessionNodePayload::Event {
-                    event: lash_core::SessionHistoryRecord::Protocol(
-                        lash_core::ProtocolEvent::typed(
-                            "orphan-fork-child-event",
-                            serde_json::json!({ "content": "child node" }),
-                        )
-                        .expect("typed child event"),
-                    ),
-                },
-            });
-        child_state
-            .session_graph
-            .set_leaf_node_id(Some("orphan-fork-child-node".to_string()));
+            .apply_append(&lash_core::store::GraphAppend {
+                nodes: vec![lash_core::SessionNodeRecord {
+                    node_id: "orphan-fork-child-node".to_string(),
+                    parent_node_id,
+                    timestamp: "2026-08-17T00:00:00Z".to_string(),
+                    payload: lash_core::SessionNodePayload::Event {
+                        event: lash_core::SessionHistoryRecord::Protocol(
+                            lash_core::ProtocolEvent::typed(
+                                "orphan-fork-child-event",
+                                serde_json::json!({ "content": "child node" }),
+                            )
+                            .expect("typed child event"),
+                        ),
+                    },
+                }],
+                leaf_node_id: Some("orphan-fork-child-node".to_string()),
+            })
+            .expect("append child node");
         child
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&child_state, &[]))
             .await

@@ -301,6 +301,35 @@ mod tests {
             .await
             .expect("seed populated sibling");
 
+        let late_leafless_request = session_store_request(
+            &SessionId::from("late-leafless-sibling"),
+            "graph-integrity-model",
+            crate::SessionRelation::Root,
+        );
+        let late_leafless = factory
+            .create_store(&late_leafless_request)
+            .await
+            .expect("create leafless sibling after populated history");
+        late_leafless
+            .admit_and_bind_session(&crate::SessionBinding::from_create_request(
+                &late_leafless_request,
+            ))
+            .await
+            .expect("bind late leafless sibling");
+        let late_leafless_state = crate::RuntimeSessionState {
+            session_id: late_leafless_request.session_id.clone(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        late_leafless
+            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+                &late_leafless_state,
+                &[],
+            ))
+            .await
+            .expect("seed late leafless sibling head");
+
         let read = leafless
             .load_session()
             .await
@@ -308,6 +337,14 @@ mod tests {
             .expect("leafless sibling has a durable head");
         assert!(read.graph.nodes.is_empty());
         assert!(read.graph.leaf_node_id.is_none());
+
+        let late_read = late_leafless
+            .load_session()
+            .await
+            .expect("late leafless sibling load is isolated")
+            .expect("late leafless sibling has a durable head");
+        assert!(late_read.graph.nodes.is_empty());
+        assert!(late_read.graph.leaf_node_id.is_none());
     }
 
     #[async_trait::async_trait]

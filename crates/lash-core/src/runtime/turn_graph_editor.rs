@@ -3,7 +3,7 @@ use lash_sansio::core_support::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::facade_support::{SessionGraphFacadeOps, SessionNodeProjection};
+use crate::facade_support::SessionNodeProjection;
 use crate::session_graph::SessionReadModel;
 use crate::session_graph::build_active_read_projection;
 use crate::session_model::SessionHistoryRecord;
@@ -329,8 +329,14 @@ impl TurnGraphEditor {
         }
         match Arc::try_unwrap(self.base_graph) {
             Ok(mut graph) => {
-                graph.extend_node_records(self.appended_nodes);
-                graph.set_leaf_node_id(leaf_node_id);
+                graph
+                    .apply_append(&crate::GraphAppend {
+                        nodes: self.appended_nodes,
+                        leaf_node_id,
+                    })
+                    .unwrap_or_else(|error| {
+                        panic!("turn graph editor produced an invalid append: {error}")
+                    });
                 graph
             }
             Err(base_graph) => {

@@ -317,8 +317,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             .map(|read| read.graph.clone())
             .unwrap_or_default();
         let mut graph = existing_graph;
-        graph.extend_node_records(commit.graph.nodes.iter().cloned());
-        graph.set_leaf_node_id(commit.graph.leaf_node_id.clone());
+        graph.apply_append(&commit.graph)?;
         let mut token_ledger = read
             .as_ref()
             .map(|read| read.token_ledger.clone())

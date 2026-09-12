@@ -120,15 +120,16 @@ fn chronological_event_order(graph: &SessionGraph) -> Vec<String> {
         .collect()
 }
 fn stored_graph_with_head_leaf(store: &RecordingStore) -> SessionGraph {
-    let mut graph = store.session_graph.lock_recover().clone();
-    graph.set_leaf_node_id(
+    let graph = store.session_graph.lock_recover().clone();
+    SessionGraph::from_nodes(
+        graph.nodes.clone(),
         store
             .session_head_meta
             .lock_recover()
             .as_ref()
             .and_then(|meta| meta.leaf_node_id.clone()),
-    );
-    graph
+    )
+    .expect("recorded head leaf resolves in the stored graph")
 }
 fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
