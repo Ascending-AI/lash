@@ -389,6 +389,59 @@ async fn after_tool_attachment_replacement_is_normalized_before_internal_recordi
 }
 
 #[tokio::test]
+async fn deferred_completion_after_hook_attachment_is_normalized_before_recording() {
+    let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
+        "deferred_completion_attachment_probe",
+        crate::PluginSpec::new().with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
+    ))])
+    .build_session("root")
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(
+        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        "precondition: the deferred completion manifest starts empty"
+    );
+    assert!(
+        backend.list().await.unwrap().is_empty(),
+        "precondition: the deferred completion blob store starts empty"
+    );
+    let attachment_store = Arc::clone(&context.attachment_store);
+    let execution = crate::RuntimeExecutionContext::new(
+        SessionId::from("session"),
+        Arc::new(context),
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        attachment_store,
+        Arc::new(crate::ChronologicalProjection::default()),
+        None,
+        crate::TurnContext::default(),
+    );
+
+    let outcome = execution
+        .pending_completion_dispatch_outcome(
+            "deferred_attachment_probe".to_string(),
+            json!({ "value": "valid" }),
+            crate::Resolution::Ok(json!({ "completed": true })),
+            17,
+            Vec::new(),
+        )
+        .await;
+
+    assert_eq!(
+        outcome.attempts.len(),
+        1,
+        "precondition: this is the deferred-completion attempt-recording exit"
+    );
+    assert_eq!(outcome.attempts[0].ordinal, 1);
+    assert!(
+        outcome.record.call_id.is_none(),
+        "the caller must retain responsibility for assigning the deferred call id"
+    );
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
+}
+
+#[tokio::test]
 async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
     let definition = named_beta_tool("orchestrating_attachment_probe");
     let orchestrator =

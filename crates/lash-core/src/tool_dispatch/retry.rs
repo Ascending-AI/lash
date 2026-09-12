@@ -155,7 +155,7 @@ impl NormalizedToolOutput {
     }
 }
 
-pub(super) async fn normalized_outcome(
+pub(crate) async fn normalized_outcome(
     context: &ToolDispatchContext<'_>,
     tool_name: String,
     args: serde_json::Value,
