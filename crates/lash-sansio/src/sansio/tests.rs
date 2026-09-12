@@ -163,7 +163,7 @@ fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
 }
 
 #[test]
-fn turn_checkpoint_stamps_v2_and_identifies_the_legacy_unstamped_shape_as_v1() {
+fn turn_checkpoint_stamps_v3() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
@@ -172,19 +172,11 @@ fn turn_checkpoint_stamps_v2_and_identifies_the_legacy_unstamped_shape_as_v1() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 2);
-
-    let mut legacy = serde_json::to_value(checkpoint).expect("checkpoint json");
-    legacy
-        .as_object_mut()
-        .expect("checkpoint object")
-        .remove("schema_version");
-    let legacy: TurnCheckpoint = serde_json::from_value(legacy).expect("legacy checkpoint");
-    assert_eq!(legacy.schema_version(), 1);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 3);
 }
 
 #[test]
-fn turn_checkpoint_restore_refuses_newer_versions_and_accepts_older_history() {
+fn turn_checkpoint_restore_refuses_every_non_current_version() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
@@ -193,11 +185,11 @@ fn turn_checkpoint_restore_refuses_newer_versions_and_accepts_older_history() {
     );
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
 
-    for actual in [99, u32::MAX] {
-        let mut newer = encoded.clone();
-        newer["schema_version"] = serde_json::json!(actual);
+    for actual in [1, 2, 99, u32::MAX] {
+        let mut incompatible = encoded.clone();
+        incompatible["schema_version"] = serde_json::json!(actual);
         let checkpoint: TurnCheckpoint =
-            serde_json::from_value(newer).expect("well-formed newer checkpoint");
+            serde_json::from_value(incompatible).expect("well-formed incompatible checkpoint");
         let Err(error) =
             TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
         else {
@@ -205,33 +197,54 @@ fn turn_checkpoint_restore_refuses_newer_versions_and_accepts_older_history() {
         };
         assert_eq!(
             error,
-            TurnCheckpointRestoreError::UnsupportedSchemaVersion {
+            TurnCheckpointRestoreError::IncompatibleSchemaVersion {
                 actual,
-                supported: TURN_CHECKPOINT_SCHEMA_VERSION,
+                expected: TURN_CHECKPOINT_SCHEMA_VERSION,
             }
         );
     }
+}
 
-    for explicit_version in [Some(1), None] {
-        let mut older = encoded.clone();
-        match explicit_version {
-            Some(version) => older["schema_version"] = serde_json::json!(version),
-            None => {
-                older
-                    .as_object_mut()
-                    .expect("checkpoint object")
-                    .remove("schema_version");
-            }
+#[test]
+fn v2_checkpoint_with_terminal_turn_state_is_a_typed_incompatible_version() {
+    let bytes = include_bytes!("fixtures/turn_checkpoint_v2_with_terminal_turn_state.json");
+    let fixture: serde_json::Value = serde_json::from_slice(bytes).expect("fixture is JSON");
+    assert_eq!(fixture["schema_version"], 2);
+    assert_eq!(
+        fixture["termination"]["turn_limit_final_scheduled"], false,
+        "negative fixture must carry the deleted field"
+    );
+
+    let error = TurnCheckpoint::<UnitTurnProtocol>::from_json_slice(bytes)
+        .expect_err("v2 checkpoint must be refused");
+    assert_eq!(
+        error,
+        TurnCheckpointRestoreError::IncompatibleSchemaVersion {
+            actual: 2,
+            expected: TURN_CHECKPOINT_SCHEMA_VERSION,
         }
-        let checkpoint: TurnCheckpoint =
-            serde_json::from_value(older).expect("well-formed older checkpoint");
-        assert_eq!(checkpoint.schema_version(), 1);
-        assert!(
-            TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
-                .is_ok(),
-            "v1 and unstamped checkpoints remain readable"
-        );
-    }
+    );
+}
+
+#[test]
+fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
+    let machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let mut encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint JSON");
+    encoded["termination"] = serde_json::json!({"turn_limit_final_scheduled": false});
+    let bytes = serde_json::to_vec(&encoded).expect("checkpoint bytes");
+
+    let error = TurnCheckpoint::<UnitTurnProtocol>::from_json_slice(&bytes)
+        .expect_err("unknown fields must not be ignored");
+    assert!(
+        matches!(error, TurnCheckpointRestoreError::IncompatibleFormat { .. }),
+        "unexpected error: {error:?}"
+    );
+    assert!(error.to_string().contains("unknown field `termination`"));
 }
 
 fn empty_exec_response() -> crate::ExecResponse {

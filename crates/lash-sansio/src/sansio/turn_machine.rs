@@ -46,7 +46,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
             cumulative_usage: TokenUsage::default(),
-            termination: TurnTerminationPolicyState::new(),
             synced_protocol_iteration: None,
             observed_cancellation: None,
         }
@@ -109,7 +108,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
-            termination: self.termination.clone(),
             synced_protocol_iteration: self.synced_protocol_iteration,
         }
     }
@@ -118,10 +116,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         config: TurnMachineConfig<M>,
         checkpoint: TurnCheckpoint<M>,
     ) -> Result<Self, TurnCheckpointRestoreError> {
-        if checkpoint.schema_version > TURN_CHECKPOINT_SCHEMA_VERSION {
-            return Err(TurnCheckpointRestoreError::UnsupportedSchemaVersion {
+        if checkpoint.schema_version != TURN_CHECKPOINT_SCHEMA_VERSION {
+            return Err(TurnCheckpointRestoreError::IncompatibleSchemaVersion {
                 actual: checkpoint.schema_version,
-                supported: TURN_CHECKPOINT_SCHEMA_VERSION,
+                expected: TURN_CHECKPOINT_SCHEMA_VERSION,
             });
         }
         let side_effect_outbox = checkpoint
@@ -141,7 +139,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: checkpoint.protocol_iteration,
             protocol_run_offset: checkpoint.protocol_run_offset,
             cumulative_usage: checkpoint.cumulative_usage,
-            termination: checkpoint.termination,
             synced_protocol_iteration: checkpoint.synced_protocol_iteration,
             observed_cancellation: None,
         })

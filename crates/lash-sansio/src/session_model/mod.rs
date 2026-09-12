@@ -643,25 +643,6 @@ impl TurnCancellationEvidence {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TurnTerminationPolicyState {
-    turn_limit_final_scheduled: bool,
-}
-
-impl Default for TurnTerminationPolicyState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TurnTerminationPolicyState {
-    pub fn new() -> Self {
-        Self {
-            turn_limit_final_scheduled: false,
-        }
-    }
-}
-
 pub fn make_error_envelope(
     kind: &str,
     code: Option<&str>,
