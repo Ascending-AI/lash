@@ -5,7 +5,13 @@
 //! dialects they accept for each purpose and resolve contracts lazily at the
 //! request boundary.
 
+use std::collections::BTreeSet;
+
 use serde_json::{Map, Value, json};
+
+mod omission_null;
+use omission_null::materialize_omission_null_paths;
+pub use omission_null::{OmissionNullPath, OmissionNullPathSegment};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SchemaContract {
@@ -251,6 +257,7 @@ pub struct ResolvedSchema {
     pub schema: Value,
     pub dialect: SchemaDialect,
     pub diagnostics: Vec<String>,
+    pub omission_null_paths: Vec<OmissionNullPath>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -325,6 +332,7 @@ pub fn resolve_schema(
                 schema: override_schema.schema.clone(),
                 dialect: dialect.clone(),
                 diagnostics,
+                omission_null_paths: Vec::new(),
             });
         }
 
@@ -352,6 +360,7 @@ pub fn resolve_schema(
                         schema: contract.canonical.clone(),
                         dialect: dialect.clone(),
                         diagnostics,
+                        omission_null_paths: Vec::new(),
                     });
                 }
                 Ok(projection) => diagnostics.push(format!(
@@ -368,6 +377,7 @@ pub fn resolve_schema(
                         schema: projection.schema,
                         dialect: dialect.clone(),
                         diagnostics,
+                        omission_null_paths: projection.omission_null_paths,
                     });
                 }
                 Err(err) => diagnostics.extend(err.diagnostics),
@@ -404,6 +414,7 @@ enum OpenAiSchemaProfile {
 pub struct SchemaProjection {
     pub schema: Value,
     pub diagnostics: Vec<String>,
+    pub omission_null_paths: Vec<OmissionNullPath>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -500,6 +511,7 @@ pub fn project_for_dialect(
         SchemaDialect::GOOGLE_SCHEMA | SchemaDialect::JSON_PROMPT_SCHEMA => Ok(SchemaProjection {
             schema: schema.clone(),
             diagnostics: Vec::new(),
+            omission_null_paths: Vec::new(),
         }),
         other => Err(SchemaResolutionError::new(
             "schema",
@@ -525,6 +537,7 @@ pub fn project_anthropic_bedrock_schema(
         Ok(SchemaProjection {
             schema: projected,
             diagnostics: sanitizer.diagnostics,
+            omission_null_paths: Vec::new(),
         })
     } else {
         Err(SchemaResolutionError::new(
@@ -540,6 +553,7 @@ struct Projector {
     profile: OpenAiSchemaProfile,
     diagnostics: Vec<String>,
     errors: Vec<String>,
+    introduced_nullable_schema_paths: BTreeSet<Path>,
 }
 
 impl Projector {
@@ -548,6 +562,7 @@ impl Projector {
             profile,
             diagnostics: Vec::new(),
             errors: Vec::new(),
+            introduced_nullable_schema_paths: BTreeSet::new(),
         }
     }
 
@@ -556,10 +571,21 @@ impl Projector {
         self.project_value(&mut projected, Path::root(), true);
         self.ensure_object_root(&mut projected);
 
+        let omission_null_paths = if self.profile == OpenAiSchemaProfile::StrictToolParameters {
+            materialize_omission_null_paths(
+                &projected,
+                &self.introduced_nullable_schema_paths,
+                &mut self.diagnostics,
+            )
+        } else {
+            Vec::new()
+        };
+
         if self.errors.is_empty() {
             Ok(SchemaProjection {
                 schema: projected,
                 diagnostics: self.diagnostics,
+                omission_null_paths,
             })
         } else {
             Err(SchemaProjectionError::new(self.profile, self.errors))
@@ -635,9 +661,10 @@ impl Projector {
                 let property_names = properties.keys().cloned().collect::<Vec<_>>();
                 for (name, schema) in properties.iter_mut() {
                     let optional = !originally_required.iter().any(|required| required == name);
-                    self.project_value(schema, path.child("properties").child(name), false);
-                    if optional && self.requires_strict_objects() {
-                        make_nullable(schema);
+                    let property_path = path.child("properties").child(name);
+                    self.project_value(schema, property_path.clone(), false);
+                    if optional && self.requires_strict_objects() && make_nullable(schema) {
+                        self.introduced_nullable_schema_paths.insert(property_path);
                     }
                 }
                 if self.requires_strict_objects() {
@@ -933,26 +960,47 @@ fn compact_value(value: &Value) -> String {
     }
 }
 
-#[derive(Clone, Debug)]
-struct Path(String);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Path(Vec<PathSegment>);
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PathSegment {
+    Key(String),
+    Index(usize),
+}
 
 impl Path {
     fn root() -> Self {
-        Self("$".to_string())
+        Self(Vec::new())
     }
 
     fn child(&self, segment: &str) -> Self {
-        Self(format!("{}.{}", self.0, segment))
+        let mut segments = self.0.clone();
+        segments.push(PathSegment::Key(segment.to_string()));
+        Self(segments)
     }
 
     fn index(&self, index: usize) -> Self {
-        Self(format!("{}[{index}]", self.0))
+        let mut segments = self.0.clone();
+        segments.push(PathSegment::Index(index));
+        Self(segments)
+    }
+
+    fn is_at_or_below(&self, ancestor: &Self) -> bool {
+        self.0.starts_with(&ancestor.0)
     }
 }
 
 impl std::fmt::Display for Path {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str("$")?;
+        for segment in &self.0 {
+            match segment {
+                PathSegment::Key(key) => write!(f, ".{key}")?,
+                PathSegment::Index(index) => write!(f, "[{index}]")?,
+            }
+        }
+        Ok(())
     }
 }
 
@@ -997,15 +1045,16 @@ fn infer_enum_type(values: &[Value]) -> Option<&'static str> {
     inferred
 }
 
-fn make_nullable(schema: &mut Value) {
+fn make_nullable(schema: &mut Value) -> bool {
     let Some(obj) = schema.as_object_mut() else {
-        return;
+        return false;
     };
     if let Some(any_of) = obj.get_mut("anyOf").and_then(Value::as_array_mut) {
         if !any_of.iter().any(is_null_schema) {
             any_of.push(json!({ "type": "null" }));
+            return true;
         }
-        return;
+        return false;
     }
     match obj.get_mut("type") {
         Some(Value::String(value)) if value != "null" => {
@@ -1017,11 +1066,13 @@ fn make_nullable(schema: &mut Value) {
                     Value::String("null".to_string()),
                 ]),
             );
+            true
         }
         Some(Value::Array(values))
             if !values.iter().any(|value| value.as_str() == Some("null")) =>
         {
             values.push(Value::String("null".to_string()));
+            true
         }
         None => {
             let original = Value::Object(obj.clone());
@@ -1030,8 +1081,9 @@ fn make_nullable(schema: &mut Value) {
                 "anyOf".to_string(),
                 Value::Array(vec![original, json!({ "type": "null" })]),
             );
+            true
         }
-        _ => {}
+        _ => false,
     }
 }
 

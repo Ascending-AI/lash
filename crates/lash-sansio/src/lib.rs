@@ -59,9 +59,10 @@ pub use sansio::{
     WaitingLlmState, render_turn_causes_prompt,
 };
 pub use schema_contract::{
-    ProjectionMode, ProviderSchemaCapabilities, ResolvedSchema, SchemaContract, SchemaDialect,
-    SchemaProjectionOverride, SchemaProjectionPolicy, SchemaPurpose, SchemaResolutionError,
-    SchemaResolutionRequest, project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
+    OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,
+    ResolvedSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride,
+    SchemaProjectionPolicy, SchemaPurpose, SchemaResolutionError, SchemaResolutionRequest,
+    project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
     CellFailure, CellFailureKind, DegradedBinding, ExecResponse, ExecutedCall, ExecutedCallOutcome,
