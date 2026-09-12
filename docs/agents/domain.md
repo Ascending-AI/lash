@@ -7,8 +7,6 @@ How the engineering skills should consume this repo's domain documentation when 
 - **`CONTEXT.md`** at the repo root: the ubiquitous-language glossary (Host Application, Execution Mode, Runtime Scenario, Trigger Occurrence, Pending Turn Input, Queued Work, and the rest).
 - **`docs/adr/`**: read the ADRs that touch the area you're about to work in.
 
-For a narrative map of the runtime rather than its vocabulary, the architecture chapters on the published docs site (`docs/architecture/`) orient faster than reading crates cold.
-
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.
 
 ## File structure
