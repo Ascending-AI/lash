@@ -606,7 +606,9 @@ pub(super) async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_
 #[tokio::test]
 pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_cancel_gate() {
     let context = Arc::new(RecordingContext::default());
-    let awaited_key = restate_await_event_key(
+    let authority = RestateAuthorityId::new("suspended-await-owner").expect("valid test authority");
+    let awaited_key = restate_await_event_key_for_authority(
+        &authority,
         &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::Custom {
             key: "wait-for-signal".to_string(),
@@ -616,8 +618,9 @@ pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_c
     let cancellation = tokio_util::sync::CancellationToken::new();
     let task_context = Arc::clone(&context);
     let task_cancellation = cancellation.clone();
+    let task_authority = authority.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new_for_test(task_context)
+        RestateRuntimeEffectController::new(task_context, task_authority)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "suspended-await-event"),
@@ -634,7 +637,8 @@ pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_c
         "await-event must genuinely remain pending"
     );
 
-    let cancel_key = restate_await_event_key(
+    let cancel_key = restate_await_event_key_for_authority(
+        &authority,
         &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::TurnCancelGate,
     )
@@ -713,7 +717,9 @@ pub(super) async fn restate_routes_every_execution_scope_to_an_exact_durable_wai
 #[tokio::test]
 pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_late_resolution() {
     let context = Arc::new(RecordingContext::default());
-    let key = restate_await_event_key(
+    let authority = RestateAuthorityId::new("execute-cancel-owner").expect("valid test authority");
+    let key = restate_await_event_key_for_authority(
+        &authority,
         &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::tool_completion("cancel-tool"),
     )
@@ -722,8 +728,9 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
     let task_context = context.clone();
     let task_key = key.clone();
     let task_cancellation = cancellation.clone();
+    let task_authority = authority.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new_for_test(task_context)
+        RestateRuntimeEffectController::new(task_context, task_authority)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "cancel-wait"),
@@ -751,7 +758,7 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
         }
     ));
 
-    let host = RestateRuntimeEffectController::new_for_test(context);
+    let host = RestateRuntimeEffectController::new(context, authority);
     assert_eq!(
         host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("late")))
             .await
