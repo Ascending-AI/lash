@@ -1,5 +1,10 @@
 # Tool attempts are atomic
 
+Status: accepted, superseded in part by [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
+
+ADR 0094 replaces the parent-end policy and settlement design described below.
+The atomic-attempt and recorded-intent decisions remain accepted.
+
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side
 effect performed while a tool runs. Pretending that those operations compose
