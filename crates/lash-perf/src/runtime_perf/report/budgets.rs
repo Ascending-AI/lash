@@ -5,10 +5,8 @@ use serde::Deserialize;
 
 use super::RuntimePerfScenario;
 
-const PERF_GUARD_BUDGETS_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../scripts/perf_guard_budgets.json"
-));
+const PERF_GUARD_BUDGETS_JSON: &str =
+    include_str!("../../../../../scripts/perf_guard_budgets.json");
 
 #[derive(Debug, Deserialize)]
 struct PerfGuardBudgets {

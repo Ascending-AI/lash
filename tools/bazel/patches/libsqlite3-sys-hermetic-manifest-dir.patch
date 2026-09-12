@@ -1,0 +1,13 @@
+diff --git a/build.rs b/build.rs
+index 19e60d5..72b564e 100644
+--- a/build.rs
++++ b/build.rs
+@@ -117,7 +117,7 @@ mod build_bundled {
+         {
+             super::copy_bindings(lib_name, "bindgen_bundled_version", out_path);
+         }
+-        println!("cargo:include={}/{lib_name}", env!("CARGO_MANIFEST_DIR"));
++        println!("cargo:include={lib_name}");
+         println!("cargo:rerun-if-changed={lib_name}/sqlite3.c");
+         println!("cargo:rerun-if-changed=sqlite3/wasm32-wasi-vfs.c");
+         let mut cfg = cc::Build::new();

@@ -1,0 +1,32 @@
+# Keep repository and action caches off the space-constrained workspace
+# filesystem. These caches are safe to share across independent Orb forks.
+startup --output_user_root=/home/sam/.cache/lash-bazel/user-root
+startup --host_jvm_args=-Xmx4g
+common --repository_cache=/home/sam/.cache/lash-bazel/repository
+common --disk_cache=/home/sam/.cache/lash-bazel/disk
+common --enable_platform_specific_config
+common --lockfile_mode=error
+
+# The host-wide REAPI executor is selected explicitly. Its endpoint is installed
+# separately from this repository; an unavailable endpoint fails closed.
+build:shared --remote_executor=grpc://127.0.0.1:45191
+build:shared --remote_cache=grpc://127.0.0.1:45191
+build:shared --remote_instance_name=orb
+build:shared --remote_default_exec_properties=orb_executor_runtime=orb-runtime-sha256-47495b3de590444ce9c8605d2b1e6da0f41077ff6c5ff44ae141343d951f4390
+build:shared --remote_default_exec_properties=cpu_count=1
+build:shared --remote_default_exec_properties=memory_kb=2097152
+build:shared --remote_local_fallback=false
+build:shared --remote_upload_local_results=true
+test:shared --test_output=errors
+
+# Local execution remains available for CI, bootstrap, and reproduction.
+build:local --spawn_strategy=local
+test:local --test_output=errors
+
+build --incompatible_strict_action_env
+build --jobs=8
+build --loading_phase_threads=4
+build --local_resources=cpu=8
+build --local_resources=memory=32768
+build --announce_rc
+build --show_timestamps

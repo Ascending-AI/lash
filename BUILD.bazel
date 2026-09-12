@@ -1,0 +1,73 @@
+load(
+    "//tools/bazel:workspace_targets.bzl",
+    "WORKSPACE_COMPILE_TARGETS",
+    "WORKSPACE_DOCTEST_TARGETS",
+    "WORKSPACE_RUST_SOURCE_TARGETS",
+    "WORKSPACE_TEST_TARGETS",
+)
+
+exports_files([
+    "Cargo.lock",
+    "Cargo.toml",
+])
+
+filegroup(
+    name = "cargo_metadata",
+    srcs = [
+        "Cargo.lock",
+        "Cargo.toml",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Runtime inputs for the few tests whose asserted contract spans package
+# boundaries. Keeping them narrow preserves action invalidation granularity.
+filegroup(
+    name = "workspace_rust_sources",
+    srcs = WORKSPACE_RUST_SOURCE_TARGETS,
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "durable_fixtures",
+    srcs = glob(["fixtures/**"]),
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "workspace_test_scripts",
+    srcs = ["scripts/slack-clone-live-model-ui.py"],
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "perf_guard_budgets",
+    srcs = ["scripts/perf_guard_budgets.json"],
+    visibility = ["//visibility:public"],
+)
+
+# Build these labels to compile the complete Cargo --workspace --all-targets
+# shape without executing service-backed or otherwise Cargo-owned test gates.
+filegroup(
+    name = "workspace_compile",
+    srcs = WORKSPACE_COMPILE_TARGETS,
+    testonly = True,
+)
+
+filegroup(
+    name = "workspace_doctests",
+    srcs = WORKSPACE_DOCTEST_TARGETS,
+    testonly = True,
+)
+
+# This target makes the complete test label set queryable without defining a
+# second workspace scheduler. Use explicit labels with `bazel test`; Cargo
+# nextest retains workspace scheduling and service constraints.
+filegroup(
+    name = "workspace_test_inventory",
+    srcs = WORKSPACE_TEST_TARGETS,
+    testonly = True,
+)
