@@ -13,7 +13,7 @@ mod omission_null;
 #[cfg(test)]
 #[path = "schema_contract/omission_null_tests.rs"]
 mod omission_null_tests;
-use omission_null::materialize_omission_null_paths;
+use omission_null::{NullAcceptance, canonical_null_acceptance, materialize_omission_null_paths};
 pub use omission_null::{OmissionNullPath, OmissionNullPathSegment};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -457,7 +457,7 @@ fn project_schema(
     schema: &Value,
     profile: OpenAiSchemaProfile,
 ) -> Result<SchemaProjection, SchemaProjectionError> {
-    Projector::new(profile).project(schema)
+    Projector::new(profile, schema).project(schema)
 }
 
 fn project_tool_parameters(schema: &Value) -> Result<SchemaProjection, SchemaProjectionError> {
@@ -552,17 +552,19 @@ pub fn project_anthropic_bedrock_schema(
     }
 }
 
-struct Projector {
+struct Projector<'a> {
     profile: OpenAiSchemaProfile,
+    canonical_root: &'a Value,
     diagnostics: Vec<String>,
     errors: Vec<String>,
     introduced_nullable_schema_paths: BTreeSet<Path>,
 }
 
-impl Projector {
-    fn new(profile: OpenAiSchemaProfile) -> Self {
+impl<'a> Projector<'a> {
+    fn new(profile: OpenAiSchemaProfile, canonical_root: &'a Value) -> Self {
         Self {
             profile,
+            canonical_root,
             diagnostics: Vec::new(),
             errors: Vec::new(),
             introduced_nullable_schema_paths: BTreeSet::new(),
@@ -665,8 +667,14 @@ impl Projector {
                 for (name, schema) in properties.iter_mut() {
                     let optional = !originally_required.iter().any(|required| required == name);
                     let property_path = path.child("properties").child(name);
+                    let canonical_property = schema.clone();
                     self.project_value(schema, property_path.clone(), false);
-                    if optional && self.requires_strict_objects() && make_nullable(schema) {
+                    if optional
+                        && self.requires_strict_objects()
+                        && make_nullable(schema)
+                        && canonical_null_acceptance(&canonical_property, self.canonical_root)
+                            == NullAcceptance::Rejects
+                    {
                         self.introduced_nullable_schema_paths.insert(property_path);
                     }
                 }

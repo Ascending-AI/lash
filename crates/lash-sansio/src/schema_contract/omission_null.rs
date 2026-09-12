@@ -24,6 +24,98 @@ pub enum OmissionNullPathSegment {
     ArrayItem,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NullAcceptance {
+    Accepts,
+    Rejects,
+    Unknown,
+}
+
+pub(super) fn canonical_null_acceptance(schema: &Value, root: &Value) -> NullAcceptance {
+    canonical_null_acceptance_inner(schema, root, &mut Vec::new())
+}
+
+fn canonical_null_acceptance_inner(
+    schema: &Value,
+    root: &Value,
+    active_refs: &mut Vec<Path>,
+) -> NullAcceptance {
+    let Some(object) = schema.as_object() else {
+        return NullAcceptance::Unknown;
+    };
+
+    if is_null_schema(schema) {
+        return NullAcceptance::Accepts;
+    }
+    if object.contains_key("type") {
+        return NullAcceptance::Rejects;
+    }
+    if let Some(values) = object.get("enum").and_then(Value::as_array) {
+        return if values.iter().any(Value::is_null) {
+            NullAcceptance::Accepts
+        } else {
+            NullAcceptance::Rejects
+        };
+    }
+    if let Some(value) = object.get("const") {
+        return if value.is_null() {
+            NullAcceptance::Accepts
+        } else {
+            NullAcceptance::Rejects
+        };
+    }
+
+    if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+        if object
+            .keys()
+            .any(|key| key != "$ref" && !is_schema_annotation(key))
+        {
+            return NullAcceptance::Unknown;
+        }
+        let Some((target, target_path)) = resolve_local_schema_ref(root, reference) else {
+            return NullAcceptance::Unknown;
+        };
+        if active_refs.contains(&target_path) {
+            return NullAcceptance::Unknown;
+        }
+        active_refs.push(target_path);
+        let acceptance = canonical_null_acceptance_inner(target, root, active_refs);
+        active_refs.pop();
+        return acceptance;
+    }
+
+    let Some(any_of) = object.get("anyOf").and_then(Value::as_array) else {
+        return NullAcceptance::Unknown;
+    };
+    let mut saw_unknown = false;
+    for branch in any_of {
+        match canonical_null_acceptance_inner(branch, root, active_refs) {
+            NullAcceptance::Accepts => return NullAcceptance::Accepts,
+            NullAcceptance::Unknown => saw_unknown = true,
+            NullAcceptance::Rejects => {}
+        }
+    }
+    if saw_unknown {
+        NullAcceptance::Unknown
+    } else {
+        NullAcceptance::Rejects
+    }
+}
+
+fn is_schema_annotation(key: &str) -> bool {
+    matches!(
+        key,
+        "$comment"
+            | "title"
+            | "description"
+            | "default"
+            | "deprecated"
+            | "readOnly"
+            | "writeOnly"
+            | "examples"
+    )
+}
+
 pub(super) fn materialize_omission_null_paths(
     schema: &Value,
     introduced: &BTreeSet<Path>,
@@ -133,19 +225,24 @@ fn collect_omission_null_paths(
         .enumerate()
         .map(|(index, _)| schema_path.child("anyOf").index(index))
         .collect::<Vec<_>>();
-    let mapped_branches = branch_paths
+    let has_mapped_branch = any_of
         .iter()
-        .filter(|branch_path| {
-            introduced
-                .iter()
-                .any(|path| path.is_at_or_below(branch_path))
-        })
-        .count();
+        .zip(&branch_paths)
+        .any(|(branch, branch_path)| {
+            let mut branch_active_refs = active_refs.clone();
+            contains_introduced_mapping(
+                root,
+                branch,
+                branch_path,
+                introduced,
+                &mut branch_active_refs,
+            )
+        });
     let non_null_branches = any_of
         .iter()
         .filter(|branch| !is_null_schema(branch))
         .count();
-    if mapped_branches > 0 && non_null_branches > 1 {
+    if has_mapped_branch && non_null_branches > 1 {
         diagnostics.push(format!(
             "{schema_path}: omission-null mapping inside multi-branch anyOf left untouched"
         ));
@@ -168,7 +265,38 @@ fn collect_omission_null_paths(
     }
 }
 
-fn resolve_local_schema_ref<'a>(root: &'a Value, reference: &str) -> Option<(&'a Value, Path)> {
+fn contains_introduced_mapping(
+    root: &Value,
+    schema: &Value,
+    schema_path: &Path,
+    introduced: &BTreeSet<Path>,
+    active_refs: &mut Vec<Path>,
+) -> bool {
+    if introduced
+        .iter()
+        .any(|path| path.is_at_or_below(schema_path))
+    {
+        return true;
+    }
+    let Some(reference) = schema.get("$ref").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some((target, target_path)) = resolve_local_schema_ref(root, reference) else {
+        return false;
+    };
+    if active_refs.contains(&target_path) {
+        return false;
+    }
+    active_refs.push(target_path.clone());
+    let mapped = contains_introduced_mapping(root, target, &target_path, introduced, active_refs);
+    active_refs.pop();
+    mapped
+}
+
+pub(super) fn resolve_local_schema_ref<'a>(
+    root: &'a Value,
+    reference: &str,
+) -> Option<(&'a Value, Path)> {
     if reference == "#" {
         return Some((root, Path::root()));
     }
