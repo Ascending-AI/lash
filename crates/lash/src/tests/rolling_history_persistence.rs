@@ -343,7 +343,7 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
             .model(model_spec("rolling-history-redrive-model", None, 40_000))
             .tools(Arc::new(AppTools))
             .plugin(Arc::new(
-                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
             ))
             .plugin(checkpoint_probe.clone())
             .store_factory(store_factory.clone())
@@ -399,7 +399,7 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
             .model(model_spec("rolling-history-redrive-model", None, 40_000))
             .tools(Arc::new(AppTools))
             .plugin(Arc::new(
-                lash_standard_plugins::rolling_history::RollingHistoryPluginFactory::default(),
+                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
             ))
             .plugin(checkpoint_probe.clone())
             .effect_host(effect_host.clone())
