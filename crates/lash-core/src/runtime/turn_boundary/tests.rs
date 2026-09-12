@@ -1,9 +1,11 @@
 use super::*;
+use crate::EffectHost as _;
 use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
 use crate::store::SessionExecutionLeaseStore;
 use crate::store::TurnInputStore;
+use crate::testing::conformance_support::TurnCancelPeekIdentity;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,
     shared_parts,
@@ -160,8 +162,8 @@ fn frame_request(frame_key: FrameKey, reason: AgentFrameReason) -> OpenAgentFram
 }
 
 #[tokio::test]
-async fn final_commit_refreshes_stale_intent_without_rematerializing() {
-    let store = RecordingStore::default();
+async fn final_commit_retry_preserves_honoured_after_step_settlement() {
+    let store = Arc::new(RecordingStore::default());
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
     state.session_id = SessionId::from("final-cancel-cas");
     state.ensure_agent_frame_initialized();
@@ -174,28 +176,89 @@ async fn final_commit_refreshes_stale_intent_without_rematerializing() {
                 &turn_id,
                 crate::TurnInputCheckpointBoundary::AfterWork,
             ),
-            crate::TurnInput::text("completion keeps this input"),
+            crate::TurnInput::text("after-step cancellation drops this input"),
         ))
         .await
         .expect("enqueue active-turn input");
-    let losing_request =
-        crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:losing-request", None)
+    let base_request =
+        crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:base", None)
+            .mode(crate::TurnCancelMode::AfterStep)
             .undelivered(crate::TurnCancelDisposition::Drop);
-    store.inject_turn_cancel_before_next_runtime_commit(losing_request.clone());
-
-    let host = crate::NativeEffectHost::default();
-    let control = crate::runtime::turn_control::ActiveTurnControl::new(&host, address.clone())
+    let host = Arc::new(crate::NativeEffectHost::default());
+    let driver =
+        crate::TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    driver
+        .request_cancel(base_request.clone())
         .await
-        .expect("create turn gate");
-    assert!(
-        control
-            .settle_before_commit(&host, false, None)
+        .expect("accept after-step cancellation");
+    let control =
+        crate::runtime::turn_control::ActiveTurnControl::new(host.as_ref(), address.clone())
             .await
-            .expect("seal completion gate")
-            .is_none()
+            .expect("create turn gate");
+    let honoured = control
+        .observe_pending_cancel(
+            host.as_ref(),
+            TurnCancelPeekIdentity::AfterStep {
+                protocol_iteration: 7,
+            },
+        )
+        .await
+        .expect("observe after-step gate")
+        .expect("after-step cancellation wins");
+    assert_eq!(honoured.honoured_after_step, Some(7));
+
+    let (mut pipeline, lease) = leased_boundary(store.as_ref(), state).await;
+    let observed = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot base intent");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
+        .await
+        .expect("bind cancellation owner");
+    let authorization = control
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            observed.clone(),
+            false,
+            Some(honoured.clone()),
+        )
+        .expect("materialize exact closure");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize exact closure");
+    let settlement = control
+        .settle_authorized(host.as_ref(), &authorization)
+        .await
+        .expect("settle exact closure");
+    assert_eq!(
+        settlement
+            .effective_cancellation()
+            .and_then(|evidence| evidence.honoured_after_step),
+        Some(7)
+    );
+    assert_eq!(settlement.effective_cancellation(), Some(&honoured));
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read authorized closure before commit"),
+        vec![authorization]
     );
 
-    let (mut pipeline, _lease) = leased_boundary(&store, state).await;
+    let later_request =
+        crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:later", None)
+            .undelivered(crate::TurnCancelDisposition::Drop);
+    store.inject_turn_cancel_before_next_runtime_commit(later_request);
     pipeline
         .prepared_checkpoint(
             SessionPolicy::new(UNBOUNDED),
@@ -214,11 +277,11 @@ async fn final_commit_refreshes_stale_intent_without_rematerializing() {
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,
-            store: Some(&store),
+            store: Some(store.as_ref()),
             usage_deltas: &[],
             failure_evidence: &[],
-            outcome: &TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
-                text: "completed".to_string(),
+            outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled {
+                evidence: honoured.clone(),
             }),
             claim_settlement: TurnClaimSettlement::for_test(
                 Vec::new(),
@@ -231,30 +294,37 @@ async fn final_commit_refreshes_stale_intent_without_rematerializing() {
             current_session_lease_generation: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: Some(turn_id.clone()),
-            interrupted_turn_input_cancellation: None,
-            interrupted_turn_cancel_intent: Some(crate::TurnCancelIntentSnapshot::Absent),
-            turn_cancel_closure_settlement: None,
-            turn_control_resolver: Some(&host),
+            interrupted_turn_input_cancellation: Some(honoured),
+            interrupted_turn_cancel_intent: Some(observed),
+            turn_cancel_closure_settlement: Some(settlement),
+            turn_control_resolver: Some(host.as_ref()),
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
+            session_execution_lease_completion: Some(lease.completion()),
         })
         .await
-        .expect("refresh stale predicate and commit completion once");
+        .expect("refresh stale predicate without discarding execution enrichment");
     assert_eq!(store.commit_write_transaction_count(), 2);
     assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
-    let row = store
-        .list_pending_turn_inputs(&address.session_id)
-        .await
-        .expect("read ordinarily deferred input");
-    assert_eq!(row[0].input_id, pending.input_id);
-    assert_eq!(row[0].state, crate::TurnInputState::DeferredNextTurn);
     let durable = store
         .turn_cancel_request(&address)
         .await
-        .expect("read losing request")
-        .expect("losing request remains retained");
-    assert_eq!(durable.request, losing_request);
-    assert!(durable.outcome.is_none());
+        .expect("read authenticated base request")
+        .expect("authenticated base remains retained");
+    assert_eq!(durable.request, base_request);
+    let affected = durable
+        .outcome
+        .expect("one logical commit records the affected input")
+        .affected_inputs;
+    assert_eq!(affected.len(), 1);
+    assert_eq!(affected[0].input_id, pending.input_id);
+    assert_eq!(affected[0].disposition, crate::TurnCancelDisposition::Drop);
+    assert!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read closure pins")
+            .is_empty()
+    );
 }
 async fn leased_boundary(
     store: &RecordingStore,

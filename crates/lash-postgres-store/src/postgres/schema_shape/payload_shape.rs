@@ -184,6 +184,14 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
         ),
         PayloadRegistration::of::<lash_core::ExecutionScope>(),
     );
+    payloads.insert(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_turn_cancel_closure_participants",
+            "scope_json",
+        ),
+        PayloadRegistration::of::<lash_core::ExecutionScope>(),
+    );
     payloads
 }
 
@@ -711,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_binding_scope_is_the_only_registered_json_carrier() {
+    fn cancellation_owner_scopes_are_the_registered_json_carriers() {
         let identities = registered_payloads()
             .keys()
             .copied()
@@ -720,9 +728,10 @@ mod tests {
 
         assert_eq!(
             identities,
-            std::collections::BTreeSet::from([String::from(
-                "postgres lash_turn_cancellation_bindings.admitted_scope_json"
-            )])
+            std::collections::BTreeSet::from([
+                String::from("postgres lash_turn_cancel_closure_participants.scope_json"),
+                String::from("postgres lash_turn_cancellation_bindings.admitted_scope_json"),
+            ])
         );
 
         // Keep the dormant registration path covered while the durable stores

@@ -37,7 +37,8 @@ use serde::Serialize;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
     RestateTurnCancelRaceOutcome, restate_await_event_key_for_authority,
-    restate_await_event_key_is_valid, restate_durable_wait_request, restate_unknown_or_revoked,
+    restate_await_event_key_is_valid, restate_await_event_key_is_valid_for_authority,
+    restate_durable_wait_request, restate_unknown_or_revoked,
 };
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
@@ -492,6 +493,10 @@ impl<'ctx, C> AwaitEventResolver for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.authority_id.binding_id().to_string())
+    }
+
     /// Restate re-drives this handler invocation, so its retry policy - not a
     /// sleep inside one invocation - is the right place to pace a queued drain
     /// that found the session execution lane held by a live foreign executor.
@@ -534,7 +539,7 @@ where
         key: &AwaitEventKey,
         resolution: Resolution,
     ) -> Result<ResolveOutcome, RuntimeError> {
-        if !restate_await_event_key_is_valid(key) {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Ok(ResolveOutcome::UnknownOrRevoked);
         }
         resolve_restate_await_event(&self.context, key, resolution).await
@@ -544,7 +549,7 @@ where
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        if !restate_await_event_key_is_valid(key) {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Err(restate_unknown_or_revoked());
         }
         self.require_active_session(key.scope.session_id()).await?;
@@ -565,7 +570,7 @@ where
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        if !restate_await_event_key_is_valid(key) {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Err(restate_unknown_or_revoked());
         }
         self.require_active_session(key.scope.session_id()).await?;

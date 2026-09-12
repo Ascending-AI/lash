@@ -30,8 +30,9 @@ pub use executor::{
     RuntimeEffectControllerError, RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor,
     RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlParticipation, turn_control_binding_id_for_scope,
+    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
+    turn_control_binding_id_for_scope,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,

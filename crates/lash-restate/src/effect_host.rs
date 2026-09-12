@@ -21,9 +21,11 @@ use lash_core::{
 };
 
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
+    RestateDurableWaitAddress, RestateDurableWaitResolveRequest,
+    RestateTurnCancelClosureParticipantRequest, durable_wait_index_key_for_scope,
     durable_wait_index_object_key, restate_await_event_key_for_authority,
-    restate_await_event_key_is_valid, restate_durable_wait_request, restate_unknown_or_revoked,
+    restate_await_event_key_is_valid, restate_await_event_key_is_valid_for_authority,
+    restate_durable_wait_request, restate_unknown_or_revoked,
 };
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
@@ -86,6 +88,10 @@ impl RestateEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateEffectHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.controller.authority_id.binding_id().to_string())
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -289,6 +295,26 @@ impl EffectHost for RestateEffectHost {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(binding.registrations);
     }
+
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.controller
+            .register_turn_cancel_closure_participant(participant_id, scope)
+            .await
+    }
+
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.controller
+            .release_turn_cancel_closure_participant(participant_id, scope)
+            .await
+    }
 }
 
 impl RestateEffectHost {
@@ -328,6 +354,10 @@ impl FencedRestateController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for FencedRestateController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.controller.authority_id.binding_id().to_string())
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -619,6 +649,38 @@ async fn update_restate_scope_waits_via_ingress(
         })
 }
 
+async fn retire_restate_scope_via_ingress(
+    ingress: &RestateAwaitEventIngress,
+    scope: &ExecutionScope,
+    only_if_quiescent: bool,
+) -> Result<(), RuntimeError> {
+    let index_key = durable_wait_index_key_for_scope(scope);
+    let handler = if only_if_quiescent {
+        "revoke_all_if_quiescent"
+    } else {
+        "retire_scope"
+    };
+    let retired = ingress
+        .ingress
+        .call_object_json::<_, bool>("LashDurableWaitIndex", &index_key, handler, &())
+        .await
+        .map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                error.to_string(),
+            )
+        })?;
+    if retired {
+        Ok(())
+    } else {
+        Err(
+            lash_core::facade_support::effect_replay_driver::scope_not_quiescent(
+                scope.journal_identity()?.key(),
+            ),
+        )
+    }
+}
+
 async fn await_restate_await_event_via_ingress(
     ingress: &RestateAwaitEventIngress,
     key: &AwaitEventKey,
@@ -689,6 +751,10 @@ fn ingress_group_error(
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateEffectHostController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.authority_id.binding_id().to_string())
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -720,7 +786,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         key: &AwaitEventKey,
         resolution: Resolution,
     ) -> Result<ResolveOutcome, RuntimeError> {
-        if !restate_await_event_key_is_valid(key) {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Ok(ResolveOutcome::UnknownOrRevoked);
         }
         resolve_restate_await_event_via_ingress(&self.await_event_ingress, key, resolution).await
@@ -787,7 +853,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         if scope.session_id().is_some() {
             return Err(restate_scope_not_retirable(scope));
         }
-        update_restate_scope_waits_via_ingress(&self.await_event_ingress, scope, "revoke_all").await
+        retire_restate_scope_via_ingress(&self.await_event_ingress, scope, false).await
     }
 
     /// Revoke and fence the scope's index only if no durable wait under it is
@@ -856,6 +922,76 @@ impl AwaitEventResolver for RestateEffectHostController {
 }
 
 impl RestateEffectHostController {
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        scope.validate()?;
+        if scope.session_id().is_some() {
+            return Ok(());
+        }
+        let index_key = durable_wait_index_key_for_scope(scope);
+        let admitted = self
+            .await_event_ingress
+            .ingress
+            .call_object_json::<_, bool>(
+                "LashDurableWaitIndex",
+                &index_key,
+                "register_closure_participant",
+                &RestateTurnCancelClosureParticipantRequest {
+                    participant_id: participant_id.to_string(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    error.to_string(),
+                )
+            })?;
+        if admitted {
+            Ok(())
+        } else {
+            Err(RuntimeError::new(
+                RuntimeErrorCode::EffectScopeRetired,
+                format!(
+                    "effect scope `{}` is retired",
+                    scope.journal_identity()?.key()
+                ),
+            ))
+        }
+    }
+
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        scope.validate()?;
+        if scope.session_id().is_some() {
+            return Ok(());
+        }
+        let index_key = durable_wait_index_key_for_scope(scope);
+        self.await_event_ingress
+            .ingress
+            .call_object_json::<_, ()>(
+                "LashDurableWaitIndex",
+                &index_key,
+                "release_closure_participant",
+                &RestateTurnCancelClosureParticipantRequest {
+                    participant_id: participant_id.to_string(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RestateAwaitEventSessionUpdate,
+                    error.to_string(),
+                )
+            })
+    }
+
     /// Whether `scope` still admits a mint: a session scope until its index
     /// is revoked, a non-session scope until it is retired (read-through
     /// above, since retirement is a non-session concept).
@@ -874,11 +1010,11 @@ impl RestateEffectHostController {
     /// The key's fence: a session key through its session index, a
     /// non-session key through the scope read-through above.
     async fn ensure_key_access(&self, key: &AwaitEventKey) -> Result<(), RuntimeError> {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
+            return Err(restate_unknown_or_revoked());
+        }
         if key.scope.session_id().is_some() {
             return ensure_restate_key_access_via_ingress(&self.await_event_ingress, key).await;
-        }
-        if !restate_await_event_key_is_valid(key) {
-            return Err(restate_unknown_or_revoked());
         }
         if self.await_event_scope_is_retired(&key.scope).await? {
             return Err(restate_unknown_or_revoked());
@@ -1249,7 +1385,7 @@ impl RuntimeEffectController for RestateEffectHostController {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let effect_replay_key = envelope.stable_hash()?;
         if let RuntimeEffectCommand::AwaitEvent { key } = &envelope.command {
-            if !restate_await_event_key_is_valid(key) {
+            if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
                 return Err(RuntimeEffectControllerError::from(
                     restate_unknown_or_revoked(),
                 ));

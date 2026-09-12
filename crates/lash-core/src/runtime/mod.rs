@@ -172,10 +172,10 @@ pub use effect::{
     RuntimeSleepOptions, RuntimeSubject, ScopeBoundController, ScopedEffectController,
     SegmentProgress, StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch,
     ToolBatchEffectOutcome, ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancellationAuthority,
-    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
+    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
+    TurnControlBinding, TurnControlParticipation, refuse_unhonored_group_membership,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};

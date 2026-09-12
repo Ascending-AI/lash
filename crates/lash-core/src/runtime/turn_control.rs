@@ -1263,7 +1263,7 @@ impl ActiveTurnControl {
             TurnCancelClosureProposal::CompletionSealed => TurnGateTerminal::CompletionSealed,
         };
         let effective_cancellation = self.settle_proposed(resolver, proposed).await?;
-        let base_cancellation = Self::peek_base_cancel_evidence(resolver, &self.address).await?;
+        let base_cancellation = self.read_settled_base_cancel_evidence(resolver).await?;
         Ok(TurnCancelClosureSettlement {
             authorization: authorization.clone(),
             base_cancellation,
@@ -1342,6 +1342,39 @@ impl ActiveTurnControl {
             }),
             Ok(None) => Ok(None),
             Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Read the exact authorized base gate after settlement. Unlike the
+    /// permissive recovery probe, absence or revocation is a refusal: a
+    /// closure authorization cannot be consumed without an observable terminal
+    /// from its bound promise owner.
+    async fn read_settled_base_cancel_evidence(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+    ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+        match resolver.peek_await_event(&self.cancel_key).await {
+            Ok(Some(terminal)) => Ok(match decode_gate(terminal)? {
+                TurnGateTerminal::CancelRequested(evidence) => Some(evidence),
+                TurnGateTerminal::CompletionSealed => None,
+            }),
+            Ok(None) => Err(RuntimeError::new(
+                crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                format!(
+                    "turn `{}` in session `{}` has no settled base cancellation terminal",
+                    self.address.turn_id, self.address.session_id
+                ),
+            )),
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                Err(RuntimeError::new(
+                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                    format!(
+                        "turn `{}` in session `{}` lost its base cancellation terminal before closure settlement",
+                        self.address.turn_id, self.address.session_id
+                    ),
+                ))
+            }
             Err(err) => Err(err),
         }
     }

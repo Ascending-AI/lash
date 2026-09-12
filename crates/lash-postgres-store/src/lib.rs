@@ -336,7 +336,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // across owner failure and are rejected rather than silently adopting them.
 // Version 88 persists retired physical scopes under the same advisory fence as
 // cancellation authorization.
-const SCHEMA_VERSION: i32 = 88;
+// Version 89 registers every cancellation-closure catalog with the actual
+// effect owner so direct retirement cannot bypass an outstanding catalog pin.
+const SCHEMA_VERSION: i32 = 89;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -352,6 +354,7 @@ pub struct PostgresSessionStoreFactory {
     await_event_signing_secret: Arc<[u8]>,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core::Clock>,
+    turn_cancel_closure_owner: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
 }
 
 #[derive(Clone)]
@@ -362,6 +365,7 @@ pub struct PostgresSessionStore {
     await_event_signing_secret: Arc<[u8]>,
     clock: Arc<dyn lash_core::Clock>,
     session_id: SessionId,
+    turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -787,6 +791,7 @@ impl PostgresStorage {
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -802,6 +807,7 @@ impl PostgresStorage {
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -820,6 +826,7 @@ impl PostgresStorage {
             await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             session_id: session_id.into(),
+            turn_cancel_closure_owner: None,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             #[cfg(test)]

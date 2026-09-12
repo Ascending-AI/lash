@@ -27,7 +27,7 @@ pub use control::{
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
     ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, await_event_scope_not_retirable,
+    ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding, await_event_scope_not_retirable,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,

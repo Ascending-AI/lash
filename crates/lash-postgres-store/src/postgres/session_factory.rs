@@ -20,71 +20,15 @@ pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "claim_id",
 ];
 
-impl PostgresSessionStoreFactory {
-    /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
-    /// gated conformance factory shares it.
-    pub(crate) async fn create_session_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<PostgresSessionStore>, StoreError> {
-        lash_core::store::validate_session_id(&request.session_id)?;
-        let store = self.store_for(request.session_id.clone());
-        let meta = SessionMeta {
-            session_id: request.session_id.clone(),
-            relation: request.relation.clone(),
-            pending_observer_intents: request.pending_observer_intents.clone(),
-        };
-        let created_at_ms = self.clock.timestamp_ms();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
-            .await?;
-        let deleted = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-             )",
-        )
-        .bind(request.session_id.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if deleted {
-            return Err(StoreError::SessionDeleted {
-                session_id: request.session_id.clone(),
-            });
-        }
-        crate::session_meta::write_session_meta_tx(
-            &mut tx,
-            &meta,
-            crate::session_meta::SessionMetaWrite::Insert,
-            created_at_ms,
-        )
-        .await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Arc::new(store))
-    }
-
-    /// Concrete reopen behind [`SessionStoreFactory::open_existing_store`];
-    /// the gated conformance factory shares it.
-    pub(crate) async fn open_existing_session_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<PostgresSessionStore>>, String> {
-        let store = self.store_for(request.session_id.clone());
-        if store
-            .load_session_meta()
-            .await
-            .map_err(|err| err.to_string())?
-            .is_some()
-        {
-            Ok(Some(Arc::new(store)))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        *self
+            .turn_cancel_closure_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
+    }
+
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core::store::RetentionBound,
@@ -143,7 +87,14 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         scope: &lash_core::ExecutionScope,
     ) -> Result<(), StoreError> {
-        crate::turn_cancel_closure::retire_scope(&self.pool, scope).await
+        crate::turn_cancel_closure::retire_scope(&self.pool, scope).await?;
+        if let Some(owner) = self.turn_cancel_closure_owner_binding() {
+            owner
+                .release(scope)
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+        }
+        Ok(())
     }
     async fn has_claimable_queued_work(
         &self,

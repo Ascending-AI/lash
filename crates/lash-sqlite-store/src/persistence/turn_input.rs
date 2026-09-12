@@ -99,6 +99,14 @@ impl TurnInputStore for Store {
                 record_kind: "TurnCancelClosureAuthorization",
                 message: error.to_string(),
             })?;
+        if authorization.admitted_scope().session_id().is_none()
+            && let Some(owner) = &self.turn_cancel_closure_owner
+        {
+            owner
+                .register(authorization.admitted_scope(), authorization.binding_id())
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+        }
         let fence = session_execution_lease.clone();
         let authorization = authorization.clone();
         let now = self.clock.timestamp_ms();

@@ -1054,6 +1054,17 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
     retired_at_ms   INTEGER NOT NULL
 );
+
+-- Durable catalogs that may hold an authorized cancellation closure under a
+-- physical scope. Owner retirement and participant registration serialize on
+-- this database; a participant is released only after its catalog fences new
+-- authorizations and proves that none remain.
+CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
+    scope_id       TEXT NOT NULL,
+    participant_id TEXT NOT NULL,
+    scope_json     TEXT NOT NULL,
+    PRIMARY KEY (scope_id, participant_id)
+);
 ";
 
 // Version 6 keys session-owned effects by the permanent session id and removes
@@ -1106,7 +1117,10 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // children, groups, and await-event promises in one transaction and leaves a
 // tombstone every admission path refuses. Pre-17 effect databases are
 // rejected at open; there is no migration arm.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 17;
+// Version 18 adds owner-side cancellation-closure participants. This makes
+// scope retirement serialize with authorization held in separate session
+// catalogs; pre-18 effect databases are rejected and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 18;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

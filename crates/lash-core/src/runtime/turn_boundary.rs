@@ -563,7 +563,7 @@ impl TurnBoundary {
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
         turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
-        turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
+        _turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
@@ -622,8 +622,11 @@ impl TurnBoundary {
             claim_settlement.has_recovered(current_session_lease_generation);
         // Recovered settlement retries are bounded by their original rows.
         // Cancellation-intent retries are instead progress-fenced: every
-        // refusal proves a newer durable intent revision and refreshes only
-        // the transient predicate and already-settled gate evidence.
+        // refusal proves a newer durable intent revision. Refresh only that
+        // snapshot: the settlement and materialized cancellation evidence are
+        // already authenticated and may contain live execution enrichment
+        // (such as the iteration that honoured an AfterStep request) which a
+        // raw promise peek cannot reconstruct.
         let mut retry_budget = RecoveredSettlementBudget(
             commit
                 .completed_queue_claims
@@ -658,34 +661,7 @@ impl TurnBoundary {
                             })?;
                     let address = crate::TurnAddress::new(&session_id, turn_id);
                     let observed = store.turn_cancel_request_intent(&address).await?;
-                    let resolver = turn_control_resolver.ok_or_else(|| {
-                        StoreError::Backend(
-                            "cancellation intent CAS retry has no turn-control resolver"
-                                .to_string(),
-                        )
-                    })?;
-                    let decision = crate::runtime::turn_control::ActiveTurnControl::peek_orphan_repair_decision(
-                        resolver,
-                        &address,
-                    )
-                    .await
-                    .map_err(|error| StoreError::Backend(format!(
-                        "failed to refresh cancellation gate after intent CAS refusal: {error}"
-                    )))?;
                     commit.interrupted_turn_cancel_intent = Some(observed);
-                    commit.interrupted_turn_input_cancellation = match decision {
-                        Some(crate::TurnCancelRepairDecision::CancellationWon(evidence)) => {
-                            Some(evidence)
-                        }
-                        Some(crate::TurnCancelRepairDecision::CancellationDidNotWin)
-                        | Some(crate::TurnCancelRepairDecision::NoCancellationIntent) => None,
-                        None => {
-                            return Err(StoreError::Backend(
-                                "cancellation gate vanished while refreshing final commit"
-                                    .to_string(),
-                            ));
-                        }
-                    };
                 }
                 Err(err) if can_retry_recovered_settlement && retry_budget.consume() => {
                     let dropped =

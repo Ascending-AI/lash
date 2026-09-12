@@ -1362,7 +1362,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 88, "Postgres component schema pin");
+    assert_eq!(current_version, 89, "Postgres component schema pin");
     assert_eq!(
         current_version - 1,
         87,

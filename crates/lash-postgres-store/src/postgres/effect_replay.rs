@@ -53,6 +53,7 @@ pub struct PostgresEffectReplayOptions {
 #[derive(Clone)]
 pub struct PostgresEffectHost {
     inner: Arc<PostgresEffectReplay>,
+    pool: PgPool,
     turn_control_binding_id: Arc<str>,
 }
 
@@ -60,6 +61,7 @@ pub struct PostgresEffectHost {
 pub struct PostgresRuntimeEffectController {
     inner: Arc<PostgresEffectReplay>,
     scope: ExecutionScope,
+    turn_control_binding_id: Arc<str>,
 }
 
 // The `AwaitEventResolver` / `EffectHost` / `RuntimeEffectController` surface of
@@ -71,11 +73,98 @@ impl effect_replay_driver::StoreReplayAdapter for PostgresEffectHost {
     fn replay_driver(&self) -> &Arc<PostgresEffectReplay> {
         &self.inner
     }
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.turn_control_binding_id.to_string())
+    }
 }
 
+#[async_trait::async_trait]
 impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.turn_control_binding_id.to_string()
+    }
+
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        let scope_id = scope.journal_identity()?.key().to_string();
+        let scope_json = serde_json::to_string(scope).map_err(|error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                error.to_string(),
+            )
+        })?;
+        let retirement_error = |error: sqlx::Error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
+        };
+        let mut tx = self.pool.begin().await.map_err(retirement_error)?;
+        lock_scope(&mut tx, &scope_id)
+            .await
+            .map_err(retirement_error)?;
+        let retired: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM lash_effect_scope_retirements WHERE scope_id = $1
+             )",
+        )
+        .bind(&scope_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(retirement_error)?;
+        if retired {
+            tx.rollback().await.map_err(retirement_error)?;
+            return Err(RuntimeError::new(
+                lash_core::RuntimeErrorCode::EffectScopeRetired,
+                format!(
+                    "effect scope `{scope_id}` has been retired and cannot admit a cancellation-closure participant"
+                ),
+            ));
+        }
+        sqlx::query(
+            "INSERT INTO lash_turn_cancel_closure_participants
+             (scope_id, participant_id, scope_json)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (scope_id, participant_id) DO NOTHING",
+        )
+        .bind(&scope_id)
+        .bind(participant_id)
+        .bind(scope_json)
+        .execute(&mut *tx)
+        .await
+        .map_err(retirement_error)?;
+        tx.commit().await.map_err(retirement_error)
+    }
+
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        let scope_id = scope.journal_identity()?.key().to_string();
+        let retirement_error = |error: sqlx::Error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
+        };
+        let mut tx = self.pool.begin().await.map_err(retirement_error)?;
+        lock_scope(&mut tx, &scope_id)
+            .await
+            .map_err(retirement_error)?;
+        sqlx::query(
+            "DELETE FROM lash_turn_cancel_closure_participants
+             WHERE scope_id = $1 AND participant_id = $2",
+        )
+        .bind(scope_id)
+        .bind(participant_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(retirement_error)?;
+        tx.commit().await.map_err(retirement_error)
     }
 }
 
@@ -84,6 +173,9 @@ impl effect_replay_driver::StoreReplayAdapter for PostgresRuntimeEffectControlle
     type AwaitEvents = PostgresAwaitEventBackend;
     fn replay_driver(&self) -> &Arc<PostgresEffectReplay> {
         &self.inner
+    }
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.turn_control_binding_id.to_string())
     }
 }
 
@@ -114,6 +206,7 @@ impl PostgresEffectHost {
     ) -> Self {
         Self {
             inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
+            pool: storage.pool.clone(),
             turn_control_binding_id: Arc::from(format!(
                 "postgres:{}",
                 hex_digest(&storage.await_event_signing_secret)
@@ -185,6 +278,10 @@ impl PostgresRuntimeEffectController {
         Self {
             inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
             scope,
+            turn_control_binding_id: Arc::from(format!(
+                "postgres:{}",
+                hex_digest(&storage.await_event_signing_secret)
+            )),
         }
     }
 
@@ -603,6 +700,20 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         // the same transaction so the fence and the deletions land together.
         if let Some(scope) = fenced_scope.as_ref() {
             lock_scope(&mut tx, &key).await.map_err(retirement_error)?;
+            let has_closure_participant: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM lash_turn_cancel_closure_participants
+                    WHERE scope_id = $1
+                 )",
+            )
+            .bind(&key)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
+            if has_closure_participant {
+                tx.rollback().await.map_err(retirement_error)?;
+                return Err(effect_replay_driver::scope_not_quiescent(&key));
+            }
             // The quiescence proof is read under the same scope lock the
             // fence is written under, so no child can start between the
             // proof and the deletions.

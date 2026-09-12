@@ -80,6 +80,10 @@ where
     C: RestateControllerContext<'ctx>,
     'ctx: 'run,
 {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn acquire_queued_lane(
         &self,
         lane: Arc<dyn QueuedLaneProbe>,

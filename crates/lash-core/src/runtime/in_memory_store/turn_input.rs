@@ -711,20 +711,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         if let Some(evidence) =
             settlement.and_then(crate::TurnCancelClosureSettlement::base_cancellation)
         {
-            let prior_outcome = requests
-                .get(turn_id)
-                .and_then(|stored| stored.record.outcome.clone());
-            let request =
-                request_from_evidence(&crate::TurnAddress::new(session_id, turn_id), evidence);
-            requests
-                .entry(turn_id.clone())
-                .or_insert_with(|| super::InMemoryTurnCancelRequest {
-                    record: crate::TurnCancelRequestRecord {
-                        request,
-                        outcome: prior_outcome,
-                    },
-                    intent_revision: 1,
-                });
+            reconcile_authenticated_turn_cancel_winner(
+                &mut requests,
+                &crate::TurnAddress::new(session_id, turn_id),
+                evidence,
+            )?;
         }
         let mut outcome = crate::TurnCancelInputOutcome::default();
         for entry in pending.iter_mut() {
@@ -788,6 +779,33 @@ pub(super) fn snapshot(
                 revision: stored.intent_revision,
             }
         })
+}
+
+pub(super) fn reconcile_authenticated_turn_cancel_winner(
+    requests: &mut std::collections::HashMap<crate::TurnId, super::InMemoryTurnCancelRequest>,
+    address: &crate::TurnAddress,
+    evidence: &crate::TurnCancellationEvidence,
+) -> Result<(), crate::StoreError> {
+    let outcome = requests
+        .get(&address.turn_id)
+        .and_then(|stored| stored.record.outcome.clone());
+    let request = request_from_evidence(address, evidence);
+    let intent_revision = match requests.get(&address.turn_id) {
+        Some(stored) if stored.record.request == request => stored.intent_revision,
+        Some(stored) => crate::StoreError::checked_monotonic_increment(
+            "turn_cancel_intent_revision",
+            stored.intent_revision,
+        )?,
+        None => 1,
+    };
+    requests.insert(
+        address.turn_id.clone(),
+        super::InMemoryTurnCancelRequest {
+            record: crate::TurnCancelRequestRecord { request, outcome },
+            intent_revision,
+        },
+    );
+    Ok(())
 }
 
 pub(super) fn request_from_evidence(

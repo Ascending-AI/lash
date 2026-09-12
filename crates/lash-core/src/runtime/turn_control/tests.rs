@@ -7,6 +7,44 @@ use crate::{
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+struct MissingBaseAfterSettleResolver {
+    owner: Arc<NativeEffectHost>,
+    base_key: crate::AwaitEventKey,
+    resolve_calls: AtomicUsize,
+    base_peeks: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::AwaitEventResolver for MissingBaseAfterSettleResolver {
+    async fn resolve_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+        resolution: crate::Resolution,
+    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
+        self.resolve_calls.fetch_add(1, Ordering::SeqCst);
+        self.owner.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &crate::AwaitEventKey,
+    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
+        if key == &self.base_key {
+            assert_eq!(
+                self.resolve_calls.load(Ordering::SeqCst),
+                1,
+                "strict base read must follow effective settlement"
+            );
+            self.base_peeks.fetch_add(1, Ordering::SeqCst);
+            return Err(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked,
+                "injected base loss after effective settlement",
+            ));
+        }
+        self.owner.peek_await_event(key).await
+    }
+}
+
 struct CatalogProbeFactory {
     store: Arc<InMemorySessionStore>,
     opens: AtomicUsize,
@@ -748,6 +786,138 @@ async fn authorized_completion_adopts_a_legitimate_different_cancel_winner() {
 }
 
 #[tokio::test]
+async fn repair_projects_authenticated_gate_winner_over_provisional_memory_row() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("authenticated-winner-repair");
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("admit session");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "authenticated-winner-repair",
+                "authenticated-winner-repair:incarnation",
+            ),
+            "authenticated-winner-repair:executor",
+            60_000,
+        )
+        .await
+        .expect("claim closure lane")
+        .acquired()
+        .expect("closure lane is free");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
+        .await
+        .expect("bind authority");
+    let provisional = request(address.clone(), "provisional-row-a");
+    store
+        .record_turn_cancel_request(provisional)
+        .await
+        .expect("record provisional request row");
+    let observed = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot provisional row");
+    let actual_winner = TurnCancellationEvidence {
+        request_id: "actual-gate-winner-b".to_string(),
+        origin: Some("remote-gate".to_string()),
+        reason: Some("won before projection".to_string()),
+        undelivered: crate::TurnCancelDisposition::Drop,
+        mode: TurnCancelMode::Immediate,
+        honoured_after_step: None,
+    };
+    // Resolve the real promise through the public cancellation path while the
+    // catalog under repair still holds its distinct provisional row A. This
+    // models a gate owner and a recovering catalog observing the same turn.
+    let gate_store = Arc::new(InMemorySessionStore::default());
+    gate_store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("admit gate-owner session");
+    TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), gate_store)
+        .request_cancel(
+            TurnCancelRequest::new(
+                address.clone(),
+                actual_winner.request_id.clone(),
+                actual_winner.origin.clone(),
+            )
+            .with_reason(actual_winner.reason.clone().expect("actual reason"))
+            .undelivered(actual_winner.undelivered)
+            .mode(actual_winner.mode),
+        )
+        .await
+        .expect("resolve actual gate winner through public request path");
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("open actual gate");
+    let authorization = active
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            observed.clone(),
+            false,
+            Some(actual_winner.clone()),
+        )
+        .expect("materialize exact closure");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize exact closure");
+    let settlement = active
+        .settle_authorized(host.as_ref(), &authorization)
+        .await
+        .expect("settle against the actual promise owner");
+    assert_eq!(settlement.base_cancellation(), Some(&actual_winner));
+    store
+        .repair_orphaned_active_turn_inputs(
+            &address.session_id,
+            &lease.fence(),
+            &address.turn_id,
+            &observed,
+            Some(&settlement),
+        )
+        .await
+        .expect("repair consumes authenticated closure")
+        .into_applied()
+        .expect("repair applies");
+
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read repaired row")
+        .expect("authenticated winner is retained");
+    assert_eq!(durable.request.request_id, actual_winner.request_id);
+    assert_eq!(durable.request.origin, actual_winner.origin);
+    assert_eq!(durable.request.reason, actual_winner.reason);
+    assert!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read pins")
+            .is_empty()
+    );
+    let replayed = ActiveTurnControl::peek_orphan_repair_decision(host.as_ref(), &address)
+        .await
+        .expect("replay the actual promise winner")
+        .expect("gate remains observable");
+    assert!(matches!(
+        replayed,
+        crate::TurnCancelRepairDecision::CancellationWon(ref evidence)
+            if evidence == &actual_winner
+    ));
+}
+
+#[tokio::test]
 async fn wrong_owner_and_revoked_authorized_closure_retain_the_store_pin() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("authorized-owner-refusal");
@@ -835,6 +1005,85 @@ async fn wrong_owner_and_revoked_authorized_closure_retain_the_store_pin() {
             .pending_turn_cancel_closure_pins()
             .await
             .expect("revoked evidence leaves pin"),
+        vec![authorization]
+    );
+}
+
+#[tokio::test]
+async fn authorized_settlement_refuses_base_loss_after_effective_resolution_and_retains_pin() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("base-loss-after-effective");
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("admit session");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "base-loss-after-effective",
+                "base-loss-after-effective:incarnation",
+            ),
+            "base-loss-after-effective:executor",
+            60_000,
+        )
+        .await
+        .expect("claim closure lane")
+        .acquired()
+        .expect("closure lane is free");
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("open exact promise keys");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
+        .await
+        .expect("bind authority");
+    let authorization = active
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            TurnCancelIntentSnapshot::Absent,
+            true,
+            None,
+        )
+        .expect("materialize cancellation closure");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("persist closure pin");
+    let resolver = MissingBaseAfterSettleResolver {
+        owner: host,
+        base_key: authorization.cancel_key().clone(),
+        resolve_calls: AtomicUsize::new(0),
+        base_peeks: AtomicUsize::new(0),
+    };
+    let error = active
+        .settle_authorized(&resolver, &authorization)
+        .await
+        .expect_err("missing authenticated base terminal must fail closed");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::TurnControlUnknownOrRevoked
+    );
+    assert_eq!(
+        resolver.resolve_calls.load(Ordering::SeqCst),
+        1,
+        "the effective cancellation was settled before the strict base read failed"
+    );
+    assert_eq!(resolver.base_peeks.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read retained pin"),
         vec![authorization]
     );
 }

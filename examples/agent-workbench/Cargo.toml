@@ -64,6 +64,7 @@ http = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
 lash-lashlang-runtime = { workspace = true }
 lash-llm-tools = { workspace = true }
+lash-core = { workspace = true, features = ["testing"] }
 lash = { workspace = true, features = ["rlm", "testing"] }
 # `testing` is a dev-dependency on purpose: it arms the loud assertions that
 # turn an accidentally-exhausted Lashlang execution bound into a test failure.

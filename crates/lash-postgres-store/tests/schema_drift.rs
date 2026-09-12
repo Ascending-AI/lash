@@ -985,7 +985,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 88")
+                && rendered.contains("expected 89")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
@@ -1083,7 +1083,7 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
             let rendered = error.to_string();
             assert!(
                 rendered.contains("has version 65")
-                    && rendered.contains("expected 88")
+                    && rendered.contains("expected 89")
                     && rendered.contains("no applicable migration")
                     && rendered.contains("does not relax it"),
                 "the destructive version boundary was lost for {provisioning:?} + {check:?}: \
@@ -1364,7 +1364,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 88 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 89 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -1495,7 +1495,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(88)", "finding_total=0"],
+        &["found_version=Some(89)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1667,7 +1667,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=88"]
+    for field in ["component=lash-postgres-store", "expected_version=89"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

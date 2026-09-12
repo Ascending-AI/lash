@@ -1395,22 +1395,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     .as_ref()
                     .and_then(crate::TurnCancelClosureSettlement::base_cancellation)
                 {
-                    let existing_outcome = requests
-                        .get(turn_id)
-                        .and_then(|stored| stored.record.outcome.clone());
-                    let request = turn_input::request_from_evidence(
+                    turn_input::reconcile_authenticated_turn_cancel_winner(
+                        &mut requests,
                         &crate::TurnAddress::new(&commit.session_id, turn_id),
                         evidence,
-                    );
-                    requests.entry(TurnId::from(turn_id)).or_insert_with(|| {
-                        InMemoryTurnCancelRequest {
-                            record: crate::TurnCancelRequestRecord {
-                                request,
-                                outcome: existing_outcome,
-                            },
-                            intent_revision: 1,
-                        }
-                    });
+                    )?;
                 }
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == commit.session_id

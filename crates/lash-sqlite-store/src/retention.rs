@@ -267,6 +267,7 @@ impl SqliteSessionStoreFactory {
             self.process_registry_path
                 .as_deref()
                 .filter(|_| attach_process_registry),
+            self.turn_cancel_closure_owner_binding(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )

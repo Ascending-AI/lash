@@ -16,6 +16,17 @@
 use super::*;
 use lash_sansio::SessionId;
 
+impl SqliteSessionStoreFactory {
+    pub(super) fn turn_cancel_closure_owner_binding(
+        &self,
+    ) -> Option<lash_core::TurnCancelClosureOwnerBinding> {
+        self.turn_cancel_closure_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
 impl Store {
     pub(crate) async fn open_bound_with_options_clock_and_process_registry(
         path: &Path,
@@ -23,6 +34,7 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
         process_registry_path: Option<&Path>,
+        turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         let store = Self::open_with_options_clock_and_process_registry(
@@ -30,6 +42,7 @@ impl Store {
             options,
             clock,
             process_registry_path,
+            turn_cancel_closure_owner,
             #[cfg(feature = "testing")]
             fault_injector,
         )
@@ -96,6 +109,7 @@ impl Store {
             options,
             clock,
             None,
+            None,
             #[cfg(feature = "testing")]
             None,
         )
@@ -110,6 +124,7 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
         process_registry_path: Option<&Path>,
+        turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -154,6 +169,7 @@ impl Store {
         Ok(Self {
             conn,
             turn_cancellation_authority: Some(authority),
+            turn_cancel_closure_owner,
             session_id: OnceLock::new(),
             clock,
             #[cfg(feature = "lashlang")]
@@ -175,6 +191,7 @@ impl Store {
         Ok(Self {
             conn,
             turn_cancellation_authority: None,
+            turn_cancel_closure_owner: None,
             session_id: OnceLock::new(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "lashlang")]
@@ -276,6 +293,7 @@ impl Store {
         Ok(Self {
             conn,
             turn_cancellation_authority: Some(authority),
+            turn_cancel_closure_owner: None,
             session_id: OnceLock::new(),
             clock,
             #[cfg(feature = "lashlang")]

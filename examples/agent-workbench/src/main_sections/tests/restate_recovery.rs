@@ -3,6 +3,9 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
+#[path = "restate_recovery/closure_lifecycle.rs"]
+mod closure_lifecycle;
+
 #[path = "restate_recovery/immutable_deployment.rs"]
 mod immutable_deployment;
 

@@ -4,8 +4,10 @@ use lash_core::SessionStoreFactory;
 use lash_core::facade_support::{NativeEffectHost, NativeRuntimeEffectController};
 use lash_core::runtime::{TurnAddress, TurnCancelOutcome, TurnCancelRequest, TurnWorkDriver};
 use lash_core::{
-    AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, RuntimeErrorCode,
-    ScopedEffectController, TurnControlBinding,
+    AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
+    ExecutionScope, LeaseOwnerIdentity, ProcessRegistrar, RuntimeErrorCode, ScopedEffectController,
+    TurnCancelClosureAuthorization, TurnCancelClosureProposal, TurnCancelIntentSnapshot,
+    TurnControlBinding,
 };
 use lash_sqlite_store::SqliteEffectHost;
 use lash_sqlite_store::SqliteSessionStoreFactory;
@@ -152,4 +154,273 @@ async fn native_turn_control_reopens_through_durable_core_authority() {
         TurnCancelOutcome::AlreadyRequested(ref evidence)
             if evidence.request_id == "native-persistent-cancel"
     ));
+}
+
+async fn authorize_completion_closure(
+    host: &Arc<SqliteEffectHost>,
+    factory: &SqliteSessionStoreFactory,
+    session: &str,
+    turn: &str,
+    physical_scope: &ExecutionScope,
+) -> (
+    Arc<dyn lash_core::RuntimePersistence>,
+    lash_core::SessionExecutionLease,
+    TurnCancelClosureAuthorization,
+) {
+    let address = TurnAddress::new(session, turn);
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: address.session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create catalog session");
+    let executor_id = format!("{session}:executor");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &LeaseOwnerIdentity::opaque(session, format!("{session}:incarnation")),
+            &executor_id,
+            60_000,
+        )
+        .await
+        .expect("claim closure lane")
+        .acquired()
+        .expect("closure lane is free");
+    let scoped = host
+        .scoped(physical_scope.clone())
+        .expect("scope effect owner");
+    let binding = host
+        .turn_control_binding(&scoped)
+        .await
+        .expect("bind exact effect owner");
+    store
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            binding.binding_id(),
+            physical_scope,
+        )
+        .await
+        .expect("persist admitted physical scope");
+    let resolver = binding.resolver();
+    let authorization = TurnCancelClosureAuthorization::new(
+        address.clone(),
+        binding.binding_id(),
+        physical_scope.clone(),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .await
+            .expect("base key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelEscalation,
+            )
+            .await
+            .expect("escalation key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnTerminal,
+            )
+            .await
+            .expect("terminal key"),
+        TurnCancelClosureProposal::CompletionSealed,
+        TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )
+    .expect("materialize closure authorization");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("register owner participant before local authorization");
+    (store, lease, authorization)
+}
+
+#[tokio::test]
+async fn direct_effect_retirement_waits_for_every_bound_catalog_participant() {
+    let dir = tempfile::tempdir().expect("temporary database directory");
+    let host = Arc::new(
+        SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
+            .await
+            .expect("open effect owner"),
+    );
+    let registry = lash_sqlite_store::SqliteProcessRegistry::open(
+        &dir.path().join("processes.sqlite"),
+        dir.path().join("process-sessions"),
+    )
+    .await
+    .expect("open separate process owner");
+    let effect_host: Arc<dyn EffectHost> = host.clone();
+    registry.bind_effect_host(&effect_host);
+    let factory_a = SqliteSessionStoreFactory::new(dir.path().join("catalog-a"));
+    let factory_b = SqliteSessionStoreFactory::new(dir.path().join("catalog-b"));
+    factory_a.bind_effect_host(&effect_host);
+    factory_b.bind_effect_host(&effect_host);
+    let scope = ExecutionScope::process("shared-retirement-scope");
+    let (store_a, lease_a, authorization_a) =
+        authorize_completion_closure(&host, &factory_a, "catalog-a-session", "turn", &scope).await;
+    let (store_b, lease_b, authorization_b) =
+        authorize_completion_closure(&host, &factory_b, "catalog-b-session", "turn", &scope).await;
+
+    let blocked = host
+        .retire_effect_journal(EffectJournalRetirement::for_scope(&scope).unwrap())
+        .await
+        .expect_err("direct owner retirement must observe both catalogs");
+    assert_eq!(blocked.code, RuntimeErrorCode::EffectScopeNotQuiescent);
+
+    for (factory, store, lease, authorization) in [
+        (&factory_a, store_a, lease_a, authorization_a),
+        (&factory_b, store_b, lease_b, authorization_b),
+    ] {
+        let authority = lash_core::TurnCancellationAuthority::new(
+            effect_host.turn_control_binding_id(),
+            effect_host.clone(),
+        );
+        let settlement = authority
+            .settle_authorized_closure(&authorization)
+            .await
+            .expect("settle closure at actual owner");
+        store
+            .repair_orphaned_active_turn_inputs(
+                authorization.session_id(),
+                &lease.fence(),
+                authorization.turn_id(),
+                authorization.observed_intent(),
+                Some(&settlement),
+            )
+            .await
+            .expect("consume local pin")
+            .into_applied()
+            .expect("repair applies");
+        factory
+            .retire_turn_cancel_closure_scope(&scope)
+            .await
+            .expect("retire one catalog and release its owner participant");
+        if std::ptr::eq(factory, &factory_a) {
+            assert!(
+                host.retire_effect_journal(EffectJournalRetirement::for_scope(&scope).unwrap())
+                    .await
+                    .is_err(),
+                "the second catalog still fences direct owner retirement"
+            );
+        }
+    }
+    host.retire_effect_journal(EffectJournalRetirement::for_scope(&scope).unwrap())
+        .await
+        .expect("owner retires only after every catalog released");
+}
+
+#[tokio::test]
+async fn owner_retirement_before_authorization_refuses_the_catalog_without_a_pin() {
+    let dir = tempfile::tempdir().expect("temporary database directory");
+    let host = Arc::new(
+        SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
+            .await
+            .expect("open effect owner"),
+    );
+    let registry = lash_sqlite_store::SqliteProcessRegistry::open(
+        &dir.path().join("processes.sqlite"),
+        dir.path().join("process-sessions"),
+    )
+    .await
+    .expect("open separate process owner");
+    let effect_host: Arc<dyn EffectHost> = host.clone();
+    registry.bind_effect_host(&effect_host);
+    let factory = SqliteSessionStoreFactory::new(dir.path().join("catalog"));
+    factory.bind_effect_host(&effect_host);
+    let scope = ExecutionScope::process("retired-before-authorization");
+    let address = TurnAddress::new("late-catalog-session", "turn");
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: address.session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create late catalog session");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &LeaseOwnerIdentity::opaque("late-catalog", "late-catalog:incarnation"),
+            "late-catalog:executor",
+            60_000,
+        )
+        .await
+        .expect("claim late lane")
+        .acquired()
+        .expect("late lane is free");
+    let scoped = host
+        .scoped(scope.clone())
+        .expect("scope owner before retirement");
+    let binding = host
+        .turn_control_binding(&scoped)
+        .await
+        .expect("capture binding before retirement");
+    store
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            binding.binding_id(),
+            &scope,
+        )
+        .await
+        .expect("persist original scope before owner retirement");
+    let resolver = binding.resolver();
+    let authorization = TurnCancelClosureAuthorization::new(
+        address.clone(),
+        binding.binding_id(),
+        scope,
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .await
+            .unwrap(),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelEscalation,
+            )
+            .await
+            .unwrap(),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnTerminal,
+            )
+            .await
+            .unwrap(),
+        TurnCancelClosureProposal::CompletionSealed,
+        TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )
+    .unwrap();
+    host.retire_effect_journal(
+        EffectJournalRetirement::for_scope(authorization.admitted_scope()).unwrap(),
+    )
+    .await
+    .expect("retire owner before authorization");
+    assert!(
+        store
+            .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+            .await
+            .is_err(),
+        "owner fence must refuse late catalog authorization"
+    );
+    assert!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read local pins")
+            .is_empty()
+    );
 }

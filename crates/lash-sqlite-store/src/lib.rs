@@ -170,6 +170,7 @@ pub use triggers::SqliteTriggerStore;
 pub struct Store {
     conn: SqliteConnection,
     turn_cancellation_authority: Option<lash_core::TurnCancellationAuthority>,
+    turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
     session_id: OnceLock<SessionId>,
     clock: Arc<dyn lash_core::Clock>,
     #[cfg(feature = "lashlang")]
@@ -605,6 +606,8 @@ pub struct SqliteSessionStoreFactory {
     /// attaches it to retire quiescent operation scopes whose receipt this
     /// catalog holds (ADR 0067). Shared by every clone of the factory.
     effect_journal_path: Arc<std::sync::Mutex<Option<PathBuf>>>,
+    turn_cancel_closure_owner:
+        Arc<std::sync::Mutex<Option<lash_core::TurnCancelClosureOwnerBinding>>>,
 }
 
 impl SqliteSessionStoreFactory {
@@ -619,6 +622,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -633,6 +637,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -651,6 +656,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -667,6 +673,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -734,6 +741,7 @@ impl SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -795,6 +803,7 @@ impl SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -816,6 +825,17 @@ impl SqliteSessionStoreFactory {
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        let catalog =
+            std::path::absolute(self.catalog_path()).unwrap_or_else(|_| self.catalog_path());
+        let catalog = std::fs::canonicalize(&catalog).unwrap_or(catalog);
+        *self
+            .turn_cancel_closure_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some(lash_core::TurnCancelClosureOwnerBinding::new(
+                format!("sqlite-catalog:{}", catalog.display()),
+                Arc::clone(effect_host),
+            ));
         if let Some(path) = effect_host.effect_scope_fence_database() {
             *self
                 .effect_journal_path
@@ -892,6 +912,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -936,6 +957,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let store = self
             .open_catalog_for_maintenance("turn cancellation scope retirement")
             .await?;
+        let inspected_scope = scope.clone();
         store
             .conn
             .write_flow(move |tx| {
@@ -955,7 +977,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                                 record_kind: "TurnCancelClosureAuthorization",
                                 message: error.to_string(),
                             })?;
-                        if authorization.admitted_scope() == &scope {
+                        if authorization.admitted_scope() == &inspected_scope {
                             return Err(StoreError::TurnCancelClosureLifecyclePinned {
                                 session_id: SessionId::from(session_id),
                                 pending_count: 1,
@@ -975,7 +997,14 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 })
             })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)??;
+        if let Some(owner) = self.turn_cancel_closure_owner_binding() {
+            owner
+                .release(&scope)
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+        }
+        Ok(())
     }
 
     async fn has_claimable_queued_work(
@@ -1225,6 +1254,7 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
             self.options,
             Arc::clone(&self.clock),
             self.process_registry_path.as_deref(),
+            self.turn_cancel_closure_owner_binding(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )

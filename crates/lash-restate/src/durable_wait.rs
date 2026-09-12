@@ -19,12 +19,12 @@
 //! from ingress-side `RestateEffectHostController::await_event_key`, which is not
 //! executing inside a Restate journal and still refuses revoked sessions eagerly.
 //!
-//! Identity epoch 6 is a hard cutover: every externally minted wait request
+//! Identity epoch 7 is a hard cutover: every externally minted wait request
 //! and indexed state value carries the full authority-bound [`AwaitEventKey`]
 //! preimage, and handlers derive scope, classification, and workflow address
 //! locally. Deployments must drain and recreate both durable-wait services
 //! before upgrading; there is no tolerant decoder, address migration, or
-//! overlap window for pre-epoch-6 state.
+//! overlap window for pre-epoch-7 state.
 
 use lash_sansio::SessionId;
 use std::time::Duration;
@@ -102,6 +102,14 @@ pub(crate) fn restate_await_event_key_is_valid(key: &AwaitEventKey) -> bool {
     )
 }
 
+pub(crate) fn restate_await_event_key_is_valid_for_authority(
+    authority_id: &RestateAuthorityId,
+    key: &AwaitEventKey,
+) -> bool {
+    RestateAuthorityId::from_binding_id(&key.signature).as_ref() == Some(authority_id)
+        && restate_await_event_key_is_valid(key)
+}
+
 pub(crate) fn restate_authority_id_for_key(key: &AwaitEventKey) -> Option<RestateAuthorityId> {
     RestateAuthorityId::from_binding_id(&key.signature)
         .filter(|_| restate_await_event_key_is_valid(key))
@@ -114,7 +122,7 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     )
 }
 const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
-pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 6;
+pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 7;
 const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
@@ -125,6 +133,7 @@ const DURABLE_WAIT_INDEX_EFFECT_PREFIX: &str = "wait-index/v2/effect/";
 /// An effect group opened under the scope, keyed by group key; cleared once
 /// the group's index reports no unsettled child.
 const DURABLE_WAIT_INDEX_GROUP_PREFIX: &str = "wait-index/v2/group/";
+const DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX: &str = "wait-index/v2/closure-participant/";
 
 #[cfg(test)]
 type WaitRegistrationWitness = tokio::sync::oneshot::Sender<RestateDurableWaitRegistration>;
@@ -286,6 +295,13 @@ pub struct RestateDurableWaitEffectRequest {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateDurableWaitGroupRequest {
     pub group_key: String,
+}
+
+/// One session catalog whose durable cancellation closure may still depend on
+/// this physical scope's promises.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateTurnCancelClosureParticipantRequest {
+    pub participant_id: String,
 }
 
 /// One turn-cancel gate entry: the awakeable the index resolves when this
@@ -627,6 +643,9 @@ pub trait LashDurableWaitIndex {
     /// under this index is still unresolved, answering whether it revoked.
     /// Object serialization makes the proof and the revocation one step.
     async fn revoke_all_if_quiescent(request: Json<()>) -> HandlerResult<Json<bool>>;
+    /// Retire a physical scope under either retirement gate while still
+    /// refusing a registered cancellation-closure catalog participant.
+    async fn retire_scope(request: Json<()>) -> HandlerResult<Json<bool>>;
     /// Lift a revocation because the scope's owner is registered again: a
     /// pruned process id the host reuses (ADR 0049). State stays cleared; only
     /// the fence goes.
@@ -645,6 +664,12 @@ pub trait LashDurableWaitIndex {
     async fn record_group(
         request: Json<RestateDurableWaitGroupRequest>,
     ) -> HandlerResult<Json<bool>>;
+    async fn register_closure_participant(
+        request: Json<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Json<bool>>;
+    async fn release_closure_participant(
+        request: Json<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Json<()>>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -867,10 +892,14 @@ async fn revoke_index(
 ) -> HandlerResult<Json<bool>> {
     let mut metadata = load_durable_wait_index_metadata(ctx).await?;
     let waits = load_indexed_waits(ctx).await?;
-    if only_if_quiescent
-        && (!waits.is_empty()
-            || !metadata.awakeables.is_empty()
-            || !scope_effects_and_groups_are_quiescent(ctx).await?)
+    let keys = ctx.get_keys().await?;
+    if keys
+        .iter()
+        .any(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX))
+        || (only_if_quiescent
+            && (!waits.is_empty()
+                || !metadata.awakeables.is_empty()
+                || !scope_effects_and_groups_are_quiescent(ctx).await?))
     {
         return Ok(Json(false));
     }
@@ -929,6 +958,11 @@ fn durable_wait_index_effect_key(replay_key: &str) -> String {
 
 fn durable_wait_index_group_key(group_key: &str) -> String {
     format!("{DURABLE_WAIT_INDEX_GROUP_PREFIX}{group_key}")
+}
+
+fn durable_wait_index_closure_participant_key(participant_id: &str) -> String {
+    let digest = Sha256::digest(participant_id.as_bytes());
+    format!("{DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX}{digest:x}")
 }
 
 pub(crate) fn split_cancellable_waits(
@@ -1130,6 +1164,14 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         revoke_index(&ctx, true).await
     }
 
+    async fn retire_scope(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(()): Json<()>,
+    ) -> HandlerResult<Json<bool>> {
+        revoke_index(&ctx, false).await
+    }
+
     async fn reinstate(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
         let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
         if metadata.revoked {
@@ -1179,5 +1221,33 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             Json(true),
         );
         Ok(Json(true))
+    }
+
+    async fn register_closure_participant(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Json<bool>> {
+        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if metadata.revoked {
+            return Ok(Json(false));
+        }
+        ctx.set(
+            &durable_wait_index_closure_participant_key(&request.participant_id),
+            Json(request.participant_id),
+        );
+        Ok(Json(true))
+    }
+
+    async fn release_closure_participant(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Json<()>> {
+        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        ctx.clear(&durable_wait_index_closure_participant_key(
+            &request.participant_id,
+        ));
+        Ok(Json(()))
     }
 }

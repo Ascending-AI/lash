@@ -117,6 +117,14 @@ impl TurnInputStore for PostgresSessionStore {
                 record_kind: "TurnCancelClosureAuthorization",
                 message: error.to_string(),
             })?;
+        if authorization.admitted_scope().session_id().is_none()
+            && let Some(owner) = &self.turn_cancel_closure_owner
+        {
+            owner
+                .register(authorization.admitted_scope(), authorization.binding_id())
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+        }
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]

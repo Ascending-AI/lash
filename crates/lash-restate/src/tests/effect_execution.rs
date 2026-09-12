@@ -422,6 +422,33 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
         first_key, other_key,
         "a distinct authority owns distinct promises"
     );
+    let mixed_controller = other_host
+        .scoped(scope.clone())
+        .expect("scope the distinct configured owner");
+    let mixed = first_host.turn_control_binding(&mixed_controller).await;
+    assert!(
+        matches!(
+            mixed,
+            Err(ref error)
+                if error.code == lash_core::RuntimeErrorCode::InvalidTurnCancelRequest
+        ),
+        "a host cannot persist its identity around another configured owner's controller"
+    );
+    assert_eq!(
+        first_host
+            .resolve_await_event(&other_key, Resolution::Cancelled)
+            .await
+            .expect("wrong-owner resolution is a typed observation"),
+        ResolveOutcome::UnknownOrRevoked
+    );
+    let wrong_peek = first_host
+        .peek_await_event(&other_key)
+        .await
+        .expect_err("a key presented to another configured owner is refused before ingress");
+    assert_eq!(
+        wrong_peek.code,
+        lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked
+    );
 
     let session_id = SessionId::from("restate-authority-reopen");
     let store = lash_core::facade_support::InMemorySessionStore::default();
