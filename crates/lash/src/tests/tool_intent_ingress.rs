@@ -1536,12 +1536,16 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
             .into(),
         )
     }
+}
 
-    fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {
-        lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
-            .with_label(payload.get("program").and_then(serde_json::Value::as_str))
-            .with_definition(Some(payload.clone()))
-    }
+fn admit_ingress_engine(
+    _kind: &'static str,
+    payload: &serde_json::Value,
+    _env: Option<&lash_core::ProcessExecutionEnvSpec>,
+) -> std::result::Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+    Ok(lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
+        .with_label(payload.get("program").and_then(serde_json::Value::as_str))
+        .with_definition(Some(payload.clone())))
 }
 
 struct IngressAdmissionEnginePlugin;
@@ -1569,8 +1573,12 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     fn process_engine_contributions(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<Arc<dyn lash_core::ProcessEngine>>, lash_core::PluginError> {
-        Ok(vec![Arc::new(IngressAdmissionEngine)])
+    ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
+    {
+        Ok(vec![lash_core::ProcessEngineRegistration::new(
+            Arc::new(IngressAdmissionEngine),
+            lash_core::ProcessEngineAdmission::new(INGRESS_ENGINE_KIND, admit_ingress_engine),
+        )])
     }
 
     fn build(
@@ -1688,7 +1696,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         .expect("admitted start registers its row");
     assert_eq!(
         started.identity,
-        lash_core::ProcessEngine::identity(&IngressAdmissionEngine, &payload),
+        admit_ingress_engine(INGRESS_ENGINE_KIND, &payload, None).expect("known payload"),
         "the admitted row must carry the engine identity stamp"
     );
     Ok(())

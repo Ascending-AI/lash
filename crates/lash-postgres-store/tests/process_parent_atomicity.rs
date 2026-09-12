@@ -362,11 +362,13 @@ fn process_worker(
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_env_store(env_store)
-    .with_process_engine(Arc::new(
-        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
-            lash_lashlang_runtime::LashlangSurface::default(),
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
         ),
-    ));
+    );
     runtime_host.control.effect_host = effect_host;
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(

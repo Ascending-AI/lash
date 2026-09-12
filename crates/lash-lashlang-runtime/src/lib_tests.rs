@@ -619,6 +619,121 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission() {
+    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let required_environment = LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::default().with_processes(),
+    );
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: r#"process scan(root: str) -> str { finish root }"#,
+        environment: &required_environment,
+        artifact_store: Some(store.as_ref()),
+    })
+    .await
+    .expect("module compiles");
+    let start = test_process_start(&output, test_start_site("child_process:scan", 1), ".");
+    let input = LashlangProcessInput {
+        module_ref: start.module_ref,
+        process_ref: start.process_ref,
+        host_requirements_ref: start.host_requirements_ref,
+        process_name: start.process_name,
+        args: serde_json::Map::new(),
+    };
+
+    validate_lashlang_process_admission(
+        &output.artifact,
+        &input,
+        LashlangHostEnvironmentCheck::OmitHostEnvironment,
+    )
+    .expect("prepare explicitly omits the live-host half of admission");
+
+    let mut requirements_mismatch = input.clone();
+    requirements_mismatch.host_requirements_ref =
+        lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("mismatch"));
+    let mut process_mismatch = input.clone();
+    process_mismatch.process_ref =
+        lashlang::ProcessRef::new(lashlang::ContentHash::new("wrong-process"), 0);
+    let incompatible_environment = LashlangHostEnvironment::default();
+    let cases = [
+        (
+            validate_lashlang_process_admission(
+                &output.artifact,
+                &requirements_mismatch,
+                LashlangHostEnvironmentCheck::OmitHostEnvironment,
+            ),
+            crate::process::validate_lashlang_process_for_run(
+                &output.artifact,
+                &requirements_mismatch,
+                LashlangHostEnvironmentCheck::OmitHostEnvironment,
+            ),
+            LashlangProcessFailureCode::ProcessHostRequirementsMismatch,
+            "requested surface",
+        ),
+        (
+            validate_lashlang_process_admission(
+                &output.artifact,
+                &process_mismatch,
+                LashlangHostEnvironmentCheck::OmitHostEnvironment,
+            ),
+            crate::process::validate_lashlang_process_for_run(
+                &output.artifact,
+                &process_mismatch,
+                LashlangHostEnvironmentCheck::OmitHostEnvironment,
+            ),
+            LashlangProcessFailureCode::ProcessRefMismatch,
+            "does not export process",
+        ),
+        (
+            validate_lashlang_process_admission(
+                &output.artifact,
+                &input,
+                LashlangHostEnvironmentCheck::CheckHostEnvironment(Err(
+                    "invalid host catalogue".to_string()
+                )),
+            ),
+            crate::process::validate_lashlang_process_for_run(
+                &output.artifact,
+                &input,
+                LashlangHostEnvironmentCheck::CheckHostEnvironment(Err(
+                    "invalid host catalogue".to_string()
+                )),
+            ),
+            LashlangProcessFailureCode::ProcessHostEnvironmentInvalid,
+            "invalid host catalogue",
+        ),
+        (
+            validate_lashlang_process_admission(
+                &output.artifact,
+                &input,
+                LashlangHostEnvironmentCheck::CheckHostEnvironment(Ok(&incompatible_environment)),
+            ),
+            crate::process::validate_lashlang_process_for_run(
+                &output.artifact,
+                &input,
+                LashlangHostEnvironmentCheck::CheckHostEnvironment(Ok(&incompatible_environment)),
+            ),
+            LashlangProcessFailureCode::ProcessHostEnvironmentIncompatible,
+            "incompatible with this host surface",
+        ),
+    ];
+    for (result, run_result, expected_code, expected_message) in cases {
+        let refusal = result.expect_err("shape must refuse");
+        assert_eq!(refusal.failure_code(), expected_code);
+        assert!(refusal.to_string().contains(expected_message), "{refusal}");
+        let run_output = *run_result.expect_err("the authoritative run mapping must refuse");
+        let lash_core::ProcessAwaitOutput::Settled { output } = run_output else {
+            panic!("admission refusal must be a settled durable process failure")
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("admission refusal must map to a durable failure")
+        };
+        assert_eq!(failure.code, expected_code.as_str());
+        assert!(failure.message.contains(expected_message), "{failure:?}");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn prepared_start_checks_indirect_process_identity_against_named_signature() {
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let environment = LashlangHostEnvironment::new(

@@ -1039,10 +1039,14 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
@@ -1180,10 +1184,14 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
@@ -1321,10 +1329,14 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let _worker = lash_core::facade_support::DurableProcessWorker::new(

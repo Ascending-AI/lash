@@ -261,3 +261,12 @@ whole attempt runs again. In-attempt effects are consequently at-least-once;
 an LLM call can be billed again. Tool authors must make external writes
 idempotent when needed and move independently durable boundaries into process
 steps.
+
+Engine starts apply a narrower rule at the journal boundary. A
+`ProcessEngineRegistration` carries a store-free admission descriptor: a static
+kind and non-capturing function pointer that can inspect only the recorded
+payload and execution-environment spec and returns the process identity or a
+typed refusal. Artifact loads, catalog resolution, and compatibility checks are
+world readiness and run only in prepare or `ProcessEngine::run`. Consequently a
+temporary world failure while replaying a committed `Start` remains retryable
+and cannot be recorded as a `CommandFailed` tool-intent refusal.

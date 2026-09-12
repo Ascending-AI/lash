@@ -629,10 +629,14 @@ async fn execute_trigger_process_with_originator(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn.clone());
     let worker = lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(

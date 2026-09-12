@@ -981,8 +981,7 @@ impl ToolIntentIngress {
         // open does, or a plugin-contributed kind would be refused here as
         // unregistered.
         let engines = self.resolved_process_engines()?;
-        let engine = engines.require(kind)?;
-        let identity = engine.identity(payload);
+        let identity = engines.admit(kind, payload, None)?;
         Ok(registration.with_identity(identity))
     }
 

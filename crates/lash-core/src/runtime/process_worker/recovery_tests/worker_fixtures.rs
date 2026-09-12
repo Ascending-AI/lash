@@ -165,7 +165,8 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(engine);
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new()
+        .with_registration(crate::ProcessEngineRegistration::accepting(engine));
     if let Some(lease_timings) = lease_timings {
         runtime_host = runtime_host.with_lease_timings(lease_timings);
     }
