@@ -186,6 +186,33 @@ fn durable_primitives_gate_independently() {
 }
 
 #[test]
+fn child_lifecycle_copy_is_present_once_on_every_process_channel() {
+    for typescript in [false, true] {
+        for native in [false, true] {
+            let prompt = system(dialect(typescript, true).as_ref(), native, true);
+            for fact in [
+                "A started handle outlives the turn",
+                "Stop cancels only the awaited handle",
+                "cancel is a request the child sees at its next step or wake",
+            ] {
+                assert_eq!(
+                    prompt.matches(fact).count(),
+                    1,
+                    "typescript={typescript}, native={native}, fact={fact}: {prompt}"
+                );
+            }
+        }
+    }
+
+    for typescript in [false, true] {
+        for native in [false, true] {
+            let prompt = system(dialect(typescript, false).as_ref(), native, false);
+            assert!(!prompt.contains("A started handle outlives the turn"));
+        }
+    }
+}
+
+#[test]
 fn labels_without_processes_render_a_complete_sentence() {
     let surface = LashlangSurface {
         language_features: lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
