@@ -4,6 +4,12 @@ use async_trait::async_trait;
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolOutcome};
 use lash::{LashCore, TurnInput};
 use lash_core::llm::types::{LlmContentBlock, LlmRole};
+use lash_core::{
+    EffectAddress, ExecutionScope, LlmRequestSpec, RuntimeAttribution, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+};
+use lash_sqlite_store::SqliteRuntimeEffectController;
 use std::sync::Mutex;
 
 const TOOL_NAME: &str = "strict_omission_probe";
@@ -106,6 +112,7 @@ fn tool_input_schema() -> Value {
             "required_name": { "type": "string" },
             "limit": { "type": "integer", "minimum": 1 },
             "nullable_note": { "type": ["string", "null"] },
+            "nullable_referenced": { "$ref": "#/$defs/Nullable" },
             "nested": {
                 "type": "object",
                 "properties": {
@@ -132,6 +139,7 @@ fn tool_input_schema() -> Value {
         "required": ["required_name", "nested", "rows", "referenced"],
         "additionalProperties": false,
         "$defs": {
+            "Nullable": { "type": ["string", "null"] },
             "Referenced": {
                 "type": "object",
                 "properties": {
@@ -322,6 +330,7 @@ fn strict_arguments() -> Value {
         "required_name": "ok",
         "limit": null,
         "nullable_note": null,
+        "nullable_referenced": null,
         "nested": { "id": "nested", "optional_count": null },
         "rows": [
             { "id": "first", "optional_count": null },
@@ -335,6 +344,7 @@ fn canonical_arguments() -> Value {
     json!({
         "required_name": "ok",
         "nullable_note": null,
+        "nullable_referenced": null,
         "nested": { "id": "nested" },
         "rows": [{ "id": "first" }, { "id": "second", "optional_count": 9 }],
         "referenced": { "id": "ref" }
@@ -395,6 +405,7 @@ async fn strict_omission_round_trip(endpoint: Endpoint) {
             "limit",
             "nested",
             "nullable_note",
+            "nullable_referenced",
             "referenced",
             "required_name",
             "rows"
@@ -596,8 +607,158 @@ fn responses_journaled_canonical_call_replays_identically_when_strict_tools_togg
     assert_journaled_call_replay_ignores_strict_toggle(Endpoint::Responses);
 }
 
+fn effect_request_spec(request: &LlmRequest) -> LlmRequestSpec {
+    LlmRequestSpec {
+        instructions: request.instructions.clone(),
+        model: request.model.clone(),
+        messages: request.messages.clone(),
+        tools: Arc::clone(&request.tools),
+        tool_choice: request.tool_choice.clone(),
+        model_variant: request.model_variant.clone(),
+        model_capability: request.model_capability.clone(),
+        generation: request.generation.clone(),
+        scope: request.scope.clone(),
+        output_spec: request.output_spec.clone(),
+    }
+}
+
+fn tool_arguments_from_effect(outcome: &RuntimeEffectOutcome) -> Value {
+    let RuntimeEffectOutcome::LlmCall { result, .. } = outcome else {
+        panic!("expected journaled LLM-call outcome");
+    };
+    let response = result
+        .as_ref()
+        .as_ref()
+        .expect("journaled successful provider response");
+    let input_json = response
+        .parts
+        .iter()
+        .find_map(|part| match part {
+            lash_core::LlmOutputPart::ToolCall { input_json, .. } => Some(input_json),
+            _ => None,
+        })
+        .expect("journaled tool call");
+    serde_json::from_str(input_json).expect("journaled tool arguments JSON")
+}
+
+async fn persisted_effect_replay_ignores_strict_toggle(endpoint: Endpoint) {
+    let dir = tempfile::tempdir().expect("effect replay tempdir");
+    let journal_path = dir
+        .path()
+        .join(format!("{}-effects.sqlite", endpoint.label()));
+    let scope = ExecutionScope::turn(
+        format!("{}-replay-session", endpoint.label()),
+        format!("{}-replay-turn", endpoint.label()),
+    );
+    let provider_request = replay_request_with_canonical_call();
+    let envelope = RuntimeEffectEnvelope::new(
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(scope.clone(), "strict-tool-call").expect("valid effect address"),
+            RuntimeAttribution::for_turn(
+                format!("{}-replay-session", endpoint.label()),
+                format!("{}-replay-turn", endpoint.label()),
+                0,
+                0,
+            ),
+            "strict-tool-call",
+        ),
+        RuntimeEffectCommand::LlmCall {
+            request: Box::new(effect_request_spec(&provider_request)),
+        },
+    );
+
+    let strict_transport = Arc::new(CapturingScriptedTransport::new([tool_response(
+        endpoint,
+        &strict_arguments(),
+    )]));
+    let mut strict_provider = provider(endpoint, true, Arc::clone(&strict_transport));
+    let controller = SqliteRuntimeEffectController::open(&journal_path, scope.clone())
+        .await
+        .expect("open durable effect controller");
+    let first = controller
+        .execute_effect(
+            envelope.clone(),
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                let completion =
+                    strict_provider
+                        .complete(provider_request)
+                        .await
+                        .map_err(|error| {
+                            RuntimeEffectControllerError::foreign(
+                                "strict_provider_call_failed",
+                                error.to_string(),
+                            )
+                        })?;
+                Ok(RuntimeEffectOutcome::LlmCall {
+                    result: Box::new(Ok(completion.response)),
+                    text_streamed: false,
+                    call_record: Some(completion.call_record),
+                })
+            }),
+        )
+        .await
+        .expect("record normalized LLM outcome");
+    assert_eq!(tool_arguments_from_effect(&first), canonical_arguments());
+    assert_eq!(strict_transport.request_bodies().len(), 1);
+    drop(controller);
+
+    let toggled_transport = Arc::new(CapturingScriptedTransport::new([tool_response(
+        endpoint,
+        &strict_arguments(),
+    )]));
+    let mut toggled_provider = provider(endpoint, false, Arc::clone(&toggled_transport));
+    let replay_request = replay_request_with_canonical_call();
+    let replay_controller = SqliteRuntimeEffectController::open(&journal_path, scope)
+        .await
+        .expect("restore durable effect controller");
+    replay_controller.start_replay();
+    let replayed = replay_controller
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                let completion =
+                    toggled_provider
+                        .complete(replay_request)
+                        .await
+                        .map_err(|error| {
+                            RuntimeEffectControllerError::foreign(
+                                "toggled_provider_call_failed",
+                                error.to_string(),
+                            )
+                        })?;
+                Ok(RuntimeEffectOutcome::LlmCall {
+                    result: Box::new(Ok(completion.response)),
+                    text_streamed: false,
+                    call_record: Some(completion.call_record),
+                })
+            }),
+        )
+        .await
+        .expect("replay persisted normalized LLM outcome");
+
+    assert_eq!(tool_arguments_from_effect(&replayed), canonical_arguments());
+    assert_eq!(
+        serde_json::to_value(&replayed).expect("encode replayed outcome"),
+        serde_json::to_value(&first).expect("encode recorded outcome")
+    );
+    assert!(
+        toggled_transport.request_bodies().is_empty(),
+        "persisted replay must not invoke the provider or rerun normalization"
+    );
+}
+
+#[tokio::test]
+async fn chat_persisted_effect_replay_ignores_strict_tools_toggle() {
+    persisted_effect_replay_ignores_strict_toggle(Endpoint::Chat).await;
+}
+
+#[tokio::test]
+async fn responses_persisted_effect_replay_ignores_strict_tools_toggle() {
+    persisted_effect_replay_ignores_strict_toggle(Endpoint::Responses).await;
+}
+
 #[test]
-fn strict_decoder_leaves_override_and_ambiguous_union_nulls_untouched() {
+fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched() {
     let override_schema = json!({
         "type": "object",
         "properties": { "value": { "type": ["integer", "null"] } },
@@ -639,28 +800,32 @@ fn strict_decoder_leaves_override_and_ambiguous_union_nulls_untouched() {
             "properties": {
                 "choice": {
                     "anyOf": [
-                        {
-                            "type": "object",
-                            "properties": {
-                                "kind": { "const": "left" },
-                                "value": { "type": "integer" }
-                            },
-                            "required": ["kind"],
-                            "additionalProperties": false
-                        },
-                        {
-                            "type": "object",
-                            "properties": {
-                                "kind": { "const": "right" },
-                                "label": { "type": "string" }
-                            },
-                            "required": ["kind"],
-                            "additionalProperties": false
-                        }
+                        { "$ref": "#/$defs/Left" },
+                        { "$ref": "#/$defs/Right" }
                     ]
                 }
             },
-            "required": ["choice"]
+            "required": ["choice"],
+            "$defs": {
+                "Left": {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "const": "left" },
+                        "value": { "type": "integer" }
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": false
+                },
+                "Right": {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "const": "right" },
+                        "value": { "type": ["integer", "null"] }
+                    },
+                    "required": ["kind", "value"],
+                    "additionalProperties": false
+                }
+            }
         })
         .into(),
         output_schema: json!({}).into(),
