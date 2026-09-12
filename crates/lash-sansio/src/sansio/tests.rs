@@ -601,6 +601,27 @@ impl ProtocolDriverHandle for CellEveryIterationDriver {
     }
 }
 
+fn machine_at_protocol_iteration(
+    turn_budget: crate::TurnBudget,
+    protocol_run_offset: usize,
+    protocol_iteration: usize,
+) -> TurnMachine {
+    let mut config = test_config(Arc::new(CellEveryIterationDriver));
+    config.turn_budget = turn_budget;
+    let machine = TurnMachine::new(
+        config,
+        vec![user_message("keep running")],
+        Arc::new(Vec::new()),
+        protocol_run_offset,
+    );
+    let mut checkpoint = machine.checkpoint();
+    checkpoint.protocol_iteration = protocol_iteration;
+
+    let mut config = test_config(Arc::new(CellEveryIterationDriver));
+    config.turn_budget = turn_budget;
+    TurnMachine::restore_from_checkpoint(config, checkpoint).expect("current checkpoint")
+}
+
 #[test]
 fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
     let mut config = test_config(Arc::new(CellEveryIterationDriver));
@@ -672,51 +693,50 @@ fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
 }
 
 #[test]
-fn unbounded_turn_budget_never_schedules_a_limit_stop() {
-    let mut machine = TurnMachine::new(
-        test_config(Arc::new(CellEveryIterationDriver)),
-        vec![user_message("keep running")],
-        Arc::new(Vec::new()),
-        0,
-    );
-
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects)
-        .expect("iteration zero provider call")
-        .0;
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse::default()),
-    });
-
-    let effects = drain_effects(&mut machine);
-    let (exec_id, _) = find_exec_call(&effects).expect("iteration zero effect");
-    machine.handle_response(Response::ExecResult {
-        id: *exec_id,
-        result: Ok(empty_exec_response()),
-    });
-
-    let effects = drain_effects(&mut machine);
-    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("iteration checkpoint");
-    assert_eq!(checkpoint, CheckpointKind::AfterWork);
-    machine.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: CheckpointDelivery::default(),
-    });
-
-    let effects = drain_effects(&mut machine);
+fn bounded_turn_budget_exhausts_exactly_at_n_iterations() {
+    let mut below_limit = machine_at_protocol_iteration(crate::TurnBudget::bounded(3), 4, 6);
+    let effects = drain_effects(&mut below_limit);
     assert!(
         find_llm_call(&effects).is_some(),
-        "iteration one provider call"
+        "iteration 6 is still inside a budget of 3 beginning at offset 4"
     );
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        Effect::Emit(SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::MaxTurns),
-        })
-    )));
     assert!(find_done(&effects).is_none());
+
+    let mut at_limit = machine_at_protocol_iteration(crate::TurnBudget::bounded(3), 4, 7);
+    let effects = drain_effects(&mut at_limit);
+    assert!(
+        find_llm_call(&effects).is_none(),
+        "iteration 7 must stop before the provider"
+    );
+    assert_eq!(
+        effects.iter().find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        }),
+        Some(&TurnOutcome::Stopped(TurnStop::MaxTurns))
+    );
+    let (_, iteration) = find_done(&effects).expect("typed terminal boundary");
+    assert_eq!(iteration, 7);
+}
+
+#[test]
+fn unbounded_turn_budget_never_schedules_a_limit_stop() {
+    for iteration in [0, 1, 10_000, usize::MAX] {
+        let mut machine = machine_at_protocol_iteration(crate::TurnBudget::Unbounded, 0, iteration);
+        let effects = drain_effects(&mut machine);
+
+        assert!(
+            find_llm_call(&effects).is_some(),
+            "iteration {iteration} must still call the provider"
+        );
+        assert!(effects.iter().all(|effect| !matches!(
+            effect,
+            Effect::Emit(SessionStreamEvent::TurnOutcome {
+                outcome: TurnOutcome::Stopped(TurnStop::MaxTurns),
+            })
+        )));
+        assert!(find_done(&effects).is_none());
+    }
 }
 
 struct NoProgressFeedbackAtBudgetDriver;
