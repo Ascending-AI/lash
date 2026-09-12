@@ -563,6 +563,8 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolStateEntry;
     pub use crate::tool_registry::facade_ops::{ToolRegistryFacadeOps, ToolStateFacadeOps};
     pub use crate::triggers::InMemoryTriggerStore;
+    #[doc(hidden)]
+    pub use crate::triggers::RecordedTriggerEmitError;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
     pub use crate::triggers::TriggerDeliveryEmitReceipt;
     pub use crate::triggers::TriggerEmitReport;

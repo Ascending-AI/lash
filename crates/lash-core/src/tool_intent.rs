@@ -197,7 +197,7 @@ pub struct EmitProcessEventIntent {
 /// A leaf attempt cannot emit a trigger synchronously: an emission that
 /// outlives a failed attempt would advertise a cause that never committed.
 /// Declaring this intent instead moves the emission behind the attempt's own
-/// commit, where the intent executor stamps the recorded occurrence's
+/// commit, where the shared realization router stamps the recorded occurrence's
 /// `idempotency_key` with this declaration's replay key as the exactly-once
 /// backstop for redrive.
 ///
@@ -209,10 +209,12 @@ pub struct EmitProcessEventIntent {
 ///   submission recorded before the change is refused as `DuplicateIdentity`
 ///   after it. New fields belong behind `skip_serializing_if` unless a
 ///   deliberate identity break is the point.
-/// - `request.idempotency_key` is caller-supplied declaration material, but it
-///   is not the occurrence's store-side dedupe key. Realization stamps that key
-///   with the declaration replay key, so distinct declarations cannot collapse
-///   while redriving the same declaration remains exactly-once.
+/// - `request.idempotency_key` remains caller-supplied declaration material. It
+///   feeds the serialized first-writer payload hash and therefore submission
+///   identity/conflict detection. At the shared realization boundary the
+///   router replaces it with the declaration replay key as the occurrence's
+///   store-side dedupe key, so distinct declarations cannot collapse while
+///   redriving the same declaration remains exactly-once.
 /// - `session_id` here is the authority the intent executor validates the
 ///   declaration against; `request.session_id` is the occurrence's own routing
 ///   scope, which the router carries onto the occurrence record and never
@@ -221,10 +223,10 @@ pub struct EmitTriggerIntent {
     /// Session whose authority owns the emission. Validated: a declaration
     /// naming another session is refused before it reaches the router.
     pub session_id: SessionId,
-    /// Complete durable trigger-occurrence request. The executor replaces its
-    /// caller-supplied `idempotency_key` with the declaration replay key before
-    /// handing it to the router. Its own `session_id` is the occurrence's
-    /// routing scope, not an authority.
+    /// Complete durable trigger-occurrence request. At realization the router
+    /// replaces its caller-supplied `idempotency_key` with the declaration
+    /// replay key. Its own `session_id` is the occurrence's routing scope, not
+    /// an authority.
     pub request: crate::TriggerOccurrenceRequest,
 }
 

@@ -1314,6 +1314,106 @@ async fn recorded_trigger_occurrence_identity_follows_the_declaration_replay_key
     );
 }
 
+/// A predecessor realization stored the caller-selected occurrence identity in
+/// its byte-stable executed report. Reconstructing that same declaration under
+/// replay-key stamping must refuse before ingesting the new address.
+#[tokio::test]
+async fn pre_change_trigger_occurrence_is_typed_refusal_before_readdressing() {
+    use crate::TriggerStore as _;
+
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    register_trigger_intent_subscription(&store).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None));
+    let request = crate::TriggerOccurrenceRequest::new(
+        "intent.trigger.emitted",
+        "intent-law-source",
+        json!({"declared": true}),
+        "pre-change-caller-key",
+    );
+    let mut context = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        Arc::new(crate::TestLocalProcessRegistry::default()),
+        crate::ToolIntents::v1(vec![crate::ToolIntent::EmitTrigger(
+            crate::EmitTriggerIntent {
+                session_id: SessionId::from("session"),
+                request: request.clone(),
+            },
+        )]),
+        Arc::clone(&calls),
+    );
+    let router = crate::TriggerRouter::new(
+        Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
+        crate::testing::process_work_wiring_for_registry(Arc::new(
+            crate::TestLocalProcessRegistry::default(),
+        )
+            as Arc<dyn crate::ProcessRegistry>),
+    );
+    context.trigger_router = Some(router.clone());
+    let identity = crate::tool_intent::derive_tool_intent_identity_for_emission(
+        &SessionId::from("session"),
+        context.effect_controller.scoped().scope_id(),
+        Some("fixed-intent-call"),
+        0,
+        "tool:fixed-intent-call:attempt:1",
+    )
+    .expect("derive the recorded declaration identity");
+
+    let legacy_report = router
+        .emit(request, &context.effect_controller.scoped())
+        .await
+        .expect("realize the declaration under predecessor caller-key semantics");
+    assert_eq!(legacy_report.occurrence_id, "trigger:pre-change-caller-key");
+    context
+        .recorded_intent_outcomes
+        .record(&[crate::ToolIntentExecutionOutcome::Executed {
+            identity: identity.clone(),
+            kind: crate::ToolIntentKind::EmitTrigger,
+            result: serde_json::to_value(&legacy_report).expect("encode predecessor report"),
+            parent_end: None,
+        }]);
+
+    let redriven = run_fixed_intent_attempt(&context).await;
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the recorded attempt runs once"
+    );
+    assert!(matches!(
+        redriven.intent_outcomes.as_slice(),
+        [crate::ToolIntentExecutionOutcome::Refused {
+            kind: crate::ToolIntentKind::EmitTrigger,
+            refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
+            ..
+        }] if code == "tool_intent_incompatible_recording"
+            && message.contains("trigger:pre-change-caller-key")
+            && message.contains(&format!("trigger:{}", identity.replay_key))
+    ));
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read occurrences after the refused redrive");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "redrive must not ingest a new occurrence"
+    );
+    assert_eq!(
+        occurrences[0].occurrence_id,
+        "trigger:pre-change-caller-key"
+    );
+    assert_eq!(
+        store
+            .list_deliveries()
+            .await
+            .expect("read deliveries after the refused redrive")
+            .len(),
+        1,
+        "redrive must not reserve a second delivery"
+    );
+}
+
 /// The at-most-once half: a crash after the occurrence is ingested and its
 /// delivery start commits leaves durable state the redrive must not add to. The
 /// redrive re-ingests the same idempotency key, replays the same delivery start

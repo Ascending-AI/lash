@@ -162,6 +162,17 @@ it as a separate admission fact. The laws
 journal-first boundary: environment state is written only after admission, and
 a failed environment write cannot leave a registered process behind.
 
+`EmitTrigger` realization replaces the caller-supplied occurrence key with the
+declaration replay key at the shared router boundary used by recorded attempts
+and direct host ingress. The caller key remains part of the declaration's
+first-writer payload hash, so changing it still conflicts with the recorded
+submission. A redrive also compares any recorded executed occurrence id with
+the reconstructed replay-key occurrence id before store ingress. A predecessor
+execution recorded under caller-key addressing is therefore refused as
+`tool_intent_incompatible_recording` instead of creating a second occurrence
+and delivery. This is an outcome-compatibility check within the existing
+protocol and identity versions, not another replay-format cutover.
+
 After the enclosing turn or process reaches its end, recorded start intents are
 handled by a deterministic parent-end step. Version 1 deliberately exposes only
 `Abandon` and `Cancel`, with `Cancel` as the default: `Abandon` is a recorded

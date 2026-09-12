@@ -44,7 +44,15 @@ pub(crate) async fn execute_final_tool_intents(
             replay_key = %identity.replay_key,
         );
         let _entered = span.enter();
-        let result = execute_one(context, intent, &identity, child_trace_hook).await;
+        let recorded_outcome = context.recorded_intent_outcomes.outcome(&identity);
+        let result = execute_one(
+            context,
+            intent,
+            &identity,
+            recorded_outcome.as_ref(),
+            child_trace_hook,
+        )
+        .await;
         let outcome = match result {
             Ok((result, parent_end)) => {
                 record_executed_metric(intent.kind());
@@ -55,18 +63,32 @@ pub(crate) async fn execute_final_tool_intents(
                     parent_end,
                 }
             }
-            Err(crate::PluginError::RuntimeEffectController(error))
-                if error.code.is_replay_mismatch() =>
-            {
+            Err(IntentExecutionError::Command(crate::PluginError::RuntimeEffectController(
+                error,
+            ))) if error.code.is_replay_mismatch() => {
                 return Err(error);
             }
-            Err(error) => refused(
+            Err(IntentExecutionError::Command(error)) => refused(
                 index,
                 intent.kind(),
                 Some(identity),
                 crate::ToolIntentRefusalReason::CommandFailed {
                     code: error_code(&error),
                     message: error_message(&error),
+                },
+            ),
+            Err(IntentExecutionError::IncompatibleRecording {
+                recorded_occurrence_id,
+                reconstructed_occurrence_id,
+            }) => refused(
+                index,
+                intent.kind(),
+                Some(identity),
+                crate::ToolIntentRefusalReason::CommandFailed {
+                    code: "tool_intent_incompatible_recording".to_string(),
+                    message: format!(
+                        "recorded trigger occurrence `{recorded_occurrence_id}` is incompatible with reconstructed occurrence `{reconstructed_occurrence_id}`"
+                    ),
                 },
             ),
         };
@@ -334,8 +356,9 @@ async fn execute_one(
     context: &ToolDispatchContext<'_>,
     intent: &crate::ToolIntent,
     identity: &crate::ToolIntentIdentity,
+    recorded_outcome: Option<&crate::ToolIntentExecutionOutcome>,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<(serde_json::Value, Option<crate::ToolIntentParentEnd>), crate::PluginError> {
+) -> Result<(serde_json::Value, Option<crate::ToolIntentParentEnd>), IntentExecutionError> {
     let parent = context.parent_invocation.clone().unwrap_or_else(|| {
         crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
@@ -444,18 +467,46 @@ async fn execute_one(
                     "trigger store is unavailable in this runtime".to_string(),
                 )
             })?;
-            let mut request = intent.request.clone();
-            request.idempotency_key = identity.replay_key.clone();
             // Boxed because the drain future is already near the coordinator's
             // large-future budget and emission adds a delivery-start frame.
-            let report =
-                Box::pin(router.emit_recorded(request, &context.effect_controller.scoped()))
-                    .await?;
+            let report = Box::pin(router.emit_recorded(
+                identity,
+                intent.request.clone(),
+                recorded_outcome,
+                &context.effect_controller.scoped(),
+            ))
+            .await
+            .map_err(|error| match error {
+                crate::RecordedTriggerEmitError::IncompatibleRecording {
+                    recorded_occurrence_id,
+                    reconstructed_occurrence_id,
+                } => IntentExecutionError::IncompatibleRecording {
+                    recorded_occurrence_id,
+                    reconstructed_occurrence_id,
+                },
+                crate::RecordedTriggerEmitError::Command(error) => {
+                    IntentExecutionError::Command(error)
+                }
+            })?;
             Ok((
                 serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
                 None,
             ))
         }
+    }
+}
+
+enum IntentExecutionError {
+    Command(crate::PluginError),
+    IncompatibleRecording {
+        recorded_occurrence_id: String,
+        reconstructed_occurrence_id: String,
+    },
+}
+
+impl From<crate::PluginError> for IntentExecutionError {
+    fn from(error: crate::PluginError) -> Self {
+        Self::Command(error)
     }
 }
 

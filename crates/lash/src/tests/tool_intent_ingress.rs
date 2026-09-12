@@ -170,6 +170,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
         .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
         .await?;
     assert_eq!(occurrences.len(), 1);
+    assert_eq!(occurrences[0].idempotency_key, key.identity().replay_key);
     assert_eq!(
         result["occurrence_id"].as_str(),
         Some(occurrences[0].occurrence_id.as_str())
@@ -224,6 +225,63 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
         1,
         "a re-submitted identity cannot reserve a second delivery"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once()
+-> Result<()> {
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _subscription) =
+        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let first_key = ingress.key("host-trigger-call-a", 0);
+    let second_key = ingress.key("host-trigger-call-b", 0);
+
+    let mut first_outcomes = Vec::new();
+    for key in [&first_key, &second_key] {
+        let outcome = ingress
+            .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
+            .await;
+        assert!(matches!(
+            outcome,
+            crate::tools::ToolIntentIngressOutcome::Admitted { .. }
+        ));
+        first_outcomes.push(outcome);
+    }
+    let occurrences = store
+        .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+        .await?;
+    assert_eq!(occurrences.len(), 2);
+    assert_eq!(
+        occurrences
+            .iter()
+            .map(|occurrence| occurrence.idempotency_key.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            first_key.identity().replay_key.clone(),
+            second_key.identity().replay_key.clone(),
+        ]
+        .into_iter()
+        .collect()
+    );
+
+    for (key, first) in [first_key, second_key].into_iter().zip(first_outcomes) {
+        let redriven = ingress
+            .submit(key, trigger_intent(&SessionId::from(SESSION)))
+            .await;
+        assert_eq!(redriven, first, "redrive returns the byte-stable outcome");
+    }
+    assert_eq!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .len(),
+        2,
+        "redriving both identities must not add occurrences"
+    );
+    assert_eq!(store.list_deliveries().await?.len(), 2);
     Ok(())
 }
 

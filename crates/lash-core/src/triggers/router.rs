@@ -482,6 +482,26 @@ fn unstarted_delivery(subscription_id: &str, reason: &str) -> PluginError {
     ))
 }
 
+/// Typed failure from realizing one recorded trigger declaration.
+///
+/// The incompatible-recording case is separate from ordinary command failure
+/// so the intent executor can expose a stable refusal code instead of silently
+/// re-addressing an occurrence recorded by predecessor code.
+#[doc(hidden)]
+pub enum RecordedTriggerEmitError {
+    IncompatibleRecording {
+        recorded_occurrence_id: String,
+        reconstructed_occurrence_id: String,
+    },
+    Command(PluginError),
+}
+
+impl From<PluginError> for RecordedTriggerEmitError {
+    fn from(error: PluginError) -> Self {
+        Self::Command(error)
+    }
+}
+
 #[derive(Clone)]
 pub struct TriggerRouter {
     store: Arc<dyn TriggerStore>,
@@ -535,16 +555,40 @@ impl TriggerRouter {
     #[doc(hidden)]
     pub async fn emit_recorded(
         &self,
-        request: TriggerOccurrenceRequest,
+        identity: &crate::ToolIntentIdentity,
+        mut request: TriggerOccurrenceRequest,
+        recorded_outcome: Option<&crate::ToolIntentExecutionOutcome>,
         effect_controller: &crate::ScopedEffectController<'_>,
-    ) -> Result<TriggerEmitReport, PluginError> {
+    ) -> Result<TriggerEmitReport, RecordedTriggerEmitError> {
+        request.idempotency_key = identity.replay_key.clone();
+        let reconstructed_occurrence_id = deterministic_occurrence_id(&request);
+        if let Some(crate::ToolIntentExecutionOutcome::Executed {
+            identity: recorded_identity,
+            kind: crate::ToolIntentKind::EmitTrigger,
+            result,
+            ..
+        }) = recorded_outcome
+        {
+            let recorded_occurrence_id = result
+                .get("occurrence_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("<missing>");
+            if recorded_identity != identity
+                || recorded_occurrence_id != reconstructed_occurrence_id
+            {
+                return Err(RecordedTriggerEmitError::IncompatibleRecording {
+                    recorded_occurrence_id: recorded_occurrence_id.to_string(),
+                    reconstructed_occurrence_id,
+                });
+            }
+        }
         let report = self.emit(request, effect_controller).await?;
         let mut deliveries = Vec::with_capacity(report.deliveries.len());
         for mut delivery in report.deliveries {
             delivery.outcome = match delivery.outcome {
                 TriggerDeliveryEmitOutcome::AlreadyReserved => TriggerDeliveryEmitOutcome::Started,
                 TriggerDeliveryEmitOutcome::Failed { reason } => {
-                    return Err(unstarted_delivery(&delivery.subscription_id, &reason));
+                    return Err(unstarted_delivery(&delivery.subscription_id, &reason).into());
                 }
                 outcome => outcome,
             };

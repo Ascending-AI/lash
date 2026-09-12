@@ -349,9 +349,10 @@ impl ToolIntentIngress {
     /// do not key-replay submissions, so the host must avoid resubmitting an
     /// identity as a new invocation.
     ///
-    /// A `StartProcess` submission does not retain the host-chosen
-    /// `request.id`: Lash replaces it with the derived intent replay key, and
-    /// that derived key is the process id returned in the observable result.
+    /// `StartProcess` and `EmitTrigger` submissions do not retain their
+    /// host-chosen realization identifiers. Lash replaces a start's
+    /// `request.id` and a trigger's `request.idempotency_key` with the derived
+    /// intent replay key before either command reaches its durable store.
     pub async fn submit(
         &self,
         key: ToolIntentIngressKey,
@@ -911,10 +912,11 @@ impl ToolIntentIngress {
                 }
             }
             lash_core::ToolIntent::EmitTrigger(intent) => {
-                let report = self.emit_recorded_trigger(intent.request).await?;
-                // The occurrence's idempotency key, not an effect-journal key,
-                // is the dedupe point for a re-submitted trigger emission, so
-                // this route never reports a journal replay.
+                let report = self.emit_recorded_trigger(identity, intent.request).await?;
+                // The replay-derived occurrence idempotency key, not an
+                // effect-journal key, is the dedupe point for a re-submitted
+                // trigger emission, so this route never reports a journal
+                // replay.
                 return Ok((RealizedIntent::Trigger(report), None, false));
             }
         };
@@ -926,6 +928,7 @@ impl ToolIntentIngress {
     /// runtime intent executor uses.
     async fn emit_recorded_trigger(
         &self,
+        identity: &lash_core::ToolIntentIdentity,
         request: lash_core::TriggerOccurrenceRequest,
     ) -> crate::Result<lash_core::facade_support::TriggerEmitReport> {
         let store = self
@@ -952,9 +955,19 @@ impl ToolIntentIngress {
             .effect_host
             .scoped(self.scope.clone())?;
         router
-            .emit_recorded(request, &scoped)
+            .emit_recorded(identity, request, None, &scoped)
             .await
-            .map_err(Into::into)
+            .map_err(|error| match error {
+                lash_core::facade_support::RecordedTriggerEmitError::Command(error) => {
+                    crate::EmbedError::Plugin(error)
+                }
+                lash_core::facade_support::RecordedTriggerEmitError::IncompatibleRecording {
+                    recorded_occurrence_id,
+                    reconstructed_occurrence_id,
+                } => crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
+                    "tool_intent_incompatible_recording: recorded trigger occurrence `{recorded_occurrence_id}` is incompatible with reconstructed occurrence `{reconstructed_occurrence_id}`"
+                ))),
+            })
     }
 
     /// Run the engine's pure admission gate over a host-submitted start using
