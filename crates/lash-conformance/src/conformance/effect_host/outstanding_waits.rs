@@ -205,12 +205,26 @@ pub(crate) async fn effect_host_lists_registered_unresolved_waits(
         .revoke_await_events_for_session(&session_a)
         .await
         .expect("revoke session A");
-    assert!(revoked_waiter.await.expect("revoked waiter joins").is_err());
+    match revoked_waiter.await.expect("revoked waiter joins") {
+        Ok(Resolution::Cancelled) => {}
+        Err(error) if error.code.as_str() == "await_event_unknown_or_revoked" => {}
+        outcome => panic!(
+            "revoked waiter must observe cancellation or the typed revocation refusal, got {outcome:?}"
+        ),
+    }
     assert!(
         observer
             .list_outstanding_await_event_keys(&session_a)
             .await
             .expect("revoked waits are absent")
             .is_empty()
+    );
+    pretty_assertions::assert_eq!(
+        resolver
+            .resolve_await_event(&revoked_key, Resolution::Cancelled)
+            .await
+            .expect("resolve revoked key"),
+        ResolveOutcome::UnknownOrRevoked,
+        "a key hidden by session revocation must also be unresolvable"
     );
 }

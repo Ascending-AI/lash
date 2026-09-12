@@ -86,6 +86,8 @@ async fn sqlite_abandoned_attachment_write_recovery_survives_cold_reopen() {
 
 #[path = "conformance/attachment_adoption.rs"]
 mod attachment_adoption;
+#[path = "conformance/await_event_discovery.rs"]
+mod await_event_discovery;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 

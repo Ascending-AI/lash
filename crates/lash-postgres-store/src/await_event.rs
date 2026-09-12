@@ -217,9 +217,14 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         session_id: &SessionId,
     ) -> Result<Vec<RegisteredAwaitEvent>, RuntimeError> {
         sqlx::query(
-            "SELECT key_id, scope_json, wait_json
+            "SELECT key_id, scope_json, wait_json, turn_control
              FROM lash_await_event_waits
-             WHERE session_id = $1 AND terminal_json IS NULL
+             WHERE session_id = $1
+               AND terminal_json IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_await_event_revoked_sessions
+                   WHERE session_id = $1
+               )
              ORDER BY key_id",
         )
         .bind(session_id.as_str())
@@ -231,6 +236,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
                     key_id: row.get("key_id"),
                     scope_json: row.get("scope_json"),
                     wait_json: row.get("wait_json"),
+                    turn_control: row.get("turn_control"),
                 })
                 .collect()
         })

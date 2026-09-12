@@ -231,9 +231,14 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         self.conn
             .call(move |connection| {
                 let mut statement = connection.prepare(
-                    "SELECT key_id, scope_json, wait_json
+                    "SELECT key_id, scope_json, wait_json, turn_control
                      FROM await_event_waits
-                     WHERE session_id = ?1 AND terminal_json IS NULL
+                     WHERE session_id = ?1
+                       AND terminal_json IS NULL
+                       AND NOT EXISTS (
+                           SELECT 1 FROM await_event_revoked_sessions
+                           WHERE session_id = ?1
+                       )
                      ORDER BY key_id",
                 )?;
                 statement
@@ -242,6 +247,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                             key_id: row.get(0)?,
                             scope_json: row.get(1)?,
                             wait_json: row.get(2)?,
+                            turn_control: row.get(3)?,
                         })
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()

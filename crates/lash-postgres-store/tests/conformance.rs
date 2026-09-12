@@ -30,6 +30,8 @@ use std::future::Future;
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]
 mod attachment_recovery;
+#[path = "conformance/await_event_discovery.rs"]
+mod await_event_discovery;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 #[path = "conformance/occurrence_listing.rs"]

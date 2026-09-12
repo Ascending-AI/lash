@@ -163,6 +163,8 @@ pub struct RegisteredAwaitEvent {
     pub scope_json: String,
     /// Canonical encoded wait identity.
     pub wait_json: String,
+    /// Whether the stored row identifies turn-control machinery.
+    pub turn_control: bool,
 }
 
 impl std::fmt::Debug for TerminalCas {
@@ -525,6 +527,11 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
                     "stored await-event key id does not match its scope and wait preimage",
                 ));
             }
+            if row.turn_control != wait.is_turn_control() {
+                return Err(self.decode_identity_error(
+                    "stored await-event turn-control classification does not match its wait preimage",
+                ));
+            }
             let signature = self.signature(&scope, &wait, &row.key_id)?;
             keys.push(AwaitEventKey {
                 scope,
@@ -878,6 +885,9 @@ mod tests {
             &self,
             session_id: &SessionId,
         ) -> Result<Vec<RegisteredAwaitEvent>, RuntimeError> {
+            if self.revoked_session(Some(session_id)) {
+                return Ok(Vec::new());
+            }
             Ok(self
                 .rows
                 .lock_recover()
@@ -890,6 +900,7 @@ mod tests {
                     key_id: key_id.clone(),
                     scope_json: row.identity.scope_json.clone(),
                     wait_json: row.identity.wait_json.clone(),
+                    turn_control: row.identity.turn_control,
                 })
                 .collect())
         }
@@ -1190,6 +1201,54 @@ mod tests {
                 .contains("failed to decode in-memory await-event terminal"),
             "unexpected decode message: {}",
             error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_refuses_inconsistent_rows_and_respects_revocation_tombstones() {
+        let coordinator = coordinator();
+        let session_id = SessionId::from("inconsistent-discovery-session");
+        let scope = ExecutionScope::turn(&session_id, "turn");
+        let key = coordinator
+            .key_for(&scope, AwaitEventWaitIdentity::tool_completion("ordinary"))
+            .await
+            .expect("mint key");
+        let mut identity = coordinator.row_identity(&key).expect("row identity");
+        identity.turn_control = true;
+        coordinator.backend.rows.lock_recover().insert(
+            key.key_id.clone(),
+            MemoryRow {
+                identity,
+                terminal_json: None,
+            },
+        );
+
+        let error = coordinator
+            .outstanding_for_session(&session_id)
+            .await
+            .expect_err("inconsistent turn-control classification must be refused");
+        assert_eq!(error.code.as_str(), "memory_await_event_decode");
+
+        coordinator.backend.rows.lock_recover().clear();
+        coordinator
+            .backend
+            .revoked
+            .lock_recover()
+            .push(session_id.to_string());
+        coordinator.backend.rows.lock_recover().insert(
+            key.key_id.clone(),
+            MemoryRow {
+                identity: coordinator.row_identity(&key).expect("row identity"),
+                terminal_json: None,
+            },
+        );
+        assert!(
+            coordinator
+                .outstanding_for_session(&session_id)
+                .await
+                .expect("revoked discovery")
+                .is_empty(),
+            "a row injected behind a revocation tombstone must stay undiscoverable"
         );
     }
 
