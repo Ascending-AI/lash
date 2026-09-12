@@ -1077,6 +1077,7 @@ impl ToolIntentIngress {
                 .with_process_env_store(std::sync::Arc::clone(
                     &self.core.env.core.durability.process_env_store,
                 ))
+                .with_process_engines(self.core.env.core.process_engines.clone())
                 .with_process_outcome_observer(outcome_observer),
             )
             .await

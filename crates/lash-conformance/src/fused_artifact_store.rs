@@ -1,6 +1,6 @@
 //! Shared conformance for durable backends that fuse both artifact-store traits
 //! ADR-0013's engine rebuild path depends on:
-//! [`lashlang::LashlangArtifactStore`] (module artifacts + raw artifact bytes)
+//! [`lashlang::LashlangArtifactStore`] (module artifacts)
 //! and [`lash_core::ProcessExecutionEnvStore`] (process-execution-env blobs).
 //!
 //! The two traits live in independent crates by design (the language crate does
@@ -68,54 +68,41 @@ where
     cross_namespace_isolation(make().open).await;
 }
 
-/// All three keyspaces multiplexed onto a durable backend stay disjoint under an
-/// identical key value. This is the case that would have caught a store keying
-/// module artifacts, raw artifact bytes, and process-execution-env blobs all on
-/// one column.
+/// The two typed keyspaces multiplexed onto a durable backend stay disjoint.
 async fn cross_namespace_isolation(handles: ArtifactStoreHandles) {
     let artifact = sample_module_artifact("process delta(root: str) -> str { finish root }");
-    let colliding_key = artifact.module_ref.as_str().to_string();
+    let env_spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::default(),
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    );
+    let env_ref = env_spec.stable_ref().expect("stable env ref");
+    let env_bytes = env_spec.to_store_bytes().expect("encode env");
+    let owner = lash_core::ArtifactOwner::host("fused-conformance");
 
     handles
         .artifacts
-        .put_module_artifact(&artifact)
+        .publish_module_artifact(&owner, &artifact)
         .await
-        .expect("put module artifact");
-    handles
-        .artifacts
-        .put_artifact_bytes(&colliding_key, "generic", b"raw-bytes")
-        .await
-        .expect("put raw bytes at the shared key");
+        .expect("publish module artifact");
     handles
         .process_env
-        .put_process_execution_env(
-            &lash_core::ProcessExecutionEnvRef::new(colliding_key.clone()),
-            b"env-bytes",
-        )
+        .publish_process_execution_env(&owner, &env_ref, &env_bytes)
         .await
-        .expect("put env at the shared key");
+        .expect("publish process environment");
 
     let module = handles
         .artifacts
         .get_module_artifact(&artifact.module_ref)
         .await
-        .expect("module artifact isolated from raw + env writes")
+        .expect("module artifact isolated from environment writes")
         .expect("module artifact present");
     assert_eq!(*module, artifact);
     assert_eq!(
         handles
-            .artifacts
-            .get_artifact_bytes(&colliding_key)
-            .await
-            .expect("raw bytes isolated"),
-        Some(b"raw-bytes".to_vec()),
-    );
-    assert_eq!(
-        handles
             .process_env
-            .get_process_execution_env(&lash_core::ProcessExecutionEnvRef::new(colliding_key))
+            .get_process_execution_env(&env_ref)
             .await
-            .expect("env bytes isolated"),
-        Some(b"env-bytes".to_vec()),
+            .expect("environment bytes isolated"),
+        Some(env_bytes),
     );
 }

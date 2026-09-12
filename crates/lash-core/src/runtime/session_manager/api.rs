@@ -236,7 +236,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let env_ref = match request.env_spec.as_ref() {
             Some(env_spec) => Some(
-                crate::persist_process_execution_env(
+                crate::publish_process_execution_env(
                     self.services
                         .current
                         .host
@@ -244,6 +244,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                         .durability
                         .process_env_store
                         .as_ref(),
+                    &crate::ArtifactOwner::process_start(&request.id),
                     env_spec,
                 )
                 .await?,

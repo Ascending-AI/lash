@@ -218,7 +218,7 @@ pub use observation::{
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
+    AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
     ObserverInheritance, PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
@@ -251,12 +251,12 @@ pub use process::{
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, allocate_process_event_sequence,
     apply_process_event_projection, apply_process_status_projection, current_epoch_ms,
     ensure_process_lease_schema_version, fold_process_record, load_process_execution_env,
-    materialize_process_event_semantics, persist_process_execution_env,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    prepare_process_transition, process_registration_fingerprint, process_runtime_session_ids,
-    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
-    process_wake_delivery, process_wake_input_from_event_payload, process_wake_turn_cause,
-    process_wake_turn_text, reconcile_pruned_trigger_deliveries,
+    materialize_process_event_semantics, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
+    process_registration_fingerprint, process_runtime_session_ids, process_signal_event_type,
+    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    publish_process_execution_env, reconcile_pruned_trigger_deliveries,
     reconcile_session_process_observer_intents, require_event_replay, terminal_append_request,
     terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
     watch_process_registry, watch_process_registry_with_sink,

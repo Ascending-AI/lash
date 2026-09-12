@@ -31,7 +31,10 @@ impl LinkedTestProcess {
         )
         .expect("link lashlang process");
         artifact_store
-            .put_module_artifact(&linked.artifact)
+            .publish_module_artifact(
+                &lash_core::ArtifactOwner::host(format!("process-test:{process_name}")),
+                &linked.artifact,
+            )
             .await
             .expect("store lashlang process artifact");
         let process_ref = linked
@@ -138,7 +141,11 @@ async fn persist_process_env_ref(
     let env_ref = spec.stable_ref().expect("stable process env ref");
     let bytes = spec.to_store_bytes().expect("encode process env spec");
     process_env_store
-        .put_process_execution_env(&env_ref, &bytes)
+        .publish_process_execution_env(
+            &lash_core::ArtifactOwner::host("process-env-test"),
+            &env_ref,
+            &bytes,
+        )
         .await
         .expect("store process execution env");
     env_ref

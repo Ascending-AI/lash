@@ -16,6 +16,7 @@ where
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
     let process_env_store = execution.process_env_store;
+    let process_engines = execution.process_engines;
     let turn_cancellation = execution.turn_cancellation;
     let outcome = match command {
         ProcessCommand::Start {
@@ -24,6 +25,8 @@ where
             env_spec,
             execution_context,
         } => {
+            let staging_owner = lash_core::ArtifactOwner::process_start(&registration.id);
+            let process_owner = lash_core::ArtifactOwner::process(registration.id.clone());
             if let Some(env_spec) = env_spec.as_ref() {
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
@@ -31,19 +34,123 @@ where
                         "admitted Restate process start carries an execution environment but the executor has no environment store",
                     )
                 })?;
-                let env_ref =
-                    lash_core::runtime::persist_process_execution_env(env_store.as_ref(), env_spec)
-                        .await?;
+                let expected_ref = env_spec.stable_ref().map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "failed to encode process execution environment: {error}"
+                    ))
+                })?;
+                let env_ref = match lash_core::runtime::publish_process_execution_env(
+                    env_store.as_ref(),
+                    &staging_owner,
+                    env_spec,
+                )
+                .await
+                {
+                    Ok(env_ref) => env_ref,
+                    Err(publish_error) => {
+                        env_store
+                            .transfer_process_execution_env(
+                                &staging_owner,
+                                &process_owner,
+                                &expected_ref,
+                            )
+                            .await
+                            .map_err(|_| publish_error)?;
+                        expected_ref
+                    }
+                };
                 registration = registration.with_execution_env_ref(Some(env_ref));
+            } else if let Some(env_ref) = registration.env_ref.as_ref() {
+                let env_store = process_env_store.as_ref().ok_or_else(|| {
+                    RuntimeEffectControllerError::foreign(
+                        "process_env_store_unavailable",
+                        "admitted Restate process start references an execution environment but the executor has no environment store",
+                    )
+                })?;
+                let bytes = env_store
+                    .get_process_execution_env(env_ref)
+                    .await?
+                    .ok_or_else(|| {
+                        lash_core::PluginError::Session(format!(
+                            "missing process execution env `{env_ref}`"
+                        ))
+                    })?;
+                if let Err(publish_error) = env_store
+                    .publish_process_execution_env(&staging_owner, env_ref, &bytes)
+                    .await
+                {
+                    env_store
+                        .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
+                        .await
+                        .map_err(|_| publish_error)?;
+                }
             }
-            let record = schedule_restate_process(
-                registry,
+            let env_ref = registration.env_ref.clone();
+            let engine_artifacts = match registration.input.as_ref() {
+                lash_core::ProcessInput::Engine { kind, payload } => {
+                    let process_engines = process_engines.as_ref().ok_or_else(|| {
+                        RuntimeEffectControllerError::foreign(
+                            "process_engine_registry_unavailable",
+                            "admitted Restate process start requires an engine but the executor has no process-engine registry",
+                        )
+                    })?;
+                    let engine = process_engines.require(kind)?;
+                    if let Err(protect_error) = engine
+                        .protect_start_artifacts(&staging_owner, payload)
+                        .await
+                        && engine
+                            .transfer_start_artifacts(&staging_owner, &process_owner, payload)
+                            .await
+                            .is_err()
+                    {
+                        if let Some(store) = process_env_store.as_ref() {
+                            store
+                                .retire_process_execution_env_owner(&staging_owner)
+                                .await?;
+                        }
+                        engine.retire_artifact_owner(&staging_owner).await?;
+                        return Err(protect_error.into());
+                    }
+                    Some((engine, payload.clone()))
+                }
+                _ => None,
+            };
+            let record = match schedule_restate_process(
+                Arc::clone(&registry),
                 registration,
                 observers,
                 *execution_context,
                 context,
             )
-            .await?;
+            .await
+            {
+                Ok(record) => record,
+                Err(error) => {
+                    if let Some(store) = process_env_store.as_ref() {
+                        store
+                            .retire_process_execution_env_owner(&staging_owner)
+                            .await?;
+                    }
+                    if let Some((engine, _)) = engine_artifacts.as_ref() {
+                        engine.retire_artifact_owner(&staging_owner).await?;
+                    }
+                    return Err(error.into());
+                }
+            };
+            if let (Some(store), Some(env_ref)) = (process_env_store.as_ref(), env_ref.as_ref()) {
+                store
+                    .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
+                    .await?;
+                store
+                    .retire_process_execution_env_owner(&staging_owner)
+                    .await?;
+            }
+            if let Some((engine, payload)) = engine_artifacts {
+                engine
+                    .transfer_start_artifacts(&staging_owner, &process_owner, &payload)
+                    .await?;
+                engine.retire_artifact_owner(&staging_owner).await?;
+            }
             Ok(ProcessEffectOutcome::Start {
                 record: Box::new(record),
             })

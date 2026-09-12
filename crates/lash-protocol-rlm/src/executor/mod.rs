@@ -409,7 +409,7 @@ async fn execute_code_inner(
         let stored = {
             let _phase = ctx.named_phase("rlm_lashlang.store_module_artifact");
             artifact_store
-                .put_module_artifact(&linked_module.artifact)
+                .publish_module_artifact(&ctx.artifact_owner(), &linked_module.artifact)
                 .await
         };
         if let Err(err) = stored {

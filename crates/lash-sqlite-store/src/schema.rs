@@ -378,6 +378,26 @@ CREATE TABLE IF NOT EXISTS artifact_refs (
     PRIMARY KEY (namespace, artifact_ref)
 );
 
+-- Exact owner edges for immutable artifacts. The edge is the liveness fact;
+-- no maintained count or last-operation field exists on shared bytes.
+CREATE TABLE IF NOT EXISTS artifact_owners (
+    namespace    TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL,
+    owner_kind   TEXT NOT NULL CHECK (owner_kind IN ('host', 'process', 'execution')),
+    owner_id     TEXT NOT NULL,
+    PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
+    FOREIGN KEY (namespace, artifact_ref)
+        REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
+);
+
+-- Execution-owner retirement is a permanent publication fence. Host and
+-- process releases are ordinary exact-edge severance and never enter here.
+CREATE TABLE IF NOT EXISTS artifact_owner_retirements (
+    owner_kind TEXT NOT NULL CHECK (owner_kind = 'execution'),
+    owner_id   TEXT NOT NULL,
+    PRIMARY KEY (owner_kind, owner_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_session
     ON attachment_manifest(session_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
@@ -387,6 +407,8 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
     ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
+CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
+    ON artifact_owners(owner_kind, owner_id);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -554,7 +576,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// re-puts and explicit host recovery can restore it exactly.
 /// Version 56 requires pending-input claim identity and token to be either both
 /// NULL or both populated; version 55 catalogs are recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 56;
+/// Version 57 replaces permanent ownerless artifact roots with exact owner
+/// edges and permanent execution-owner publication fences. Version 56
+/// catalogs are rejected and recreated; there is no compatibility path.
+pub(crate) const SCHEMA_VERSION: i32 = 57;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

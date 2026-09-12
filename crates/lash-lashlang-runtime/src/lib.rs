@@ -1121,6 +1121,59 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             Err(_) => lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND),
         }
     }
+
+    async fn protect_start_artifacts(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        payload: &serde_json::Value,
+    ) -> Result<(), lash_core::PluginError> {
+        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
+            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
+        })?;
+        self.artifact_store
+            .retain_module_artifact(owner, &input.module_ref)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn transfer_start_artifacts(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        payload: &serde_json::Value,
+    ) -> Result<(), lash_core::PluginError> {
+        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
+            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
+        })?;
+        self.artifact_store
+            .transfer_module_artifact(from, to, &input.module_ref)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn release_artifacts(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        payload: &serde_json::Value,
+    ) -> Result<(), lash_core::PluginError> {
+        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
+            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
+        })?;
+        self.artifact_store
+            .release_module_artifact(owner, &input.module_ref)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn retire_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lash_core::PluginError> {
+        self.artifact_store
+            .retire_module_artifact_owner(owner)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
 }
 
 mod bridge;

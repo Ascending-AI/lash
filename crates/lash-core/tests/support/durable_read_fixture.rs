@@ -231,7 +231,7 @@ use std::sync::Arc;
 
 use lash_core::runtime::{
     QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload, load_process_execution_env,
-    persist_process_execution_env, process_wake_batch_draft,
+    process_wake_batch_draft, publish_process_execution_env,
 };
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AwaitEventKey, AwaitEventWaitIdentity,
@@ -492,10 +492,13 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("enqueue fixture pending turn input");
 
     let process_env = fixture_process_env();
-    let process_env_ref =
-        persist_process_execution_env(handles.process_envs.as_ref(), &process_env)
-            .await
-            .expect("persist fixture process execution environment");
+    let process_env_ref = publish_process_execution_env(
+        handles.process_envs.as_ref(),
+        &lash_core::ArtifactOwner::host("durable-read-fixture"),
+        &process_env,
+    )
+    .await
+    .expect("persist fixture process execution environment");
     let registration = waiting_process_registration(process_env_ref.clone());
     handles
         .processes

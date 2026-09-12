@@ -328,7 +328,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 85 requires pending-input claim identity and token to be either both
 // NULL or both populated. Component-84 stores are recreated; there is no
 // migration into this generation.
-const SCHEMA_VERSION: i32 = 85;
+// Version 86 replaces ownerless artifact roots with exact owner edges and
+// permanent execution-owner publication fences. Component-85 stores are
+// recreated; there is no compatibility path.
+const SCHEMA_VERSION: i32 = 86;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

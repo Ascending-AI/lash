@@ -238,13 +238,12 @@ impl RlmProtocolPluginFactory {
         })
     }
 
-    /// Compile a Lashlang module against the compile-time surface, persisting the
-    /// artifact through this factory's artifact store.
+    /// Compile a Lashlang module against the compile-time surface without I/O.
     #[allow(
         clippy::result_large_err,
         reason = "boxing LashlangModuleCompileError would change this public compile API"
     )]
-    pub async fn compile_lashlang_module(
+    pub fn compile_lashlang_module(
         &self,
         plugin_host: &PluginHost,
         process_lifecycle_available: bool,
@@ -273,9 +272,18 @@ impl RlmProtocolPluginFactory {
         lashlang::compile_module(lashlang::ModuleCompileRequest {
             source: &request.source,
             environment: &surface.host_environment,
-            artifact_store: Some(self.artifact_store.as_ref()),
         })
-        .await
+    }
+
+    /// Publish an already compiled module under an explicit lifetime owner.
+    pub async fn publish_lashlang_module(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        artifact: &lashlang::ModuleArtifact,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.artifact_store
+            .publish_module_artifact(owner, artifact)
+            .await
     }
 }
 

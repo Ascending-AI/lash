@@ -604,7 +604,12 @@ impl SessionAdmin {
         operation_scope: lash_core::ExecutionScope,
     ) {
         match retire_facade_operation_scope(effect_host, &operation_scope).await {
-            Ok(FacadeScopeRetirement::Retired) => {}
+            Ok(FacadeScopeRetirement::Retired) => {
+                let owner = lash_core::ArtifactOwner::execution(operation_scope.clone());
+                if let Err(err) = self.runtime.retire_artifact_owner(&owner).await {
+                    tracing::warn!(scope = %operation_scope.id(), error = %err, "artifact owner retirement failed");
+                }
+            }
             Ok(FacadeScopeRetirement::Deferred) => {
                 tracing::debug!(
                     scope = %operation_scope.id(),

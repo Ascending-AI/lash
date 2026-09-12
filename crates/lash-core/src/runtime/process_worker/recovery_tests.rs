@@ -1368,8 +1368,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     let policy = test_session_policy();
     let env_spec =
         crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone());
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("boundary-recovery-test"),
         &env_spec,
     )
     .await
@@ -1494,8 +1495,9 @@ async fn snapshot_recovery_fixture(
             payloads: Arc::clone(&payloads),
         }));
     let policy = test_session_policy();
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("snapshot-recovery-test"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
     )
     .await

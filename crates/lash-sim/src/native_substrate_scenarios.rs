@@ -238,8 +238,9 @@ impl ProcessAdmissionScenario {
                 .expect("valid admission scenario model"),
             ..SessionPolicy::new(TurnBudget::Unbounded)
         };
-        let env_ref = lash_core::runtime::persist_process_execution_env(
+        let env_ref = lash_core::runtime::publish_process_execution_env(
             runtime_host.durability.process_env_store.as_ref(),
+            &lash_core::ArtifactOwner::host("sim-native-process-admission"),
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::PluginOptions::default(),
                 session_policy.clone(),

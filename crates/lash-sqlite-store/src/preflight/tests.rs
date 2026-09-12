@@ -386,7 +386,7 @@ mod walk {
         .expect("link the frozen source IR with a complete process signature")
         .artifact;
         store
-            .put_module_artifact(&artifact)
+            .publish_module_artifact(&lash_core::ArtifactOwner::host("preflight-test"), &artifact)
             .await
             .expect("persist module artifact");
         drop(store);

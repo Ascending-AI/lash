@@ -282,13 +282,14 @@ async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<(
 struct ProbeProcessEnvStore {
     puts: std::sync::atomic::AtomicUsize,
     fail_put: std::sync::atomic::AtomicBool,
-    values: tokio::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
 }
 
 #[async_trait::async_trait]
 impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
-    async fn put_process_execution_env(
+    async fn publish_process_execution_env(
         &self,
+        owner: &lash_core::ArtifactOwner,
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> std::result::Result<(), lash_core::PluginError> {
@@ -298,18 +299,44 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
                 "injected process env persist failure".to_string(),
             ));
         }
-        self.values
-            .lock()
+        self.inner
+            .publish_process_execution_env(owner, env_ref, bytes)
             .await
-            .insert(env_ref.as_str().to_string(), bytes.to_vec());
-        Ok(())
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .transfer_process_execution_env(from, to, env_ref)
+            .await
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .release_process_execution_env(owner, env_ref)
+            .await
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner.retire_process_execution_env_owner(owner).await
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
     ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
-        Ok(self.values.lock().await.get(env_ref.as_str()).cloned())
+        self.inner.get_process_execution_env(env_ref).await
     }
 }
 

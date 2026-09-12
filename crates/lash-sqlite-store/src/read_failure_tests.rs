@@ -1,5 +1,5 @@
 use super::*;
-use crate::attachments::RAW_ARTIFACT_NAMESPACE;
+use crate::attachments::MODULE_ARTIFACT_NAMESPACE;
 use lashlang::LashlangArtifactStore;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::instrument::WithSubscriber as _;
@@ -493,11 +493,13 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     raw.execute(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
          VALUES (?1, 'dangling-artifact', 'missing-artifact-blob')",
-        params![RAW_ARTIFACT_NAMESPACE],
+        params![MODULE_ARTIFACT_NAMESPACE],
     )
     .expect("insert dangling artifact reference");
+    let dangling_ref: lashlang::ModuleRef =
+        serde_json::from_value(serde_json::json!("dangling-artifact")).unwrap();
     let artifact_error = store
-        .get_artifact_bytes("dangling-artifact")
+        .get_module_artifact(&dangling_ref)
         .await
         .expect_err("dangling artifact reference must fail");
     assert!(
@@ -667,9 +669,15 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
     );
 
     assert_artifact_storage_failure(
-        "put_artifact_ref_blob",
+        "publish_module_artifact",
         store
-            .put_artifact_bytes("readonly-artifact", "generic", b"artifact-ref")
+            .publish_module_artifact(
+                &lash_core::ArtifactOwner::host("readonly-test"),
+                &lashlang::ModuleArtifact::from_program(
+                    lashlang::parse("finish true").expect("parse module"),
+                )
+                .expect("build module"),
+            )
             .await,
     );
 

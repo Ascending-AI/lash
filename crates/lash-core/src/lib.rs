@@ -1123,8 +1123,8 @@ pub use runtime::drive_with_event_pump;
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
 pub use runtime::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AssistantResponseHookEvents, AwaitEventKey,
-    AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
+    AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, AssistantResponseHookEvents,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
     EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement,
@@ -1197,11 +1197,11 @@ pub(crate) use runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkItem,
     QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, load_process_execution_env,
-    materialize_process_event_semantics, persist_process_execution_env,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    prepare_process_transition, process_event_invocation, process_registration_fingerprint,
-    process_wake_batch_draft, process_wake_input_from_event_payload, process_wake_turn_cause,
-    process_wake_turn_text, require_event_replay,
+    materialize_process_event_semantics, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
+    process_event_invocation, process_registration_fingerprint, process_wake_batch_draft,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    publish_process_execution_env, require_event_replay,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 pub(crate) use session_model::plugin_runtime_protocol_event;

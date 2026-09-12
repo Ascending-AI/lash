@@ -121,7 +121,10 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     .artifact;
     storage
         .lashlang_artifact_store()
-        .put_module_artifact(&artifact)
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("postgres-preflight-test"),
+            &artifact,
+        )
         .await
         .expect("persist module artifact");
     drop(storage);

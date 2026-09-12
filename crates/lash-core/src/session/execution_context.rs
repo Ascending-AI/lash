@@ -309,6 +309,18 @@ impl<'run> RuntimeExecutionContext<'run> {
             .to_string()
     }
 
+    /// Returns the exact owner used to stage artifacts produced by this
+    /// replayable execution.
+    pub fn artifact_owner(&self) -> crate::ArtifactOwner {
+        crate::ArtifactOwner::execution(
+            self.dispatch
+                .effect_controller
+                .scoped()
+                .execution_scope()
+                .clone(),
+        )
+    }
+
     /// Exposes session scope to protocol and process-engine implementors while executing code
     /// against the session runtime.
     pub fn session_scope(&self) -> crate::SessionScope {
@@ -578,7 +590,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
         match registration.input.as_ref() {
             crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
-                let env_ref = self.captured_process_execution_env_ref().await?;
+                let owner = crate::ArtifactOwner::process_start(&registration.id);
+                let env_ref = self.captured_process_execution_env_ref(&owner).await?;
                 Ok(registration.with_execution_env_ref(Some(env_ref)))
             }
             crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
@@ -591,6 +604,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// executing code against the session runtime.
     pub async fn captured_process_execution_env_ref(
         &self,
+        owner: &crate::ArtifactOwner,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
         if let Some(env_ref) = self
             .process_execution
@@ -599,8 +613,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         {
             return Ok(env_ref);
         }
-        crate::persist_process_execution_env(
+        crate::publish_process_execution_env(
             self.process_env_store.as_ref(),
+            owner,
             &self.execution_env_spec,
         )
         .await

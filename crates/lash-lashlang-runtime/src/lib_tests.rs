@@ -80,9 +80,7 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source,
         environment: &environment,
-        artifact_store: None,
     })
-    .await
     .expect("labeled workflow compiles");
     let graph = lashlang::workflow_graph_from_source(source).expect("workflow graph projects");
     let trace_map = trace_lashlang_main_map(&output.artifact);
@@ -584,10 +582,12 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
-    .expect("module compiles and persists");
+    .expect("module compiles");
+    store
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .await
+        .expect("module publishes");
     let artifact_store: Arc<dyn LashlangArtifactStore> = store;
     let site = test_start_site("child_process:scan", 1);
 
@@ -628,38 +628,41 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     let matching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: str, other: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("matching handler compiles");
     let mismatching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(payload: str, other: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("mismatching handler compiles");
     let wrong_type = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: int, other: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("wrong-type handler compiles");
     let wrong_order = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(other: str, event: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("wrong-order handler compiles");
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "type Handler = Process<(event: str, other: str), bool>\ntype Envelope = { handler: Handler }\nprocess install(envelope: Envelope) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("receiver compiles");
+    let owner = lash_core::ArtifactOwner::host("fixture");
+    for artifact in [
+        &matching.artifact,
+        &mismatching.artifact,
+        &wrong_type.artifact,
+        &wrong_order.artifact,
+        &receiver.artifact,
+    ] {
+        store
+            .publish_module_artifact(&owner, artifact)
+            .await
+            .expect("module publishes");
+    }
     let artifact_store: Arc<dyn LashlangArtifactStore> = store.clone();
 
     let start_with = |definition: lashlang::ProcessDefinitionIdentity| {
@@ -787,7 +790,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     process.params[0].name = "event".into();
     assert!(forged.verify().is_err(), "forged artifact must not verify");
     store
-        .put_module_artifact(&forged)
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("forged-test"), &forged)
         .await
         .expect("test store accepts public artifact values");
     let error = prepare_lashlang_process_start(
@@ -814,10 +817,12 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(value: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("receiver compiles");
+    store
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .await
+        .expect("module publishes");
     let mut forged = output.artifact.clone();
     let process = forged
         .canonical_ir
@@ -831,7 +836,7 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
     process.params[0].name = "forged".into();
     assert!(forged.verify().is_err(), "forged artifact must not verify");
     store
-        .put_module_artifact(&forged)
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("forged-test"), &forged)
         .await
         .expect("test store accepts public artifact values");
     let artifact_store: Arc<dyn LashlangArtifactStore> = store;
@@ -865,10 +870,15 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(handler: Process<(event: str), bool> | str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("union receiver compiles");
+    store
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("fixture"),
+            &receiver.artifact,
+        )
+        .await
+        .expect("module publishes");
     let mut args = lashlang::Record::new();
     args.insert(
         "handler".to_string(),

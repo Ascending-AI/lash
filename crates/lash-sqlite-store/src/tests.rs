@@ -807,7 +807,10 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
     .expect("link module");
 
     store
-        .put_module_artifact(&linked.artifact)
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("sqlite-store-test"),
+            &linked.artifact,
+        )
         .await
         .expect("put artifact");
     let restored = store

@@ -274,6 +274,8 @@ pub struct RuntimeHandle {
     pub(in crate::runtime) runtime: Arc<Mutex<LashRuntime>>,
     observation: Arc<ArcSwap<RuntimeObservation>>,
     live_replay_store: Arc<dyn LiveReplayStore>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    process_engines: crate::ProcessEngineRegistry,
 }
 
 impl RuntimeHandle {
@@ -285,6 +287,8 @@ impl RuntimeHandle {
         runtime: LashRuntime,
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
+        let process_env_store = Arc::clone(&runtime.host.core.durability.process_env_store);
+        let process_engines = runtime.host.core.process_engines.clone();
         let revision = SessionRevision::from_runtime(&runtime);
         let cursor =
             live_replay_store.current_cursor(&SessionId::from(runtime.session_id()), revision);
@@ -302,11 +306,25 @@ impl RuntimeHandle {
             runtime: Arc::new(Mutex::new(runtime)),
             observation: Arc::new(ArcSwap::from_pointee(observation)),
             live_replay_store,
+            process_env_store,
+            process_engines,
         }
     }
 
     pub fn writer(&self) -> Arc<Mutex<LashRuntime>> {
         Arc::clone(&self.runtime)
+    }
+
+    /// Retire an execution artifact owner across the runtime's environment and
+    /// process-engine stores after its effect journal is durably unreachable.
+    pub async fn retire_artifact_owner(
+        &self,
+        owner: &crate::ArtifactOwner,
+    ) -> Result<(), crate::PluginError> {
+        self.process_env_store
+            .retire_process_execution_env_owner(owner)
+            .await?;
+        self.process_engines.retire_artifact_owner(owner).await
     }
 
     pub fn observe(&self) -> Arc<RuntimeObservation> {
@@ -827,6 +845,8 @@ impl RuntimeHandle {
                 runtime,
                 observation: self.observation,
                 live_replay_store: self.live_replay_store,
+                process_env_store: self.process_env_store,
+                process_engines: self.process_engines,
             }),
         }
     }

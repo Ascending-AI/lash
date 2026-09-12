@@ -288,6 +288,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         .with_process_env_store(Arc::clone(
             &self.current.host.core.durability.process_env_store,
         ))
+        .with_process_engines(self.current.host.core.process_engines.clone())
         .with_process_effect_controller(owned_controller);
         if let Some(turn_cancellation) = self.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
@@ -351,13 +352,30 @@ impl ProcessCapability {
         registration: &crate::ProcessRegistration,
     ) -> Result<Option<crate::ProcessExecutionEnvRef>, crate::PluginError> {
         if let Some(env_ref) = registration.env_ref.clone() {
+            let store = current.host.core.durability.process_env_store.as_ref();
+            let bytes = store
+                .get_process_execution_env(&env_ref)
+                .await?
+                .ok_or_else(|| {
+                    crate::PluginError::Session(format!(
+                        "missing process execution env `{env_ref}`"
+                    ))
+                })?;
+            store
+                .publish_process_execution_env(
+                    &crate::ArtifactOwner::process_start(&registration.id),
+                    &env_ref,
+                    &bytes,
+                )
+                .await?;
             return Ok(Some(env_ref));
         }
         match registration.input.as_ref() {
             crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
                 let spec = self.current_execution_env_spec(current);
-                crate::persist_process_execution_env(
+                crate::publish_process_execution_env(
                     current.host.core.durability.process_env_store.as_ref(),
+                    &crate::ArtifactOwner::process_start(&registration.id),
                     &spec,
                 )
                 .await
@@ -389,6 +407,8 @@ impl ProcessCapability {
         let env_ref = self
             .capture_execution_env_ref(current, &registration)
             .await?;
+        let staged_env_ref = env_ref.clone();
+        let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
         // session. Wake routing and observer membership are independent: only
@@ -407,15 +427,44 @@ impl ProcessCapability {
             )
             .with_execution_env_ref(env_ref)
             .with_wake_session_id(wake_session_id);
-        let registration = self
+        let registration = match self
             .prepare_process_environment(current, session_id, registration)
-            .await?;
+            .await
+        {
+            Ok(registration) => registration,
+            Err(error) => {
+                if staged_env_ref.is_some() {
+                    current
+                        .host
+                        .core
+                        .durability
+                        .process_env_store
+                        .retire_process_execution_env_owner(&staging_owner)
+                        .await?;
+                }
+                return Err(error);
+            }
+        };
         let execution_context = options.execution_context(&scope);
-        let runner = ProcessCommandRunner::new(
+        let runner = match ProcessCommandRunner::new(
             current,
             &scope,
             "processes are unavailable in this runtime",
-        )?;
+        ) {
+            Ok(runner) => runner,
+            Err(error) => {
+                if staged_env_ref.is_some() {
+                    current
+                        .host
+                        .core
+                        .durability
+                        .process_env_store
+                        .retire_process_execution_env_owner(&staging_owner)
+                        .await?;
+                }
+                return Err(error);
+            }
+        };
         runner
             .start(
                 registration,

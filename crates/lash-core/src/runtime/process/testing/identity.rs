@@ -176,7 +176,8 @@ fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
 async fn runtime_feedback_process_environment_refuses_prior_family() {
     use super::super::model::InMemoryProcessExecutionEnvStore;
     use crate::{
-        ProcessExecutionEnvStore, load_process_execution_env, persist_process_execution_env,
+        ArtifactOwner, ProcessExecutionEnvStore, load_process_execution_env,
+        publish_process_execution_env,
     };
     let store = InMemoryProcessExecutionEnvStore::new();
     let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
@@ -195,15 +196,18 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
         "process-env:v4:blake3:{}",
         crate::stable_hash::blake3_hex("lash-process-env/v4", &bytes)
     ));
-    store.put_process_execution_env(&old, &bytes).await.unwrap();
     assert!(
-        load_process_execution_env(&store, &old)
+        store
+            .publish_process_execution_env(&ArtifactOwner::host("version-test"), &old, &bytes)
             .await
             .unwrap_err()
             .to_string()
-            .contains("recreate")
+            .contains("do not match")
     );
-    let current = persist_process_execution_env(&store, &spec).await.unwrap();
+    let current =
+        publish_process_execution_env(&store, &ArtifactOwner::host("version-test"), &spec)
+            .await
+            .unwrap();
     assert!(current.as_str().starts_with("process-env:v5:blake3:"));
     assert_eq!(
         load_process_execution_env(&store, &current).await.unwrap(),

@@ -103,7 +103,7 @@ async fn prepare_trigger_draft(
         .chain(lashlang_process_signal_event_types(process))
         .collect::<Vec<_>>();
     let env_ref = ctx
-        .captured_process_execution_env_ref()
+        .captured_process_execution_env_ref(&ctx.artifact_owner())
         .await
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let draft = lash_core::TriggerSubscriptionDraft {

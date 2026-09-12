@@ -137,8 +137,9 @@ pub(super) async fn trigger_lashlang_registration(
         ),
     )
     .expect("link lashlang trigger module");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked_module.artifact,
     )
     .await
@@ -188,8 +189,9 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
         ),
     )
     .expect("link TypeScript process");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked.artifact,
     )
     .await
@@ -266,8 +268,9 @@ pub(super) async fn sleeping_process_registration(
         .expect("link sleeping TypeScript process"),
     };
     assert_eq!(linked.artifact.compilation_dialect, dialect);
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked.artifact,
     )
     .await
@@ -328,8 +331,9 @@ pub(super) async fn sleeping_then_tool_process_registration(
         ),
     )
     .expect("link sleeping post-wake-effect process");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-recovery-test"),
         &linked.artifact,
     )
     .await

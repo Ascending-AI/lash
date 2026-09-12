@@ -1,5 +1,5 @@
 use lash_sansio::sync::MutexExt;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -115,7 +115,7 @@ impl ProcessChangeCursor {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SessionScopeId(String);
 
@@ -285,11 +285,81 @@ impl ProcessExecutionEnvRef {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Verify that this reference addresses exactly one valid encoded
+    /// process-execution environment.
+    pub fn matches_store_bytes(&self, bytes: &[u8]) -> bool {
+        ProcessExecutionEnvSpec::from_store_bytes(bytes).is_ok()
+            && process_execution_env_ref_for_bytes(bytes) == *self
+    }
 }
 
 impl fmt::Display for ProcessExecutionEnvRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
+    }
+}
+
+/// Exact authority retaining immutable module or process-environment bytes.
+///
+/// Artifact stores persist one edge per owner and content address. Owners are
+/// deliberately identities rather than reference counts: releasing one edge
+/// cannot disturb another owner's use of the same bytes.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum ArtifactOwner {
+    /// Host-managed publication retained until that host explicitly releases it.
+    Host(String),
+    /// A durable process record retaining the bytes it references.
+    Process(ProcessId),
+    /// A publication staged by replayable execution before ownership transfers
+    /// to a registered process.
+    Execution(crate::ExecutionScope),
+}
+
+impl ArtifactOwner {
+    /// Construct an explicit, indefinitely retained host owner.
+    pub fn host(id: impl Into<String>) -> Self {
+        Self::Host(id.into())
+    }
+
+    /// Construct the owner represented by one durable process record.
+    pub fn process(id: impl Into<ProcessId>) -> Self {
+        Self::Process(id.into())
+    }
+
+    /// Construct the staging owner for one replayable execution scope.
+    pub fn execution(scope: crate::ExecutionScope) -> Self {
+        Self::Execution(scope)
+    }
+
+    /// Construct the stable staging owner for one replayable process start.
+    pub fn process_start(process_id: &ProcessId) -> Self {
+        Self::execution(crate::ExecutionScope::RuntimeOperation {
+            operation_id: format!("process-start:{process_id}"),
+        })
+    }
+
+    /// Stable columns used by first-party artifact stores.
+    pub fn storage_parts(&self) -> Result<(&'static str, String), crate::PluginError> {
+        let (kind, id) = match self {
+            Self::Host(id) => ("host", id.clone()),
+            Self::Process(id) => ("process", id.to_string()),
+            Self::Execution(scope) => (
+                "execution",
+                scope
+                    .journal_identity()
+                    .map_err(|error| crate::PluginError::Session(error.to_string()))?
+                    .key()
+                    .to_string(),
+            ),
+        };
+        if !crate::store::namespace::is_valid_opaque_key(&id) {
+            return Err(crate::PluginError::Invoke(format!(
+                "invalid {kind} artifact owner"
+            )));
+        }
+        Ok((kind, id))
     }
 }
 
@@ -343,10 +413,36 @@ fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
 
 #[async_trait::async_trait]
 pub trait ProcessExecutionEnvStore: Send + Sync {
-    async fn put_process_execution_env(
+    /// Publish immutable bytes and retain them for one exact owner.
+    async fn publish_process_execution_env(
         &self,
+        owner: &ArtifactOwner,
         env_ref: &ProcessExecutionEnvRef,
         bytes: &[u8],
+    ) -> Result<(), crate::PluginError>;
+
+    /// Atomically transfer one retained environment from a staging owner to a
+    /// registered process owner, adding the destination before severing the
+    /// source edge.
+    async fn transfer_process_execution_env(
+        &self,
+        from: &ArtifactOwner,
+        to: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError>;
+
+    /// Sever one exact owner edge and reclaim the bytes when it was the last.
+    async fn release_process_execution_env(
+        &self,
+        owner: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError>;
+
+    /// Permanently fence an execution owner against late publication and sever
+    /// every process-environment edge it still owns.
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &ArtifactOwner,
     ) -> Result<(), crate::PluginError>;
 
     async fn get_process_execution_env(
@@ -357,7 +453,14 @@ pub trait ProcessExecutionEnvStore: Send + Sync {
 
 #[derive(Default)]
 pub struct InMemoryProcessExecutionEnvStore {
-    envs: Mutex<BTreeMap<String, Vec<u8>>>,
+    envs: Mutex<InMemoryProcessExecutionEnvState>,
+}
+
+#[derive(Default)]
+struct InMemoryProcessExecutionEnvState {
+    bytes: BTreeMap<String, Vec<u8>>,
+    owners: HashSet<(String, ArtifactOwner)>,
+    retired_owners: HashSet<ArtifactOwner>,
 }
 
 impl InMemoryProcessExecutionEnvStore {
@@ -368,8 +471,9 @@ impl InMemoryProcessExecutionEnvStore {
 
 #[async_trait::async_trait]
 impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
-    async fn put_process_execution_env(
+    async fn publish_process_execution_env(
         &self,
+        owner: &ArtifactOwner,
         env_ref: &ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> Result<(), crate::PluginError> {
@@ -378,9 +482,110 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
                 "invalid process execution environment reference".into(),
             ));
         }
-        self.envs
-            .lock_recover()
-            .insert(env_ref.as_str().to_string(), bytes.to_vec());
+        if !env_ref.matches_store_bytes(bytes) {
+            return Err(crate::PluginError::Session(format!(
+                "process execution environment bytes do not match `{env_ref}`"
+            )));
+        }
+        let mut state = self.envs.lock_recover();
+        if state.retired_owners.contains(owner) {
+            return Err(crate::PluginError::Session(
+                "artifact owner has been permanently retired".to_string(),
+            ));
+        }
+        if let Some(existing) = state.bytes.get(env_ref.as_str())
+            && existing != bytes
+        {
+            return Err(crate::PluginError::Session(format!(
+                "process execution environment `{env_ref}` is immutable"
+            )));
+        }
+        state
+            .bytes
+            .entry(env_ref.as_str().to_string())
+            .or_insert_with(|| bytes.to_vec());
+        state
+            .owners
+            .insert((env_ref.as_str().to_string(), owner.clone()));
+        Ok(())
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &ArtifactOwner,
+        to: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError> {
+        let mut state = self.envs.lock_recover();
+        let edge = (env_ref.as_str().to_string(), from.clone());
+        if !state.owners.contains(&edge) || !state.bytes.contains_key(env_ref.as_str()) {
+            if state
+                .owners
+                .contains(&(env_ref.as_str().to_string(), to.clone()))
+            {
+                return Ok(());
+            }
+            return Err(crate::PluginError::Session(format!(
+                "process execution environment `{env_ref}` is not retained by the staging owner"
+            )));
+        }
+        if state.retired_owners.contains(to) {
+            return Err(crate::PluginError::Session(
+                "artifact destination owner has been permanently retired".to_string(),
+            ));
+        }
+        state
+            .owners
+            .insert((env_ref.as_str().to_string(), to.clone()));
+        state.owners.remove(&edge);
+        Ok(())
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError> {
+        let mut state = self.envs.lock_recover();
+        state
+            .owners
+            .remove(&(env_ref.as_str().to_string(), owner.clone()));
+        if !state
+            .owners
+            .iter()
+            .any(|(candidate, _)| candidate == env_ref.as_str())
+        {
+            state.bytes.remove(env_ref.as_str());
+        }
+        Ok(())
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &ArtifactOwner,
+    ) -> Result<(), crate::PluginError> {
+        if !matches!(owner, ArtifactOwner::Execution(_)) {
+            return Err(crate::PluginError::Invoke(
+                "only execution artifact owners can be retired".to_string(),
+            ));
+        }
+        let mut state = self.envs.lock_recover();
+        state.retired_owners.insert(owner.clone());
+        let affected = state
+            .owners
+            .iter()
+            .filter_map(|(env_ref, candidate)| (candidate == owner).then_some(env_ref.clone()))
+            .collect::<Vec<_>>();
+        state.owners.retain(|(_, candidate)| candidate != owner);
+        for env_ref in affected {
+            if !state
+                .owners
+                .iter()
+                .any(|(candidate, _)| candidate == &env_ref)
+            {
+                state.bytes.remove(&env_ref);
+            }
+        }
         Ok(())
     }
 
@@ -393,12 +598,18 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
                 "invalid process execution environment reference".into(),
             ));
         }
-        Ok(self.envs.lock_recover().get(env_ref.as_str()).cloned())
+        Ok(self
+            .envs
+            .lock_recover()
+            .bytes
+            .get(env_ref.as_str())
+            .cloned())
     }
 }
 
-pub async fn persist_process_execution_env(
+pub async fn publish_process_execution_env(
     env_store: &dyn ProcessExecutionEnvStore,
+    owner: &ArtifactOwner,
     spec: &ProcessExecutionEnvSpec,
 ) -> Result<ProcessExecutionEnvRef, crate::PluginError> {
     let bytes = spec.to_store_bytes().map_err(|err| {
@@ -406,7 +617,7 @@ pub async fn persist_process_execution_env(
     })?;
     let env_ref = process_execution_env_ref_for_bytes(&bytes);
     env_store
-        .put_process_execution_env(&env_ref, &bytes)
+        .publish_process_execution_env(owner, &env_ref, &bytes)
         .await?;
     Ok(env_ref)
 }

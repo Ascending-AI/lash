@@ -999,8 +999,9 @@ pub(super) async fn process_parent_lashlang_registration(
         ),
     )
     .expect("link segmented process-parent law");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked.artifact,
     )
     .await
@@ -1051,8 +1052,9 @@ pub(super) async fn segmented_child_await_registration(
         ),
     )
     .expect("link segmented child-await law");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked.artifact,
     )
     .await
@@ -1483,9 +1485,13 @@ pub(super) async fn persist_recovery_env_ref() -> lash_core::ProcessExecutionEnv
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
     );
-    lash_core::runtime::persist_process_execution_env(RECOVERY_PROCESS_ENV_STORE.as_ref(), &spec)
-        .await
-        .expect("persist recovery process execution env")
+    lash_core::runtime::publish_process_execution_env(
+        RECOVERY_PROCESS_ENV_STORE.as_ref(),
+        &lash_core::ArtifactOwner::host("restate-recovery-env"),
+        &spec,
+    )
+    .await
+    .expect("persist recovery process execution env")
 }
 
 pub(super) async fn persist_snapshot_recovery_env_ref(
@@ -1495,9 +1501,13 @@ pub(super) async fn persist_snapshot_recovery_env_ref(
         snapshot_recovery_tool_options(snapshot_ref),
         recovery_session_policy(),
     );
-    lash_core::runtime::persist_process_execution_env(RECOVERY_PROCESS_ENV_STORE.as_ref(), &spec)
-        .await
-        .expect("persist snapshot recovery process execution env")
+    lash_core::runtime::publish_process_execution_env(
+        RECOVERY_PROCESS_ENV_STORE.as_ref(),
+        &lash_core::ArtifactOwner::host("restate-snapshot-recovery-env"),
+        &spec,
+    )
+    .await
+    .expect("persist snapshot recovery process execution env")
 }
 
 pub(super) fn process_wake_event_type() -> lash_core::ProcessEventType {
@@ -1552,8 +1562,9 @@ pub(super) async fn snapshot_lashlang_registration(
         ),
     )
     .expect("link snapshot lashlang module");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked_module.artifact,
     )
     .await

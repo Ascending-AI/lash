@@ -358,8 +358,9 @@ finish "registered"
             core: &LashCore,
             registration: lash_core::ProcessRegistration,
         ) -> lash_core::ProcessRegistration {
-            let env_ref = lash_core::runtime::persist_process_execution_env(
+            let env_ref = lash_core::runtime::publish_process_execution_env(
                 core.env.core.durability.process_env_store.as_ref(),
+                &lash_core::ArtifactOwner::host("rebuild-test"),
                 &lash_core::ProcessExecutionEnvSpec::new(
                     lash_core::PluginOptions::default(),
                     lash_core::SessionPolicy {

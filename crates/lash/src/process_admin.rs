@@ -322,8 +322,9 @@ impl Processes {
     ) -> Result<lash_core::ProcessRecord> {
         let env_ref = match request.env_spec.as_ref() {
             Some(env_spec) => Some(
-                lash_core::runtime::persist_process_execution_env(
+                lash_core::runtime::publish_process_execution_env(
                     self.core.env.core.durability.process_env_store.as_ref(),
+                    &lash_core::ArtifactOwner::process_start(&request.id),
                     env_spec,
                 )
                 .await?,
@@ -614,7 +615,27 @@ impl Processes {
         let prunable = registry
             .prunable_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await?;
+        let mut prunable_records = Vec::with_capacity(prunable.len());
+        for process_id in &prunable {
+            if let Some(record) = registry.get_process(process_id).await? {
+                prunable_records.push(record);
+            }
+        }
         for process_id in prunable {
+            let staging_owner = lash_core::ArtifactOwner::process_start(&process_id);
+            self.core
+                .env
+                .core
+                .durability
+                .process_env_store
+                .retire_process_execution_env_owner(&staging_owner)
+                .await?;
+            self.core
+                .env
+                .core
+                .process_engines
+                .retire_artifact_owner(&staging_owner)
+                .await?;
             // The process journal and the worker's trigger-delivery reconcile
             // scope for the same process: that runtime operation exists only
             // to admit this process, so nothing can replay it once the row is
@@ -666,6 +687,24 @@ impl Processes {
                 return Err(err.into());
             }
         };
+        for record in &prunable_records {
+            let owner = lash_core::ArtifactOwner::process(record.id.clone());
+            if let Some(env_ref) = record.env_ref.as_ref() {
+                self.core
+                    .env
+                    .core
+                    .durability
+                    .process_env_store
+                    .release_process_execution_env(&owner, env_ref)
+                    .await?;
+            }
+            self.core
+                .env
+                .core
+                .process_engines
+                .release_process_artifacts(record)
+                .await?;
+        }
         if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
             let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
                 registry.as_ref(),

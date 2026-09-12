@@ -43,7 +43,7 @@ pub use events::{
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
-    AbandonRequest, InMemoryProcessExecutionEnvStore, ObserverInheritance,
+    AbandonRequest, ArtifactOwner, InMemoryProcessExecutionEnvStore, ObserverInheritance,
     PROCESS_LEASE_SCHEMA_VERSION, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
     ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
@@ -55,7 +55,7 @@ pub use model::{
     ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
     ProcessTombstone, RecoveryContract, SessionId, SessionScope, SessionScopeId, WaitKind,
     WaitState, ensure_process_lease_schema_version, load_process_execution_env,
-    persist_process_execution_env, process_runtime_session_ids,
+    process_runtime_session_ids, publish_process_execution_env,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,

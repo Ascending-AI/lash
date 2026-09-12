@@ -24,7 +24,18 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 85
+version 86
+table lash_artifact_owner_retirements
+  column owner_id text not-null
+  column owner_kind text not-null
+  primary-key (owner_kind, owner_id)
+table lash_artifact_owners
+  column artifact_ref text not-null
+  column namespace text not-null
+  column owner_id text not-null
+  column owner_kind text not-null
+  primary-key (namespace, artifact_ref, owner_kind, owner_id)
+  foreign-key (namespace, artifact_ref) references lash_lashlang_artifacts (namespace, artifact_ref) on delete cascade
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null

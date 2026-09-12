@@ -152,11 +152,17 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
 }
 
 pub(super) async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
+    let spec = crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    let bytes = spec.to_store_bytes().expect("encode test environment");
+    let owner = crate::ArtifactOwner::host("hostile-input-test");
     for raw in ["", "nul\0reference"] {
         let reference = crate::ProcessExecutionEnvRef::new(raw);
         assert!(
             store
-                .put_process_execution_env(&reference, b"hostile")
+                .publish_process_execution_env(&owner, &reference, &bytes)
                 .await
                 .is_err(),
             "malformed environment reference must not reach blob mutation"
@@ -171,22 +177,16 @@ pub(super) async fn process_environment_namespace(store: Arc<dyn crate::ProcessE
         "../canary",
         "'; DROP TABLE lash_artifact_blobs; --",
     ] {
-        store
-            .put_process_execution_env(&crate::ProcessExecutionEnvRef::new(raw), raw.as_bytes())
-            .await
-            .expect("opaque reference write");
-    }
-    for raw in [
-        "canary",
-        "../canary",
-        "'; DROP TABLE lash_artifact_blobs; --",
-    ] {
-        assert_eq!(
+        assert!(
             store
-                .get_process_execution_env(&crate::ProcessExecutionEnvRef::new(raw))
+                .publish_process_execution_env(
+                    &owner,
+                    &crate::ProcessExecutionEnvRef::new(raw),
+                    &bytes,
+                )
                 .await
-                .expect("opaque reference read"),
-            Some(raw.as_bytes().to_vec())
+                .is_err(),
+            "non-content-addressed environment references must be refused"
         );
     }
 }
