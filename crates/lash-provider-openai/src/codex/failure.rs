@@ -7,7 +7,7 @@
 
 use serde_json::Value;
 
-use lash_core::llm::transport::ProviderFailure;
+use lash_core::llm::transport::LlmTransportError;
 use lash_core::provider::{DefaultProviderFailureClassifier, ProviderFailureClassifier};
 
 use super::CodexProvider;
@@ -77,7 +77,7 @@ impl CodexProvider {
 pub(super) struct CodexFailureClassifier;
 
 impl ProviderFailureClassifier for CodexFailureClassifier {
-    fn classify(&self, failure: ProviderFailure) -> ProviderFailure {
+    fn classify(&self, failure: LlmTransportError) -> LlmTransportError {
         // The default classifier already covers everything Codex needs from a
         // status/text standpoint: HTTP-status → kind/retryability, the
         // usage-limit/quota and content-filter text markers, and context

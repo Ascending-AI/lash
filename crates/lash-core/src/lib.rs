@@ -316,7 +316,6 @@ pub mod facade_support {
     pub use crate::direct::DirectRole;
     pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
-    pub use crate::llm::transport::ProviderFailure;
     pub use crate::plugin::AbortTurnDirective;
     pub use crate::plugin::AfterToolCallPluginDirective;
     pub use crate::plugin::AfterTurnPluginDirective;
