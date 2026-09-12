@@ -1,25 +1,6 @@
 use lash_core::runtime::InMemorySessionStore as RecordingStore;
 use lash_sansio::SessionId;
 use std::sync::Arc;
-async fn recording_store_satisfies_runtime_persistence_conformance(
-    law: crate::conformance::RuntimePersistenceLaw,
-) {
-    let clock = Arc::new(crate::testing::TestClock::new(10_000));
-    let store_clock = Arc::clone(&clock);
-    crate::conformance::runtime_persistence(
-        move |session_id| {
-            let store = RecordingStore::with_clock(store_clock.clone());
-            store.bind_session_for_conformance(&SessionId::from(session_id));
-            std::sync::Arc::new(store) as std::sync::Arc<dyn crate::RuntimePersistence>
-        },
-        crate::conformance::RuntimePersistenceLeaseTiming::controlled({
-            let clock = Arc::clone(&clock);
-            move |duration_ms| clock.advance(duration_ms)
-        }),
-        law,
-    )
-    .await;
-}
 
 #[tokio::test]
 async fn recording_store_enforces_core_lease_fence_authority() {
@@ -187,5 +168,18 @@ async fn in_memory_unclaimed_turn_input_settlement_is_a_conditional_write() {
 }
 mod runtime_laws {
     use super::*;
-    crate::runtime_persistence_tests!(recording_store_satisfies_runtime_persistence_conformance);
+    crate::runtime_persistence_tests!({
+        let clock = Arc::new(crate::testing::TestClock::new(10_000));
+        let store_clock = Arc::clone(&clock);
+        (
+            move |session_id: &str| {
+                let store = RecordingStore::with_clock(store_clock.clone());
+                store.bind_session_for_conformance(&SessionId::from(session_id));
+                Arc::new(store) as Arc<dyn crate::RuntimePersistence>
+            },
+            crate::conformance::RuntimePersistenceLeaseTiming::controlled(move |duration_ms| {
+                clock.advance(duration_ms)
+            }),
+        )
+    });
 }

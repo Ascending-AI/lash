@@ -297,14 +297,8 @@ async fn postgres_graph_node_primary_key_is_global_when_configured() {
     assert_eq!(definition, "PRIMARY KEY (node_id)");
 }
 
-lash_conformance::runtime_persistence_reopenable_tests!(
-    postgres_runtime_persistence_satisfies_conformance_when_configured
-);
-
-async fn postgres_runtime_persistence_satisfies_conformance_when_configured(
-    law: lash_conformance::RuntimePersistenceLaw,
-) {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::runtime_persistence_reopenable_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres conformance: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
@@ -312,8 +306,9 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured(
     let database_url = database_url().expect("configured Postgres database URL");
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     let lease_clock = Arc::clone(&clock);
-    lash_conformance::runtime_persistence_reopenable(
-        |session_id| {
+    (
+        move |session_id: &str| {
+            let _database_lock = &database_lock;
             let storage = Arc::clone(&storage);
             let database_url = database_url.clone();
             let clock = Arc::clone(&clock);
@@ -355,10 +350,8 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured(
         lash_conformance::RuntimePersistenceLeaseTiming::controlled(move |ms| {
             lease_clock.advance(ms)
         }),
-        law,
     )
-    .await;
-}
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_store_enforces_core_lease_fence_authority_when_configured() {

@@ -1,7 +1,7 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-pub(super) async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
+pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let first = store
@@ -142,9 +142,7 @@ pub(super) async fn pending_turn_inputs_source_keys_order_cancel_and_cross_sessi
     );
 }
 
-pub(super) async fn pending_turn_input_bulk_and_suffix_cancellation(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimePersistence>) {
     let first = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("root"), "bulk first")
@@ -320,7 +318,7 @@ pub(super) async fn pending_turn_input_bulk_and_suffix_cancellation(
     );
 }
 
-pub(super) async fn pending_turn_input_claims_reclaim_complete_and_fence(
+pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let first = store
@@ -516,7 +514,7 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
         .await;
 }
 
-pub(super) async fn turn_input_claims_supersede_across_session_lease_generations_with_timing(
+pub async fn turn_input_claims_supersede_across_session_lease_generations_with_timing(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
 ) {
@@ -731,7 +729,7 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
         .expect("successor settles reacquired active input");
 }
 
-pub(super) async fn pending_turn_input_cancel_covers_active_and_deferred_states(
+pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let turn_id = "cancel-active-turn";
@@ -836,7 +834,7 @@ pub(super) async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     );
 }
 
-pub(super) async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
+pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let turn_id = "active-turn-1";
@@ -1267,7 +1265,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     release_session_execution_lease_for_test(&store, &successor).await;
 }
 
-pub(super) async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
+pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("root"),
@@ -1292,9 +1290,8 @@ pub(super) async fn session_metadata_round_trips(store: Arc<dyn RuntimePersisten
 /// commit orphaned, while preserving the live one. Generalizes the SQLite-only
 /// `gc_unreachable_keeps_rooted_checkpoint_blobs` test to every reclaiming
 /// backend via the [`GcReport`](crate::GcReport) counters plus a post-GC load.
-pub(super) async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn gc_blobs(factory: ReopenableRuntimePersistence) {
+    let store = factory.open;
     // First commit writes a live checkpoint blob.
     let mut v1 = RuntimeSessionState {
         session_id: SessionId::from("gc-blobs"),
@@ -1372,7 +1369,7 @@ pub(super) async fn gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(
 }
 
 /// Manifest rows are GC roots, not read authorization (FIG-653).
-pub(super) async fn attachment_manifest_reference_tracking_and_gc_root_set(
+pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let intent_id = AttachmentId::parse(format!("{:x}", sha256_of(b"intent-only")))
@@ -1445,7 +1442,7 @@ pub(super) fn sha256_of(bytes: &[u8]) -> impl std::fmt::LowerHex {
     Sha256::digest(bytes)
 }
 
-pub(super) async fn append_receipt_survives_reopen(factory: ReopenableRuntimePersistence) {
+pub async fn append_receipt_reopen(factory: ReopenableRuntimePersistence) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1479,7 +1476,7 @@ pub(super) async fn append_receipt_survives_reopen(factory: ReopenableRuntimePer
     );
 }
 
-pub(super) async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersistence) {
+pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     session_execution_lease_first_claim_excludes_concurrent_reopen_handles(&factory).await;
 
     let meta = SessionMeta {
@@ -1702,7 +1699,7 @@ pub(super) async fn session_execution_lease_first_claim_excludes_concurrent_reop
     }
 }
 
-pub(super) async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
+pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let wake = ProcessWakeDelivery {
@@ -1823,7 +1820,7 @@ pub(super) async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_on
     );
 }
 
-pub(super) async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
+pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let mut state = RuntimeSessionState {
@@ -1905,7 +1902,7 @@ pub(super) async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_ha
     );
 }
 
-pub(super) async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersistence>) {
+pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1973,7 +1970,7 @@ pub(super) async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn Ru
     );
 }
 
-pub(super) async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -2011,7 +2008,7 @@ pub(super) async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn Ru
     );
 }
 
-pub(super) async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -2080,7 +2077,7 @@ pub(super) async fn append_rejects_existing_node_id_collision(store: Arc<dyn Run
     assert_eq!(reason.as_str(), "original");
 }
 
-pub(super) async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -2117,7 +2114,7 @@ pub(super) async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn Runti
     );
 }
 
-pub(super) async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -2157,7 +2154,7 @@ pub(super) async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersi
     );
 }
 
-pub(super) async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -2192,7 +2189,7 @@ pub(super) async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistenc
     );
 }
 
-pub(super) async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
+pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("empty-append-head-move"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))

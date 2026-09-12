@@ -117,30 +117,29 @@ async fn commit(store: &Arc<dyn RuntimePersistence>, state: &mut RuntimeSessionS
     state.apply_persisted_commit_result(receipt);
 }
 
-pub(super) async fn plugin_state_boundary_law(make: impl Fn(&str) -> Arc<dyn RuntimePersistence>) {
+pub async fn plugin_state_boundary(
+    make: impl Fn(&str) -> Arc<dyn RuntimePersistence>,
+    label: &str,
+) {
+    let register_remove = format!("{label}-register-remove");
     registration_state_law(
-        make("plugin-state-register-remove"),
-        "plugin-state-register-remove",
+        make(&register_remove),
+        &register_remove,
         Registration::Remove,
     )
     .await;
+    let register_admission = format!("{label}-register-admission");
     registration_state_law(
-        make("plugin-state-register-admission"),
-        "plugin-state-register-admission",
+        make(&register_admission),
+        &register_admission,
         Registration::Admission,
     )
     .await;
-    plugin_state_boundary_trace(
-        make("plugin-state-parent"),
-        "plugin-state-parent",
-        make("plugin-state-child"),
-        "plugin-state-child",
-    )
-    .await;
-    Box::pin(runtime_plugin_state_park_law(make(
-        "plugin-state-lifecycle",
-    )))
-    .await;
+    let parent = format!("{label}-parent");
+    let child = format!("{label}-child");
+    plugin_state_boundary_trace(make(&parent), &parent, make(&child), &child).await;
+    let lifecycle = format!("{label}-lifecycle");
+    Box::pin(runtime_plugin_state_park_law(make(&lifecycle))).await;
 }
 
 /// Execute the plugin-state boundary and fork laws, returning decoded checkpoint
