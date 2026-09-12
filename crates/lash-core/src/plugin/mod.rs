@@ -437,7 +437,8 @@ mod tests {
                 sessions: Arc::new(MockSessionManager::default()),
                 state: SessionReadView::from_snapshot(&SessionSnapshot::new(
                     crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-                )),
+                ))
+                .expect("empty snapshot has an unscoped read view"),
                 protocol_turn_options: ProtocolTurnOptions::default(),
                 turn_context: crate::TurnContext::default(),
             })

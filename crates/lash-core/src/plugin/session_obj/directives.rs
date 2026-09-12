@@ -227,11 +227,18 @@ impl PluginSession {
                     }
                 }
                 AfterTurnPluginDirective::EnqueueMessages(directive) => {
-                    let messages = updated_messages.get_or_insert_with(|| {
-                        crate::MessageSequence::from_base(
-                            turn.state.read_view().messages().to_vec().into(),
-                        )
-                    });
+                    if updated_messages.is_none() {
+                        let read_view = turn
+                            .state
+                            .read_view()
+                            .map_err(|error| PluginError::Session(error.to_string()))?;
+                        updated_messages = Some(crate::MessageSequence::from_base(
+                            read_view.messages().to_vec().into(),
+                        ));
+                    }
+                    let messages = updated_messages
+                        .as_mut()
+                        .expect("message sequence was initialized above");
                     append_plugin_messages(
                         messages,
                         &directive.messages,

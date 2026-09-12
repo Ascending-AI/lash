@@ -237,7 +237,10 @@ impl CurrentSessionCapability {
             snapshot: match turn_graph_appends {
                 None => CurrentSnapshot::Owned(runtime.export_persistence_state()),
                 Some(graph_appends) => {
-                    let read_model = runtime.state.read_model();
+                    let read_model = runtime
+                        .state
+                        .read_model()
+                        .expect("turn-scoped runtime state is normalized before service creation");
                     CurrentSnapshot::ReadModel {
                         meta: Self::snapshot_meta_with_frame_root(runtime),
                         messages: read_model.messages,

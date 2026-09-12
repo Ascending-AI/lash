@@ -278,7 +278,8 @@ impl LashRuntime {
         protocol_session
             .restore_session(
                 crate::plugin::ProtocolSessionContext::new(&mut session, &session_id),
-                crate::plugin::ProtocolSessionRestoreView::new(&state),
+                crate::plugin::ProtocolSessionRestoreView::new(&state)
+                    .map_err(|error| SessionError::Protocol(error.to_string()))?,
             )
             .await?;
         if session.history_store().is_some() {
@@ -289,7 +290,8 @@ impl LashRuntime {
         session
             .plugins()
             .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                crate::SessionReadView::from_persisted_state(&state),
+                crate::SessionReadView::from_persisted_state(&state)
+                    .map_err(|error| SessionError::Protocol(error.to_string()))?,
             ))
             .await
             .map_err(|err| SessionError::Protocol(err.to_string()))?;

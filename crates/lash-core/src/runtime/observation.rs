@@ -236,7 +236,9 @@ fn export_observation_state(
     // invalidated, project only the already-adopted durable snapshot; never
     // recapture live plugin/tool state before the async reload gate runs.
     let mut state = runtime.export_persistence_state();
-    let read_view = runtime.read_view();
+    let read_view = runtime
+        .read_view()
+        .expect("resident runtime state is normalized before observation publication");
     let shared_ledger = runtime.shared_token_ledger.lock_recover();
     let mut saturated = false;
     for entry in shared_ledger.iter().cloned() {
@@ -860,7 +862,7 @@ mod tests {
         let frame_node_id =
             crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
         assert!(state.session_graph.append_frame_open_with_id_at(
-            frame_node_id.to_string(),
+            frame_node_id.clone(),
             frame_key,
             crate::AgentFrameReason::new("observation-test"),
             crate::AgentFrameAssignment::from_policy(state.policy.clone()),

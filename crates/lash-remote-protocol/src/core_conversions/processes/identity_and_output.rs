@@ -1,8 +1,13 @@
 use super::*;
 
-fn restore_frame_node_id(value: String) -> lash_core::FrameNodeId {
-    lash_core::FrameNodeId::new(value)
-        .expect("remote frame ids are validated before conversion to core")
+fn restore_frame_node_id(
+    value: String,
+    type_name: &'static str,
+) -> Result<lash_core::FrameNodeId, RemoteProtocolError> {
+    lash_core::FrameNodeId::new(value).map_err(|error| RemoteProtocolError::InvalidEnvelope {
+        type_name,
+        message: error.to_string(),
+    })
 }
 
 impl From<lash_core::ProcessRef> for RemoteProcessRef {
@@ -36,16 +41,21 @@ impl From<lash_core::SessionScope> for RemoteSessionScope {
     }
 }
 
-impl From<RemoteSessionScope> for lash_core::SessionScope {
-    fn from(value: RemoteSessionScope) -> Self {
+impl TryFrom<RemoteSessionScope> for lash_core::SessionScope {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteSessionScope) -> Result<Self, Self::Error> {
+        value.validate("RemoteSessionScope")?;
         let RemoteSessionScope {
             session_id,
             agent_frame_id,
         } = value;
-        Self {
+        Ok(Self {
             session_id,
-            agent_frame_id: agent_frame_id.map(restore_frame_node_id),
-        }
+            agent_frame_id: agent_frame_id
+                .map(|frame_node_id| restore_frame_node_id(frame_node_id, "RemoteSessionScope"))
+                .transpose()?,
+        })
     }
 }
 
@@ -64,18 +74,25 @@ impl From<lash_core::ProcessOriginator> for RemoteProcessOriginator {
     }
 }
 
-impl From<RemoteProcessOriginator> for lash_core::ProcessOriginator {
-    fn from(value: RemoteProcessOriginator) -> Self {
-        match value {
+impl TryFrom<RemoteProcessOriginator> for lash_core::ProcessOriginator {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessOriginator) -> Result<Self, Self::Error> {
+        value.validate("RemoteProcessOriginator")?;
+        Ok(match value {
             RemoteProcessOriginator::Host { scope } => Self::Host { scope },
             RemoteProcessOriginator::Session {
                 session_id,
                 agent_frame_id,
             } => Self::Session {
                 session_id,
-                agent_frame_id: agent_frame_id.map(restore_frame_node_id),
+                agent_frame_id: agent_frame_id
+                    .map(|frame_node_id| {
+                        restore_frame_node_id(frame_node_id, "RemoteProcessOriginator")
+                    })
+                    .transpose()?,
             },
-        }
+        })
     }
 }
 
@@ -92,16 +109,19 @@ impl From<lash_core::ProcessProvenance> for RemoteProcessProvenance {
     }
 }
 
-impl From<RemoteProcessProvenance> for lash_core::ProcessProvenance {
-    fn from(value: RemoteProcessProvenance) -> Self {
+impl TryFrom<RemoteProcessProvenance> for lash_core::ProcessProvenance {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessProvenance) -> Result<Self, Self::Error> {
+        value.validate("RemoteProcessProvenance")?;
         let RemoteProcessProvenance {
             originator,
             caused_by,
         } = value;
-        Self {
-            originator: originator.into(),
+        Ok(Self {
+            originator: originator.try_into()?,
             caused_by: caused_by.map(Into::into),
-        }
+        })
     }
 }
 

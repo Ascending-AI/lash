@@ -465,7 +465,17 @@ impl LashRuntime {
             protocol_session
                 .restore_session(
                     crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    crate::plugin::ProtocolSessionRestoreView::new(&durable_state),
+                    crate::plugin::ProtocolSessionRestoreView::new(&durable_state).map_err(
+                        |error| {
+                            (
+                                ResidentReloadStage::ProtocolSessionRestore,
+                                RuntimeError::new(
+                                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                                    error.to_string(),
+                                ),
+                            )
+                        },
+                    )?,
                 )
                 .await
                 .map_err(|err| {
@@ -486,7 +496,17 @@ impl LashRuntime {
             session
                 .plugins()
                 .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                    crate::SessionReadView::from_persisted_state(&durable_state),
+                    crate::SessionReadView::from_persisted_state(&durable_state).map_err(
+                        |error| {
+                            (
+                                ResidentReloadStage::SessionRestoredHook,
+                                RuntimeError::new(
+                                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                                    error.to_string(),
+                                ),
+                            )
+                        },
+                    )?,
                 ))
                 .await
                 .map_err(|err| {

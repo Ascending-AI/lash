@@ -171,10 +171,7 @@ impl<'de> serde::Deserialize<'de> for SessionGraph {
         D: serde::Deserializer<'de>,
     {
         let inner = SessionGraphData::deserialize(deserializer)?;
-        Ok(Self {
-            inner: Arc::new(inner),
-            cache: Arc::new(OnceLock::new()),
-        })
+        Self::from_nodes(inner.nodes, inner.leaf_node_id).map_err(serde::de::Error::custom)
     }
 }
 
@@ -1189,18 +1186,18 @@ impl SessionGraph {
 
     pub fn append_frame_open_with_id_at(
         &mut self,
-        frame_node_id: String,
+        frame_node_id: crate::FrameNodeId,
         frame_key: crate::FrameKey,
         reason: crate::AgentFrameReason,
         assignment: crate::AgentFrameAssignment,
         protocol_turn_options: crate::ProtocolTurnOptions,
         timestamp: String,
     ) -> bool {
-        if self.find_node(&frame_node_id).is_some() {
+        if self.find_node(frame_node_id.as_str()).is_some() {
             return false;
         }
         self.append_prebuilt_nodes(vec![SessionNodeRecord {
-            node_id: frame_node_id,
+            node_id: frame_node_id.into_inner(),
             parent_node_id: self.leaf_node_id.clone(),
             timestamp,
             payload: SessionNodePayload::FrameOpen {

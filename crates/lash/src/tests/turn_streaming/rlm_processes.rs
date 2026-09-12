@@ -61,10 +61,15 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                 if required_node_id == "inactive-ancestor"
         ));
         assert!(
-            runtime.read_view().messages().iter().all(|message| message
-                .parts
+            runtime
+                .read_view()
+                .expect("test runtime frame scope resolves")
+                .messages()
                 .iter()
-                .all(|part| part.content != ROLLED_BACK_MARKER)),
+                .all(|message| message
+                    .parts
+                    .iter()
+                    .all(|part| part.content != ROLLED_BACK_MARKER)),
             "the stale append must be absent from the reconciled RLM history projection"
         );
         session.runtime.publish_from(&runtime);
@@ -701,7 +706,10 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
         TurnEvent::FinalValue { .. } | TurnEvent::ToolValue { .. }
     )));
     assert_eq!(assistant_prose(&events), "done in prose");
-    let read_view = result.state.read_view();
+    let read_view = result
+        .state
+        .read_view()
+        .expect("test runtime frame scope resolves");
     let assistant_messages = read_view
         .messages()
         .iter()

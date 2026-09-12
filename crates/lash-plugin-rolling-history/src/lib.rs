@@ -939,7 +939,7 @@ mod tests {
     ) -> TurnTransformContext<'static> {
         TurnTransformContext {
             session_id: SessionId::from(session_id.to_string()),
-            state: state.read_view(),
+            state: state.read_view().expect("runtime frame scope resolves"),
             prompt_usage,
             max_context_tokens,
             sessions: manager.clone(),
@@ -989,7 +989,7 @@ mod tests {
         CompactionContext {
             session_id: SessionId::from(session_id.to_string()),
             instructions,
-            state: state.read_view(),
+            state: state.read_view().expect("runtime frame scope resolves"),
             sessions,
             session_lifecycle,
             session_graph,

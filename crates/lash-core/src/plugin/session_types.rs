@@ -165,15 +165,16 @@ impl SessionSnapshot {
 }
 
 impl SessionSnapshot {
-    pub(crate) fn read_model(&self) -> crate::session_graph::SessionReadModel {
+    pub(crate) fn read_model(
+        &self,
+    ) -> Result<crate::session_graph::SessionReadModel, crate::SessionGraphScopeError> {
         self.session_graph
             .read_model(self.current_frame_node_id.as_ref())
-            .expect("snapshot current frame must resolve in its validated session graph")
     }
 
     /// Exposes read view to store and durable-substrate implementors while snapshotting or
     /// restoring durable session state.
-    pub fn read_view(&self) -> crate::SessionReadView {
+    pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
         crate::SessionReadView::from_snapshot(self)
     }
 

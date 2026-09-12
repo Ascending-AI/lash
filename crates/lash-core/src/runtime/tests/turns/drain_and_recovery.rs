@@ -1033,7 +1033,11 @@ pub(super) async fn external_invoke_can_create_session_from_current_snapshot() {
                                             Ok(snapshot) => Ok(crate::plugin::ErasedPluginOperationOutcome {
                                                 output: json!({
                                                 "session_id": handle.session_id,
-                                                "message_count": snapshot.read_model().messages.len(),
+                                                "message_count": snapshot
+                                                    .read_model()
+                                                    .expect("test snapshot frame scope resolves")
+                                                    .messages
+                                                    .len(),
                                                 }),
                                                 events: Vec::new(),
                                                 directives: Vec::new(),

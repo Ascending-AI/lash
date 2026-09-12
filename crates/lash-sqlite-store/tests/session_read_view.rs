@@ -82,7 +82,8 @@ async fn committed_catalog(
         .await
         .expect("reload committed no-write proof session")
         .expect("committed no-write proof session exists")
-        .read_view();
+        .read_view()
+        .expect("runtime frame scope resolves");
     (factory, writer, expected)
 }
 

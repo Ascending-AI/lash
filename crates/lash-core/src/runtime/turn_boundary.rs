@@ -173,7 +173,7 @@ impl TurnBoundary {
         turn_index: usize,
         protocol_turn_options: crate::ProtocolTurnOptions,
         messages: MessageSequence,
-    ) -> SessionReadView {
+    ) -> Result<SessionReadView, crate::SessionGraphScopeError> {
         self.draft_ref()
             .read_view(policy, turn_index, protocol_turn_options, messages)
     }

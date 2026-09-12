@@ -315,7 +315,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
     let hook_error = hook_session
         .before_turn(crate::plugin::TurnHookContext {
             session_id: id.into(),
-            state: runtime.read_view(),
+            state: runtime.read_view().expect("runtime frame scope resolves"),
             sessions: runtime.session_state_service().unwrap(),
             turn_context: crate::TurnContext::default(),
         })

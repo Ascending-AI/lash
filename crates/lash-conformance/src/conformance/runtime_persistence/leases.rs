@@ -27,7 +27,7 @@ pub(super) async fn commit_increments_head_and_round_trips_agent_frames(
     let second_frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, second_frame_key.as_str());
     assert!(state.session_graph.append_frame_open_with_id_at(
-        second_frame_node_id.to_string(),
+        second_frame_node_id.clone(),
         second_frame_key,
         custom_reason.clone(),
         assignment,

@@ -196,12 +196,15 @@ impl RuntimeTurnDriver<'_> {
             .collect_prompt_contributions(PromptHookContext {
                 session_id: self.session_id.clone(),
                 sessions: self.session_services.state_service(),
-                state: self.turn_pipeline.read_view(
-                    session_policy.clone(),
-                    turn_index,
-                    self.protocol_turn_options.clone(),
-                    messages,
-                ),
+                state: self
+                    .turn_pipeline
+                    .read_view(
+                        session_policy.clone(),
+                        turn_index,
+                        self.protocol_turn_options.clone(),
+                        messages,
+                    )
+                    .map_err(|error| PluginError::Session(error.to_string()))?,
                 protocol_turn_options: self.protocol_turn_options.clone(),
                 turn_context: self.turn_context.clone(),
             })
@@ -259,10 +262,12 @@ impl RuntimeTurnDriver<'_> {
                     sessions: self.session_services.state_service(),
                     session_graph: self.session_services.graph_service(),
                     processes: self.session_services.process_service(),
-                    state: self.checkpoint_state_view(
-                        machine.message_sequence(),
-                        machine.protocol_iteration(),
-                    ),
+                    state: self
+                        .checkpoint_state_view(
+                            machine.message_sequence(),
+                            machine.protocol_iteration(),
+                        )
+                        .map_err(|error| PluginError::Session(error.to_string()))?,
                     latest_prompt_usage,
                 },
                 request,
@@ -274,7 +279,7 @@ impl RuntimeTurnDriver<'_> {
         &self,
         messages: crate::MessageSequence,
         _protocol_iteration: usize,
-    ) -> crate::SessionReadView {
+    ) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
         self.turn_pipeline.read_view(
             self.policy.policy.clone(),
             self.turn_index,

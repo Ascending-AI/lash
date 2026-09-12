@@ -34,6 +34,12 @@ absence representation. Runtime paths that require an initialized Agent Frame
 return an error when it is absent instead of fabricating an empty identity.
 There is no legacy empty-ID decoder, adapter, or migration.
 
+Graph construction and graph deserialization also reject empty node identities,
+so a malformed `FrameOpen` cannot bypass `FrameNodeId` and fail later during
+projection. Public snapshot and runtime read-view constructors preserve the
+typed scope error. Remote DTO-to-core conversions are fallible and validate
+their frame carriers before constructing core identities.
+
 The serialized representation remains a transparent string, so valid stored
 identities retain their bytes and format generations do not advance. Previously
 accepted empty identities fail at decode rather than being translated.

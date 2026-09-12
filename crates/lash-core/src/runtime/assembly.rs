@@ -722,7 +722,22 @@ impl TurnAssembler {
         {
             output
         } else {
-            let recovered = recovered_assistant_output_from_state(&state);
+            let recovered = match recovered_assistant_output_from_state(&state) {
+                Ok(recovered) => recovered,
+                Err(error) => {
+                    issues.push(TurnIssue {
+                        severity: crate::runtime::TurnIssueSeverity::Blocking,
+                        kind: "runtime".to_string(),
+                        code: Some("session_graph_scope".to_string()),
+                        terminal_reason: None,
+                        message: error.to_string(),
+                        raw: None,
+                        retryable: Some(false),
+                        provider_failure_kind: None,
+                    });
+                    String::new()
+                }
+            };
             if !recovered.is_empty() {
                 issues.push(TurnIssue {
                     severity: crate::runtime::TurnIssueSeverity::Advisory,
@@ -875,8 +890,10 @@ fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
     }
 }
 
-pub(super) fn recovered_assistant_output_from_state(state: &crate::SessionSnapshot) -> String {
-    let read_model = state.read_model();
+pub(super) fn recovered_assistant_output_from_state(
+    state: &crate::SessionSnapshot,
+) -> Result<String, crate::SessionGraphScopeError> {
+    let read_model = state.read_model()?;
     let messages = read_model.messages.as_slice();
     let latest_user_message_idx = messages
         .iter()
@@ -884,7 +901,7 @@ pub(super) fn recovered_assistant_output_from_state(state: &crate::SessionSnapsh
     let search_messages = latest_user_message_idx
         .map(|idx| &messages[idx.saturating_add(1)..])
         .unwrap_or(messages);
-    search_messages
+    Ok(search_messages
         .iter()
         .rev()
         .find(|message| message.role == MessageRole::Assistant)
@@ -901,7 +918,7 @@ pub(super) fn recovered_assistant_output_from_state(state: &crate::SessionSnapsh
                 .map(|part| part.content.as_str())
                 .collect::<String>()
         })
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 pub(super) fn sanitize_assistant_output(text: String) -> String {

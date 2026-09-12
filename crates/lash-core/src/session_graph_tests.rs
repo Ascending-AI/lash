@@ -28,6 +28,21 @@ fn construction_enforces_structural_graph_integrity() {
     };
 
     assert!(matches!(
+        SessionGraph::from_nodes(vec![node("", None)], Some(String::new())),
+        Err(crate::StoreError::InvalidGraphNodeId { node_id }) if node_id.is_empty()
+    ));
+    let invalid_encoded = serde_json::to_string(&SessionGraph::from_unchecked_nodes_for_testing(
+        vec![node("", None)],
+        Some(String::new()),
+    ))
+    .unwrap();
+    assert!(
+        serde_json::from_str::<SessionGraph>(&invalid_encoded)
+            .expect_err("serialized graphs must reject empty node identities")
+            .to_string()
+            .contains("node id must not be empty")
+    );
+    assert!(matches!(
         SessionGraph::from_nodes(
             vec![node("duplicate", None), node("duplicate", None)],
             Some("duplicate".to_string()),
@@ -660,7 +675,7 @@ fn nearest_frame_is_derived_from_ancestry() {
         crate::FrameKey::from_caller_material("first-frame").expect("non-empty frame material");
     let first = frame_node_id(&SessionId::from("session"), first_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
-        first.to_string(),
+        first.clone(),
         first_key,
         crate::AgentFrameReason::initial(),
         assignment.clone(),
@@ -672,7 +687,7 @@ fn nearest_frame_is_derived_from_ancestry() {
         crate::FrameKey::from_caller_material("second-frame").expect("non-empty frame material");
     let second = frame_node_id(&SessionId::from("session"), second_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
-        second.to_string(),
+        second.clone(),
         second_key,
         crate::AgentFrameReason::continue_as(),
         assignment,
@@ -881,7 +896,7 @@ fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
         crate::FrameKey::from_caller_material("frame").expect("non-empty frame material");
     let frame = frame_node_id(&SessionId::from("session"), frame_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
-        frame.to_string(),
+        frame.clone(),
         frame_key,
         crate::AgentFrameReason::initial(),
         assignment,
@@ -917,7 +932,7 @@ fn root_frame_and_unscoped_reads_are_equivalent() {
         crate::FrameKey::from_caller_material("root-frame").expect("non-empty frame material");
     let frame = frame_node_id(&SessionId::from("session"), frame_key.as_str());
     assert!(graph.append_frame_open_with_id_at(
-        frame.to_string(),
+        frame.clone(),
         frame_key,
         crate::AgentFrameReason::initial(),
         assignment,
@@ -958,4 +973,30 @@ fn missing_frame_read_and_rewrite_return_the_same_error_without_mutation() {
 
     assert_eq!(read_error, rewrite_error);
     assert_eq!(serde_json::to_value(&graph).unwrap(), before);
+}
+
+#[test]
+fn public_read_views_return_missing_frame_errors() {
+    let missing = crate::FrameNodeId::new("frame-node/v3/missing").unwrap();
+    let mut snapshot =
+        crate::SessionSnapshot::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    snapshot.current_frame_node_id = Some(missing.clone());
+    let snapshot_error = snapshot
+        .read_view()
+        .expect_err("an invalid public snapshot must return its missing-frame error");
+
+    let mut runtime =
+        crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    runtime.current_frame_node_id = Some(missing.clone());
+    let runtime_error = runtime
+        .read_view()
+        .expect_err("an invalid public runtime state must return its missing-frame error");
+
+    assert_eq!(
+        snapshot_error,
+        SessionGraphScopeError::FrameNotFound {
+            frame_node_id: missing
+        }
+    );
+    assert_eq!(runtime_error, snapshot_error);
 }

@@ -622,7 +622,8 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     parent
         .before_turn(crate::plugin::TurnHookContext {
             session_id: "private-parent".into(),
-            state: crate::plugin::SessionReadView::from_persisted_state(&runtime_state),
+            state: crate::plugin::SessionReadView::from_persisted_state(&runtime_state)
+                .expect("test runtime frame scope resolves"),
             sessions: Arc::new(Sessions),
             turn_context: Default::default(),
         })

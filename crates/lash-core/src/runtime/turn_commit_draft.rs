@@ -294,7 +294,7 @@ impl TurnCommitDraft {
         turn_index: usize,
         protocol_turn_options: crate::ProtocolTurnOptions,
         messages: MessageSequence,
-    ) -> SessionReadView {
+    ) -> Result<SessionReadView, crate::SessionGraphScopeError> {
         SessionReadView::derived_from_persisted_state(
             &self.state,
             policy,
@@ -679,7 +679,9 @@ mod tests {
                 .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
             Some(opened.frame_node_id.as_str())
         );
-        let read = state.read_model();
+        let read = state
+            .read_model()
+            .expect("test runtime frame scope resolves");
         assert_eq!(
             read.messages
                 .iter()

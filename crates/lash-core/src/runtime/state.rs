@@ -846,10 +846,11 @@ impl RuntimeSessionState {
         super::usage::SessionUsageReport::from_entries(&self.token_ledger)
     }
 
-    pub(crate) fn read_model(&self) -> crate::session_graph::SessionReadModel {
+    pub(crate) fn read_model(
+        &self,
+    ) -> Result<crate::session_graph::SessionReadModel, crate::SessionGraphScopeError> {
         self.session_graph
             .read_model(self.current_frame_node_id.as_ref())
-            .expect("runtime current frame must resolve in its validated session graph")
     }
 
     /// Replaces the current frame's readable message tail for protocol implementors restoring
@@ -894,7 +895,7 @@ impl RuntimeSessionState {
 
     /// Exposes read view to protocol and process-engine implementors while materializing or
     /// restoring protocol session state.
-    pub fn read_view(&self) -> crate::SessionReadView {
+    pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
         crate::SessionReadView::from_persisted_state(self)
     }
 
@@ -1192,7 +1193,7 @@ impl RuntimeSessionState {
         let frame_node_id =
             crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str());
         self.session_graph.append_frame_open_with_id_at(
-            frame_node_id.to_string(),
+            frame_node_id.clone(),
             frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
@@ -1218,7 +1219,7 @@ impl RuntimeSessionState {
         let frame_node_id =
             crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str());
         self.session_graph.append_frame_open_with_id_at(
-            frame_node_id.to_string(),
+            frame_node_id.clone(),
             frame_key,
             crate::AgentFrameReason::initial(),
             assignment,
@@ -1608,7 +1609,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     let frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, request.frame_key.as_str());
     let opened = state.session_graph.append_frame_open_with_id_at(
-        frame_node_id.to_string(),
+        frame_node_id.clone(),
         request.frame_key.clone(),
         request.reason,
         assignment,

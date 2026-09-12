@@ -314,9 +314,16 @@ async fn open_with_plugins(
 async fn projected_prompt(runtime: &LashRuntime, plugins: &PluginSession) -> String {
     let contributions = plugins
         .collect_prompt_contributions(PromptHookContext {
-            session_id: SessionId::from(runtime.read_view().session_id()),
+            session_id: SessionId::from(
+                runtime
+                    .read_view()
+                    .expect("test runtime frame scope resolves")
+                    .session_id(),
+            ),
             sessions: Arc::new(NoSessions),
-            state: runtime.read_view(),
+            state: runtime
+                .read_view()
+                .expect("test runtime frame scope resolves"),
             protocol_turn_options: ProtocolTurnOptions::default(),
             turn_context: Default::default(),
         })
@@ -516,7 +523,13 @@ fn continue_as_response() -> String {
 fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
         Arc::new(NativeRuntimeEffectController::default()),
-        ExecutionScope::turn(runtime.read_view().session_id(), turn_id),
+        ExecutionScope::turn(
+            runtime
+                .read_view()
+                .expect("test runtime frame scope resolves")
+                .session_id(),
+            turn_id,
+        ),
     )
     .expect("scope")
 }
