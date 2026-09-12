@@ -231,7 +231,7 @@ class FeatureCoverageContractTests(unittest.TestCase):
         command = [
             "sh",
             "-c",
-            'echo timeout-marker; sleep 60 & echo "$!" > "$1"; wait',
+            'echo timeout-marker; sleep 60 >/dev/null 2>&1 & echo "$!" > "$1"; wait',
             "sh",
             str(grandchild_pid),
         ]
