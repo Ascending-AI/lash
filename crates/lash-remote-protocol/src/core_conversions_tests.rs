@@ -2496,6 +2496,5 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
-
 #[path = "core_conversions_tests/cancellation.rs"]
 mod cancellation;

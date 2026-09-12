@@ -23,6 +23,27 @@ fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolErro
     Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
 }
 
+/// Refusal witness (FIG-1123): the generation-60 decoder rejects its immediate
+/// predecessor before attempting to decode the envelope body.
+#[test]
+fn immediate_predecessor_remote_protocol_generation_59_is_refused() {
+    const PREDECESSOR: u32 = 59;
+    assert_eq!(
+        PREDECESSOR + 1,
+        REMOTE_PROTOCOL_VERSION,
+        "remote-protocol generation adjacency pin"
+    );
+    let error = decode_empty_envelope(PREDECESSOR)
+        .expect_err("generation-59 remote envelope must be refused");
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: PREDECESSOR,
+            expected: REMOTE_PROTOCOL_VERSION,
+        }
+    ));
+}
+
 #[derive(Clone)]
 struct VecRegistry(Vec<RemoteToolGrant>);
 
