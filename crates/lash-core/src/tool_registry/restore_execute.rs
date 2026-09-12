@@ -89,10 +89,10 @@ impl ToolRegistry {
 
     fn resolve_granted_execution_source(
         &self,
-        grant: &ToolExecutionGrant,
+        tool_id: &ToolId,
+        source_id: Option<&str>,
     ) -> Result<Arc<dyn ToolSourceExecutor>, ToolOutcome> {
-        let tool_id = &grant.manifest().id;
-        let Some(source_id) = grant.source_id.as_deref() else {
+        let Some(source_id) = source_id else {
             return Err(ToolOutcome::err_fmt(format_args!(
                 "Granted tool id `{tool_id}` is missing an explicit tool source"
             )));
@@ -138,6 +138,32 @@ impl ToolRegistry {
             )));
         }
         Ok(source)
+    }
+
+    fn resolve_execution_source_for_route(
+        &self,
+        tool_id: &ToolId,
+        route: &crate::tool_provider::ToolExecutionRoute,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ToolOutcome> {
+        match route {
+            crate::tool_provider::ToolExecutionRoute::Catalog => self
+                .resolve_execution_source(tool_id)
+                .map(|(source, _)| source),
+            crate::tool_provider::ToolExecutionRoute::Granted { source_id } => {
+                self.resolve_granted_execution_source(tool_id, source_id.as_deref())
+            }
+        }
+    }
+
+    pub(crate) fn attempt_may_defer_for_grant(
+        &self,
+        tool_id: &ToolId,
+        source_id: Option<&str>,
+    ) -> Option<bool> {
+        let source = self
+            .resolve_granted_execution_source(tool_id, source_id)
+            .ok()?;
+        Some(source.attempt_may_defer(tool_id))
     }
 
     pub(crate) async fn execute_orchestrating_by_id(
@@ -211,23 +237,8 @@ impl ToolProvider for ToolRegistry {
         &self,
         call: ToolPrepareCall<'_>,
     ) -> Result<PreparedToolCall, ToolOutcome> {
-        let (source, _) = self.resolve_execution_source(&call.tool_id)?;
-        source.prepare_tool_call(call).await
-    }
-
-    async fn prepare_granted_tool_call(
-        &self,
-        grant: &ToolExecutionGrant,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        if call.tool_id != grant.manifest().id {
-            return Err(ToolOutcome::err_fmt(format_args!(
-                "Granted prepare id `{}` does not match call id `{}`",
-                grant.manifest().id,
-                call.tool_id
-            )));
-        }
-        let source = self.resolve_granted_execution_source(grant)?;
+        let source =
+            self.resolve_execution_source_for_route(&call.tool_id, call.context.execution_route())?;
         source.prepare_tool_call(call).await
     }
 
@@ -250,10 +261,11 @@ impl ToolProvider for ToolRegistry {
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
     ) -> crate::ToolAttemptOutcome {
-        let (source, _) = match self.resolve_execution_source(tool_id) {
-            Ok(resolved) => resolved,
-            Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
-        };
+        let source =
+            match self.resolve_execution_source_for_route(tool_id, context.execution_route()) {
+                Ok(resolved) => resolved,
+                Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
+            };
         source.execute_attempt_by_id(tool_id, args, context).await
     }
 
@@ -263,11 +275,11 @@ impl ToolProvider for ToolRegistry {
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
     ) -> ToolOutcome {
-        let (source, manifest) = match self.resolve_execution_source(tool_id) {
-            Ok(resolved) => resolved,
-            Err(result) => return result,
-        };
-        let _ = manifest;
+        let source =
+            match self.resolve_execution_source_for_route(tool_id, context.execution_route()) {
+                Ok(resolved) => resolved,
+                Err(result) => return result,
+            };
         source.execute_by_id(tool_id, args, context).await
     }
 
@@ -287,35 +299,5 @@ impl ToolProvider for ToolRegistry {
             ));
         }
         source.execute_internal_by_id(tool_id, args, context).await
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let source = match self.resolve_granted_execution_source(grant) {
-            Ok(source) => source,
-            Err(result) => return result,
-        };
-        source
-            .execute_by_id(&grant.manifest().id, args, context)
-            .await
-    }
-
-    async fn execute_granted_attempt(
-        &self,
-        grant: &ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptOutcome {
-        let source = match self.resolve_granted_execution_source(grant) {
-            Ok(source) => source,
-            Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
-        };
-        source
-            .execute_attempt_by_id(&grant.manifest().id, args, context)
-            .await
     }
 }

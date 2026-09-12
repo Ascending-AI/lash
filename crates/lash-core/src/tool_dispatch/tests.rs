@@ -1091,27 +1091,6 @@ impl ToolProvider for ExactDispatchTools {
         }
         ToolOutcome::ok(json!("host"))
     }
-
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &crate::ToolExecutionGrant,
-        call: crate::ToolPrepareCall<'_>,
-    ) -> Result<crate::PreparedToolCall, ToolOutcome> {
-        Ok(crate::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &crate::ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        self.execute_by_id(&grant.manifest().id, args, context)
-            .await
-    }
 }
 
 #[async_trait::async_trait]

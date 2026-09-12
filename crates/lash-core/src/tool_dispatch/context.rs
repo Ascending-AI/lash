@@ -183,6 +183,24 @@ impl ToolDispatchContext<'_> {
             .is_some_and(|registry| registry.is_orchestrating_tool(tool_id))
     }
 
+    pub(crate) fn attempt_may_defer(
+        &self,
+        tool_id: &crate::ToolId,
+        grant: Option<&crate::ToolExecutionGrant>,
+    ) -> bool {
+        // A registry's pinned catalog deliberately omits out-of-catalog grant
+        // routes. Ask its live grant source first, then retain the direct
+        // provider fallback used by non-registry execution contexts.
+        if let Some(grant) = grant
+            && let Some(result) = self.tool_registry.as_deref().and_then(|registry| {
+                registry.attempt_may_defer_for_grant(tool_id, grant.source_id.as_deref())
+            })
+        {
+            return result;
+        }
+        self.tools.attempt_may_defer(tool_id)
+    }
+
     /// Attribution available without a causal parent comes only from the
     /// admitted execution scope. `CurrentSession` also hosts process and
     /// runtime-operation work, so its descriptive session id is not provenance

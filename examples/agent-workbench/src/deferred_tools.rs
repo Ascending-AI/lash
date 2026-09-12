@@ -15,8 +15,8 @@ use lash::sync::MutexExt;
 use lash::tools::{
     CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
     SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall,
-    ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolExecutionGrant, ToolId,
-    ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolPrepareCall, ToolProvider,
+    ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolId, ToolManifest,
+    ToolManifestBindingExt, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -380,17 +380,6 @@ impl ToolProvider for DeferredExecutionProvider {
             .map(|definition| Arc::new(definition.contract()))
     }
 
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &ToolExecutionGrant,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<lash::tools::PreparedToolCall, ToolOutcome> {
-        Ok(lash::tools::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let Some(definition) = self
             .definitions
@@ -401,21 +390,6 @@ impl ToolProvider for DeferredExecutionProvider {
         };
         self.execute_definition(definition, call.args, call.context)
             .await
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &ToolExecutionGrant,
-        args: &Value,
-        context: &lash::tools::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let Some(definition) = self.definition_by_id(&grant.manifest().id) else {
-            return ToolOutcome::err_fmt(format_args!(
-                "unknown deferred tool id `{}`",
-                grant.manifest().id
-            ));
-        };
-        self.execute_definition(definition, args, context).await
     }
 }
 
