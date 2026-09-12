@@ -650,46 +650,48 @@ mod tests {
 
     #[test]
     fn graph_invariant_rejects_missing_parent_and_cycle() {
-        let missing_parent: lash_core::SessionGraph = serde_json::from_value(json!({
-            "nodes": [
-                {
-                    "node_id": "child",
-                    "parent_node_id": "missing",
-                    "timestamp": "2026-01-01T00:00:00Z",
-                    "kind": "plugin",
-                    "plugin_type": "sim",
-                    "body": {}
-                }
-            ],
-            "leaf_node_id": "child"
-        }))
-        .expect("graph");
+        let missing_parent_nodes = serde_json::from_value(json!([
+            {
+                "node_id": "child",
+                "parent_node_id": "missing",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "kind": "plugin",
+                "plugin_type": "sim",
+                "body": {}
+            }
+        ]))
+        .expect("test nodes");
+        let missing_parent = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
+            missing_parent_nodes,
+            Some("child".to_string()),
+        );
         let facts = runtime_graph_invariant_facts(&missing_parent);
         assert!(!facts.passed);
         assert_eq!(facts.missing_parent_links[0].parent_node_id, "missing");
 
-        let cycle: lash_core::SessionGraph = serde_json::from_value(json!({
-            "nodes": [
-                {
-                    "node_id": "a",
-                    "parent_node_id": "b",
-                    "timestamp": "2026-01-01T00:00:00Z",
-                    "kind": "plugin",
-                    "plugin_type": "sim",
-                    "body": {}
-                },
-                {
-                    "node_id": "b",
-                    "parent_node_id": "a",
-                    "timestamp": "2026-01-01T00:00:01Z",
-                    "kind": "plugin",
-                    "plugin_type": "sim",
-                    "body": {}
-                }
-            ],
-            "leaf_node_id": "b"
-        }))
-        .expect("graph");
+        let cycle_nodes = serde_json::from_value(json!([
+            {
+                "node_id": "a",
+                "parent_node_id": "b",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "kind": "plugin",
+                "plugin_type": "sim",
+                "body": {}
+            },
+            {
+                "node_id": "b",
+                "parent_node_id": "a",
+                "timestamp": "2026-01-01T00:00:01Z",
+                "kind": "plugin",
+                "plugin_type": "sim",
+                "body": {}
+            }
+        ]))
+        .expect("test nodes");
+        let cycle = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
+            cycle_nodes,
+            Some("b".to_string()),
+        );
         let facts = runtime_graph_invariant_facts(&cycle);
         assert!(!facts.passed);
         assert!(!facts.cycle_node_ids.is_empty());

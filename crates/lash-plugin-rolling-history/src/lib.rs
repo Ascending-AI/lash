@@ -209,9 +209,11 @@ fn append_identity_field(identity: &mut Vec<u8>, value: &str) {
     identity.extend_from_slice(value.as_bytes());
 }
 
-fn latest_physical_turn_id(state: &SessionSnapshot) -> Option<TurnId> {
-    let read_view = state.read_view();
-    read_view
+fn latest_physical_turn_id(state: &SessionSnapshot) -> Result<Option<TurnId>, ContextError> {
+    let read_view = state
+        .read_view()
+        .map_err(|error| ContextError::Session(error.to_string()))?;
+    Ok(read_view
         .messages()
         .iter()
         .rev()
@@ -219,7 +221,7 @@ fn latest_physical_turn_id(state: &SessionSnapshot) -> Option<TurnId> {
             Some(MessageOrigin::TurnInput { turn_id, .. })
             | Some(MessageOrigin::TurnOutput { turn_id, .. }) => Some(turn_id.clone()),
             _ => None,
-        })
+        }))
 }
 
 #[derive(serde::Serialize)]
@@ -383,7 +385,7 @@ fn compaction_child_ids(
     prompt_text: &str,
     execution_scope: &lash_core::ExecutionScope,
 ) -> Result<(SessionId, TurnId), ContextError> {
-    let physical_parent_turn_id = latest_physical_turn_id(state)
+    let physical_parent_turn_id = latest_physical_turn_id(state)?
         .or_else(|| execution_scope.turn_id().cloned())
         .unwrap_or_else(|| TurnId::from(execution_scope.id()));
     let journal_scope = execution_scope
@@ -460,8 +462,7 @@ async fn summarize_compaction_prefix(
         return Ok(None);
     }
 
-    let (snapshot, prompt_text) =
-        prepare_compaction_request(state, prefix_messages, instructions)?;
+    let (snapshot, prompt_text) = prepare_compaction_request(state, prefix_messages, instructions)?;
 
     let (compaction_session_id, turn_id) = compaction_child_ids(
         session_id,
