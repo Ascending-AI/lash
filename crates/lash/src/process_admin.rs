@@ -297,7 +297,11 @@ impl Processes {
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
-                lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work),
+                lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
+                    .with_process_env_store(Arc::clone(
+                        &self.core.env.core.durability.process_env_store,
+                    ))
+                    .with_process_engines(self.core.host_process_engines.clone()),
             )
             .await
             .map_err(|err| EmbedError::Plugin(lash_core::PluginError::Session(err.to_string())))?;
@@ -320,19 +324,12 @@ impl Processes {
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessRecord> {
-        let env_ref = match request.env_spec.as_ref() {
-            Some(env_spec) => Some(
-                lash_core::runtime::publish_process_execution_env(
-                    self.core.env.core.durability.process_env_store.as_ref(),
-                    &lash_core::ArtifactOwner::process_start(&request.id),
-                    env_spec,
-                )
-                .await?,
-            ),
-            None => None,
-        };
+        // Publication belongs inside the replayable process effect. Publishing here
+        // would revisit the permanently retired staging owner before the executor can
+        // discover the already-transferred process edge on an exact replay.
+        let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
-        let registration = request.into_registration(env_ref);
+        let registration = request.into_registration(None);
         // A host-named process id may be one the registry pruned earlier: its
         // scope fence has been refusing every redrive since. The registry
         // lifts that fence inside the registration write itself (ADR 0049),
@@ -340,7 +337,7 @@ impl Processes {
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,
-            env_spec: None,
+            env_spec,
             execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
         };
         let outcome = self
@@ -615,12 +612,6 @@ impl Processes {
         let prunable = registry
             .prunable_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await?;
-        let mut prunable_records = Vec::with_capacity(prunable.len());
-        for process_id in &prunable {
-            if let Some(record) = registry.get_process(process_id).await? {
-                prunable_records.push(record);
-            }
-        }
         for process_id in prunable {
             let staging_owner = lash_core::ArtifactOwner::process_start(&process_id);
             self.core
@@ -631,9 +622,7 @@ impl Processes {
                 .retire_process_execution_env_owner(&staging_owner)
                 .await?;
             self.core
-                .env
-                .core
-                .process_engines
+                .host_process_engines
                 .retire_artifact_owner(&staging_owner)
                 .await?;
             // The process journal and the worker's trigger-delivery reconcile
@@ -687,9 +676,27 @@ impl Processes {
                 return Err(err.into());
             }
         };
-        for record in &prunable_records {
-            let owner = lash_core::ArtifactOwner::process(record.id.clone());
-            if let Some(env_ref) = record.env_ref.as_ref() {
+        // The registry transaction stores the exact release inputs beside the
+        // tombstone before deleting each process row. Drain every pending job,
+        // including jobs left by an earlier process or host incarnation, and
+        // acknowledge only after all configured artifact stores have severed
+        // the process owner. Thus a failure at either store is resumable by the
+        // next prune call even when this call has no newly eligible rows.
+        for cleanup in registry.pending_process_artifact_cleanup().await? {
+            let staging_owner = lash_core::ArtifactOwner::process_start(&cleanup.process_id);
+            self.core
+                .env
+                .core
+                .durability
+                .process_env_store
+                .retire_process_execution_env_owner(&staging_owner)
+                .await?;
+            self.core
+                .host_process_engines
+                .retire_artifact_owner(&staging_owner)
+                .await?;
+            let owner = lash_core::ArtifactOwner::process(cleanup.process_id.clone());
+            if let Some(env_ref) = cleanup.env_ref.as_ref() {
                 self.core
                     .env
                     .core
@@ -699,10 +706,11 @@ impl Processes {
                     .await?;
             }
             self.core
-                .env
-                .core
-                .process_engines
-                .release_process_artifacts(record)
+                .host_process_engines
+                .release_pruned_process_artifacts(&cleanup)
+                .await?;
+            registry
+                .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
                 .await?;
         }
         if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {

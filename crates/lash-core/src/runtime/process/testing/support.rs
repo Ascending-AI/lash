@@ -29,12 +29,14 @@ impl Default for TestLocalProcessRegistry {
             process_lease_renew_error: Arc::new(Mutex::new(None)),
             process_terminal_write_error: Arc::new(Mutex::new(None)),
             process_terminal_write_outcome: Arc::new(Mutex::new(None)),
+            external_ref_write_error: Arc::new(Mutex::new(None)),
             process_lease_release_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
             tombstone_compaction_horizon: Arc::new(Mutex::new(0)),
             observers: Arc::new(Mutex::new(HashMap::<_, HashSet<_>>::new())),
             wake_targets: Arc::new(Mutex::new(HashMap::new())),
             tombstones: Arc::new(Mutex::new(HashMap::new())),
+            artifact_cleanup: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
             process_lease_point_reads: Arc::new(Mutex::new(0)),
             process_lease_batch_reads: Arc::new(Mutex::new(0)),
@@ -58,6 +60,11 @@ impl Default for TestLocalProcessRegistry {
 }
 
 impl TestLocalProcessRegistry {
+    #[doc(hidden)]
+    pub async fn fail_next_external_ref_write_for_testing(&self, error: PluginError) {
+        *self.external_ref_write_error.lock().await = Some(error);
+    }
+
     /// Inject a structurally valid wake row for delivery-driver boundary tests.
     #[doc(hidden)]
     pub async fn insert_wake_delivery_for_testing(

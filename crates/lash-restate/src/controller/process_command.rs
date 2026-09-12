@@ -125,17 +125,12 @@ where
             .await
             {
                 Ok(record) => record,
-                Err(error) => {
-                    if let Some(store) = process_env_store.as_ref() {
-                        store
-                            .retire_process_execution_env_owner(&staging_owner)
-                            .await?;
-                    }
-                    if let Some((engine, _)) = engine_artifacts.as_ref() {
-                        engine.retire_artifact_owner(&staging_owner).await?;
-                    }
-                    return Err(error.into());
-                }
+                // Registration, workflow submission, and external-ref persistence are
+                // separate durable authorities. An error after any one of them is an
+                // unknown/retriable start, not proof that the process was abandoned.
+                // Keep the staging edges so an exact redrive can finish the transfer;
+                // authoritative process retirement owns their eventual permanent fence.
+                Err(error) => return Err(error.into()),
             };
             if let (Some(store), Some(env_ref)) = (process_env_store.as_ref(), env_ref.as_ref()) {
                 store

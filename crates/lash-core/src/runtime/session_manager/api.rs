@@ -234,30 +234,16 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let env_ref = match request.env_spec.as_ref() {
-            Some(env_spec) => Some(
-                crate::publish_process_execution_env(
-                    self.services
-                        .current
-                        .host
-                        .core
-                        .durability
-                        .process_env_store
-                        .as_ref(),
-                    &crate::ArtifactOwner::process_start(&request.id),
-                    env_spec,
-                )
-                .await?,
-            ),
-            None => None,
-        };
+        let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
-        let registration = request.into_registration(env_ref);
+        let registration = request.into_registration(None);
         let record = self
             .start(
                 session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_initial_observers(observers),
+                crate::ProcessStartOptions::new()
+                    .with_initial_observers(observers)
+                    .with_env_spec(env_spec),
                 scope,
             )
             .await?;

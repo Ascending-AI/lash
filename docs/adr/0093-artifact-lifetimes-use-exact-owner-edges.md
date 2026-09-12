@@ -35,8 +35,9 @@ Process start uses a deterministic execution owner derived from the process id.
 Environment and engine artifacts are protected under that staging owner before
 registration. After the process row commits, store operations atomically add
 the process owner and sever the staging owner; replaying that transfer is
-idempotent, including a replay after staging retirement. Registration failure
-retires the staging owner. Retirement records a permanent execution-owner fence
+idempotent, including a replay after staging retirement. An authoritative
+abandonment decision retires the staging owner; a scheduling error after
+registration remains resumable and preserves its inputs. Retirement records a permanent execution-owner fence
 before severing remaining edges, so a delayed writer cannot republish after
 abandonment.
 
@@ -47,8 +48,12 @@ bytes. Existing process-environment family-version refusal remains
 reject-and-recreate.
 
 SQLite durable-core schema 57 adds owner edges and execution-owner retirement
-fences beside `artifact_refs`. PostgreSQL component 86 brings module and
-process-environment rows under the same owner-edge and retirement-fence model.
+fences beside `artifact_refs`; process schema 33 retains exact prune release
+inputs, and effect schema 18 records artifact-cleanup completion on the existing
+scope-retirement evidence. PostgreSQL component 87 brings module and
+process-environment rows under the same owner-edge model, serializes every
+artifact mutation at a stable advisory-lock identity, and retains both prune
+release inputs and scope-retirement cleanup completion.
 These are reject-and-recreate boundaries under ADR 0081; no migration or dual
 path is provided.
 
@@ -58,10 +63,12 @@ path is provided.
   counter or last-operation marker on the content.
 - Reclamation is an owner-severing transaction, not tracing garbage collection
   and not a lease-, time-, or receipt-based inference.
-- Process pruning releases the process owner's environment and engine artifact
-  edges only after the authoritative process rows are pruned.
+- Process pruning writes exact environment and engine release inputs before the
+  authoritative rows are pruned, then acknowledges them only after every store
+  has severed the process owner; tombstone compaction cannot outrun that evidence.
 - Scope retirement remains the abandonment authority: artifact cleanup consumes
-  its durable verdict and does not invent another lifecycle journal.
+  its durable verdict until every configured store acknowledges the permanent
+  fence and owner severance; it does not invent another lifecycle journal.
 - A backend must make publication, transfer, release/reclaim, and execution-owner
   retirement atomic and retry-safe. Missing exact edges on release are an
   idempotent success; missing both sides of a transfer is an error.

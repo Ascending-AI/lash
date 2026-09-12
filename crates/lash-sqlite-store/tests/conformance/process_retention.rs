@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessRetention as _;
 use lash_sansio::ProcessId;
 
 /// Drive one process into `waiting` and assert the retention contract: live rows
@@ -101,6 +102,71 @@ async fn sqlite_waiting_processes_are_live_not_prunable() {
     .expect("open waiting retention registry");
     let process_id = ProcessId::from(format!("waiting-retention:{}", uuid::Uuid::new_v4()));
     assert_waiting_process_is_live_not_prunable(&registry, &process_id).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
+    let dir = tempfile::tempdir().expect("process cleanup tempdir");
+    let database = dir.path().join("processes.db");
+    let sessions = dir.path().join("sessions");
+    let registry = SqliteProcessRegistry::open(&database, &sessions)
+        .await
+        .expect("open process registry");
+    let registered = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                "sqlite-prune-cleanup",
+                lash_core::ProcessInput::Engine {
+                    kind: "test-engine".to_string(),
+                    payload: serde_json::json!({"module_ref": "module-sqlite"}),
+                },
+                lash_core::RecoveryContract::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+                "process-env:sqlite-cleanup",
+            ))),
+        )
+        .await
+        .expect("register cleanup process");
+    registry
+        .complete_process(
+            &registered.id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key("sqlite-prune-cleanup"),
+        )
+        .await
+        .expect("complete cleanup process");
+    registry
+        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune with atomic cleanup evidence");
+    drop(registry);
+
+    let reopened = SqliteProcessRegistry::open(&database, &sessions)
+        .await
+        .expect("reopen process registry");
+    let pending = reopened
+        .pending_process_artifact_cleanup()
+        .await
+        .expect("read cleanup evidence after reopen");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].process_id, registered.id);
+    assert_eq!(pending[0].env_ref, registered.env_ref);
+    assert_eq!(pending[0].input, registered.input);
+    reopened
+        .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
+        .await
+        .expect("ack cleanup evidence");
+    assert!(
+        reopened
+            .pending_process_artifact_cleanup()
+            .await
+            .expect("read acknowledged cleanup")
+            .is_empty()
+    );
 }
 
 /// Lexical half of the retention contract: every `status IN`/`status NOT IN`

@@ -46,6 +46,10 @@ pub struct LashCore {
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     /// Whether process lifecycle is available; threaded into rebuilt session plugin hosts.
     pub(crate) process_lifecycle_available: bool,
+    /// Base plugin-contributed engines available to host-level process APIs.
+    /// Session runtimes still install onto their own clean registries so
+    /// session-scoped plugin overlays can contribute additional engines.
+    pub(crate) host_process_engines: lash_core::ProcessEngineRegistry,
     pub(crate) process_execution_concurrency: usize,
     /// Explicit host supplier; `None` preserves a fresh bound per process worker.
     pub(crate) worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
@@ -297,6 +301,8 @@ impl LashCore {
             Arc::clone(&resolved_env.core.control.effect_host),
             ports.process,
             resolved_env.trigger_store.clone(),
+            Arc::clone(&resolved_env.core.durability.process_env_store),
+            self.host_process_engines.clone(),
         ))
     }
 
@@ -727,6 +733,41 @@ impl LashCore {
                 session_id: session_id.clone(),
                 message: err.to_string(),
             })?;
+        for scope in administration
+            .effect_host()
+            .pending_artifact_owner_retirements()
+            .await
+            .map_err(|err| EmbedError::SessionDeleteProcess {
+                session_id: session_id.clone(),
+                message: err.to_string(),
+            })?
+        {
+            let owner = lash_core::ArtifactOwner::execution(scope.clone());
+            administration
+                .process_env_store()
+                .retire_process_execution_env_owner(&owner)
+                .await
+                .map_err(|err| EmbedError::SessionDeleteProcess {
+                    session_id: session_id.clone(),
+                    message: err.to_string(),
+                })?;
+            administration
+                .process_engines()
+                .retire_artifact_owner(&owner)
+                .await
+                .map_err(|err| EmbedError::SessionDeleteProcess {
+                    session_id: session_id.clone(),
+                    message: err.to_string(),
+                })?;
+            administration
+                .effect_host()
+                .complete_artifact_owner_retirement(&scope)
+                .await
+                .map_err(|err| EmbedError::SessionDeleteProcess {
+                    session_id: session_id.clone(),
+                    message: err.to_string(),
+                })?;
+        }
         Ok(SessionDeleteReport {
             session_id,
             storage,
@@ -1274,11 +1315,12 @@ impl LashCoreBuilder {
         // Threaded to every plugin host so core installs the same
         // plugin-contributed process engines wherever it rebuilds a runtime.
         let process_lifecycle_available = process_work_source.has_registry();
-        // Install onto a throwaway clone to validate unique engine kinds.
-        // Runtime-construction sites install the contributions again onto their
-        // own clean registries.
-        let _ = default_plugin_host
-            .install_process_engine_contributions(core.clone(), process_lifecycle_available)?;
+        // Resolve the base engine set once for host-level process APIs and
+        // store-maintenance cleanup. Session construction still installs onto
+        // a clean clone so session-scoped plugin overlays remain isolated.
+        let host_process_engines = default_plugin_host
+            .install_process_engine_contributions(core.clone(), process_lifecycle_available)?
+            .process_engines;
         let tool_registry =
             lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
         let native_process_registry = process_work_source.process_registry();
@@ -1332,6 +1374,10 @@ impl LashCoreBuilder {
             .chain(self.session_creation_store_factory.iter())
         {
             store_factory.bind_effect_host(&env.core.control.effect_host);
+            store_factory.bind_artifact_stores(
+                Arc::clone(&env.core.durability.process_env_store),
+                host_process_engines.clone(),
+            );
         }
         let process_port = Self::resolve_process_work(
             &process_work_source,
@@ -1391,6 +1437,7 @@ impl LashCoreBuilder {
             live_replay_store,
             protocol_factory,
             process_lifecycle_available,
+            host_process_engines,
             process_execution_concurrency,
             worker_slot_supplier,
             substrate_slot: Arc::new(NativeSubstrateSlot::new(substrate)),

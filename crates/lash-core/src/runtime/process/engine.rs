@@ -632,6 +632,23 @@ impl ProcessEngineRegistry {
             .await
     }
 
+    /// Release engine artifacts from the durable evidence Process Prune left
+    /// after deleting the full process row.
+    pub async fn release_pruned_process_artifacts(
+        &self,
+        cleanup: &crate::ProcessArtifactCleanup,
+    ) -> Result<(), crate::PluginError> {
+        let crate::ProcessInput::Engine { kind, payload } = &*cleanup.input else {
+            return Ok(());
+        };
+        self.require(kind)?
+            .release_artifacts(
+                &crate::ArtifactOwner::process(cleanup.process_id.clone()),
+                payload,
+            )
+            .await
+    }
+
     /// Register an engine, rejecting a duplicate
     /// [`ProcessEngine::kind`]. This is the single enforcement point for unique
     /// engine kinds across everything registered on a runtime host, whether the

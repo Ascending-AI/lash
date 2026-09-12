@@ -454,19 +454,48 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let cursor = session.observe().current_observation().cursor;
     let process_id = "observed-process";
 
+    let request = lash_core::ProcessStartRequest::new(
+        process_id,
+        lash_core::ProcessInput::ToolCall {
+            call: lash_core::PreparedToolCall::from_parts(
+                "observed-process-call",
+                "tool:observed-process",
+                "observed_process",
+                serde_json::Value::Null,
+                None,
+                serde_json::Value::Null,
+            ),
+        },
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessOriginator::host(),
+    )
+    .with_observers(["process-observation-events".to_string()])
+    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        lash_core::SessionPolicy {
+            model: mock_model_spec(),
+            ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        },
+    ));
     session
         .admin()
         .processes()
         .start(
-            lash_core::ProcessStartRequest::external(
-                process_id,
-                lash_core::ProcessOriginator::host(),
-                serde_json::Value::Null,
-            )
-            .with_observers(["process-observation-events".to_string()]),
+            request.clone(),
             native_scope(lash_core::ExecutionScope::process(process_id)),
         )
         .await?;
+    session
+        .admin()
+        .processes()
+        .start(
+            request,
+            native_scope(lash_core::ExecutionScope::runtime_operation(
+                "process-observation-events-replay",
+            )),
+        )
+        .await
+        .expect("public session start replay bypasses the retired staging owner");
     session
         .admin()
         .processes()

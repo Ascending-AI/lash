@@ -369,6 +369,12 @@ impl Store {
 #[cfg(feature = "lashlang")]
 #[async_trait::async_trait]
 impl lashlang::LashlangArtifactStore for Store {
+    fn pause_next_publication_for_testing(&self) -> Option<lashlang::ArtifactPublicationPause> {
+        let pause = lashlang::ArtifactPublicationPause::default();
+        *self.artifact_publication_pause.lock_recover() = Some(pause.clone());
+        Some(pause)
+    }
+
     fn durability_tier(&self) -> lashlang::DurabilityTier {
         lashlang::DurabilityTier::Durable
     }
@@ -387,6 +393,10 @@ impl lashlang::LashlangArtifactStore for Store {
             .to_store_bytes()
             .map_err(|err| lashlang::ArtifactStoreError::Encode(err.to_string()))?;
         let artifact_ref = artifact.module_ref.as_str().to_string();
+        let publication_pause = self.artifact_publication_pause.lock_recover().take();
+        if let Some(pause) = publication_pause {
+            pause.pause().await;
+        }
         self.publish_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
             artifact_ref,

@@ -103,20 +103,18 @@ impl ProcessLocalExecution {
                         if let Err(protect_error) = engine
                             .protect_start_artifacts(&staging_owner, payload)
                             .await
-                        {
-                            if engine
+                            && engine
                                 .transfer_start_artifacts(&staging_owner, &process_owner, payload)
                                 .await
                                 .is_err()
-                            {
-                                if let Some(env_store) = process_env_store.as_ref() {
-                                    env_store
-                                        .retire_process_execution_env_owner(&staging_owner)
-                                        .await?;
-                                }
-                                engine.retire_artifact_owner(&staging_owner).await?;
-                                return Err(protect_error.into());
+                        {
+                            if let Some(env_store) = process_env_store.as_ref() {
+                                env_store
+                                    .retire_process_execution_env_owner(&staging_owner)
+                                    .await?;
                             }
+                            engine.retire_artifact_owner(&staging_owner).await?;
+                            return Err(protect_error.into());
                         }
                         Some((engine, payload.clone()))
                     }

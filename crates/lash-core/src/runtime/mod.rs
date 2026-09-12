@@ -221,14 +221,14 @@ pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
     ObserverInheritance, PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine, ProcessEngineProcessContext,
-    ProcessEngineRegistry, ProcessEngineRunContext, ProcessEngineRunGuard,
-    ProcessEngineRuntimeContext, ProcessEngineValidationContext, ProcessEvent,
-    ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType,
-    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    PersistedSegmentHandover, ProcessArtifactCleanup, ProcessAwaitOutput, ProcessCancelReceipt,
+    ProcessChange, ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine,
+    ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
+    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
+    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    ProcessEventLog, ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink,
+    ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
     ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation, ProcessInfraError,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
@@ -1293,6 +1293,15 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// has anything to record; a store sharing the journal's database, and
     /// one with no durable journal to sweep, ignore it.
     fn bind_effect_host(&self, _effect_host: &Arc<dyn crate::EffectHost>) {}
+
+    /// Bind the exact artifact stores whose execution-owner cleanup this
+    /// factory resumes from committed scope-retirement evidence.
+    fn bind_artifact_stores(
+        &self,
+        _process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+        _process_engines: ProcessEngineRegistry,
+    ) {
+    }
 
     async fn create_store(
         &self,

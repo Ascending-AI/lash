@@ -346,43 +346,40 @@ impl ProcessCapability {
         state.process_execution_env_spec(&current.policy)
     }
 
-    async fn capture_execution_env_ref(
+    async fn capture_execution_env(
         &self,
         current: &CurrentSessionCapability,
         registration: &crate::ProcessRegistration,
-    ) -> Result<Option<crate::ProcessExecutionEnvRef>, crate::PluginError> {
+        requested_env_spec: Option<crate::ProcessExecutionEnvSpec>,
+    ) -> Result<
+        (
+            Option<crate::ProcessExecutionEnvRef>,
+            Option<crate::ProcessExecutionEnvSpec>,
+            Option<crate::ProcessExecutionEnvSpec>,
+        ),
+        crate::PluginError,
+    > {
         if let Some(env_ref) = registration.env_ref.clone() {
-            let store = current.host.core.durability.process_env_store.as_ref();
-            let bytes = store
-                .get_process_execution_env(&env_ref)
-                .await?
-                .ok_or_else(|| {
-                    crate::PluginError::Session(format!(
-                        "missing process execution env `{env_ref}`"
-                    ))
-                })?;
-            store
-                .publish_process_execution_env(
-                    &crate::ArtifactOwner::process_start(&registration.id),
-                    &env_ref,
-                    &bytes,
-                )
-                .await?;
-            return Ok(Some(env_ref));
+            let spec = crate::load_process_execution_env(
+                current.host.core.durability.process_env_store.as_ref(),
+                &env_ref,
+            )
+            .await?;
+            // Keep the existing reference in the registration and let the
+            // replayable executor protect/transfer it. The decoded value is
+            // only for the pre-journal engine-admission check.
+            return Ok((Some(env_ref), None, Some(spec)));
+        }
+        if let Some(spec) = requested_env_spec {
+            return Ok((None, Some(spec.clone()), Some(spec)));
         }
         match registration.input.as_ref() {
             crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
                 let spec = self.current_execution_env_spec(current);
-                crate::publish_process_execution_env(
-                    current.host.core.durability.process_env_store.as_ref(),
-                    &crate::ArtifactOwner::process_start(&registration.id),
-                    &spec,
-                )
-                .await
-                .map(Some)
+                Ok((None, Some(spec.clone()), Some(spec)))
             }
             crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
-                Ok(None)
+                Ok((None, None, None))
             }
         }
     }
@@ -404,11 +401,9 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let env_ref = self
-            .capture_execution_env_ref(current, &registration)
+        let (env_ref, command_env_spec, validation_env_spec) = self
+            .capture_execution_env(current, &registration, options.env_spec.clone())
             .await?;
-        let staged_env_ref = env_ref.clone();
-        let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
         // session. Wake routing and observer membership are independent: only
@@ -427,49 +422,25 @@ impl ProcessCapability {
             )
             .with_execution_env_ref(env_ref)
             .with_wake_session_id(wake_session_id);
-        let registration = match self
-            .prepare_process_environment(current, session_id, registration)
-            .await
-        {
-            Ok(registration) => registration,
-            Err(error) => {
-                if staged_env_ref.is_some() {
-                    current
-                        .host
-                        .core
-                        .durability
-                        .process_env_store
-                        .retire_process_execution_env_owner(&staging_owner)
-                        .await?;
-                }
-                return Err(error);
-            }
-        };
+        let registration = self
+            .validate_and_stamp_engine_start(
+                current,
+                session_id,
+                registration,
+                validation_env_spec.as_ref(),
+            )
+            .await?;
         let execution_context = options.execution_context(&scope);
-        let runner = match ProcessCommandRunner::new(
+        let runner = ProcessCommandRunner::new(
             current,
             &scope,
             "processes are unavailable in this runtime",
-        ) {
-            Ok(runner) => runner,
-            Err(error) => {
-                if staged_env_ref.is_some() {
-                    current
-                        .host
-                        .core
-                        .durability
-                        .process_env_store
-                        .retire_process_execution_env_owner(&staging_owner)
-                        .await?;
-                }
-                return Err(error);
-            }
-        };
+        )?;
         runner
             .start(
                 registration,
                 options.initial_observers.into_iter().collect(),
-                None,
+                command_env_spec,
                 execution_context,
             )
             .await
@@ -514,32 +485,6 @@ impl ProcessCapability {
             .await
     }
 
-    async fn prepare_process_environment(
-        &self,
-        current: &CurrentSessionCapability,
-        session_id: &SessionId,
-        registration: crate::ProcessRegistration,
-    ) -> Result<crate::ProcessRegistration, crate::PluginError> {
-        if !matches!(
-            registration.input.as_ref(),
-            crate::ProcessInput::Engine { .. }
-        ) {
-            return Ok(registration);
-        }
-        let env_spec = match registration.env_ref.as_ref() {
-            Some(env_ref) => Some(
-                crate::load_process_execution_env(
-                    current.host.core.durability.process_env_store.as_ref(),
-                    env_ref,
-                )
-                .await?,
-            ),
-            None => None,
-        };
-        self.validate_and_stamp_engine_start(current, session_id, registration, env_spec.as_ref())
-            .await
-    }
-
     /// Both parts of the engine-admission gate documented on
     /// [`crate::ProcessEngineRegistry::require`]: resolve the kind, validate the
     /// payload against this session's resolved tool catalog, then stamp the
@@ -559,7 +504,7 @@ impl ProcessCapability {
         };
         // Deliberate asymmetry between the two routes, and not a new refusal.
         // A request-shaped start captures the live session env before it reaches
-        // this gate (`capture_execution_env_ref`), so its env is never absent. A
+        // this gate (`capture_execution_env`), so its env is never absent. A
         // recorded intent must be validated against the env its own record
         // carries — substituting the live session env would make the admitted
         // start depend on when it was realized, which a journaled command may

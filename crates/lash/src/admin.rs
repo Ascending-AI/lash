@@ -77,7 +77,11 @@ impl CoreTriggerAdmin {
         let store = self.store()?;
         let ports = self.core.substrate_slot.ports().await;
         let process_work = ports.process.ok_or(EmbedError::MissingProcessRegistry)?;
-        let router = lash_core::facade_support::TriggerRouter::new(store, process_work);
+        let router = lash_core::facade_support::TriggerRouter::new(store, process_work)
+            .with_process_artifacts(
+                Arc::clone(&self.core.env.core.durability.process_env_store),
+                self.core.host_process_engines.clone(),
+            );
         router
             .emit(request, scoped_effect_controller.controller())
             .await
@@ -525,10 +529,9 @@ impl SessionAdmin {
         let receipt = runtime
             .run_plugin_command(name, args, Some(session_id), operation_scope.clone())
             .await;
-        // The receipt and its observations land first; retirement is a
-        // reclaim that can only be deferred or logged, never a reason to lose
-        // what the operation already did. A failed receipt is terminal for
-        // the scope too, so it retires on both paths.
+        // The receipt and its observations land first. Retirement failures
+        // are surfaced: the committed lifecycle fence remains pending durable
+        // cleanup and the retained-evidence sweep can resume it.
         if let Ok(receipt) = &receipt {
             self.record_plugin_operation_observations(
                 &receipt.events,
@@ -537,7 +540,7 @@ impl SessionAdmin {
             self.runtime.publish_from(&runtime);
         }
         self.retire_operation_scope(&runtime.effect_host(), operation_scope)
-            .await;
+            .await?;
         Ok(receipt?)
     }
 
@@ -584,7 +587,7 @@ impl SessionAdmin {
             self.runtime.publish_from(&runtime);
         }
         self.retire_operation_scope(&runtime.effect_host(), operation_scope)
-            .await;
+            .await?;
         Ok(receipt?)
     }
 
@@ -596,19 +599,21 @@ impl SessionAdmin {
     /// is the retained-evidence reclaim sweep (ADR 0067): the receipt is
     /// durable, so "receipt recorded and quiescent" is re-derived from the
     /// store at sweep time, which no process-local queue survives a restart
-    /// to do. Any other failure is logged; the receipt already returned and
-    /// stands.
+    /// to do. Any other failure is returned while its durable retirement
+    /// evidence remains pending.
     async fn retire_operation_scope(
         &self,
         effect_host: &Arc<dyn lash_core::EffectHost>,
         operation_scope: lash_core::ExecutionScope,
-    ) {
+    ) -> Result<()> {
         match retire_facade_operation_scope(effect_host, &operation_scope).await {
             Ok(FacadeScopeRetirement::Retired) => {
                 let owner = lash_core::ArtifactOwner::execution(operation_scope.clone());
-                if let Err(err) = self.runtime.retire_artifact_owner(&owner).await {
-                    tracing::warn!(scope = %operation_scope.id(), error = %err, "artifact owner retirement failed");
-                }
+                self.runtime.retire_artifact_owner(&owner).await?;
+                effect_host
+                    .complete_artifact_owner_retirement(&operation_scope)
+                    .await
+                    .map_err(EmbedError::Runtime)?;
             }
             Ok(FacadeScopeRetirement::Deferred) => {
                 tracing::debug!(
@@ -616,14 +621,9 @@ impl SessionAdmin {
                     "facade operation scope still has live effects; left to the reclaim sweep"
                 );
             }
-            Err(err) => {
-                tracing::warn!(
-                    scope = %operation_scope.id(),
-                    error = %err,
-                    "facade operation scope retirement failed; journal rows retained"
-                );
-            }
+            Err(err) => return Err(err),
         }
+        Ok(())
     }
 
     fn record_plugin_operation_observations(

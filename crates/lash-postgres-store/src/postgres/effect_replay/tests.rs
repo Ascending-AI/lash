@@ -58,12 +58,17 @@ impl GroupFixture {
             .expect("connect effect-group contract storage");
         let unique = uuid::Uuid::new_v4().simple().to_string();
         let session_id = SessionId::from(format!("effect-group-{label}-{unique}"));
+        let scope_id = ExecutionScope::turn(session_id.clone(), format!("effect-group-{label}"))
+            .journal_identity()
+            .expect("valid effect-group scope")
+            .key()
+            .to_string();
         let fixture = Self {
             _database_lock: database_lock,
             store: PostgresEffectReplayRowStore {
                 pool: storage.pool().clone(),
             },
-            scope_id: format!("session:{session_id}"),
+            scope_id,
             group_key: format!("session:{session_id}/group-1"),
             session_id,
         };
@@ -317,6 +322,32 @@ async fn retirement_removes_a_group_and_its_children_together() {
             .await
             .expect("count group rows");
     assert_eq!(groups, 0, "the group row goes with its children");
+    let pending = fixture
+        .store
+        .pending_artifact_owner_retirements()
+        .await
+        .expect("read session-scope artifact cleanup evidence");
+    assert_eq!(
+        pending.len(),
+        1,
+        "the deleted session scope stays recoverable"
+    );
+    let identity = pending[0]
+        .journal_identity()
+        .expect("durable scope identity");
+    fixture
+        .store
+        .complete_artifact_owner_retirement(identity.key())
+        .await
+        .expect("ack artifact owner cleanup");
+    assert!(
+        fixture
+            .store
+            .pending_artifact_owner_retirements()
+            .await
+            .expect("read acknowledged cleanup")
+            .is_empty()
+    );
 }
 
 /// The unsettled read is the exact complement of the rank read: every child of

@@ -544,14 +544,13 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
     let execution =
         runtime_execution_for_intent_law(context, tokio_util::sync::CancellationToken::new());
 
-    let reply = execution
-        .call_tool_by_id(
-            "fixed-intent-call".to_string(),
-            crate::ToolId::from("tool:fixed_intent_law"),
-            json!({"value": "drive"}),
-            0,
-        )
-        .await;
+    let reply = Box::pin(execution.call_tool_by_id(
+        "fixed-intent-call".to_string(),
+        crate::ToolId::from("tool:fixed_intent_law"),
+        json!({"value": "drive"}),
+        0,
+    ))
+    .await;
 
     assert!(!reply.output.is_success());
     let error = execution

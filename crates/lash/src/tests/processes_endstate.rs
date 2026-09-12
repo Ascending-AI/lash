@@ -1,9 +1,155 @@
 use super::*;
-use lash_core::TestProcessRegistryWriteExt;
+use lash_core::{
+    ProcessEngine as _, ProcessQuery as _, ProcessRetention as _, TestProcessRegistryWriteExt,
+};
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+
+struct FailOnceReleaseEnvStore {
+    inner: Arc<lash_core::InMemoryProcessExecutionEnvStore>,
+    release_failures: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessExecutionEnvStore for FailOnceReleaseEnvStore {
+    async fn publish_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+        bytes: &[u8],
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .publish_process_execution_env(owner, env_ref, bytes)
+            .await
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .transfer_process_execution_env(from, to, env_ref)
+            .await
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        if self
+            .release_failures
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |remaining| remaining.checked_sub(1),
+            )
+            .is_ok()
+        {
+            return Err(lash_core::PluginError::Session(
+                "injected process environment release failure".to_string(),
+            ));
+        }
+        self.inner
+            .release_process_execution_env(owner, env_ref)
+            .await
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner.retire_process_execution_env_owner(owner).await
+    }
+
+    async fn get_process_execution_env(
+        &self,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
+        self.inner.get_process_execution_env(env_ref).await
+    }
+}
+
+#[derive(Default)]
+struct PruneEngineState {
+    owners: HashSet<lash_core::ArtifactOwner>,
+    bytes_present: bool,
+}
+
+struct FailOnceReleaseEngine {
+    state: std::sync::Mutex<PruneEngineState>,
+    release_failures: std::sync::atomic::AtomicUsize,
+}
+
+impl FailOnceReleaseEngine {
+    fn retain(&self, owner: lash_core::ArtifactOwner) {
+        let mut state = self.state.lock_recover();
+        state.bytes_present = true;
+        state.owners.insert(owner);
+    }
+
+    fn snapshot(&self) -> (bool, HashSet<lash_core::ArtifactOwner>) {
+        let state = self.state.lock_recover();
+        (state.bytes_present, state.owners.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessEngine for FailOnceReleaseEngine {
+    fn kind(&self) -> &'static str {
+        "fig677-prune-engine"
+    }
+
+    async fn run(
+        &self,
+        _context: lash_core::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> std::result::Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+        unreachable!("the prune recovery fixture never runs a process")
+    }
+
+    async fn release_artifacts(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        if self
+            .release_failures
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |remaining| remaining.checked_sub(1),
+            )
+            .is_ok()
+        {
+            return Err(lash_core::PluginError::Session(
+                "injected process engine release failure".to_string(),
+            ));
+        }
+        let mut state = self.state.lock_recover();
+        state.owners.remove(owner);
+        if state.owners.is_empty() {
+            state.bytes_present = false;
+        }
+        Ok(())
+    }
+
+    async fn retire_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        let mut state = self.state.lock_recover();
+        state.owners.remove(owner);
+        if state.owners.is_empty() {
+            state.bytes_present = false;
+        }
+        Ok(())
+    }
+}
 
 struct LinkedTestProcess {
     module_ref: lashlang::ModuleRef,
@@ -272,6 +418,175 @@ fn in_memory_process_env_store() -> Arc<dyn lash_core::ProcessExecutionEnvStore>
     Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new())
 }
 
+fn prune_recovery_core(
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    engine: Arc<FailOnceReleaseEngine>,
+) -> Result<LashCore> {
+    let provider = mock_provider();
+    let provider_id = provider.kind().to_string();
+    let config = process_runtime_host_config(env_store, provider.clone())
+        .with_process_engine(engine as Arc<dyn lash_core::ProcessEngine>);
+    LashCore::standard_builder(crate::TurnBudget::Unbounded)
+        .session_spec(
+            crate::SessionSpec::new()
+                .provider_id(provider_id)
+                .turn_budget(crate::TurnBudget::Unbounded),
+        )
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(registry)
+        .without_queued_work()
+        .advanced()
+        .runtime_host_config(config)
+        .build(crate::testing::runtime_lease_owner())
+}
+
+async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
+    let dir = tempfile::tempdir().expect("process prune recovery tempdir");
+    let database = dir.path().join("processes.db");
+    let sessions = dir.path().join("sessions");
+    let registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(&database, &sessions)
+            .await
+            .expect("open process registry"),
+    );
+    let env_inner = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::new());
+    let env_store = Arc::new(FailOnceReleaseEnvStore {
+        inner: Arc::clone(&env_inner),
+        release_failures: std::sync::atomic::AtomicUsize::new(usize::from(
+            failing_store == "environment",
+        )),
+    });
+    let engine = Arc::new(FailOnceReleaseEngine {
+        state: std::sync::Mutex::new(PruneEngineState::default()),
+        release_failures: std::sync::atomic::AtomicUsize::new(usize::from(
+            failing_store == "engine",
+        )),
+    });
+    let process_id = ProcessId::from(format!("prune-recovery-{failing_store}"));
+    let process_owner = lash_core::ArtifactOwner::process(process_id.clone());
+    let shared_owner = lash_core::ArtifactOwner::host(format!("shared-{failing_store}"));
+    let env_spec = process_env_spec();
+    let env_ref = env_spec.stable_ref().expect("stable environment ref");
+    let env_bytes = env_spec.to_store_bytes().expect("environment bytes");
+    env_store
+        .publish_process_execution_env(&process_owner, &env_ref, &env_bytes)
+        .await?;
+    env_store
+        .publish_process_execution_env(&shared_owner, &env_ref, &env_bytes)
+        .await?;
+    engine.retain(process_owner.clone());
+    engine.retain(shared_owner.clone());
+    let registered = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                process_id.clone(),
+                lash_core::ProcessInput::Engine {
+                    kind: engine.kind().to_string(),
+                    payload: serde_json::json!({"artifact_ref": "shared-bytes"}),
+                },
+                lash_core::RecoveryContract::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+            )
+            .with_execution_env_ref(Some(env_ref.clone())),
+        )
+        .await?;
+    registry
+        .complete_process(
+            &registered.id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key(process_id.to_string()),
+        )
+        .await?;
+
+    let core = prune_recovery_core(
+        registry.clone() as Arc<dyn lash_core::ProcessRegistry>,
+        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        Arc::clone(&engine),
+    )?;
+    assert!(Arc::ptr_eq(
+        &(env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>),
+        &core.env.core.durability.process_env_store,
+    ));
+    let first_prune = core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await;
+    let pending_after_first = registry.pending_process_artifact_cleanup().await?;
+    assert!(
+        first_prune.is_err(),
+        "selected artifact release fails after durable row prune; result={first_prune:?}, pending={pending_after_first:?}, env_failures={}, engine_failures={}",
+        env_store
+            .release_failures
+            .load(std::sync::atomic::Ordering::SeqCst),
+        engine
+            .release_failures
+            .load(std::sync::atomic::Ordering::SeqCst),
+    );
+    assert!(matches!(
+        registry.get_process(&process_id).await,
+        Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
+    ));
+    assert_eq!(pending_after_first.len(), 1);
+    drop(core);
+    drop(registry);
+
+    let reopened = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(&database, &sessions)
+            .await
+            .expect("reopen process registry after release failure"),
+    );
+    let recovered_core = prune_recovery_core(
+        reopened.clone() as Arc<dyn lash_core::ProcessRegistry>,
+        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        Arc::clone(&engine),
+    )?;
+    recovered_core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
+    assert!(
+        reopened
+            .pending_process_artifact_cleanup()
+            .await?
+            .is_empty()
+    );
+    assert!(
+        env_store
+            .get_process_execution_env(&env_ref)
+            .await?
+            .is_some()
+    );
+    let (engine_bytes, engine_owners) = engine.snapshot();
+    assert!(engine_bytes);
+    assert_eq!(engine_owners, HashSet::from([shared_owner.clone()]));
+    env_store
+        .release_process_execution_env(&shared_owner, &env_ref)
+        .await?;
+    engine
+        .release_artifacts(&shared_owner, &serde_json::Value::Null)
+        .await?;
+    assert!(
+        env_store
+            .get_process_execution_env(&env_ref)
+            .await?
+            .is_none()
+    );
+    assert_eq!(engine.snapshot(), (false, HashSet::new()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn process_prune_retries_each_artifact_release_after_registry_reopen() -> Result<()> {
+    process_prune_recovery_case("environment").await?;
+    process_prune_recovery_case("engine").await
+}
+
 #[tokio::test]
 async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()> {
     let dir = tempfile::tempdir().expect("sqlite facade prune tempdir");
@@ -507,12 +822,20 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     )
     .await;
 
+    let start_request = process.start_request(&ProcessId::from("sessionless-direct"));
     core.processes()
         .start(
-            process.start_request(&ProcessId::from("sessionless-direct")),
+            start_request.clone(),
             runtime_operation_scope(&core, "sessionless-direct-start"),
         )
         .await?;
+    core.processes()
+        .start(
+            start_request,
+            runtime_operation_scope(&core, "sessionless-direct-start-replay"),
+        )
+        .await
+        .expect("public start replay discovers process ownership after staging retirement");
     let waiting =
         wait_for_waiting_signal(&core, &ProcessId::from("sessionless-direct"), "ready").await;
     assert!(matches!(

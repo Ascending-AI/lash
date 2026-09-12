@@ -527,6 +527,76 @@ async fn register_successor(
 }
 
 #[tokio::test]
+async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
+    let registry = TestLocalProcessRegistry::default();
+    let registration = ProcessRegistration::new(
+        "artifact-cleanup-process",
+        ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::json!({"module_ref": "module-1"}),
+        },
+        RecoveryContract::Rerunnable,
+        ProcessProvenance::host(),
+    )
+    .with_execution_env_ref(Some(ProcessExecutionEnvRef::new("process-env:cleanup")));
+    let registered = registry
+        .register_process(registration)
+        .await
+        .expect("register process with exact artifact inputs");
+    registry
+        .complete_process(
+            &registered.id,
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            ProcessCompletionAuthority::workflow_key("artifact-cleanup-process"),
+        )
+        .await
+        .expect("complete process before prune");
+
+    registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune process row and persist cleanup evidence atomically");
+    let pending = registry
+        .pending_process_artifact_cleanup()
+        .await
+        .expect("read pending artifact cleanup");
+    assert_eq!(
+        pending,
+        vec![ProcessArtifactCleanup::from_record(&registered)],
+        "row deletion must leave its exact env and engine release inputs"
+    );
+    assert_eq!(
+        registry
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
+            .await
+            .expect("compact while cleanup is pending"),
+        0,
+        "the tombstone is the durable parent of pending cleanup evidence"
+    );
+
+    registry
+        .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
+        .await
+        .expect("acknowledge artifact cleanup");
+    assert!(
+        registry
+            .pending_process_artifact_cleanup()
+            .await
+            .expect("read cleanup after acknowledgement")
+            .is_empty()
+    );
+    assert_eq!(
+        registry
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
+            .await
+            .expect("compact after cleanup acknowledgement"),
+        1
+    );
+}
+
+#[tokio::test]
 async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
     let registry = TestLocalProcessRegistry::default();
     let (old_ref, _) = register_successor(&registry, &ProcessId::from("reused-event-cursor")).await;

@@ -14,6 +14,8 @@ use super::validation::prepare_process_registration;
 
 mod execution;
 pub use execution::*;
+mod artifact_cleanup;
+pub use artifact_cleanup::*;
 
 pub use lash_sansio::{ProcessId, SessionId};
 pub type ProcessOutcome = ProcessAwaitOutput;
@@ -656,6 +658,10 @@ pub struct ProcessStartOptions {
     /// options — not the request — so in-session callers cannot forge
     /// provenance through the session surface.
     pub spawn_provenance: Option<ProcessSpawnProvenance>,
+    /// Request-carried environment bytes handed to the replayable start
+    /// command. Kept in options so the service contract does not prepublish a
+    /// staging edge ahead of its journal.
+    pub env_spec: Option<ProcessExecutionEnvSpec>,
 }
 
 /// Provenance a process-run context hands to its children: the chain's
@@ -694,6 +700,11 @@ impl ProcessStartOptions {
     /// implementors while persisting and coordinating durable process execution.
     pub fn with_spawn_provenance(mut self, spawn_provenance: ProcessSpawnProvenance) -> Self {
         self.spawn_provenance = Some(spawn_provenance);
+        self
+    }
+
+    pub fn with_env_spec(mut self, env_spec: Option<ProcessExecutionEnvSpec>) -> Self {
+        self.env_spec = env_spec;
         self
     }
 

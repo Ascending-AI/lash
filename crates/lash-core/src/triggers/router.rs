@@ -486,6 +486,8 @@ fn unstarted_delivery(subscription_id: &str, reason: &str) -> PluginError {
 pub struct TriggerRouter {
     store: Arc<dyn TriggerStore>,
     process_work: crate::ProcessWorkWiring,
+    process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
+    process_engines: Option<crate::ProcessEngineRegistry>,
 }
 
 impl TriggerRouter {
@@ -493,7 +495,21 @@ impl TriggerRouter {
         Self {
             store,
             process_work,
+            process_env_store: None,
+            process_engines: None,
         }
+    }
+
+    /// Bind the exact artifact stores used by the runtime that will execute
+    /// trigger-started processes.
+    pub fn with_process_artifacts(
+        mut self,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_engines: crate::ProcessEngineRegistry,
+    ) -> Self {
+        self.process_env_store = Some(process_env_store);
+        self.process_engines = Some(process_engines);
+        self
     }
 
     pub(crate) fn store(&self) -> Arc<dyn TriggerStore> {
@@ -696,10 +712,19 @@ impl TriggerRouter {
                     invocation,
                     crate::RuntimeEffectCommand::process(command),
                 ),
-                crate::RuntimeEffectLocalExecutor::processes(
-                    process_registry,
-                    Arc::clone(self.process_work.port()),
-                ),
+                {
+                    let mut executor = crate::RuntimeEffectLocalExecutor::processes(
+                        process_registry,
+                        Arc::clone(self.process_work.port()),
+                    );
+                    if let Some(store) = self.process_env_store.as_ref() {
+                        executor = executor.with_process_env_store(Arc::clone(store));
+                    }
+                    if let Some(engines) = self.process_engines.as_ref() {
+                        executor = executor.with_process_engines(engines.clone());
+                    }
+                    executor
+                },
             )
             .await?;
         match outcome {

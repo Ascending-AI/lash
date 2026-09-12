@@ -41,6 +41,11 @@ struct TablePair {
 const TABLE_REGISTRY: &[TablePair] = &[
     pair("attachment_condemnations", "lash_attachment_condemnations"),
     pair("attachment_manifest", "lash_attachment_manifest"),
+    pair(
+        "artifact_owner_retirements",
+        "lash_artifact_owner_retirements",
+    ),
+    pair("artifact_owners", "lash_artifact_owners"),
     pair("await_event_meta", "lash_await_event_meta"),
     pair(
         "await_event_revoked_sessions",
@@ -69,6 +74,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("process_leases", "lash_process_leases"),
     pair("process_observers", "lash_process_observers"),
     pair("process_parent_end_plans", "lash_process_parent_end_plans"),
+    pair("process_artifact_cleanup", "lash_process_artifact_cleanup"),
     pair(
         "process_segment_handovers",
         "lash_process_segment_handovers",

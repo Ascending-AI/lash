@@ -522,6 +522,15 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
 
 #[async_trait::async_trait]
 pub trait LashlangArtifactStore: Send + Sync {
+    /// Arm a one-shot conformance pause immediately before this backend's
+    /// publication serialization point. Production callers never use this
+    /// diagnostic seam; stores that participate in ownership conformance
+    /// return a handle and pause their next publish until it is resumed.
+    #[doc(hidden)]
+    fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
+        None
+    }
+
     /// Durability tier this artifact store provides; defaults to [`DurabilityTier::Inline`].
     fn durability_tier(&self) -> DurabilityTier {
         DurabilityTier::Inline
@@ -570,8 +579,51 @@ pub trait LashlangArtifactStore: Send + Sync {
 }
 
 #[derive(Clone, Default)]
+#[doc(hidden)]
+pub struct ArtifactPublicationPause {
+    state: Arc<Mutex<ArtifactPublicationPauseState>>,
+}
+
+#[derive(Default)]
+struct ArtifactPublicationPauseState {
+    reached: bool,
+    resumed: bool,
+    writer_waker: Option<std::task::Waker>,
+}
+
+impl ArtifactPublicationPause {
+    pub fn is_reached(&self) -> bool {
+        self.state.lock_recover().reached
+    }
+
+    pub fn resume(&self) {
+        let mut state = self.state.lock_recover();
+        state.resumed = true;
+        if let Some(waker) = state.writer_waker.take() {
+            waker.wake();
+        }
+    }
+
+    #[doc(hidden)]
+    pub async fn pause(&self) {
+        std::future::poll_fn(|context| {
+            let mut state = self.state.lock_recover();
+            state.reached = true;
+            if state.resumed {
+                std::task::Poll::Ready(())
+            } else {
+                state.writer_waker = Some(context.waker().clone());
+                std::task::Poll::Pending
+            }
+        })
+        .await
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct InMemoryLashlangArtifactStore {
     state: Arc<Mutex<InMemoryArtifactState>>,
+    publication_pause: Arc<Mutex<Option<ArtifactPublicationPause>>>,
 }
 
 #[derive(Default)]
@@ -596,6 +648,12 @@ pub fn global_in_memory_lashlang_artifact_store() -> Arc<InMemoryLashlangArtifac
 
 #[async_trait::async_trait]
 impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
+    fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
+        let pause = ArtifactPublicationPause::default();
+        *self.publication_pause.lock_recover() = Some(pause.clone());
+        Some(pause)
+    }
+
     async fn publish_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,
@@ -607,6 +665,10 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
             ));
         }
         artifact.verify()?;
+        let publication_pause = self.publication_pause.lock_recover().take();
+        if let Some(pause) = publication_pause {
+            pause.pause().await;
+        }
         let mut state = self.state.lock_recover();
         if state.retired_owners.contains(owner) {
             return Err(ArtifactStoreError::Backend(

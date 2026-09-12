@@ -173,6 +173,8 @@ pub struct Store {
     clock: Arc<dyn lash_core::Clock>,
     #[cfg(feature = "lashlang")]
     artifact_cache: Mutex<BTreeMap<lashlang::ModuleRef, Arc<lashlang::ModuleArtifact>>>,
+    #[cfg(feature = "lashlang")]
+    artifact_publication_pause: Mutex<Option<lashlang::ArtifactPublicationPause>>,
     options: StoreOptions,
     commit_count: AtomicU64,
     process_registry_attached: bool,
@@ -587,12 +589,18 @@ pub struct StoredSessionCheckpoint {
     pub manifest: SessionCheckpoint,
 }
 
+type BoundArtifactStores = (
+    Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    lash_core::ProcessEngineRegistry,
+);
+type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
+
 /// Explicit first-party factory for one SQLite durable-core catalog.
 ///
 /// Hosts opt into this by passing it to `lash::LashCoreBuilder::store_factory`.
 /// The factory never becomes a default: app storage and runtime storage remain
 /// host-owned decisions.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SqliteSessionStoreFactory {
     root: PathBuf,
     process_registry_path: Option<PathBuf>,
@@ -604,9 +612,49 @@ pub struct SqliteSessionStoreFactory {
     /// attaches it to retire quiescent operation scopes whose receipt this
     /// catalog holds (ADR 0067). Shared by every clone of the factory.
     effect_journal_path: Arc<std::sync::Mutex<Option<PathBuf>>>,
+    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
+    artifact_stores: SharedArtifactStores,
 }
 
 impl SqliteSessionStoreFactory {
+    async fn resume_artifact_owner_retirements(&self) -> Result<(), lash_core::StoreError> {
+        let effect_host = self
+            .effect_host
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let artifact_stores = self
+            .artifact_stores
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let (Some(effect_host), Some((process_env_store, process_engines))) =
+            (effect_host, artifact_stores)
+        else {
+            return Ok(());
+        };
+        let scopes = effect_host
+            .pending_artifact_owner_retirements()
+            .await
+            .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+        for scope in scopes {
+            let owner = lash_core::ArtifactOwner::execution(scope.clone());
+            process_env_store
+                .retire_process_execution_env_owner(&owner)
+                .await
+                .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+            process_engines
+                .retire_artifact_owner(&owner)
+                .await
+                .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+            effect_host
+                .complete_artifact_owner_retirement(&scope)
+                .await
+                .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+        }
+        Ok(())
+    }
+
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
         warn_process_registry_not_wired("SqliteSessionStoreFactory::new");
@@ -618,6 +666,8 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            effect_host: Arc::new(std::sync::Mutex::new(None)),
+            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -632,6 +682,8 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            effect_host: Arc::new(std::sync::Mutex::new(None)),
+            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -650,6 +702,8 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            effect_host: Arc::new(std::sync::Mutex::new(None)),
+            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -666,6 +720,8 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            effect_host: Arc::new(std::sync::Mutex::new(None)),
+            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -815,6 +871,10 @@ impl SqliteSessionStoreFactory {
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        *self
+            .effect_host
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
         if let Some(path) = effect_host.effect_scope_fence_database() {
             *self
                 .effect_journal_path
@@ -823,13 +883,29 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         }
     }
 
+    fn bind_artifact_stores(
+        &self,
+        process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        process_engines: lash_core::ProcessEngineRegistry,
+    ) {
+        *self
+            .artifact_stores
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some((process_env_store, process_engines));
+    }
+
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core::store::RetentionBound,
     ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
-        crate::retention::reclaim(self, bound)
+        let report = crate::retention::reclaim(self, bound)
             .await
-            .map_err(|failure| *failure)
+            .map_err(|failure| *failure)?;
+        if let Err(error) = self.resume_artifact_owner_retirements().await {
+            return Err(lash_core::MaintenanceFailure::failed(error, report));
+        }
+        Ok(report)
     }
 
     async fn create_store(

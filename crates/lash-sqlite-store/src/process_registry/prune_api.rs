@@ -95,6 +95,52 @@ pub(super) async fn prune_terminal_processes(
 
 #[async_trait::async_trait]
 impl lash_core::ProcessRetention for SqliteProcessRegistry {
+    async fn pending_process_artifact_cleanup(
+        &self,
+    ) -> Result<Vec<lash_core::ProcessArtifactCleanup>, lash_core::PluginError> {
+        self.conn
+            .call(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT cleanup_json FROM process_artifact_cleanup
+                     ORDER BY process_id, incarnation",
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .map(|row| {
+                        let json = row?;
+                        serde_json::from_str(&json).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
+    async fn complete_process_artifact_cleanup(
+        &self,
+        process_id: &ProcessId,
+        incarnation: lash_core::ProcessIncarnation,
+    ) -> Result<(), lash_core::PluginError> {
+        let process_id = process_id.to_string();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "DELETE FROM process_artifact_cleanup
+                     WHERE process_id = ?1 AND incarnation = ?2",
+                    params![process_id, incarnation.registration_sequence() as i64],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,

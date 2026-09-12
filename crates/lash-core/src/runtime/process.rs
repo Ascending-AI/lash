@@ -44,8 +44,8 @@ pub use events::{
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
     AbandonRequest, ArtifactOwner, InMemoryProcessExecutionEnvStore, ObserverInheritance,
-    PROCESS_LEASE_SCHEMA_VERSION, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
+    PROCESS_LEASE_SCHEMA_VERSION, ProcessArtifactCleanup, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,

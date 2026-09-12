@@ -331,13 +331,23 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 86 replaces ownerless artifact roots with exact owner edges and
 // permanent execution-owner publication fences. Component-85 stores are
 // recreated; there is no compatibility path.
-const SCHEMA_VERSION: i32 = 86;
+// Version 87 retains exact Process Prune artifact-release evidence and extends
+// scope-retirement evidence with artifact-cleanup completion until every
+// configured store acknowledges owner severance. Component-86 stores are
+// recreated; there is no compatibility path.
+const SCHEMA_VERSION: i32 = 87;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
     pool: PgPool,
     await_event_signing_secret: Arc<[u8]>,
 }
+
+type BoundArtifactStores = (
+    Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    lash_core::ProcessEngineRegistry,
+);
+type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
 
 #[derive(Clone)]
 pub struct PostgresSessionStoreFactory {
@@ -346,6 +356,8 @@ pub struct PostgresSessionStoreFactory {
     pool: PgPool,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core::Clock>,
+    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
+    artifact_stores: SharedArtifactStores,
 }
 
 #[derive(Clone)]
@@ -404,6 +416,8 @@ impl PostgresTriggerStore {
 #[derive(Clone)]
 pub struct PostgresLashlangArtifactStore {
     pool: PgPool,
+    #[cfg(feature = "lashlang")]
+    publication_pause: Arc<std::sync::Mutex<Option<lashlang::ArtifactPublicationPause>>>,
 }
 
 /// Connection-pool and per-connection timeout knobs for [`PostgresStorage`].
@@ -779,6 +793,8 @@ impl PostgresStorage {
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            effect_host: Arc::new(std::sync::Mutex::new(None)),
+            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -793,6 +809,8 @@ impl PostgresStorage {
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            effect_host: Arc::new(std::sync::Mutex::new(None)),
+            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -851,12 +869,16 @@ impl PostgresStorage {
     pub fn lashlang_artifact_store(&self) -> PostgresLashlangArtifactStore {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
+            #[cfg(feature = "lashlang")]
+            publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
     pub fn process_env_store(&self) -> PostgresLashlangArtifactStore {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
+            #[cfg(feature = "lashlang")]
+            publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 

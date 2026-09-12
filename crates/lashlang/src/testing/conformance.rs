@@ -4,6 +4,7 @@
 //! durable reopen behavior. Generic raw-byte storage is deliberately absent:
 //! every publication is a verified, content-addressed module artifact.
 
+use std::future::Future as _;
 use std::sync::Arc;
 
 use lash_core::{ArtifactOwner, ExecutionScope};
@@ -188,11 +189,24 @@ async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactStore
 async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process slow(root: str) -> str { finish root }");
     let abandoned = execution_owner("slow-module-writer");
-    let writer = store.publish_module_artifact(&abandoned, &artifact);
+    let pause = store
+        .pause_next_publication_for_testing()
+        .expect("conformance store exposes its publication serialization pause");
+    let mut writer = Box::pin(store.publish_module_artifact(&abandoned, &artifact));
+    std::future::poll_fn(|context| {
+        let _ = writer.as_mut().poll(context);
+        if pause.is_reached() {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await;
     store
         .retire_module_artifact_owner(&abandoned)
         .await
-        .expect("retire before the paused writer is polled");
+        .expect("retire after publication reached the backend serialization point");
+    pause.resume();
     assert!(
         writer.await.is_err(),
         "a writer paused across retirement must remain fenced"

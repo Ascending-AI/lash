@@ -529,6 +529,7 @@ pub(super) struct RecordingContext {
     pub(super) sleeps: Mutex<Vec<u64>>,
     pub(super) runs: Mutex<Vec<String>>,
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
+    fail_process_workflow_starts: AtomicUsize,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
@@ -555,6 +556,11 @@ impl lash_trace::TraceSink for RecordingTraceSink {
 }
 
 impl RecordingContext {
+    pub(super) fn fail_next_process_workflow_start(&self) {
+        self.fail_process_workflow_starts
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
     pub(super) fn with_endpoint(endpoint: Endpoint) -> Self {
         Self {
             endpoint: Some(endpoint),
@@ -743,6 +749,17 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             .lock_recover()
             .push(execution_context.clone());
         Box::pin(async move {
+            if self
+                .fail_process_workflow_starts
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(TerminalError::new(
+                    "injected process workflow start failure",
+                ));
+            }
             if let Some(endpoint) = endpoint {
                 let complete_runs =
                     matches!(registration.input.as_ref(), ProcessInput::ToolCall { .. });

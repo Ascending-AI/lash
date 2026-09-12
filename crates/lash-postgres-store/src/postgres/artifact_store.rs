@@ -18,6 +18,22 @@ impl PostgresLashlangArtifactStore {
             .map(|_| ())
     }
 
+    /// Serialize every mutation of one logical artifact at a stable PostgreSQL
+    /// advisory-lock key. Row locks are insufficient because both the bytes row
+    /// and its final owner edge may legitimately disappear during release.
+    async fn lock_artifact(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        namespace: &str,
+        artifact_ref: &str,
+    ) -> Result<(), sqlx::Error> {
+        let key = format!("lash-artifact:{namespace}:{artifact_ref}");
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(key)
+            .execute(&mut **tx)
+            .await
+            .map(|_| ())
+    }
+
     async fn publish_namespaced_bytes(
         &self,
         namespace: &str,
@@ -28,6 +44,9 @@ impl PostgresLashlangArtifactStore {
         let (owner_kind, owner_id) = owner.storage_parts().map_err(|error| error.to_string())?;
         let mut tx = self.pool.begin().await.map_err(|error| error.to_string())?;
         Self::lock_owner(&mut tx, owner_kind, &owner_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        Self::lock_artifact(&mut tx, namespace, artifact_ref)
             .await
             .map_err(|error| error.to_string())?;
         let retired: bool = sqlx::query_scalar(
@@ -107,13 +126,55 @@ impl PostgresLashlangArtifactStore {
         artifact_ref: &str,
         owner: &lash_core::ArtifactOwner,
     ) -> Result<(), String> {
-        let bytes = self
-            .get_namespaced_bytes(namespace, artifact_ref)
+        let (owner_kind, owner_id) = owner.storage_parts().map_err(|error| error.to_string())?;
+        let mut tx = self.pool.begin().await.map_err(|error| error.to_string())?;
+        Self::lock_owner(&mut tx, owner_kind, &owner_id)
             .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("missing artifact `{artifact_ref}`"))?;
-        self.publish_namespaced_bytes(namespace, artifact_ref, &bytes, owner)
+            .map_err(|error| error.to_string())?;
+        Self::lock_artifact(&mut tx, namespace, artifact_ref)
             .await
+            .map_err(|error| error.to_string())?;
+        let retired: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM lash_artifact_owner_retirements
+                 WHERE owner_kind = $1 AND owner_id = $2
+             )",
+        )
+        .bind(owner_kind)
+        .bind(&owner_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        if retired {
+            return Err("artifact owner has been permanently retired".to_string());
+        }
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM lash_lashlang_artifacts
+                 WHERE namespace = $1 AND artifact_ref = $2
+             )",
+        )
+        .bind(namespace)
+        .bind(artifact_ref)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        if !exists {
+            return Err(format!("missing artifact `{artifact_ref}`"));
+        }
+        sqlx::query(
+            "INSERT INTO lash_artifact_owners
+             (namespace, artifact_ref, owner_kind, owner_id)
+             VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+        )
+        .bind(namespace)
+        .bind(artifact_ref)
+        .bind(owner_kind)
+        .bind(owner_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        tx.commit().await.map_err(|error| error.to_string())
     }
 
     async fn transfer_namespaced_owner(
@@ -133,6 +194,9 @@ impl PostgresLashlangArtifactStore {
                 .await
                 .map_err(|error| error.to_string())?;
         }
+        Self::lock_artifact(&mut tx, namespace, artifact_ref)
+            .await
+            .map_err(|error| error.to_string())?;
         let retired: bool = sqlx::query_scalar(
             "SELECT EXISTS (
                  SELECT 1 FROM lash_artifact_owner_retirements
@@ -222,6 +286,9 @@ impl PostgresLashlangArtifactStore {
         Self::lock_owner(&mut tx, owner_kind, &owner_id)
             .await
             .map_err(|error| error.to_string())?;
+        Self::lock_artifact(&mut tx, namespace, artifact_ref)
+            .await
+            .map_err(|error| error.to_string())?;
         sqlx::query(
             "DELETE FROM lash_artifact_owners
              WHERE namespace = $1 AND artifact_ref = $2
@@ -273,6 +340,23 @@ impl PostgresLashlangArtifactStore {
         .execute(&mut *tx)
         .await
         .map_err(|error| error.to_string())?;
+        let mut artifact_refs: Vec<String> = sqlx::query_scalar(
+            "SELECT artifact_ref FROM lash_artifact_owners
+             WHERE namespace = $1 AND owner_kind = $2 AND owner_id = $3
+             ORDER BY artifact_ref",
+        )
+        .bind(namespace)
+        .bind(owner_kind)
+        .bind(&owner_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        artifact_refs.dedup();
+        for artifact_ref in &artifact_refs {
+            Self::lock_artifact(&mut tx, namespace, artifact_ref)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
         sqlx::query(
             "DELETE FROM lash_artifact_owners
              WHERE namespace = $1 AND owner_kind = $2 AND owner_id = $3",
@@ -286,6 +370,7 @@ impl PostgresLashlangArtifactStore {
         sqlx::query(
             "DELETE FROM lash_lashlang_artifacts AS artifact
              WHERE artifact.namespace = $1
+               AND artifact.artifact_ref = ANY($2)
                AND NOT EXISTS (
                    SELECT 1 FROM lash_artifact_owners AS owner
                    WHERE owner.namespace = artifact.namespace
@@ -293,6 +378,7 @@ impl PostgresLashlangArtifactStore {
                )",
         )
         .bind(namespace)
+        .bind(&artifact_refs)
         .execute(&mut *tx)
         .await
         .map_err(|error| error.to_string())?;
@@ -303,6 +389,15 @@ impl PostgresLashlangArtifactStore {
 #[cfg(feature = "lashlang")]
 #[async_trait::async_trait]
 impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
+    fn pause_next_publication_for_testing(&self) -> Option<lashlang::ArtifactPublicationPause> {
+        let pause = lashlang::ArtifactPublicationPause::default();
+        *self
+            .publication_pause
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(pause.clone());
+        Some(pause)
+    }
+
     fn durability_tier(&self) -> lashlang::DurabilityTier {
         lashlang::DurabilityTier::Durable
     }
@@ -320,6 +415,14 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         let bytes = artifact
             .to_store_bytes()
             .map_err(lashlang::ArtifactStoreError::from)?;
+        let publication_pause = self
+            .publication_pause
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(pause) = publication_pause {
+            pause.pause().await;
+        }
         self.publish_namespaced_bytes(
             MODULE_ARTIFACT_NAMESPACE,
             artifact.module_ref.as_str(),

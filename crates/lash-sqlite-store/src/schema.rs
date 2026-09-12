@@ -386,8 +386,7 @@ CREATE TABLE IF NOT EXISTS artifact_owners (
     owner_kind   TEXT NOT NULL CHECK (owner_kind IN ('host', 'process', 'execution')),
     owner_id     TEXT NOT NULL,
     PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
-    FOREIGN KEY (namespace, artifact_ref)
-        REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
 );
 
 -- Execution-owner retirement is a permanent publication fence. Host and
@@ -660,7 +659,8 @@ CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
 -- identity, the same key the bound effect journal's rows carry.
 CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL
+    retired_at_ms   INTEGER NOT NULL,
+    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
 );
 
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
@@ -757,6 +757,14 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
 
+CREATE TABLE IF NOT EXISTS process_artifact_cleanup (
+    process_id       TEXT NOT NULL,
+    incarnation      INTEGER NOT NULL,
+    cleanup_json     TEXT NOT NULL,
+    PRIMARY KEY (process_id, incarnation),
+    FOREIGN KEY (process_id, incarnation) REFERENCES process_tombstones(process_id, incarnation) ON DELETE RESTRICT
+);
+
 CREATE TABLE IF NOT EXISTS process_leases (
     process_id       TEXT PRIMARY KEY,
     lease_owner_id   TEXT,
@@ -848,7 +856,9 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version-29 registries are rejected rather than migrated.
 /// Version 31 removes the unread process waiting projection and its index.
 /// Version-30 registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 32;
+/// Version 33 makes Process Prune retain exact artifact-release evidence until
+/// every configured artifact store acknowledges owner severance.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 33;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1023,7 +1033,8 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 -- Keyed by the scope's journal identity, the same key its effect rows carry.
 CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL
+    retired_at_ms   INTEGER NOT NULL,
+    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
 );
 ";
 
@@ -1077,7 +1088,9 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // children, groups, and await-event promises in one transaction and leaves a
 // tombstone every admission path refuses. Pre-17 effect databases are
 // rejected at open; there is no migration arm.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 17;
+// Version 18 makes that lifecycle evidence own execution-artifact cleanup
+// completion. Pre-18 effect databases are rejected rather than migrated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 18;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
