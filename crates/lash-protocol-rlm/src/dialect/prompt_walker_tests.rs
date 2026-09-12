@@ -28,15 +28,16 @@ use crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
 use crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY;
 use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
 
-/// The authored example corpus, as the shipped tools spell it.
+/// The authored example corpus, as tool authors spell it.
 ///
 /// Copied deliberately rather than read from a live catalog: this is the shape
-/// authors write, and the rewriter has to survive every one of them. Each is a
-/// real example from `lash-tools`, `lash-plugin-process-controls`,
-/// `lash-protocol-standard` or the workbench's deferred-tool registry.
+/// authors write, and the rewriter has to survive every one of them. The set
+/// spans the current first-party plugins (process controls, the standard
+/// protocol, the MCP web tools) plus retired tool families the rewriter must
+/// still accept verbatim.
 fn authored_tool_examples() -> Vec<&'static str> {
     vec![
-        r#"await web.search({ query: "latest Rust release notes", limit: 5 })?"#,
+        r#"await parallel.web_search_57jmhsdk2uvtc7o55qwq73syq({ query: "latest Rust release notes", limit: 5 })?"#,
         r#"await files.read({ path: "src/main.rs", offset: 1, limit: 120 })?"#,
         r#"await files.edit({ path: "src/main.rs", edits: [{ oldText: "old();", newText: "new();" }] })?"#,
         r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#,

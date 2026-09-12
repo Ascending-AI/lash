@@ -28,22 +28,6 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     },
     ScenarioContractSpec {
         suite: "agent",
-        test_name: "agent_scenario_shell_nonzero_and_pipeline_results_are_data",
-        owned_invariant: "Shell failures and pipelines remain data at the facade boundary.",
-        semantic_oracle: "agent.shell_results_are_data",
-        required_sim_evidence: &["exec_code", "tool_result"],
-        oracle_id: "sim.oracle.scenario.agent-contract.v1",
-    },
-    ScenarioContractSpec {
-        suite: "agent",
-        test_name: "agent_scenario_shell_output_survives_print_projection_in_variable",
-        owned_invariant: "Large shell output survives print projection and remains addressable.",
-        semantic_oracle: "agent.shell_output_print_projection_survives",
-        required_sim_evidence: &["exec_code", "provider_turn"],
-        oracle_id: "sim.oracle.scenario.agent-contract.v1",
-    },
-    ScenarioContractSpec {
-        suite: "agent",
         test_name: "agent_scenario_started_process_labeled_subagent_spawn",
         owned_invariant: "Started process spawns a subagent and records child session execution graphs.",
         semantic_oracle: "agent.started_process_subagent_spawn",
@@ -104,7 +88,7 @@ mod tests {
 
     #[test]
     fn agent_scenario_contract_metadata_is_unique_and_complete() {
-        assert_eq!(AGENT_SCENARIO_CONTRACTS.len(), 11);
+        assert_eq!(AGENT_SCENARIO_CONTRACTS.len(), 9);
         let mut names = BTreeSet::new();
         for contract in AGENT_SCENARIO_CONTRACTS {
             assert_eq!(contract.suite, "agent");

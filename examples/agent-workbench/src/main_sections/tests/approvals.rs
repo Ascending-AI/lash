@@ -48,7 +48,7 @@ async fn approval_test_core(
             data_dir.join("lash-sessions"),
         )))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_approvals(approvals),
+            WorkbenchPluginFactory::new().with_approvals(approvals),
         ))
         .trigger_store(trigger_store)
         .without_queued_work()

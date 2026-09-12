@@ -496,7 +496,7 @@ mod tests {
         }
         // Whether the binding lands in the manifest is governed by
         // `lash-tool-support/lashlang`, not by this crate's own feature: our
-        // `lashlang` implies it, but `lash-llm-tools`, `lash-tools`,
+        // `lashlang` implies it, but `lash-llm-tools`,
         // `lash-plugin-process-controls` and `lash-protocol-standard` each
         // enable it independently, so a workspace build can carry the binding
         // while this crate is built without the feature. An empty map is

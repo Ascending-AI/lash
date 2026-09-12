@@ -9,9 +9,9 @@ deliberately hunt for cross-session leaks in transcripts, trigger registrations,
 delivery, and durable process projections. The two sessions use the same trigger source
 and deliberately similar process names so superficial partitioning cannot pass.
 
-**Real tokens.** Both sessions call OpenRouter; the overlap prompts also use Tavily to
-make concurrent turns observable. Gate on literal operator markers and structural API
-state, never exact assistant prose.
+**Real tokens.** Both sessions call OpenRouter; the overlap prompts also use the keyless
+Parallel Search MCP web tool to make concurrent turns observable. Gate on literal operator
+markers and structural API state, never exact assistant prose.
 
 ## Scenario-specific golden rules
 
@@ -90,7 +90,7 @@ and B's `subscription_id` absent from A's. Do not use the shared name or
 
 Prepare distinct literal markers `FIG425-ISO-A-<run-id>` and
 `FIG425-ISO-B-<run-id>`. In each tab, submit a prompt that includes its marker, requests
-one current fact via `web.search`, and asks that the marker be repeated in the answer.
+one current fact via the Parallel web-search MCP tool, and asks that the marker be repeated in the answer.
 Trigger the two submissions concurrently through the browser driver.
 
 Poll until both scoped `/api/state` responses simultaneously contain one active turn;

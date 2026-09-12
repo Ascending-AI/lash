@@ -20,10 +20,10 @@ use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
 use lash_provider_openai::OpenAiCompatibleProvider;
 use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
-use lash_standard_plugins::{StandardToolStackOptions, standard_tool_stack};
 use tokio_util::sync::CancellationToken;
 
 use super::openai_compat::OpenAiCompatBenchServer;
+use super::plugin_stack::runtime_perf_plugin_stack;
 use super::providers::{
     BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE, BenchmarkEchoTool, BenchmarkLargeToolCatalog,
     BenchmarkObliqueTools, BenchmarkProviderControl, BenchmarkSettlementControl,
@@ -726,7 +726,6 @@ pub(crate) async fn build_runtime_with_store(
     trace_config: Option<RuntimePerfTraceConfig>,
 ) -> anyhow::Result<BenchmarkRuntime> {
     let execution_mode = scenario.execution_mode();
-    let standard_context_approach = scenario.standard_context_approach();
     let openai_compat_server = if matches!(scenario, RuntimePerfScenario::OpenAiCompatStream) {
         Some(OpenAiCompatBenchServer::start(benchmark_stream_profile(scenario)).await?)
     } else {
@@ -777,11 +776,10 @@ pub(crate) async fn build_runtime_with_store(
         RuntimePerfScenario::RlmToolCatalogCold | RuntimePerfScenario::RlmToolCatalogWarm
     )
     .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
-    let mut plugin_stack = standard_tool_stack(StandardToolStackOptions {
-        standard_context_approach: standard_context_approach.clone(),
-        tavily_api_key: None,
-        include_cancel_process: execution_mode.is_standard(),
-    });
+    let mut plugin_stack = runtime_perf_plugin_stack(
+        scenario.uses_rolling_history(),
+        execution_mode.is_standard(),
+    );
     let benchmark_tool = settlement_control.as_ref().map_or_else(
         || BenchmarkEchoTool::new(Arc::clone(&effect_host)),
         |control| {
@@ -1225,11 +1223,8 @@ pub(crate) async fn build_runtime_with_sqlite_store(
 ) -> anyhow::Result<BenchmarkRuntime> {
     let mode_id = scenario.execution_mode();
     let provider = benchmark_provider(scenario).into_handle();
-    let mut plugin_stack = standard_tool_stack(StandardToolStackOptions {
-        standard_context_approach: scenario.standard_context_approach(),
-        tavily_api_key: None,
-        include_cancel_process: mode_id.is_standard(),
-    });
+    let mut plugin_stack =
+        runtime_perf_plugin_stack(scenario.uses_rolling_history(), mode_id.is_standard());
     let sessions_root = root.join("sessions");
     let attachments_root = root.join("attachments");
     let artifacts_db = root.join("artifacts.db");
@@ -1395,11 +1390,8 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let (store_factory, store_metrics) = durable_postgres_session_store_factory(&postgres);
     let attachment_store = Arc::new(lash::persistence::InMemoryAttachmentStore::new());
     let commit_budget = lash::CommitBudget::bounded(1024 * 1024, 512);
-    let mut plugin_stack = standard_tool_stack(StandardToolStackOptions {
-        standard_context_approach: scenario.standard_context_approach(),
-        tavily_api_key: None,
-        include_cancel_process: mode_id.is_standard(),
-    });
+    let mut plugin_stack =
+        runtime_perf_plugin_stack(scenario.uses_rolling_history(), mode_id.is_standard());
     plugin_stack.push(Arc::new(StaticPluginFactory::new(
         "runtime_perf_tools",
         PluginSpec::new().with_tool_provider(Arc::new(BenchmarkEchoTool::new(effect_host.clone()))),

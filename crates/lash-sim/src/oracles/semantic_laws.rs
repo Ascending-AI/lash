@@ -476,60 +476,6 @@ pub(super) fn process_wake_fact(
     )
 }
 
-pub(super) fn agent_shell_output_projection_fact(
-    events: &[DeliveredBoundary],
-) -> Result<ScenarioContractGeneratedFact, String> {
-    let Some((exec, provider)) = events
-        .iter()
-        .filter(|event| {
-            event.kind == BoundaryKind::ExecCode
-                && event
-                    .payload
-                    .pointer("/runtime_completion/completion_family")
-                    .and_then(Value::as_str)
-                    == Some("exec_result")
-                && event
-                    .observed
-                    .pointer("/runtime_effect_outcome/result/Ok/calls")
-                    .and_then(Value::as_array)
-                    .is_some_and(Vec::is_empty)
-                && event
-                    .observed
-                    .get("execution_count")
-                    .and_then(Value::as_u64)
-                    == Some(1)
-        })
-        .find_map(|exec| {
-            successful_provider_events(events)
-                .into_iter()
-                .filter(|provider| {
-                    provider.actor_alias == exec.actor_alias && provider.sequence > exec.sequence
-                })
-                .min_by_key(|provider| provider.sequence)
-                .map(|provider| (exec, provider))
-        })
-    else {
-        return Err(
-            "agent shell output projection did not find an exec data result followed by same-actor provider projection"
-                .to_string(),
-        );
-    };
-    generated_fact(
-        "agent_shell_output_projection_survives",
-        "shell exec output is scheduler-owned data and a later same-actor provider turn projects it without replaying tool calls",
-        vec![exec, provider],
-        json!({
-            "exec_boundary": exec.boundary_id,
-            "projection_provider_boundary": provider.boundary_id,
-            "actor": exec.actor_alias,
-            "exec_sequence": exec.sequence,
-            "provider_sequence": provider.sequence,
-            "exec_result_channel": "runtime_effect_outcome.result.Ok",
-            "tool_calls_replayed": false,
-        }),
-    )
-}
-
 pub(super) fn agent_session_turn_child_provider_fact(
     events: &[DeliveredBoundary],
 ) -> Result<ScenarioContractGeneratedFact, String> {

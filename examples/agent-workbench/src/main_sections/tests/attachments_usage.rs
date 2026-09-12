@@ -430,7 +430,6 @@ fn attachment_usage_gate_state(
             model: "test-model".to_string(),
             model_variant: None,
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),

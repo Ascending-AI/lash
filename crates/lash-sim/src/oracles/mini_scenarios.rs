@@ -889,24 +889,6 @@ pub fn scenario_contract_generated_facts_for_semantic(
             process_wake_fact(events, "agent_durable_input_process_wake")?,
             observer_reconnect_fact(events, "agent_durable_input_observer_reconnect")?,
         ]),
-        "agent.shell_results_are_data" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.shell_results_are_data")?,
-            exec_semantic_fact(
-                events,
-                "agent_shell_exec_result_data",
-                ExecFactRequirement::RuntimeOutcome,
-            )?,
-            tool_reentry_fact(events, "agent_shell_tool_result_data", false)?,
-        ]),
-        "agent.shell_output_print_projection_survives" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.shell_output_print_projection_survives")?,
-            exec_semantic_fact(
-                events,
-                "agent_shell_output_exec_projection",
-                ExecFactRequirement::RuntimeOutcome,
-            )?,
-            agent_shell_output_projection_fact(events)?,
-        ]),
         "agent.started_process_subagent_spawn" => Ok(vec![
             agent_contract_execution_fact(events, "agent.started_process_subagent_spawn")?,
             process_wake_fact(events, "agent_started_process_subagent_spawn")?,

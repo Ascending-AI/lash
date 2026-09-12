@@ -1139,7 +1139,6 @@ pub(super) fn fig1293_migrated_tool_factories()
     let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
     vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
-        Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
         Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
             lash_subagents::CapabilityRegistry::new().with(Arc::new(
@@ -1167,7 +1166,11 @@ pub(super) async fn fig1293_seed_control_target(
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "fig1293"}),
                 },
-                lash_core::RecoveryContract::Rerunnable,
+                // Fixture-owned external process: `ExternallyOwned` keeps the
+                // installed worker from racing cancellation by trying to
+                // recover an input it does not own. Mirrors the PostgreSQL
+                // fixture.
+                lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
             )
             .with_extra_event_types([lash_core::ProcessEventType {

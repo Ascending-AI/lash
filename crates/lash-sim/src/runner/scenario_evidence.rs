@@ -617,10 +617,6 @@ fn scenario_transition_kind(contract: &ScenarioContractSpec) -> &'static str {
         "rlm.typed_schema_mismatch_repair_loop" => "rlm.typed-schema-mismatch-repair-transition",
         "rlm.typed_schema_any_of_mismatch" => "rlm.typed-anyof-mismatch-repair-transition",
         semantic if semantic.starts_with("rlm.") => "rlm.provider-repair-or-finish-transition",
-        "agent.shell_results_are_data" => "agent.shell-result-data-transition",
-        "agent.shell_output_print_projection_survives" => {
-            "agent.shell-output-print-projection-transition"
-        }
         "agent.foreground_tool_call_round_trip" => {
             "agent.foreground-tool-call-round-trip-transition"
         }
