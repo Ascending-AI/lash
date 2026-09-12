@@ -28,6 +28,8 @@ use ws_testing::{
 };
 #[path = "idle_timeout_tests.rs"]
 mod idle_timeout_tests;
+#[path = "response_error_tests.rs"]
+mod response_error_tests;
 fn process_event(state: &mut CodexStreamState, event: Value) {
     CodexProvider::process_sse_event(&event.to_string(), state, None).unwrap();
 }
@@ -489,16 +491,6 @@ fn codex_request_omits_output_token_cap() {
     req.generation.output_token_cap = NonZeroUsize::new(2_048);
     let request_limited = provider.build_request_body(&req, false).unwrap();
     assert!(request_limited.get("max_output_tokens").is_none());
-}
-
-#[test]
-fn codex_error_summary_uses_top_level_detail() {
-    let summary =
-        CodexProvider::codex_error_summary(400, r#"{"detail":"Unsupported parameter: foo"}"#);
-    assert_eq!(
-        summary.as_deref(),
-        Some("Codex request failed with 400: Unsupported parameter: foo")
-    );
 }
 
 #[test]
