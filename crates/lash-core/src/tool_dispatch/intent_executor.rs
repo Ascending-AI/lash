@@ -431,11 +431,12 @@ async fn execute_one(
             ))
         }
         crate::ToolIntent::EmitTrigger(intent) => {
-            // Unlike the process commands above, the router owns the whole
-            // emission: the occurrence's idempotency key is the store-side
-            // dedupe point and each reserved delivery starts under its own
-            // deterministic journal key, so a redrive of this declaration
-            // re-ingests the same occurrence and re-plays the same starts.
+            // The router owns the whole emission, but the durable declaration
+            // owns its occurrence identity. Stamp the request with that
+            // declaration's replay key so two declarations cannot collapse
+            // merely because their callers reused a key. A redrive retains the
+            // same replay key, so it still re-ingests the same occurrence and
+            // replays the same deterministic delivery starts.
             // `emit_recorded` settles the report those two dedupe points make
             // replay-varying, so the recorded `Executed` result is byte-stable.
             let router = context.trigger_router.as_ref().ok_or_else(|| {
@@ -443,12 +444,13 @@ async fn execute_one(
                     "trigger store is unavailable in this runtime".to_string(),
                 )
             })?;
+            let mut request = intent.request.clone();
+            request.idempotency_key = identity.replay_key.clone();
             // Boxed because the drain future is already near the coordinator's
             // large-future budget and emission adds a delivery-start frame.
-            let report = Box::pin(
-                router.emit_recorded(intent.request.clone(), &context.effect_controller.scoped()),
-            )
-            .await?;
+            let report =
+                Box::pin(router.emit_recorded(request, &context.effect_controller.scoped()))
+                    .await?;
             Ok((
                 serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
                 None,

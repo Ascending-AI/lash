@@ -1228,6 +1228,92 @@ async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emis
     }
 }
 
+/// The occurrence dedupe point belongs to the durable declaration, not to the
+/// caller-selected key inside its payload. Distinct declaration replay keys
+/// must produce distinct occurrences even when callers reuse that key, while
+/// redriving those same declarations must not add another occurrence.
+#[tokio::test]
+async fn recorded_trigger_occurrence_identity_follows_the_declaration_replay_key() {
+    use crate::TriggerStore as _;
+
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    register_trigger_intent_subscription(&store).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None));
+    let declaration = crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
+        session_id: SessionId::from("session"),
+        request: crate::TriggerOccurrenceRequest::new(
+            "intent.trigger.emitted",
+            "intent-law-source",
+            json!({"declared": true}),
+            "shared-caller-key",
+        ),
+    });
+    let mut context = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        Arc::new(crate::TestLocalProcessRegistry::default()),
+        crate::ToolIntents::v1(vec![declaration.clone(), declaration]),
+        Arc::clone(&calls),
+    );
+    context.trigger_router = Some(crate::TriggerRouter::new(
+        Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
+        crate::testing::process_work_wiring_for_registry(Arc::new(
+            crate::TestLocalProcessRegistry::default(),
+        )
+            as Arc<dyn crate::ProcessRegistry>),
+    ));
+
+    let first = run_fixed_intent_attempt(&context).await;
+    let replay_keys = first
+        .intent_outcomes
+        .iter()
+        .map(|outcome| match outcome {
+            crate::ToolIntentExecutionOutcome::Executed { identity, .. } => {
+                identity.replay_key.clone()
+            }
+            outcome => panic!("both trigger declarations must execute: {outcome:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_ne!(
+        replay_keys[0], replay_keys[1],
+        "the two declarations must have distinct replay keys"
+    );
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read distinct declaration occurrences");
+    assert_eq!(
+        occurrences.len(),
+        2,
+        "same caller key must not collapse distinct declarations"
+    );
+    assert_eq!(
+        occurrences
+            .iter()
+            .map(|occurrence| occurrence.idempotency_key.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        replay_keys.iter().cloned().collect(),
+        "each occurrence must be stamped with its declaration replay key"
+    );
+
+    let redriven = run_fixed_intent_attempt(&context).await;
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "the attempt body replays");
+    assert_eq!(
+        redriven.intent_outcomes, first.intent_outcomes,
+        "redrive reports the same declaration outcomes"
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("read occurrences after redrive")
+            .len(),
+        2,
+        "redriving the same replay keys must not add occurrences"
+    );
+}
+
 /// The at-most-once half: a crash after the occurrence is ingested and its
 /// delivery start commits leaves durable state the redrive must not add to. The
 /// redrive re-ingests the same idempotency key, replays the same delivery start
