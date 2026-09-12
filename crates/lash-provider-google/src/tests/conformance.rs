@@ -294,7 +294,9 @@ impl ProviderNormalizer for GoogleNormalizer {
                 secret: "oauth-client-secret".into(),
             },
         );
-        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
+        let contents = provider
+            .build_contents_with_attachment_parts(&req, &[])
+            .expect("retention policy");
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             .expect("conformance schema projection")
     }

@@ -487,7 +487,9 @@ mod tests {
                 secret: "oauth-client-secret".into(),
             },
         );
-        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
+        let contents = provider
+            .build_contents_with_attachment_parts(&req, &[])
+            .expect("retention policy");
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             .expect("schema projection")
     }
@@ -735,6 +737,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: lash_core::SamplingCapability::Configurable,
+            reasoning_retention: Default::default(),
         }
     }
 
@@ -763,6 +766,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: lash_core::SamplingCapability::Configurable,
+            reasoning_retention: Default::default(),
         }
     }
 
@@ -1297,7 +1301,9 @@ mod tests {
         }]);
 
         let provider = GoogleOAuthProvider::for_test();
-        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
+        let contents = provider
+            .build_contents_with_attachment_parts(&req, &[])
+            .expect("retention policy");
         let body = GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             .expect("schema projection");
         assert!(
@@ -1353,8 +1359,9 @@ mod tests {
                 cache_breakpoint: false,
             }],
         )];
-        let contents =
-            GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+        let contents = GoogleOAuthProvider::for_test()
+            .build_contents_with_attachment_parts(&req, &[])
+            .expect("retention policy");
         assert_eq!(contents[0]["parts"][0]["thoughtSignature"], signature);
     }
 
@@ -1467,8 +1474,9 @@ mod tests {
                     cache_breakpoint: false,
                 }],
             )];
-            let contents =
-                GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+            let contents = GoogleOAuthProvider::for_test()
+                .build_contents_with_attachment_parts(&req, &[])
+                .expect("retention policy");
             assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
         }
     }

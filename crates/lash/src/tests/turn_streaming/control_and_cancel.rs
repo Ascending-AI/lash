@@ -1064,7 +1064,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
     assert_eq!(
         serde_json::to_string(&deferred_request)
             .expect("serialize deferred active-input request messages"),
-        r#"[{"role":"User","blocks":[{"Text":{"text":"primary hangs","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"deferred active steer","response_meta":null,"cache_breakpoint":false}}]}]"#
+        r#"[{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"primary hangs","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"deferred active steer","response_meta":null,"cache_breakpoint":false}}]}]"#
     );
     Ok(())
 }
@@ -1295,7 +1295,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         assert_eq!(
             serde_json::to_string(&requests[1][..requests[1].len() - 1])
                 .expect("serialize stable request message prefix"),
-            r#"[{"role":"User","blocks":[{"Text":{"text":"perform two iterations","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"<lashlang>\nprint(\"first work complete\")\n</lashlang>","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"history[1].output[0] (19 chars):\nfirst work complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"mid-turn injection marker","response_meta":null,"cache_breakpoint":true}}]}]"#
+            r#"[{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"perform two iterations","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"<lashlang>\nprint(\"first work complete\")\n</lashlang>","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"history[1].output[0] (19 chars):\nfirst work complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"mid-turn injection marker","response_meta":null,"cache_breakpoint":true}}]}]"#
         );
         assert_eq!(
             serde_json::to_string(&requests[2])?

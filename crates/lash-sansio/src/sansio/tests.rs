@@ -38,6 +38,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         tool_specs: Vec::new().into(),
         system_prompt: Arc::from(""),
         session_id: SessionId::from("test".to_string()),
+        agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination: (),
@@ -412,6 +413,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         protocol_iteration: 0,
         use_tools: false,
     });
+    assert_eq!(active_request.scope.agent_frame_id, "test-frame");
     assert!(active_request.messages.iter().any(|message| {
         message.role == crate::llm::types::LlmRole::User
             && message_text(message).contains("=== TURN EVENTS ===")

@@ -25,9 +25,11 @@ mod tests {
     use crate::stream::StreamState;
     use crate::{AnthropicProvider, DEFAULT_BASE_URL};
     use lash_core::llm::types::{
-        AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage,
-        LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole, LlmStreamEvent, LlmTerminalReason,
-        LlmToolChoice, LlmToolSpec, LlmUsage, NonNegativeFiniteF64, ProviderRouteIdentity,
+        AnthropicThinkingRetention, AttachmentSource, LlmContentBlock, LlmEventSender,
+        LlmJsonSchema, LlmMessage, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole,
+        LlmStreamEvent, LlmTerminalReason, LlmToolChoice, LlmToolSpec, LlmUsage,
+        NonNegativeFiniteF64, ProviderRouteIdentity, ReasoningRetentionCapability,
+        ReasoningRetentionPolicy, ReasoningRetentionSelection,
     };
     use lash_core::provider::{
         CacheRetention, ModelCapability, Provider, ProviderOptions, ReasoningCapability,
@@ -101,6 +103,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: lash_core::SamplingCapability::Configurable,
+            reasoning_retention: Default::default(),
         }
     }
 
@@ -129,6 +132,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: lash_core::SamplingCapability::Configurable,
+            reasoning_retention: Default::default(),
         }
     }
 
@@ -1095,6 +1099,30 @@ mod tests {
         assert!(body.get("thinking").is_none());
     }
 
+    #[test]
+    fn fig1123_native_clear_thinking_maps_exact_thinking_turn_units() {
+        let provider = AnthropicProvider::new("key");
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
+        *req.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+            capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
+            selection: ReasoningRetentionSelection::AnthropicClearThinking {
+                keep: AnthropicThinkingRetention::Turns(std::num::NonZeroU32::new(2).unwrap()),
+            },
+        };
+
+        let body = provider.build_request_body(&req).expect("body");
+
+        assert_eq!(
+            body["context_management"],
+            json!({
+                "edits": [{
+                    "type": "clear_thinking_20251015",
+                    "keep": {"type": "thinking_turns", "value": 2},
+                }]
+            })
+        );
+    }
+
     // Header-capturing transport: records the outbound `anthropic-beta` header
     // and answers with a minimal end_turn stream so `complete` succeeds. Used to
     // assert the interleaved-thinking beta gates on the emitted thinking shape.
@@ -1177,6 +1205,21 @@ mod tests {
             !captured_beta_for(plain).contains(crate::policy::INTERLEAVED_THINKING_BETA),
             "a request without thinking must not request the interleaved beta"
         );
+    }
+
+    #[test]
+    fn fig1123_context_management_beta_gates_on_native_retention_body() {
+        let mut req = request(vec![LlmMessage::text(LlmRole::User, "think")]);
+        *req.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+            capability: Some(ReasoningRetentionCapability::AnthropicClearThinking),
+            selection: ReasoningRetentionSelection::AnthropicClearThinking {
+                keep: AnthropicThinkingRetention::All,
+            },
+        };
+
+        let beta = captured_beta_for(req);
+
+        assert!(beta.contains("context-management-2025-06-27"));
     }
 
     #[test]

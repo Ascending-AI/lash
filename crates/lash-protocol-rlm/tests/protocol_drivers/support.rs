@@ -70,6 +70,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: SessionId::from("test"),
+        agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination,

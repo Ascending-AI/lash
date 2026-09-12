@@ -40,6 +40,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-plugin-snapshot-revision/v2",
     "lash-process-env/v4",
     "lash-process-env/v5",
+    "lash-process-env/v6",
     "lash-process-lease/v2",
     "lash-queued-work-batch/v2",
     "lash-queued-work-claim-lease/v2",
@@ -407,6 +408,8 @@ mod blake3_domain_tests {
     // it to a disposition-carrying encoding; and the v3 payload after the same
     // ticket's fix round replaced the hole *count* with per-attempt descriptors.
     const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
+        "lash-process-env/v4",
+        "lash-process-env/v5",
         "lash-plugin-snapshot-revision/v2",
         "lash-queued-work-claim-lease/v2",
         "lash-rolling-history-compaction/v1",

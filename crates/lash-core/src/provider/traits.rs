@@ -57,7 +57,7 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
 
     /// Execute one request.
     ///
-    /// Implementations must apply [`LlmRequest::replay_safe_for`] for their
+    /// Implementations must apply [`LlmRequest::reasoning_retention_safe_for`] for their
     /// exact [`Provider::route_identity`] before serializing any raw wire body.
     /// `ProviderHandle` applies the semantic gate too; this raw-trait
     /// obligation is the structural backstop for direct callers.

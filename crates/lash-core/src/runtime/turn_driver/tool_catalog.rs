@@ -102,6 +102,13 @@ impl RuntimeTurnDriver<'_> {
         );
         let prepared = crate::build_turn(crate::SansIoTurnInput {
             session_id: self.session_id.clone(),
+            agent_frame_id: self
+                .turn_pipeline
+                .state()
+                .current_frame_node_id
+                .clone()
+                .expect("an admitted turn has a committed active agent frame")
+                .into_inner(),
             turn_id: self.turn_id.clone(),
             autonomous: session_policy.autonomous,
             model,

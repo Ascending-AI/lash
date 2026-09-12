@@ -1656,6 +1656,7 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
         cache_control: None,
         stream_termination: None,
         sampling: crate::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     };
     let model = crate::ModelSpec::builder("mock-model")
         .variant(crate::ReasoningSelection::Effort("xhigh".to_string()))
@@ -1740,6 +1741,7 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         cache_control: None,
         stream_termination: None,
         sampling: crate::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     };
     let model = crate::ModelSpec::builder("mock-model")
         .variant(crate::ReasoningSelection::Effort("turbo".to_string()))

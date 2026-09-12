@@ -19,8 +19,8 @@ mod fixture;
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-7861e438/postgres-expected.json",
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-ee717fab/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/postgres-expected.json",
 ];
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]

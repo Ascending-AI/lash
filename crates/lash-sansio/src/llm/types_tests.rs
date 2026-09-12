@@ -22,6 +22,109 @@ fn replay_request(blocks: Vec<LlmContentBlock>) -> LlmRequest {
     }
 }
 
+fn marked_text(role: LlmRole, text: &str, starts_user_segment: bool) -> LlmMessage {
+    let mut message = LlmMessage::text(role, text);
+    message.starts_user_segment = starts_user_segment;
+    message
+}
+
+#[test]
+fn fig1123_client_side_retention_cuts_only_at_genuine_user_segments() {
+    let serving = route("openai-compatible", "https://gateway.example/v1", "model-a");
+    let mut request = replay_request(Vec::new());
+    request.messages = vec![
+        marked_text(LlmRole::User, "first genuine input", true),
+        LlmMessage::new(
+            LlmRole::Assistant,
+            vec![LlmContentBlock::ToolCall {
+                call_id: "call-1".to_string(),
+                tool_name: "lookup".to_string(),
+                input_json: "{}".to_string(),
+                replay: None,
+            }],
+        ),
+        LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::ToolResult {
+                call_id: "call-1".to_string(),
+                content: "result".to_string(),
+                tool_name: Some("lookup".to_string()),
+            }],
+        ),
+        marked_text(LlmRole::User, "synthetic observation", false),
+        marked_text(LlmRole::User, "second genuine input", true),
+        marked_text(LlmRole::Assistant, "second answer", false),
+        marked_text(LlmRole::User, "third genuine input", true),
+    ];
+    *request.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+        capability: Some(ReasoningRetentionCapability::ClientSideUserSegments),
+        selection: ReasoningRetentionSelection::ClientSideUserSegments {
+            max_segments: std::num::NonZeroUsize::new(2).unwrap(),
+        },
+    };
+
+    let safe = request
+        .reasoning_retention_safe_for(
+            &serving,
+            "OpenAI Chat Completions",
+            ProviderReasoningRetentionSupport::ClientSideUserSegments,
+        )
+        .expect("fallback is supported");
+
+    assert_eq!(safe.messages.len(), 3);
+    assert!(safe.messages[0].starts_user_segment);
+    assert!(matches!(
+        &safe.messages[0].blocks[0],
+        LlmContentBlock::Text { text, .. } if text.as_ref() == "second genuine input"
+    ));
+    assert!(safe.messages.iter().all(|message| !message.blocks.iter().any(
+        |block| matches!(block, LlmContentBlock::ToolCall { call_id, .. } | LlmContentBlock::ToolResult { call_id, .. } if call_id == "call-1")
+    )));
+}
+
+#[test]
+fn fig1123_native_retention_keeps_http_history_and_rejects_cross_primitive_approximation() {
+    let serving = route("openai", "https://api.openai.com/v1", "model-a");
+    let mut request = replay_request(Vec::new());
+    request.messages = vec![
+        marked_text(LlmRole::User, "old", true),
+        marked_text(LlmRole::Assistant, "answer", false),
+        marked_text(LlmRole::User, "new", true),
+    ];
+    *request.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+        capability: Some(ReasoningRetentionCapability::OpenAiContext {
+            supported: vec![OpenAiReasoningContext::CurrentTurn],
+        }),
+        selection: ReasoningRetentionSelection::OpenAiContext {
+            context: OpenAiReasoningContext::CurrentTurn,
+        },
+    };
+
+    let safe = request
+        .reasoning_retention_safe_for(
+            &serving,
+            "OpenAI Responses",
+            ProviderReasoningRetentionSupport::OpenAiContext,
+        )
+        .expect("native policy is exact");
+    assert_eq!(
+        safe.messages, request.messages,
+        "native pruning is model-side"
+    );
+
+    let error = request
+        .reasoning_retention_safe_for(
+            &serving,
+            "OpenAI Chat Completions",
+            ProviderReasoningRetentionSupport::ClientSideUserSegments,
+        )
+        .expect_err("native units must not be approximated as user segments");
+    assert_eq!(
+        error.category,
+        ReasoningRetentionValidationCategory::UnsupportedSelection
+    );
+}
+
 #[test]
 fn route_identity_normalizes_endpoint_without_collapsing_distinct_gateways() {
     assert_eq!(

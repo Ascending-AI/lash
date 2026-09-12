@@ -713,7 +713,8 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
 }
 
 #[tokio::test]
-pub(super) async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_state() {
+pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_preserves_execution_state()
+ {
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),
@@ -850,7 +851,8 @@ pub(super) async fn caller_supplied_key_colliding_with_existing_frame_preserves_
 }
 
 #[tokio::test]
-pub(super) async fn materialized_frame_switch_clears_checkpoint_and_resets_resident_executor() {
+pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_resets_resident_executor()
+ {
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),

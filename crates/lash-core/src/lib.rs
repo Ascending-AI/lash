@@ -1117,10 +1117,12 @@ pub(crate) use plugin::{
 };
 
 pub use provider::{
-    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
-    ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
-    SamplingCapability, StreamTermination,
+    AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
+    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
+    InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
+    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,

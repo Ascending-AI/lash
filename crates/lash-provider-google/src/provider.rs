@@ -450,13 +450,13 @@ impl GoogleOAuthProvider {
             })
             .collect::<Vec<_>>();
         let inline_contents =
-            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts);
+            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts)?;
 
         let (attachment_parts, used_uploaded_files) = self
             .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
             .await?;
         let contents = if used_uploaded_files {
-            self.build_contents_with_attachment_parts(&req, &attachment_parts)
+            self.build_contents_with_attachment_parts(&req, &attachment_parts)?
         } else {
             inline_contents.clone()
         };
@@ -571,6 +571,7 @@ impl Provider for GoogleOAuthProvider {
                     .with_kind(ProviderFailureKind::Validation)
                     .with_code("invalid_provider_endpoint")
             })?;
+        let req = self.reasoning_retention_safe_request(&req)?.into_owned();
         Self::validate_attachments(&req)?;
         let manager = Arc::clone(&self.credentials);
         let mut context = GoogleCredentialCallContext {
@@ -763,5 +764,47 @@ mod error_detail_tests {
             json!("resolved-project")
         );
         assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn unsupported_retention_is_refused_before_project_resolution() {
+        let transport = Arc::new(ProjectResolutionTransport {
+            calls: AtomicUsize::new(0),
+        });
+        let mut provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            u64::MAX,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(transport.clone());
+        let mut request = completion_request();
+        *request.model_capability.reasoning_retention = lash_core::ReasoningRetentionPolicy {
+            capability: Some(lash_core::ReasoningRetentionCapability::OpenAiContext {
+                supported: vec![lash_core::OpenAiReasoningContext::CurrentTurn],
+            }),
+            selection: lash_core::ReasoningRetentionSelection::OpenAiContext {
+                context: lash_core::OpenAiReasoningContext::CurrentTurn,
+            },
+        };
+
+        let error = provider
+            .complete(request)
+            .await
+            .expect_err("provider-native retention must be refused");
+
+        assert_eq!(error.kind, ProviderFailureKind::Unsupported);
+        assert_eq!(
+            error.code.as_deref(),
+            Some("unsupported_reasoning_retention")
+        );
+        assert_eq!(
+            transport.calls.load(Ordering::SeqCst),
+            0,
+            "retention refusal must precede project-resolution HTTP"
+        );
     }
 }

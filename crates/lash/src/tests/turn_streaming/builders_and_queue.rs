@@ -331,7 +331,7 @@ pub(super) async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle
         assert_eq!(
             serde_json::to_string(&requests[0])
                 .expect("serialize queued-next request user messages"),
-            r#"[{"role":"User","blocks":[{"Text":{"text":"queued work","response_meta":null,"cache_breakpoint":false}}]}]"#
+            r#"[{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"queued work","response_meta":null,"cache_breakpoint":false}}]}]"#
         );
     }
     assert!(session.queued_turn().run().await?.ran().is_none());

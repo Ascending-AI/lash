@@ -631,6 +631,7 @@ fn checkpoint_config(
             "Synthetic sans-IO checkpoint profiler prompt. Preserve pending effects across checkpoint restore.",
         ),
         session_id: SessionId::from("runtime-perf-turn-checkpoint"),
+        agent_frame_id: "runtime-perf-turn-frame".to_string(),
         turn_id: TurnId::from("runtime-perf-turn"),
         emit_llm_trace: false,
         termination: ProtocolTurnOptions::default(),
