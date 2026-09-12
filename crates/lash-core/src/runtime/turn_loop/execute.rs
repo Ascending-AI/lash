@@ -331,8 +331,7 @@ async fn drive_turn_to_completion<F>(
     turn_events: &dyn TurnActivitySink,
 ) -> Result<(crate::MessageSequence, usize), RuntimeError>
 where
-    F: std::future::Future<Output = Result<(crate::MessageSequence, usize, bool), RuntimeError>>
-        + ?Sized,
+    F: std::future::Future<Output = Result<(crate::MessageSequence, usize), RuntimeError>> + ?Sized,
 {
     let mut event_pump = RuntimeStreamEventPump {
         assembler,
@@ -354,10 +353,7 @@ where
     while let Some(event) = event_rx.recv().await {
         emit_runtime_stream_event_to_sinks(events, turn_events, event, assembler).await;
     }
-    run_result.map(|(messages, iteration, turn_limit_final_scheduled)| {
-        assembler.turn_limit_final_scheduled = turn_limit_final_scheduled;
-        (messages, iteration)
-    })
+    run_result
 }
 
 impl LashRuntime {

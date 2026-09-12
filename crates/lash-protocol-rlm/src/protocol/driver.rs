@@ -39,7 +39,7 @@ use super::finish::internal_assistant_prose_message;
 use super::finish::{
     finish_required_reminder_message, finish_schema_mismatch_message,
     internal_assistant_prose_message_for_turn, invalid_cell_message, no_progress_stop_message,
-    output_limit_retry_message, turn_limit_final_message, validate_finish_value,
+    output_limit_retry_message, validate_finish_value,
 };
 use super::stall::{
     LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, reply_fingerprint, stalled_attempts,
@@ -220,7 +220,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &message,
                 )));
                 if let Err(err) = continue_or_stop_after_nonterminal(
-                    self.dialect.as_ref(),
                     &ctx,
                     &mut actions,
                     Vec::new(),
@@ -277,7 +276,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &self.dialect.foreign_cell_retry_copy(foreign_tags.open),
                 )));
                 if let Err(err) = continue_or_stop_after_nonterminal(
-                    self.dialect.as_ref(),
                     &ctx,
                     &mut actions,
                     Vec::new(),
@@ -327,7 +325,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         .map(std::num::NonZeroUsize::get),
                 )));
                 if let Err(err) = continue_or_stop_after_nonterminal(
-                    self.dialect.as_ref(),
                     &ctx,
                     &mut actions,
                     Vec::new(),
@@ -389,7 +386,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &self.dialect.malformed_cell_fence_retry_copy(),
                 )));
                 if let Err(err) = continue_or_stop_after_nonterminal(
-                    self.dialect.as_ref(),
                     &ctx,
                     &mut actions,
                     Vec::new(),
@@ -480,7 +476,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 schema.is_some(),
             )));
             if let Err(err) = continue_or_stop_after_nonterminal(
-                self.dialect.as_ref(),
                 &ctx,
                 &mut actions,
                 Vec::new(),
@@ -639,7 +634,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 && let Err(error_text) = validate_finish_value(finish_value, &schema)
             {
                 if let Err(err) = continue_or_stop_after_nonterminal(
-                    self.dialect.as_ref(),
                     &ctx,
                     &mut actions,
                     trajectory_events(
@@ -681,7 +675,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         }
 
         if let Err(err) = continue_or_stop_after_nonterminal(
-            self.dialect.as_ref(),
             &ctx,
             &mut actions,
             trajectory_events(
@@ -880,7 +873,6 @@ enum AttemptProgress {
 }
 
 fn continue_or_stop_after_nonterminal(
-    dialect: &dyn RlmDialect,
     ctx: &DriverContextView<'_>,
     actions: &mut Vec<DriverAction>,
     durable_events: Vec<SessionHistoryRecord>,
@@ -891,13 +883,6 @@ fn continue_or_stop_after_nonterminal(
         actions.push(DriverAction::AppendEvents(durable_events));
     }
     actions.push(DriverAction::AdvanceProtocolIteration);
-
-    if ctx.should_force_exit_after_grace_turn() {
-        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-            TurnStop::MaxTurns,
-        )));
-        return Ok(());
-    }
 
     if progress == AttemptProgress::Stalled {
         let attempts = stalled_attempts(ctx, actions);
@@ -933,25 +918,10 @@ fn continue_or_stop_after_nonterminal(
     if reached_turn_limit {
         // Final-turn-fresh doctrine: retry events, including the durable
         // reasoning record, are deliberately dropped at the turn limit.
-        match decode_rlm_termination_options(ctx.termination())? {
-            RlmTermination::FinishRequired { .. } => {
-                actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-                    TurnStop::MaxTurns,
-                )));
-                return Ok(());
-            }
-            RlmTermination::Natural => {
-                if let Some(max_turns) = ctx.turn_budget().max_turns() {
-                    actions.push(DriverAction::ScheduleTurnLimitFinal {
-                        message: turn_limit_final_message(
-                            dialect,
-                            rlm_message_id(ctx.turn_id(), next_protocol_iteration, "turn_limit"),
-                            max_turns,
-                        ),
-                    });
-                }
-            }
-        }
+        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
+            TurnStop::MaxTurns,
+        )));
+        return Ok(());
     } else if !retry_events.is_empty() {
         actions.push(DriverAction::AppendEvents(retry_events));
     }

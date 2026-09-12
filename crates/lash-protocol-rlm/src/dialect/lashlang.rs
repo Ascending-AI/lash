@@ -142,16 +142,6 @@ r#"Natural termination: prose alone ends this turn as the final answer, so write
         }
     }
 
-    fn turn_limit_final_copy(&self, max_turns: usize) -> String {
-        format!(
-            "Turn limit reached ({max_turns}). You MUST reply in plain prose now containing:\n\
-             1. Summary of what you accomplished\n\
-             2. List of remaining tasks not yet completed\n\
-             3. Recommended next steps\n\
-             Do NOT emit a <lashlang> block, invoke module operations, or call finish."
-        )
-    }
-
     fn finish_required_copy(&self, requires_schema: bool) -> String {
         if requires_schema {
             "Call `finish <value>` inside a paired `<lashlang>...</lashlang>` block when the task is complete, with a value matching the required output schema.".to_string()

@@ -55,12 +55,6 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             final_answer_format: None,
         })
         .unwrap(),
-        turn_limit_final_message: Arc::new(|id, _| lash_core::Message {
-            id,
-            role: lash_core::MessageRole::System,
-            parts: Vec::new().into(),
-            origin: None,
-        }),
     }
 }
 

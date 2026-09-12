@@ -21,8 +21,8 @@ cargo nextest run --workspace --locked -E 'test(runtime_feedback_)'
 ```
 
 Expect nonzero passed counts covering Responses, Codex, Chat, both Anthropic
-modes, Gemini, Code Assist, real RLM output-limit retries, checkpoint directives,
-and Standard turn limits. The Anthropic witnesses must include native/fallback
+modes, Gemini, Code Assist, real RLM output-limit retries, and checkpoint directives.
+The Anthropic witnesses must include native/fallback
 wire equality after a partial answer and a request containing both a legal and
 an illegal native slot. This companion uses scripted providers in tests only;
 it does not substitute for the judged browser row.

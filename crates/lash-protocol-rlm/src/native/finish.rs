@@ -6,23 +6,6 @@ use crate::dialect::RlmDialect;
 
 use super::state::RlmReasoningPart;
 
-pub(crate) fn turn_limit_final_message(
-    dialect: &dyn RlmDialect,
-    message_id: String,
-    max_turns: usize,
-) -> Message {
-    Message {
-        id: message_id.clone(),
-        role: MessageRole::System,
-        parts: shared_parts(vec![Part::text(
-            format!("{message_id}.p0"),
-            super::prompt::transport_copy(&dialect.turn_limit_final_copy(max_turns), dialect),
-            None,
-        )]),
-        origin: None,
-    }
-}
-
 pub(super) fn internal_assistant_prose_message_for_turn(
     turn_id: &TurnId,
     message_id: String,

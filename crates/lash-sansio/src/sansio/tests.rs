@@ -42,19 +42,6 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination: (),
-        turn_limit_final_message: Arc::new(test_turn_limit_final_message),
-    }
-}
-
-fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
-    Message {
-        id: message_id.clone(),
-        role: MessageRole::System,
-        parts: crate::shared_parts(vec![Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 
@@ -551,6 +538,124 @@ impl ProtocolDriverHandle for SyncThenAdvanceDriver {
     ) -> Vec<DriverAction> {
         Vec::new()
     }
+}
+
+struct CellEveryIterationDriver;
+
+impl ProtocolDriverHandle for CellEveryIterationDriver {
+    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        vec![DriverAction::StartLlm {
+            request: ctx.project_llm_request(false),
+            driver_state: None,
+        }]
+    }
+
+    fn handle_llm_success(
+        &self,
+        ctx: DriverContextView<'_>,
+        _waiting: WaitingLlmState,
+        _llm_response: LlmResponse,
+        _text_streamed: bool,
+    ) -> Vec<DriverAction> {
+        vec![DriverAction::StartExec {
+            language: "test".to_string(),
+            code: format!("effect-at-iteration-{}", ctx.protocol_iteration()),
+            driver_state: serde_json::Value::Null,
+        }]
+    }
+
+    fn handle_tool_results(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _completed: Vec<CompletedToolCall>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+
+    fn handle_exec_result(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _waiting: WaitingExecState,
+        _result: Result<crate::ExecResponse, String>,
+    ) -> Vec<DriverAction> {
+        vec![
+            DriverAction::AdvanceProtocolIteration,
+            DriverAction::StartCheckpoint {
+                checkpoint: CheckpointKind::AfterWork,
+                on_empty: CheckpointResumeAction::PrepareIteration,
+            },
+        ]
+    }
+}
+
+#[test]
+fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
+    let mut config = test_config(Arc::new(CellEveryIterationDriver));
+    config.turn_budget = crate::TurnBudget::bounded(1);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("run one cell")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects)
+        .expect("iteration zero provider call")
+        .0;
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::LlmCall { .. }))
+            .count(),
+        1
+    );
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let (exec_id, code) = find_exec_call(&effects).expect("allowed iteration effect");
+    assert_eq!(code, "effect-at-iteration-0");
+    machine.handle_response(Response::ExecResult {
+        id: *exec_id,
+        result: Ok(empty_exec_response()),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("iteration checkpoint");
+    assert_eq!(checkpoint, CheckpointKind::AfterWork);
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: CheckpointDelivery::default(),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        find_llm_call(&effects).is_none(),
+        "no provider call at iteration one"
+    );
+    assert!(
+        find_exec_call(&effects).is_none(),
+        "no effect at iteration one"
+    );
+    assert_eq!(
+        effects.iter().find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        }),
+        Some(&TurnOutcome::Stopped(TurnStop::MaxTurns))
+    );
+    let (messages, iteration) = find_done(&effects).expect("typed terminal boundary");
+    assert_eq!(iteration, 1);
+    assert_eq!(messages.len(), 1, "no synthetic transcript message");
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.role != MessageRole::System)
+    );
 }
 
 struct ToolBatchDriver;

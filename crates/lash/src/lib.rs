@@ -486,8 +486,6 @@ pub mod plugins {
     /// Sans-I/O protocol handle accepted by [`TurnDriverConfig::chat`]; custom host drivers use
     /// [`HostTurnProtocol`] as its protocol parameter.
     pub use lash_sansio::ProtocolDriverHandle;
-    /// Callback used by [`TurnDriverConfig`] to materialize the terminal turn-limit message.
-    pub use lash_sansio::TurnLimitFinalMessage;
     /// Model-facing tool declaration carried by [`TurnDriverPreamble::tool_specs`].
     pub use lash_sansio::llm::types::LlmToolSpec;
 }
