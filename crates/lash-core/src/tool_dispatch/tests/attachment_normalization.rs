@@ -23,6 +23,38 @@ fn attachment_output(sources: impl IntoIterator<Item = crate::AttachmentSource>)
     ))
 }
 
+fn attachment_call_output(
+    sources: impl IntoIterator<Item = crate::AttachmentSource>,
+) -> crate::ToolCallOutput {
+    attachment_output(sources)
+        .into_done_output()
+        .expect("attachment probe returns a completed output")
+}
+
+fn before_attachment_hook(bytes: &'static [u8]) -> crate::plugin::BeforeToolCallHook {
+    Arc::new(move |_context| {
+        Box::pin(async move {
+            Ok(vec![crate::BeforeToolCallPluginDirective::from(
+                crate::ShortCircuitToolDirective {
+                    output: attachment_call_output([inline_attachment(bytes)]),
+                },
+            )])
+        })
+    })
+}
+
+fn after_attachment_hook(bytes: &'static [u8]) -> crate::plugin::AfterToolCallHook {
+    Arc::new(move |_context| {
+        Box::pin(async move {
+            Ok(vec![crate::AfterToolCallPluginDirective::from(
+                crate::ShortCircuitToolDirective {
+                    output: attachment_call_output([inline_attachment(bytes)]),
+                },
+            )])
+        })
+    })
+}
+
 #[derive(Clone)]
 struct AttachmentProbeTools {
     definition: crate::ToolDefinition,
@@ -127,6 +159,41 @@ async fn durable_attachment_context(
     (context, persistence, backend)
 }
 
+fn deny_probe_attachment(
+    context: &mut ToolDispatchContext<'_>,
+) -> Arc<std::sync::Mutex<Vec<Vec<u8>>>> {
+    let authorized = Arc::new(std::sync::Mutex::new(Vec::new()));
+    context.attachment_source_policy = Arc::new(DenySecondInlinePolicy {
+        authorized: Arc::clone(&authorized),
+    });
+    authorized
+}
+
+async fn assert_policy_denial_left_no_attachment_state(
+    outcome: &ToolDispatchOutcome,
+    persistence: &Arc<dyn crate::RuntimePersistence>,
+    backend: &Arc<crate::InMemoryAttachmentStore>,
+    authorized: &Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+) {
+    let crate::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome else {
+        panic!("the denied hook attachment must replace the result with failure");
+    };
+    assert_eq!(failure.code, "attachment_source_policy_denied");
+    assert_eq!(
+        *authorized.lock_recover(),
+        vec![DENIED_BYTES.to_vec()],
+        "the final hook output must pass through attachment policy"
+    );
+    assert!(
+        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        "authorization rejection must leave no write-ahead manifest intent"
+    );
+    assert!(
+        backend.list().await.unwrap().is_empty(),
+        "authorization rejection must leave no physical blob"
+    );
+}
+
 fn prepared(definition: &crate::ToolDefinition, call_id: &str) -> crate::PreparedToolCall {
     crate::PreparedToolCall::from_parts(
         call_id,
@@ -174,16 +241,15 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
         backend.list().await.unwrap().is_empty(),
         "precondition: the blob store starts empty"
     );
-    let call = prepared(&definition, "atomic-attachment-call");
-    let tool_context = tool_context_for_prepared(&context, &call);
+    let outcome = dispatch_tool_call(
+        &context,
+        definition.name().to_string(),
+        json!({ "value": "valid" }),
+    )
+    .await;
 
-    let outcome = execute_once(&context, &call, tool_context, None).await;
-
-    let crate::ToolAttemptOutcome::Done { result, .. } = outcome else {
-        panic!("policy denial must complete the attempt");
-    };
-    let crate::ToolCallOutcome::Failure(failure) = result.into_output().outcome else {
-        panic!("the denied second attachment must fail the attempt");
+    let crate::ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
+        panic!("the denied second attachment must fail the recorded call");
     };
     assert_eq!(failure.code, "attachment_source_policy_denied");
     assert_eq!(
@@ -199,6 +265,127 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
         backend.list().await.unwrap().is_empty(),
         "authorization rejection must leave no physical blob"
     );
+}
+
+#[tokio::test]
+async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording() {
+    let definition = named_beta_tool("before_hook_attachment_probe");
+    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
+        definition: definition.clone(),
+        sources: Vec::new(),
+    });
+    let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
+        "before_hook_attachment_probe",
+        crate::PluginSpec::new()
+            .with_tool_provider(provider)
+            .with_before_tool_call(before_attachment_hook(DENIED_BYTES)),
+    ))])
+    .build_session("root")
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(backend.list().await.unwrap().is_empty());
+
+    let outcome = dispatch_tool_call(
+        &context,
+        definition.name().to_string(),
+        json!({ "value": "valid" }),
+    )
+    .await;
+
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
+}
+
+#[tokio::test]
+async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording() {
+    let definition = named_beta_tool("after_hook_leaf_attachment_probe");
+    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
+        definition: definition.clone(),
+        sources: Vec::new(),
+    });
+    let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
+        "after_hook_leaf_attachment_probe",
+        crate::PluginSpec::new()
+            .with_tool_provider(provider)
+            .with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
+    ))])
+    .build_session("root")
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(backend.list().await.unwrap().is_empty());
+
+    let outcome = dispatch_tool_call(
+        &context,
+        definition.name().to_string(),
+        json!({ "value": "valid" }),
+    )
+    .await;
+
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
+}
+
+#[tokio::test]
+async fn after_tool_attachment_replacement_is_normalized_before_orchestrating_recording() {
+    let definition = named_beta_tool("after_hook_orchestrating_attachment_probe");
+    let orchestrator =
+        crate::facade_support::OrchestratingToolDef::new(Arc::new(AttachmentProbeOrchestrator {
+            definition: definition.clone(),
+            sources: Vec::new(),
+        }));
+    let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
+        "after_hook_orchestrating_attachment_probe",
+        crate::PluginSpec::new()
+            .with_orchestrating_tool(orchestrator)
+            .with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
+    ))])
+    .build_session("root")
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    context.tool_registry = Some(context.plugins.tool_registry());
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(backend.list().await.unwrap().is_empty());
+    let call = prepared(&definition, "after-hook-orchestrating-call");
+    let tool_context = tool_context_for_prepared(&context, &call);
+
+    let outcome = execute_orchestrating_tool(&context, call, tool_context).await;
+
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
+}
+
+#[tokio::test]
+async fn after_tool_attachment_replacement_is_normalized_before_internal_recording() {
+    let definition = named_beta_tool("after_hook_internal_attachment_probe")
+        .with_activation(crate::ToolActivation::Internal);
+    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
+        definition: definition.clone(),
+        sources: Vec::new(),
+    });
+    let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
+        "after_hook_internal_attachment_probe",
+        crate::PluginSpec::new()
+            .with_tool_provider(provider)
+            .with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
+    ))])
+    .build_session("root")
+    .expect("plugin session");
+    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let authorized = deny_probe_attachment(&mut context);
+    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(backend.list().await.unwrap().is_empty());
+    let call = prepared(&definition, "after-hook-internal-call");
+    let tool_context = tool_context_for_prepared(&context, &call);
+
+    let outcome = execute_internal_process_tool(&context, call, tool_context).await;
+
+    assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
+        .await;
 }
 
 #[tokio::test]
