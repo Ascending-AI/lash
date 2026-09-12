@@ -712,6 +712,7 @@ fn complete_buffered_responses(
                     && !text.is_empty()
                 {
                     tx.send(LlmStreamEvent::ReasoningDelta(text.clone()));
+                    tx.send(LlmStreamEvent::Part(part.clone()));
                 }
             }
         }

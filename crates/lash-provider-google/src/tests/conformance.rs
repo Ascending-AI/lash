@@ -258,6 +258,7 @@ impl ProviderNormalizer for GoogleNormalizer {
                         execution_evidence: &mut execution_evidence,
                         tool_call_parts: Some(&mut tool_calls),
                         output_parts: Some(&mut output_parts),
+                        reasoning_stream: None,
                         finish_event: &mut finish_event,
                     },
                     None,
