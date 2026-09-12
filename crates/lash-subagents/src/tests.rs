@@ -3,6 +3,7 @@ use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::rlm_support::{
     SpawnCreateRequestInput, build_session_policy, build_spawn_create_request,
@@ -43,7 +44,31 @@ fn model_spec(
 
 struct SeedProbeState {
     parent_response: String,
+    child_response: String,
+    child_execution_count: Arc<AtomicUsize>,
     captured_child_prompt: Arc<Mutex<Option<String>>>,
+}
+
+struct BoundaryValidationCapability;
+
+impl Capability for BoundaryValidationCapability {
+    fn name(&self) -> &str {
+        "default"
+    }
+
+    fn build_session_request(
+        &self,
+        mut ctx: SubagentSpawnContext<'_>,
+    ) -> Result<lash_core::SessionCreateRequest, String> {
+        // Leave this test child's finish untyped so its invalid value reaches
+        // the parent's independent result-boundary validation.
+        ctx.output_schema = None;
+        ctx.rlm_request(
+            self.name(),
+            &SessionSpec::inherit(),
+            lash_core::SessionPluginSource::CurrentHostFresh,
+        )
+    }
 }
 
 fn prompt_advertises_bound_variable(prompt: &str, name: &str) -> bool {
@@ -636,6 +661,52 @@ finish direct
 }
 
 #[tokio::test]
+async fn schema_mismatch_stops_after_one_child_execution_and_reaches_parent_failure() {
+    let probe = run_seed_probe_inner_dispatch_with(
+        lashlang_block(
+            r#"
+result = await agents.spawn({
+  capability: "default",
+  task: "Return a len value.",
+  output: Type { len: int }
+})
+finish result"#,
+        ),
+        lashlang_block(r#"finish "not-an-object""#),
+        TurnInput::text("reject the child's invalid typed result"),
+        Arc::new(BoundaryValidationCapability),
+    )
+    .await;
+
+    let child_executions_at_rejection = probe.child_execution_count();
+    assert_eq!(
+        child_executions_at_rejection, 1,
+        "the terminal boundary rejection must follow exactly one child execution"
+    );
+    tokio::task::yield_now().await;
+    assert_eq!(
+        probe.child_execution_count(),
+        child_executions_at_rejection,
+        "the parent must not start another child execution after terminal rejection"
+    );
+    let lash_core::facade_support::TurnOutcome::Finished(
+        lash_core::facade_support::TurnFinish::FinalValue { value },
+    ) = probe.outcome
+    else {
+        panic!(
+            "schema mismatch must reach the parent's failure outcome: {:?}",
+            probe.outcome
+        );
+    };
+    assert!(
+        value["ok"] == json!(false)
+            && value["error"].as_str().is_some_and(|message| message
+                .starts_with("subagent task result did not match the declared output schema:")),
+        "unexpected boundary rejection: {value}"
+    );
+}
+
+#[tokio::test]
 async fn rlm_spawn_is_visible_through_parent_session_process_observer() {
     let probe = run_seed_probe_inner_dispatch(
         lashlang_block(
@@ -872,13 +943,13 @@ async fn complete_seed_probe_request(
     request: LlmRequest,
 ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
     let prompt = request_text(&request);
-    let is_child = prompt.contains("Subagent capability: default. Depth: 1/5.")
-        || prompt_advertises_bound_variable(&prompt, "chunk");
+    let is_child = request.scope.session_id != "root";
     if is_child {
+        state.child_execution_count.fetch_add(1, Ordering::SeqCst);
         *state.captured_child_prompt.lock_recover() = Some(prompt);
         Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
-                text: lashlang_block("finish { len: len(chunk) }"),
+                text: state.child_response.clone(),
                 response_meta: None,
             }],
             response_metadata: Default::default(),
@@ -938,6 +1009,42 @@ async fn run_seed_probe_inner_dispatch(
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
     parent_dialect: Option<lash_rlm_types::RlmDialect>,
 ) -> SeedProbe {
+    run_seed_probe_inner_dispatch_with_options(
+        parent_response,
+        lashlang_block("finish { len: len(chunk) }"),
+        input,
+        graph_store,
+        parent_dialect,
+        Arc::new(StaticCapability::new("default", SessionSpec::inherit())),
+    )
+    .await
+}
+
+async fn run_seed_probe_inner_dispatch_with(
+    parent_response: String,
+    child_response: String,
+    input: TurnInput,
+    capability: Arc<dyn Capability>,
+) -> SeedProbe {
+    run_seed_probe_inner_dispatch_with_options(
+        parent_response,
+        child_response,
+        input,
+        None,
+        None,
+        capability,
+    )
+    .await
+}
+
+async fn run_seed_probe_inner_dispatch_with_options(
+    parent_response: String,
+    child_response: String,
+    input: TurnInput,
+    graph_store: Option<Arc<TraceLashlangGraphStore>>,
+    parent_dialect: Option<lash_rlm_types::RlmDialect>,
+    capability: Arc<dyn Capability>,
+) -> SeedProbe {
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("subagent-seed-probe".to_string())
@@ -945,9 +1052,11 @@ async fn run_seed_probe_inner_dispatch(
         .spawn(move || {
             let test = Box::pin(run_seed_probe_inner(
                 parent_response,
+                child_response,
                 input,
                 graph_store,
                 parent_dialect,
+                capability,
             ));
             let result = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -962,13 +1071,18 @@ async fn run_seed_probe_inner_dispatch(
 
 async fn run_seed_probe_inner(
     parent_response: String,
+    child_response: String,
     input: TurnInput,
     graph_store: Option<Arc<TraceLashlangGraphStore>>,
     parent_dialect: Option<lash_rlm_types::RlmDialect>,
+    capability: Arc<dyn Capability>,
 ) -> SeedProbe {
     let captured_child_prompt: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let child_execution_count = Arc::new(AtomicUsize::new(0));
     let state = Arc::new(SeedProbeState {
         parent_response,
+        child_response,
+        child_execution_count: Arc::clone(&child_execution_count),
         captured_child_prompt: Arc::clone(&captured_child_prompt),
     });
     let provider = seed_probe_provider(Arc::clone(&state)).into_handle();
@@ -1006,10 +1120,7 @@ async fn run_seed_probe_inner(
             .with_process_lifecycle(true),
         ),
         Arc::new(SubagentsPluginFactory::new(Arc::new(
-            CapabilityRegistry::new().with(Arc::new(StaticCapability::new(
-                "default",
-                lash_core::facade_support::SessionSpec::inherit(),
-            ))),
+            CapabilityRegistry::new().with(capability),
         ))),
     ];
     let registry = Arc::new(TestLocalProcessRegistry::default());
@@ -1153,6 +1264,7 @@ async fn run_seed_probe_inner(
     SeedProbe {
         outcome: turn.outcome,
         child_prompt: prompt,
+        child_execution_count,
         process_registry: registry,
     }
 }
@@ -1162,10 +1274,15 @@ async fn run_seed_probe_inner(
 struct SeedProbe {
     outcome: lash_core::facade_support::TurnOutcome,
     child_prompt: Option<String>,
+    child_execution_count: Arc<AtomicUsize>,
     process_registry: Arc<TestLocalProcessRegistry>,
 }
 
 impl SeedProbe {
+    fn child_execution_count(&self) -> usize {
+        self.child_execution_count.load(Ordering::SeqCst)
+    }
+
     fn child_prompt(&self) -> &str {
         self.child_prompt
             .as_deref()

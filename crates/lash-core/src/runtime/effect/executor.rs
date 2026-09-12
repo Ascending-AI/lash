@@ -607,6 +607,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 driver.turn_pipeline.state().turn_scope(&driver.turn_id),
                 driver.host.core.durability.commit_budget,
             ),
+            latest_prompt_usage: driver.latest_prompt_usage.clone(),
             llm_stream_summaries: driver.llm_stream_summaries.clone(),
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),

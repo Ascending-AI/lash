@@ -468,6 +468,19 @@ paths = ["crates/lash-core/src/store/checkpoint.rs"]
 symbols = ["SessionCheckpoint"]
 
 [[surface]]
+constant = "TURN_CHECKPOINT_SCHEMA_VERSION"
+constant_path = "crates/lash-sansio/src/sansio/machine_state.rs"
+description = "serialized sans-IO turn checkpoint and pending host-effect vocabulary"
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = [
+  "crates/lash-sansio/src/sansio/machine_state.rs",
+  "crates/lash-sansio/src/sansio/turn_protocol.rs",
+]
+must_cover = ["TurnCheckpoint", "MachineState", "Effect"]
+
+[[surface]]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
 constant_path = "crates/lash-core/src/store/checkpoint.rs"
 description = "logical bytes stored behind checkpoint component descriptors"

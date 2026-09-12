@@ -27,7 +27,8 @@ use lash_sansio::SessionId;
 mod attachment_adoption;
 pub use attachment_adoption::{
     abandoned_attachment_write_recovery_after_cold_reopen,
-    cross_owner_attachment_adoption_conformance,
+    attachment_condemnation_delete_crash_survives_cold_reopen,
+    attachment_condemnation_enumeration_conformance, cross_owner_attachment_adoption_conformance,
 };
 
 mod artifact_store;

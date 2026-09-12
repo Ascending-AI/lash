@@ -30,6 +30,70 @@ impl CronSessionDisposition {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CronRegistrationDisposition {
+    Enabled,
+    Disabled,
+    Absent,
+}
+
+impl CronRegistrationDisposition {
+    pub(super) fn journal_value(self) -> &'static str {
+        match self {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+            Self::Absent => "absent",
+        }
+    }
+
+    pub(super) fn from_journal_value(value: &str) -> HandlerResult<Self> {
+        match value {
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
+            "absent" => Ok(Self::Absent),
+            _ => Err(TerminalError::new(format!(
+                "invalid journaled cron registration disposition `{value}`"
+            ))
+            .into()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CronTickBasis {
+    pub(super) session: CronSessionDisposition,
+    pub(super) registration: CronRegistrationDisposition,
+}
+
+impl CronTickBasis {
+    pub(super) fn journal_value(self) -> String {
+        format!(
+            "{}:{}",
+            self.session.journal_value(),
+            self.registration.journal_value()
+        )
+    }
+
+    pub(super) fn from_journal_value(value: &str) -> HandlerResult<Self> {
+        match value.split_once(':') {
+            Some((session, registration)) => Ok(Self {
+                session: CronSessionDisposition::from_journal_value(session)?,
+                registration: CronRegistrationDisposition::from_journal_value(registration)?,
+            }),
+            // Pre-FIG-1071 invocations journaled the session axis alone; only the
+            // session arm could cancel, so a live legacy value keeps ticking. This
+            // is intentionally a bounded exception, not immediate silence: an
+            // in-flight legacy `live` tick may emit or re-arm once before its next
+            // tick journals the registration axis and self-cancels. It never
+            // resurrects a retired or absent session, which the session arm owns.
+            None => Ok(Self {
+                session: CronSessionDisposition::from_journal_value(value)?,
+                registration: CronRegistrationDisposition::Enabled,
+            }),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum CronTick {
     Cancel { reason: &'static str, trace: Value },
@@ -37,29 +101,50 @@ pub(super) enum CronTick {
 }
 
 pub(super) fn cron_tick_decision(
-    disposition: CronSessionDisposition,
+    basis: CronTickBasis,
     state: &WorkbenchCronState,
     job_key: &str,
 ) -> CronTick {
-    let (decision_basis, session_state, reason) = match disposition {
-        CronSessionDisposition::Live => return CronTick::Run,
-        CronSessionDisposition::Retired => {
-            ("deleted_session_tombstone", "retired", "session_retired")
-        }
-        CronSessionDisposition::Unknown => {
-            ("session_store_meta_absent", "unknown", "session_absent")
-        }
+    let (decision_basis, session_state, registration_state, reason) = match basis.session {
+        CronSessionDisposition::Live => match basis.registration {
+            CronRegistrationDisposition::Enabled => return CronTick::Run,
+            CronRegistrationDisposition::Disabled => (
+                "registration_record_disabled",
+                "live",
+                Some("disabled"),
+                "registration_disabled",
+            ),
+            CronRegistrationDisposition::Absent => (
+                "registration_record_absent",
+                "live",
+                Some("absent"),
+                "registration_absent",
+            ),
+        },
+        CronSessionDisposition::Retired => (
+            "deleted_session_tombstone",
+            "retired",
+            None,
+            "session_retired",
+        ),
+        CronSessionDisposition::Unknown => (
+            "session_store_meta_absent",
+            "unknown",
+            None,
+            "session_absent",
+        ),
     };
-    CronTick::Cancel {
-        reason,
-        trace: json!({
-            "job_key": job_key,
-            "job_session_id": state.request.session_id,
-            "decision_basis": decision_basis,
-            "session_state": session_state,
-            "reason": reason,
-        }),
+    let mut trace = json!({
+        "job_key": job_key,
+        "job_session_id": state.request.session_id,
+        "decision_basis": decision_basis,
+        "session_state": session_state,
+        "reason": reason,
+    });
+    if let Some(registration_state) = registration_state {
+        trace["registration_state"] = json!(registration_state);
     }
+    CronTick::Cancel { reason, trace }
 }
 
 pub(super) async fn cron_session_disposition(
@@ -81,6 +166,31 @@ pub(super) async fn cron_session_disposition(
         Ok(CronSessionDisposition::Live)
     } else {
         Ok(CronSessionDisposition::Unknown)
+    }
+}
+
+pub(super) async fn cron_registration_disposition(
+    state: &AppState,
+    session_id: &SessionId,
+    source_key: &str,
+) -> Result<CronRegistrationDisposition, HandlerError> {
+    let mut filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
+    filter.source_type = Some(CRON_SCHEDULE_SOURCE_TYPE.to_string());
+    filter.source_key = Some(source_key.to_string());
+    let registrations = state
+        .trigger_store
+        .list_subscriptions(filter)
+        .await
+        .map_err(classified_plugin_handler_error)?;
+    if registrations
+        .iter()
+        .any(|registration| registration.enabled)
+    {
+        Ok(CronRegistrationDisposition::Enabled)
+    } else if registrations.is_empty() {
+        Ok(CronRegistrationDisposition::Absent)
+    } else {
+        Ok(CronRegistrationDisposition::Disabled)
     }
 }
 

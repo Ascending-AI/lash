@@ -4,6 +4,12 @@
 > named screenshots, polling, real-token use, Abort/RCA, and teardown ownership. This
 > runbook adds only the engine-restart scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove a running Workbench turn reconverges after the Restate engine
 container itself is stopped and started while the web process and endpoint worker remain
 alive. After reconvergence, the restored Stop control must cancel the original exact
@@ -190,8 +196,10 @@ lease TTL and use monotonic timestamps to prove both post-loss commits start bef
 worker's original lease could expire.
 
 1. Start a shape-pinned long turn, record its exact session/turn address and the Workbench
-   PID, and gate a real `exec_code_started` record. Run `just agent-workbench-restart <port>`
-   without changing the data directory or Restate. Require the PID to change and the run log
+   PID, and gate a real `exec_code_started` record. **This comparison arm is blocked by
+   FIG-1164:** retain the historical `just agent-workbench-restart <port>` command, but do not
+   execute it until a verified immutable same-configuration host restart exists. That mechanism
+   must not change the data directory or Restate. Require the PID to change and the run log
    to gain a fresh `starting agent-workbench` line, while the session and turn address remain
    exact.
 

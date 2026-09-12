@@ -283,19 +283,31 @@ impl<C: Credential> CredentialManager<C> {
         persist_result.map(|()| next)
     }
 
-    pub async fn execute<T, E, F, Fut>(&self, mut call: F) -> Result<T, CredentialExecuteError<E>>
+    pub async fn execute<S, T, E, F>(
+        &self,
+        context: &mut S,
+        mut call: F,
+    ) -> Result<T, CredentialExecuteError<E>>
     where
-        F: FnMut(Lease<C>) -> Fut,
-        Fut: Future<Output = Result<T, CredentialCallError<E>>>,
+        S: Send,
+        T: Send,
+        E: Send,
+        F: Send
+            + for<'a> FnMut(
+                &'a mut S,
+                Lease<C>,
+            ) -> Pin<
+                Box<dyn Future<Output = Result<T, CredentialCallError<E>>> + Send + 'a>,
+            >,
     {
         let first = self.lease().await?;
-        match call(first.clone()).await {
+        match call(context, first.clone()).await {
             Ok(value) => Ok(value),
             Err(CredentialCallError::PreOutputAuth(_)) => {
                 let refreshed = self
                     .refresh_if_current(first.generation, RefreshCause::Rejected)
                     .await?;
-                call(refreshed)
+                call(context, refreshed)
                     .await
                     .map_err(|error| CredentialExecuteError::Call(error.into_inner()))
             }
@@ -522,22 +534,23 @@ mod tests {
             result: Ok(credential("new", 1000)),
         });
         let manager = manager(Arc::clone(&refresher), 0);
-        let calls = AtomicUsize::new(0);
+        let mut calls = 0;
         let result = manager
-            .execute(|lease| {
-                let attempt = calls.fetch_add(1, Ordering::SeqCst);
-                async move {
+            .execute(&mut calls, |calls, lease| {
+                Box::pin(async move {
+                    let attempt = *calls;
+                    *calls += 1;
                     if attempt == 0 {
                         Err(CredentialCallError::PreOutputAuth("401"))
                     } else {
                         Ok((lease.value.secret, lease.generation))
                     }
-                }
+                })
             })
             .await
             .unwrap();
         assert_eq!(result, ("new".to_string(), 1));
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls, 2);
         assert_eq!(refresher.calls.load(Ordering::SeqCst), 1);
     }
 
@@ -548,18 +561,20 @@ mod tests {
             result: Ok(credential("new", 1000)),
         });
         let manager = manager(Arc::clone(&refresher), 0);
-        let calls = AtomicUsize::new(0);
+        let mut calls = 0;
         let result: Result<(), _> = manager
-            .execute(|_| {
-                calls.fetch_add(1, Ordering::SeqCst);
-                async { Err(CredentialCallError::PostOutput("stream failed")) }
+            .execute(&mut calls, |calls, _| {
+                Box::pin(async move {
+                    *calls += 1;
+                    Err(CredentialCallError::PostOutput("stream failed"))
+                })
             })
             .await;
         assert!(matches!(
             result,
             Err(CredentialExecuteError::Call("stream failed"))
         ));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(calls, 1);
         assert_eq!(refresher.calls.load(Ordering::SeqCst), 0);
     }
 

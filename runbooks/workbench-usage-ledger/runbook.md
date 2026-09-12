@@ -4,6 +4,12 @@
 > screenshot, polling, real-token, Abort/RCA, and teardown rules. This runbook adds only
 > the usage-ledger scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove that the workbench renders Lash's canonical persisted
 `SessionUsageReport`, that its counters reconcile with completed LLM calls in the trace,
 and that replacing the web process does not reset or mutate the ledger.
@@ -26,7 +32,8 @@ provider-reported counters, canonical arithmetic, and equality between surfaces.
 4. **Totals dominate rows/calls.** API session totals must equal the sum of
    `by_source_model` rows and be greater than or equal to this turn's completed-call sum.
    Input and output must be non-zero when the trace reports calls.
-5. **Restart equality is exact.** After `agent-workbench-restart`, require the full
+5. **Restart equality is exact.** The `agent-workbench-restart` phase is blocked by FIG-1164.
+   Once a verified immutable same-configuration host restart exists, require the full
    `/api/state.usage` JSON object and rendered total/input/output strings to equal the
    pre-restart values. Monotonic-but-different is a failure when no new call ran.
 6. **A saturated report is an operator signal.** `/api/state.usage.saturated == true`
@@ -41,9 +48,10 @@ overflowing, unconfirmed row remains in the resident session's process-local
 retry the turn in place and do not edit the durable token ledger.
 
 Operator remediation is to replace the resident Lash session/runtime and reconstruct it
-from the last committed `RuntimePersistence` state (for Workbench, use
-`just agent-workbench-restart <port>` with the same data directory and store). Cold
-reconstruction clears only the non-durable `shared_token_ledger`; the committed
+from the last committed `RuntimePersistence` state. For Workbench, the historical
+`just agent-workbench-restart <port>` command with the same data directory and store is blocked
+by FIG-1164; do not execute it until a verified immutable same-configuration host restart exists.
+Cold reconstruction clears only the non-durable `shared_token_ledger`; the committed
 `RuntimeSessionState.token_ledger`, graph, checkpoint, and session identity remain the
 store-authoritative state. If cold reconstruction itself reports an overflow, the bad
 rows are already durable: stop, retain the database evidence, and escalate for data
@@ -109,8 +117,11 @@ disagreement is a contract violation → Abort/RCA.
 
 ## Phase 3 — Replace the process and prove persistence
 
-Run `just agent-workbench-restart <port>` and poll `/healthz`. Require the PID to change
-while session identity remains fixed. Reload the browser without submitting a turn. Save
+**Blocked by FIG-1164.** Retain `just agent-workbench-restart <port>` as the historical
+process-replacement command, but do not execute it until a verified immutable
+same-configuration host restart exists. After that mechanism runs, poll `/healthz`. Require the
+PID to change while session identity remains fixed. Reload the browser without submitting a turn.
+Save
 the new state as `03-restarted-state.json` and require its complete `usage` object to equal
 `01-settled-state.json.usage`. Require the two rendered usage rows to be text-identical to
 Phase 2. Screenshot `03-usage-persisted.png`.

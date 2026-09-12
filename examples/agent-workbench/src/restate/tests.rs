@@ -1,6 +1,7 @@
 use super::{
-    CronSessionDisposition, WorkbenchCronRequest, classified_embed_handler_error,
-    cron_occurrence_key, cron_session_disposition, emit_cron_occurrence_with_effect_controller,
+    CronRegistrationDisposition, CronSessionDisposition, CronTickBasis, WorkbenchCronRequest,
+    classified_embed_handler_error, cron_occurrence_key, cron_session_disposition,
+    emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
 use lash::ProcessId;
@@ -37,15 +38,33 @@ impl lash::runtime::RuntimeEffectController for CountingProcessEffectController 
 
 struct OccurrenceFailureTriggerStore {
     inner: lash::triggers::InMemoryTriggerStore,
-    failure: lash::plugins::PluginError,
+    occurrence_failure: Option<lash::plugins::PluginError>,
+    list_subscriptions_failure: Option<lash::plugins::PluginError>,
+    list_subscription_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl OccurrenceFailureTriggerStore {
     fn new(failure: lash::plugins::PluginError) -> Self {
         Self {
             inner: lash::triggers::InMemoryTriggerStore::new(),
-            failure,
+            occurrence_failure: Some(failure),
+            list_subscriptions_failure: None,
+            list_subscription_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
+    }
+
+    fn for_subscription_list(failure: lash::plugins::PluginError) -> Self {
+        Self {
+            inner: lash::triggers::InMemoryTriggerStore::new(),
+            occurrence_failure: None,
+            list_subscriptions_failure: Some(failure),
+            list_subscription_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    fn list_subscription_calls(&self) -> usize {
+        self.list_subscription_calls
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -63,6 +82,11 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
         &self,
         filter: lash::triggers::TriggerSubscriptionFilter,
     ) -> Result<Vec<lash::triggers::TriggerSubscriptionRecord>, lash::plugins::PluginError> {
+        self.list_subscription_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(failure) = &self.list_subscriptions_failure {
+            return Err(failure.clone());
+        }
         self.inner.list_subscriptions(filter).await
     }
 
@@ -75,9 +99,12 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
 
     async fn ingest_occurrence(
         &self,
-        _request: lash::triggers::TriggerOccurrenceRequest,
+        request: lash::triggers::TriggerOccurrenceRequest,
     ) -> Result<lash::triggers::TriggerIngressReceipt, lash::plugins::PluginError> {
-        Err(self.failure.clone())
+        if let Some(failure) = &self.occurrence_failure {
+            return Err(failure.clone());
+        }
+        self.inner.ingest_occurrence(request).await
     }
 
     async fn list_occurrences(
@@ -821,6 +848,7 @@ fn settlement_reader_treats_ambiguous_errors_as_retryable() {
 
 use lash::sync::MutexExt;
 
+mod cron_replay;
 mod cron_tests;
 
 #[async_trait::async_trait]

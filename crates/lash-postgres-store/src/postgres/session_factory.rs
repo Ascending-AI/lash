@@ -1,5 +1,8 @@
 use crate::*;
 
+#[path = "session_factory/store.rs"]
+mod store;
+
 pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "enqueue_seq",
     "batch_id",
@@ -16,23 +19,6 @@ pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "claim_session_lease_generation",
     "claim_id",
 ];
-
-impl PostgresSessionStoreFactory {
-    fn store_for(&self, session_id: SessionId) -> PostgresSessionStore {
-        PostgresSessionStore {
-            pool: self.pool.clone(),
-            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
-            clock: Arc::clone(&self.clock),
-            session_id,
-            #[cfg(any(test, feature = "testing"))]
-            lease_clock_for_testing: self.lease_clock_for_testing.clone(),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }
-    }
-}
 
 impl PostgresSessionStoreFactory {
     /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
@@ -653,6 +639,12 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         rows.into_iter()
             .map(|row| attachment_id_from_sql("AttachmentManifest", "attachment_id", row.get(0)))
             .collect()
+    }
+
+    async fn list_condemnations(
+        &self,
+    ) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, lash_core::StoreError> {
+        crate::attachments::list_attachment_condemnations(&self.pool).await
     }
 
     async fn has_live_attachment_ref(

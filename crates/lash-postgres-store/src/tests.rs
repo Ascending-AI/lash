@@ -24,6 +24,150 @@ where
     }
 }
 
+async fn persisted_record_decode_store(
+    storage: &PostgresStorage,
+    label: &str,
+) -> (SessionId, PostgresSessionStore) {
+    let session_id = SessionId::from(format!(
+        "persisted-record-decode-{label}:{}",
+        uuid::Uuid::new_v4()
+    ));
+    let store = storage.session_store(session_id.as_str());
+    store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id.as_str()))
+        .await
+        .expect("admit persisted-record decode session");
+    let state = lash_core::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &state,
+            &[],
+        ))
+        .await
+        .expect("seed persisted-record decode session");
+    (session_id, store)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_persisted_record_decode_classification_head_when_configured() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres head decode classification: database URL is not set");
+        return;
+    };
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(isolated_database.url())
+        .await
+        .expect("connect persisted-record decode storage");
+
+    let (head_session_id, head_store) = persisted_record_decode_store(&storage, "head").await;
+    assert_eq!(
+        sqlx::query("UPDATE lash_sessions SET head_json = '{' WHERE session_id = $1")
+            .bind(head_session_id.as_str())
+            .execute(storage.pool())
+            .await
+            .expect("corrupt head JSON")
+            .rows_affected(),
+        1
+    );
+    let head_error = head_store
+        .load_session_head_meta()
+        .await
+        .expect_err("malformed head JSON must refuse");
+    assert!(
+        matches!(
+            head_error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                ..
+            }
+        ),
+        "malformed Postgres head JSON must be stored-data corruption, got {head_error:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_persisted_record_decode_classification_checkpoint_when_configured() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres checkpoint decode classification: database URL is not set");
+        return;
+    };
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = PostgresStorage::connect(isolated_database.url())
+        .await
+        .expect("connect persisted-record decode storage");
+
+    let (checkpoint_session_id, checkpoint_store) =
+        persisted_record_decode_store(&storage, "checkpoint").await;
+    let checkpoint_ref: String =
+        sqlx::query_scalar("SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1")
+            .bind(checkpoint_session_id.as_str())
+            .fetch_one(storage.pool())
+            .await
+            .expect("read checkpoint ref");
+    assert_eq!(
+        sqlx::query("UPDATE lash_blobs SET content = $1 WHERE hash = $2")
+            .bind(vec![0xc1_u8])
+            .bind(checkpoint_ref)
+            .execute(storage.pool())
+            .await
+            .expect("corrupt checkpoint MessagePack")
+            .rows_affected(),
+        1
+    );
+    let checkpoint_error = SessionCommitStore::load_session(&checkpoint_store)
+        .await
+        .expect_err("malformed checkpoint MessagePack must refuse");
+    assert!(
+        matches!(
+            checkpoint_error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "SessionCheckpoint",
+                ..
+            }
+        ),
+        "malformed Postgres checkpoint MessagePack must be stored-data corruption, got {checkpoint_error:?}"
+    );
+}
+
+#[test]
+fn postgres_persisted_record_decode_classification_preserves_version_refusals() {
+    let expected = lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION;
+    let decode = |value: serde_json::Value| {
+        let bytes = rmp_serde::to_vec_named(&value).expect("encode version-refusal fixture");
+        decode_versioned_msgpack_record::<SessionCheckpoint>(&bytes, "SessionCheckpoint", expected)
+            .expect_err("non-current checkpoint version must refuse")
+    };
+
+    assert!(matches!(
+        decode(serde_json::json!({})),
+        StoreError::MissingRecordSchemaVersion {
+            record_kind: "SessionCheckpoint",
+            expected: actual_expected,
+        } if actual_expected == expected
+    ));
+    assert!(matches!(
+        decode(serde_json::json!({"schema_version": "invalid"})),
+        StoreError::InvalidRecordSchemaVersion {
+            record_kind: "SessionCheckpoint",
+            expected: actual_expected,
+            ..
+        } if actual_expected == expected
+    ));
+    assert!(matches!(
+        decode(serde_json::json!({"schema_version": expected + 1})),
+        StoreError::UnsupportedRecordSchemaVersion {
+            record_kind: "SessionCheckpoint",
+            actual,
+            expected: actual_expected,
+        } if actual == expected + 1 && actual_expected == expected
+    ));
+}
+
 #[test]
 fn turn_failure_settlement_query_filters_receipts_without_evidence() {
     assert!(

@@ -496,28 +496,49 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
         // whose store metadata is absent, while allowing every live session
         // (current or non-current) to tick. This also catches jobs armed by a
         // previous process run that in-memory cancel bookkeeping cannot see.
-        let disposition = {
+        // The registration axis is the durable backstop for a live session
+        // whose cron registration was deleted or disabled after arming.
+        let basis = {
             let app_state = self.state.clone();
             let session_id = state.request.session_id.clone();
+            let source_key = state.request.source_key.clone();
             let journal_value = ctx
                 .run(move || {
                     let app_state = app_state.clone();
                     let session_id = session_id.clone();
+                    let source_key = source_key.clone();
                     async move {
-                        cron_session_disposition(&app_state.core, &session_id)
-                            .await
-                            .map(|disposition| disposition.journal_value().to_string())
+                        let session =
+                            cron_session_disposition(&app_state.core, &session_id).await?;
+                        // A non-live session cancels unconditionally, so probing the
+                        // registration store would only add a failure dependency to an
+                        // already-confirmed cancellation. The placeholder is inert: the
+                        // decision returns the session arm before it reads this axis.
+                        let registration = match session {
+                            CronSessionDisposition::Live => {
+                                cron_registration_disposition(&app_state, &session_id, &source_key)
+                                    .await?
+                            }
+                            _ => CronRegistrationDisposition::Enabled,
+                        };
+                        Ok::<_, HandlerError>(
+                            CronTickBasis {
+                                session,
+                                registration,
+                            }
+                            .journal_value(),
+                        )
                     }
                 })
-                .name("workbench-cron:session-disposition")
+                .name("workbench-cron:session-disposition") // historical run identity; replay matches names
                 .await?;
-            CronSessionDisposition::from_journal_value(&journal_value)?
+            CronTickBasis::from_journal_value(&journal_value)?
         };
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
         );
-        let decision = cron_tick_decision(disposition, &state, controller.context().key());
+        let decision = cron_tick_decision(basis, &state, controller.context().key());
         let cancel_surface = RestateCronTickCancelSurface::new(self.state.clone(), &controller);
         if Box::pin(handle_observed_cron_tick(&cancel_surface, &state, decision)).await?
             == CronTickHandling::Cancelled
@@ -1569,32 +1590,9 @@ fn cron_request_from_registration(
 
 mod error_helpers;
 use error_helpers::*;
+mod queued_work_ext;
+use queued_work_ext::QueuedWorkExt;
 mod session_admission;
 use session_admission::journaled_session_admission;
 #[cfg(test)]
 mod tests;
-#[async_trait::async_trait]
-trait QueuedWorkExt {
-    async fn drain_session(
-        &self,
-        session_id: &SessionId,
-        reason: &str,
-    ) -> Result<(), lash::plugins::PluginError>;
-}
-#[async_trait::async_trait]
-impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
-    async fn drain_session(
-        &self,
-        session_id: &SessionId,
-        reason: &str,
-    ) -> Result<(), lash::plugins::PluginError> {
-        use lash::runtime::QueuedWorkSubstrate as _;
-
-        self.drain_session_work(
-            lash::runtime::SessionWorkTarget::Session(SessionId::from(session_id.to_string())),
-            reason,
-        )
-        .await
-        .map(|_| ())
-    }
-}

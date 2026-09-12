@@ -1244,6 +1244,15 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
             .collect())
     }
 
+    async fn list_condemnations(
+        &self,
+    ) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, lash_core::StoreError> {
+        let store = self
+            .open_catalog_for_maintenance("condemnation enumeration")
+            .await?;
+        store.list_attachment_condemnations().await
+    }
+
     async fn has_live_attachment_ref(
         &self,
         id: &lash_core::AttachmentId,

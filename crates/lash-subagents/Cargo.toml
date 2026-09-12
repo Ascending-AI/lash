@@ -27,11 +27,11 @@ lash-protocol-rlm = { workspace = true }
 lash-tool-support = { workspace = true }
 lash-rlm-types = { workspace = true }
 async-trait = { workspace = true }
+jsonschema = { workspace = true, default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
-jsonschema = { workspace = true, default-features = false }
 tokio-util = { workspace = true, features = ["rt"] }

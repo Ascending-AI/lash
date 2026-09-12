@@ -8,6 +8,14 @@ async fn in_memory_cross_owner_attachment_adoption_conformance() {
 }
 
 #[tokio::test]
+async fn in_memory_attachment_condemnation_enumeration_conformance() {
+    crate::attachment_condemnation_enumeration_conformance(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .await;
+}
+
+#[tokio::test]
 async fn in_memory_store_satisfies_the_maintenance_outcome_contract() {
     crate::conformance::store_maintenance_outcome_contract(
         "in-memory",

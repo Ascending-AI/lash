@@ -1,19 +1,10 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_cross_owner_attachment_adoption_conformance() {
-    let Some((_database_lock, storage)) = storage().await else {
-        return;
-    };
-    reset(&storage).await;
-    lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
-        storage.session_store_factory(),
-    ))
-    .await;
-}
 
 use std::future::Future;
+#[path = "conformance/attachment_catalog.rs"]
+mod attachment_catalog;
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]

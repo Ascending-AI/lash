@@ -55,6 +55,100 @@ fn assert_artifact_storage_failure<T>(
     }
 }
 
+#[tokio::test]
+async fn sqlite_persisted_record_decode_classification() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("persisted-record-decode.db");
+
+    let head_session_id = SessionId::from("persisted-record-decode-head");
+    let head_store = Store::open(&path).await.expect("open head store");
+    head_store
+        .bind_session(&head_session_id)
+        .expect("bind head store");
+    head_store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(head_session_id.as_str()))
+        .await
+        .expect("admit head session");
+    let head_state = lash_core::RuntimeSessionState {
+        session_id: head_session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    head_store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &head_state,
+            &[],
+        ))
+        .await
+        .expect("seed head session");
+
+    let checkpoint_session_id = SessionId::from("persisted-record-decode-checkpoint");
+    let checkpoint_store = Store::open(&path).await.expect("open checkpoint store");
+    checkpoint_store
+        .bind_session(&checkpoint_session_id)
+        .expect("bind checkpoint store");
+    checkpoint_store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(
+            checkpoint_session_id.as_str(),
+        ))
+        .await
+        .expect("admit checkpoint session");
+    let checkpoint_state = lash_core::RuntimeSessionState {
+        session_id: checkpoint_session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    checkpoint_store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &checkpoint_state,
+            &[],
+        ))
+        .await
+        .expect("seed checkpoint session");
+
+    let raw = rusqlite::Connection::open(&path).expect("open corruption connection");
+    assert_eq!(
+        raw.execute(
+            "UPDATE session_head SET head_json = '{' WHERE session_id = ?1",
+            [head_session_id.as_str()],
+        )
+        .expect("corrupt head JSON"),
+        1
+    );
+    assert_corrupt(head_store.load_session_head_meta().await, "SessionHeadMeta");
+
+    let checkpoint_ref: String = raw
+        .query_row(
+            "SELECT checkpoint_ref FROM session_head WHERE session_id = ?1",
+            [checkpoint_session_id.as_str()],
+            |row| row.get(0),
+        )
+        .expect("read checkpoint ref");
+    let malformed_manifest = encode_msgpack(
+        &StoredBlobEnvelope {
+            descriptor: BlobArtifactDescriptor::checkpoint_manifest(),
+            compression: BlobCompression::None,
+            content: vec![0xc1],
+        },
+        "malformed checkpoint fixture",
+    )
+    .expect("encode valid blob envelope");
+    assert_eq!(
+        raw.execute(
+            "UPDATE blobs SET content = ?1 WHERE hash = ?2",
+            params![malformed_manifest, checkpoint_ref],
+        )
+        .expect("corrupt checkpoint MessagePack"),
+        1
+    );
+    assert_corrupt(
+        SessionCommitStore::load_session(&checkpoint_store).await,
+        "SessionCheckpoint",
+    );
+}
+
 #[test]
 fn turn_failure_settlement_query_filters_receipts_without_evidence() {
     assert!(

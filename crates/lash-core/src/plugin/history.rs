@@ -322,8 +322,9 @@ impl SessionReadView {
         &self.0.meta.token_usage
     }
 
-    /// Exposes last prompt usage to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work. Returns `None` when no last prompt usage is present.
+    /// Returns the prompt usage basis pinned for the current logical turn, or the latest
+    /// completed turn's usage outside a turn. The pinned basis may be `None`.
+    /// Current-call feedback is available through `ProtocolBeforeLlmCallContext.latest_prompt_usage`.
     pub fn last_prompt_usage(&self) -> Option<&crate::runtime::PromptUsage> {
         self.0.meta.last_prompt_usage.as_ref()
     }

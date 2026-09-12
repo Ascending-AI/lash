@@ -4,6 +4,12 @@
 > screenshot, polling, real-token, Abort/RCA, and teardown rules. This runbook adds only
 > the session-resume scenario.
 
+
+> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
+> below is retained as an acceptance contract and is not currently executable. See the
+> [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
+> never substitute the destructive reset.
+
 **Purpose.** Prove that the Agent Workbench reconstructs committed conversation history
 from Lash's durable session store after replacing the entire web process, and that the
 next turn continues with that history in its provider request. This is deliberately
@@ -21,8 +27,10 @@ its prompt and verdict with the run artifacts.
 1. **Restart only committed history.** Wait for the idle pill and an empty
    `/api/state.active_turns` after each pre-restart turn. Uncommitted streamed prose is not
    evidence for this scenario.
-2. **The replacement process starts cold.** Use `just agent-workbench-restart <port>`;
-   do not reload only the page and do not restart Restate or replace the data directory.
+2. **The replacement process starts cold (blocked by FIG-1164).** The historical command was
+   `just agent-workbench-restart <port>`; do not execute it until a verified immutable
+   same-configuration host restart exists. Reloading only the page, restarting Restate, or
+   replacing the data directory does not satisfy this gate.
 3. **The store is authoritative.** Before and after restart, the active `graph_nodes`
    path must contain every committed user and assistant nonce: use
    `<data-dir>/lash-sessions/durable-core.db` in SQLite mode or `lash_graph_nodes` in the managed
@@ -61,8 +69,9 @@ its prompt and verdict with the run artifacts.
 - Postgres boot variant:
   `AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
   Gate the startup trace's `store_backend: "postgres"`. The helper owns a port-isolated
-  Postgres 16 container and marker file, preserves it across
-  `agent-workbench-restart`, and removes it on `agent-workbench-down`. For store evidence,
+  Postgres 16 container and marker file. The acceptance contract preserves it across the
+  currently blocked `agent-workbench-restart` phase and removes it on
+  `agent-workbench-down`. For store evidence,
   query `lash_graph_nodes` through the managed database coordinates recorded as
   `postgres_host`/`postgres_port` in the run metadata (managed credentials are
   `lash`/`lash`, database `lash`); filter by the rendered session id and the active
@@ -120,8 +129,10 @@ Save the final pre-restart `composition_changed` record as
 
 ## Phase 2 — Replace the web process and reconstruct the transcript
 
-Run `just agent-workbench-restart <port>` and poll `/healthz` until ready. Require a new
-PID, the unchanged rendered/API/disk session id, and the same idle state. Reload the
+**Blocked by FIG-1164.** Retain `just agent-workbench-restart <port>` as the historical
+process-replacement command, but do not execute it until a verified immutable
+same-configuration host restart exists. After that mechanism runs, poll `/healthz` until ready.
+Require a new PID, the unchanged rendered/API/disk session id, and the same idle state. Reload the
 browser and gate all of the following before sending another turn:
 
 - the transcript renders all four pre-restart rows in their original order;

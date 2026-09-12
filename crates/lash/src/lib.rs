@@ -324,7 +324,8 @@ pub mod persistence {
         ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
     };
     pub use lash_core::{
-        AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,
+        AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
+        AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentReclamationPolicy,
         AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
         AttachmentStorePersistence, AttachmentWriteFence, AttachmentWritePermit,
         AttachmentWriteToken, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,

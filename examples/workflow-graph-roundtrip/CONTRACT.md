@@ -91,7 +91,7 @@ An unknown ID returns HTTP `404`:
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 8,
   "version": 1,
   "source": "canonical Lashlang source",
   "nodes": [
@@ -151,9 +151,10 @@ Optional properties are omitted, so a real call node has `operation` but no
 `effect`, expression slot, `source`, or `children`. The combined example above
 shows every possible property in one place.
 
-`schemaVersion: 3` is the clean-cutover contract in which every expression
-owned by a structured Lashlang graph node is canonical editable text. Version
-2 serialized retained AST payloads and is not accepted by the v3 renderer.
+`schemaVersion: 8` is the current clean-cutover contract. Container nodes use a
+distinct container-kind discriminator in the core graph JSON, so serialized
+graphs roundtrip without colliding with the node-kind discriminator. Older
+schema versions are not accepted by the renderer.
 
 Node `type` and `data.kind` use `process`, `data`, `call`, `effect`,
 `computation`, `state_update`, `terminal`, `container`, or `opaque`.

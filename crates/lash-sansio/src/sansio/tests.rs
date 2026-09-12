@@ -174,6 +174,78 @@ fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
     serde_json::from_str(&encoded).expect("deserialize checkpoint")
 }
 
+#[test]
+fn turn_checkpoint_stamps_v2_and_identifies_the_legacy_unstamped_shape_as_v1() {
+    let machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let checkpoint = machine.checkpoint();
+    assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 2);
+
+    let mut legacy = serde_json::to_value(checkpoint).expect("checkpoint json");
+    legacy
+        .as_object_mut()
+        .expect("checkpoint object")
+        .remove("schema_version");
+    let legacy: TurnCheckpoint = serde_json::from_value(legacy).expect("legacy checkpoint");
+    assert_eq!(legacy.schema_version(), 1);
+}
+
+#[test]
+fn turn_checkpoint_restore_refuses_newer_versions_and_accepts_older_history() {
+    let machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+
+    for actual in [99, u32::MAX] {
+        let mut newer = encoded.clone();
+        newer["schema_version"] = serde_json::json!(actual);
+        let checkpoint: TurnCheckpoint =
+            serde_json::from_value(newer).expect("well-formed newer checkpoint");
+        let Err(error) =
+            TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+        else {
+            panic!("checkpoint schema version {actual} must be refused");
+        };
+        assert_eq!(
+            error,
+            TurnCheckpointRestoreError::UnsupportedSchemaVersion {
+                actual,
+                supported: TURN_CHECKPOINT_SCHEMA_VERSION,
+            }
+        );
+    }
+
+    for explicit_version in [Some(1), None] {
+        let mut older = encoded.clone();
+        match explicit_version {
+            Some(version) => older["schema_version"] = serde_json::json!(version),
+            None => {
+                older
+                    .as_object_mut()
+                    .expect("checkpoint object")
+                    .remove("schema_version");
+            }
+        }
+        let checkpoint: TurnCheckpoint =
+            serde_json::from_value(older).expect("well-formed older checkpoint");
+        assert_eq!(checkpoint.schema_version(), 1);
+        assert!(
+            TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+                .is_ok(),
+            "v1 and unstamped checkpoints remain readable"
+        );
+    }
+}
+
 fn empty_exec_response() -> crate::ExecResponse {
     crate::ExecResponse {
         observations: Vec::new(),
@@ -207,6 +279,53 @@ fn completed_tool(
         intent_outcomes: Vec::new(),
         replay: None,
     }
+}
+
+#[test]
+fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    assert!(find_llm_call(&effects).is_some());
+
+    machine.apply_actions(vec![DriverAction::ReportToolCalls {
+        completed: vec![completed_tool(
+            "call-refused",
+            "catalog.private",
+            serde_json::json!({"query":"secret"}),
+            ToolCallOutput::failure(ToolFailure::tool(
+                ToolFailureClass::PermissionDenied,
+                "tool_not_advertised",
+                "tool was not advertised",
+            )),
+        )],
+    }]);
+
+    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
+    let mut restored =
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+            .expect("supported checkpoint");
+    let effects = drain_effects(&mut restored);
+
+    let Effect::ReportToolCalls { completed } = &effects[0] else {
+        panic!("reporting must precede accounting: {effects:?}");
+    };
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].call_id, "call-refused");
+    assert_eq!(completed[0].tool_name, "catalog.private");
+    assert!(matches!(
+        &effects[1],
+        Effect::Emit(SessionStreamEvent::ToolCall {
+            call_id: Some(call_id),
+            name,
+            ..
+        }) if call_id == "call-refused" && name == "catalog.private"
+    ));
 }
 
 struct ProseDriver;
@@ -660,7 +779,8 @@ fn checkpoint_before_llm_completion_reissues_same_logical_llm_call() {
     let (llm_id, request) = find_llm_call(&effects).expect("llm call");
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+            .expect("supported checkpoint");
 
     let effects = drain_effects(&mut restored);
     let (restored_id, restored_request) = find_llm_call(&effects).expect("restored llm call");
@@ -692,7 +812,8 @@ fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+            .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
 
     assert!(find_llm_call(&effects).is_none());
@@ -984,7 +1105,8 @@ fn checkpoint_preserves_parallel_tool_batch_before_any_result() {
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint)
+            .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     let (restored_tool_id, restored_calls) = effects
         .iter()
@@ -1062,7 +1184,8 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint)
+            .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     assert!(find_llm_call(&effects).is_none());
     assert!(effects.iter().any(|effect| matches!(
@@ -1129,7 +1252,8 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
     let decoded = roundtrip_checkpoint(machine.checkpoint());
 
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), decoded);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), decoded)
+            .expect("supported checkpoint");
     restored.handle_response(Response::ExecResult {
         id: *exec_id,
         result: Ok(crate::ExecResponse {
@@ -1173,7 +1297,8 @@ fn checkpoint_redelivers_waiting_llm_from_state_only() {
 
     let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+            .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     assert!(find_llm_call(&effects).is_some());
 }
@@ -1188,7 +1313,8 @@ fn stale_response_does_not_cancel_checkpoint_redelivery() {
 
     let checkpoint = roundtrip_checkpoint(machine.checkpoint());
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
+            .expect("supported checkpoint");
     restored.handle_response(Response::LlmComplete {
         id: EffectId(llm_id.0 + 1),
         text_streamed: false,
@@ -1236,7 +1362,8 @@ fn checkpoint_redelivers_waiting_tool_batch_from_state_only() {
 
     let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ToolBatchDriver)), checkpoint)
+            .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     assert!(
         effects
@@ -1264,7 +1391,8 @@ fn checkpoint_redelivers_waiting_exec_from_state_only() {
 
     let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
-        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), checkpoint);
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ExecDriver)), checkpoint)
+            .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     assert!(find_exec_call(&effects).is_some());
 }

@@ -487,6 +487,277 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
     sweep_reput_race(f).await;
 }
 
+/// Shared host-facing condemnation-enumeration law.
+pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn SessionStoreFactory>) {
+    let namespace = uuid::Uuid::new_v4();
+    let session_id = SessionId::from(format!("condemnation-list-owner-{namespace}"));
+    let store = f
+        .create_store(&session_store_request(
+            &session_id,
+            "condemnation-list",
+            SessionRelation::Root,
+        ))
+        .await
+        .expect("create condemnation-list session");
+    let id = |suffix: &str| {
+        AttachmentId::parse(format!("condemnation-list-{namespace}-{suffix}"))
+            .expect("valid generated attachment id")
+    };
+    // These suffixes deliberately mix ASCII punctuation and case. Database
+    // locale collation can order them differently from `AttachmentId::Ord`.
+    let condemned = id("_condemned");
+    let deleting = id("Z-deleting");
+    let reclaimed = id("!reclaimed");
+    let restoring_condemned = id("a-restoring-condemned");
+    let restoring_reclaimed = id("A-restoring-reclaimed");
+
+    for digest in [
+        &reclaimed,
+        &condemned,
+        &restoring_reclaimed,
+        &deleting,
+        &restoring_condemned,
+    ] {
+        assert_eq!(
+            f.condemn_attachment(digest, u64::MAX).await.unwrap(),
+            AttachmentCondemnation::Condemned
+        );
+    }
+    assert_eq!(
+        f.arm_attachment_delete(&deleting).await.unwrap(),
+        AttachmentDeleteArming::Armed
+    );
+    for digest in [&reclaimed, &restoring_reclaimed] {
+        assert_eq!(
+            f.arm_attachment_delete(digest).await.unwrap(),
+            AttachmentDeleteArming::Armed
+        );
+        f.reclaim_attachment_condemnation(digest).await.unwrap();
+    }
+    let restoring_intent = |digest: &AttachmentId| AttachmentIntent {
+        attachment_id: digest.clone(),
+        session_id: session_id.clone(),
+        canonical_uri: format!("lash-attachment://blake3/{digest}"),
+        intent_at_epoch_ms: 1,
+        owner_kind: None,
+        owner_id: None,
+    };
+    for digest in [&restoring_condemned, &restoring_reclaimed] {
+        assert!(matches!(
+            store
+                .begin_attachment_write(restoring_intent(digest))
+                .expect("restoring writer claims condemnation"),
+            AttachmentWriteFence::Granted(permit) if permit.rollback_token().is_some()
+        ));
+    }
+
+    let mut expected = vec![
+        AttachmentCondemnationRecord {
+            digest: condemned.clone(),
+            phase: AttachmentCondemnationPhase::Condemned,
+            provenance: AttachmentCondemnationProvenance::SweepOwned,
+        },
+        AttachmentCondemnationRecord {
+            digest: deleting.clone(),
+            phase: AttachmentCondemnationPhase::Deleting,
+            provenance: AttachmentCondemnationProvenance::SweepOwned,
+        },
+        AttachmentCondemnationRecord {
+            digest: reclaimed.clone(),
+            phase: AttachmentCondemnationPhase::Reclaimed,
+            provenance: AttachmentCondemnationProvenance::SweepOwned,
+        },
+        AttachmentCondemnationRecord {
+            digest: restoring_condemned.clone(),
+            phase: AttachmentCondemnationPhase::Condemned,
+            provenance: AttachmentCondemnationProvenance::RestoringWrite {
+                session_id: session_id.clone(),
+            },
+        },
+        AttachmentCondemnationRecord {
+            digest: restoring_reclaimed.clone(),
+            phase: AttachmentCondemnationPhase::Reclaimed,
+            provenance: AttachmentCondemnationProvenance::RestoringWrite {
+                session_id: session_id.clone(),
+            },
+        },
+    ];
+    expected.sort_by(|left, right| left.digest.cmp(&right.digest));
+    assert_eq!(f.list_condemnations().await.unwrap(), expected);
+
+    for digest in [
+        &condemned,
+        &deleting,
+        &reclaimed,
+        &restoring_condemned,
+        &restoring_reclaimed,
+    ] {
+        f.release_attachment_condemnation(digest).await.unwrap();
+    }
+    expected.retain(|row| {
+        row.phase == AttachmentCondemnationPhase::Reclaimed
+            || matches!(
+                row.provenance,
+                AttachmentCondemnationProvenance::RestoringWrite { .. }
+            )
+    });
+    assert_eq!(
+        f.list_condemnations().await.unwrap(),
+        expected,
+        "manual release clears only tokenless Condemned/Deleting rows"
+    );
+}
+
+struct StopBeforeCondemnationReclaim {
+    inner: Arc<dyn SessionStoreFactory>,
+    reclaim_reached: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl AttachmentRootSet for StopBeforeCondemnationReclaim {
+    fn can_prove_process_owner_death(&self) -> bool {
+        self.inner.can_prove_process_owner_death()
+    }
+
+    async fn live_attachment_refs(
+        &self,
+        cutoff: u64,
+    ) -> Result<std::collections::BTreeSet<AttachmentId>, StoreError> {
+        self.inner.live_attachment_refs(cutoff).await
+    }
+
+    async fn list_condemnations(&self) -> Result<Vec<AttachmentCondemnationRecord>, StoreError> {
+        self.inner.list_condemnations().await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &AttachmentId,
+        cutoff: u64,
+    ) -> Result<bool, StoreError> {
+        self.inner.has_live_attachment_ref(id, cutoff).await
+    }
+
+    fn fence(&self) -> AttachmentGcFence {
+        self.inner.fence()
+    }
+
+    async fn condemn_attachment(
+        &self,
+        id: &AttachmentId,
+        cutoff: u64,
+    ) -> Result<AttachmentCondemnation, StoreError> {
+        self.inner.condemn_attachment(id, cutoff).await
+    }
+
+    async fn arm_attachment_delete(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<AttachmentDeleteArming, StoreError> {
+        self.inner.arm_attachment_delete(id).await
+    }
+
+    async fn release_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
+        self.inner.release_attachment_condemnation(id).await
+    }
+
+    async fn reclaim_attachment_condemnation(&self, _id: &AttachmentId) -> Result<(), StoreError> {
+        self.reclaim_reached.notify_one();
+        std::future::pending().await
+    }
+}
+
+/// Real GC regression for the crash window after bytes are deleted but before
+/// `Deleting -> Reclaimed` is persisted.
+pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, ReopenFuture>(
+    factory: Arc<dyn SessionStoreFactory>,
+    reopen: Reopen,
+) where
+    Reopen: FnOnce() -> ReopenFuture,
+    ReopenFuture: Future<Output = Arc<dyn SessionStoreFactory>>,
+{
+    let namespace = uuid::Uuid::new_v4();
+    let session_id = SessionId::from(format!("condemnation-crash-{namespace}"));
+    factory
+        .create_store(&session_store_request(
+            &session_id,
+            "condemnation-crash",
+            SessionRelation::Root,
+        ))
+        .await
+        .expect("materialize durable condemnation catalog");
+    let backend = Arc::new(InMemoryAttachmentStore::new());
+    let reference = backend
+        .put(
+            format!("condemnation-crash-{namespace}").into_bytes(),
+            AttachmentCreateMeta::new(
+                MediaType::parse("application/octet-stream").unwrap(),
+                None,
+                None,
+            ),
+        )
+        .await
+        .expect("seed unreferenced physical blob");
+    let interrupted = Arc::new(StopBeforeCondemnationReclaim {
+        inner: Arc::clone(&factory),
+        reclaim_reached: tokio::sync::Notify::new(),
+    });
+    let sweep_root = Arc::clone(&interrupted);
+    let sweep_backend = Arc::clone(&backend);
+    let sweep = tokio::spawn(async move {
+        reclaim_unreferenced_attachments(
+            sweep_root.as_ref(),
+            sweep_backend.as_ref(),
+            AttachmentReclamationPolicy {
+                grace_period_ms: 0,
+                empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
+            },
+        )
+        .await
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        interrupted.reclaim_reached.notified(),
+    )
+    .await
+    .expect("GC reaches the post-delete, pre-reclaim stop point");
+    let expected = vec![AttachmentCondemnationRecord {
+        digest: reference.id.clone(),
+        phase: AttachmentCondemnationPhase::Deleting,
+        provenance: AttachmentCondemnationProvenance::SweepOwned,
+    }];
+    assert_eq!(
+        factory.list_condemnations().await.unwrap(),
+        expected,
+        "precondition: durable authority remains Deleting while reclaim is blocked"
+    );
+    sweep.abort();
+    let cancellation = tokio::time::timeout(std::time::Duration::from_secs(5), sweep)
+        .await
+        .expect("aborted GC sweep terminates promptly");
+    assert!(
+        matches!(cancellation, Err(ref error) if error.is_cancelled()),
+        "aborted GC sweep must report cancellation: {cancellation:?}"
+    );
+    let physical = backend.list().await.expect("enumerate physical backend");
+    assert!(
+        physical.is_empty(),
+        "physical delete completed before the scripted stop"
+    );
+    drop(interrupted);
+    drop(factory);
+
+    let reopened = reopen().await;
+    assert_eq!(reopened.list_condemnations().await.unwrap(), expected);
+
+    let backend_derived = physical.into_iter().map(|blob| blob.id).collect::<Vec<_>>();
+    assert_ne!(
+        backend_derived,
+        vec![reference.id],
+        "negative control: backend.list cannot discover an orphaned Deleting authority row once bytes are absent"
+    );
+}
+
 async fn out_of_band_absence_is_reclaimed(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("absent-head-receiver-{namespace}"));

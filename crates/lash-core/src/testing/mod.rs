@@ -24,8 +24,10 @@ pub mod checkpoint_observer;
 mod execution_context_builder;
 mod live_replay;
 pub mod sansio_transcript;
+pub mod tool_fixtures;
 
 pub(crate) use execution_context_builder::*;
+pub use tool_fixtures::{FIXTURE_ECHO_TOOL, FixtureTools, fixture_echo_definition};
 
 use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::future::Future;
