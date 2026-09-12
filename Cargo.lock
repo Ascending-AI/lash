@@ -2398,6 +2398,7 @@ dependencies = [
  "lash-internal-provider-auth",
  "lash-internal-provider-openai",
  "lash-internal-sansio",
+ "lash-internal-tool-support",
  "lash-runtime",
  "reqwest 0.13.4",
  "serde",

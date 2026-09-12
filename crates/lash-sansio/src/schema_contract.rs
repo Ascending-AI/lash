@@ -10,6 +10,9 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value, json};
 
 mod omission_null;
+#[cfg(test)]
+#[path = "schema_contract/omission_null_tests.rs"]
+mod omission_null_tests;
 use omission_null::materialize_omission_null_paths;
 pub use omission_null::{OmissionNullPath, OmissionNullPathSegment};
 
