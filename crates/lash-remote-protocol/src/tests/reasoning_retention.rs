@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn absent_retention_and_user_segment_marker_decode_to_safe_defaults() {
+    let capability: RemoteModelCapability =
+        serde_json::from_value(serde_json::json!({})).expect("absent retention policy decodes");
+    assert!(capability.reasoning_retention.is_default());
+    assert_eq!(
+        serde_json::to_value(capability).expect("serialize default capability"),
+        serde_json::json!({})
+    );
+
+    let message: RemoteLlmMessage = serde_json::from_value(serde_json::json!({
+        "role": "user",
+        "content": [{"type": "text", "text": "synthetic"}]
+    }))
+    .expect("absent segment marker decodes");
+    assert!(!message.starts_user_segment);
+}
+
+#[test]
 fn fig1123_remote_llm_request_json_round_trips() {
     let mut model_intent = RemoteModelIntent::new("gpt-test");
     model_intent.capability.reasoning_retention = RemoteReasoningRetentionPolicy {

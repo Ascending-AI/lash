@@ -204,7 +204,7 @@ fn process_input_remote_helpers_use_generic_engine_and_identity() {
     let draft = input
         .remote_trigger_subscription_draft(
             "button-main",
-            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
             "ui.button.pressed",

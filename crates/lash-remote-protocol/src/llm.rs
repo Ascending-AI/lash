@@ -506,6 +506,10 @@ pub struct RemoteModelCapability {
     /// Whether this model lets a caller set the sampling temperature.
     #[serde(default, skip_serializing_if = "RemoteSamplingCapability::is_default")]
     pub sampling: RemoteSamplingCapability,
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteReasoningRetentionPolicy::is_default"
+    )]
     pub reasoning_retention: RemoteReasoningRetentionPolicy,
 }
 
@@ -803,6 +807,7 @@ pub enum RemoteLlmRole {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLlmMessage {
     pub role: RemoteLlmRole,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starts_user_segment: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content: Vec<RemoteLlmContentBlock>,

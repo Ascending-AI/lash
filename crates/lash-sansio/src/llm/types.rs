@@ -420,6 +420,7 @@ pub struct LlmMessage {
     /// True only for a host-confirmed genuine user input. Client-side retention
     /// may cut before this message; synthetic observations and tool results do
     /// not receive the marker even when their provider role is `user`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub starts_user_segment: bool,
     pub blocks: Arc<Vec<LlmContentBlock>>,
 }

@@ -42,6 +42,7 @@ pub struct ModelCapability {
     /// Host-selected reasoning-history retention, independent of reasoning
     /// effort. Providers consume this exact capability/selection pair; they do
     /// not infer support from model identifiers or approximate other units.
+    #[serde(default, skip_serializing_if = "ReasoningRetentionPolicy::is_default")]
     pub reasoning_retention: Box<ReasoningRetentionPolicy>,
 }
 

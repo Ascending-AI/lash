@@ -1999,7 +1999,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
-            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         wake_target: Some(lash_core::SessionScope::new("session-a")),
         name: Some("button watcher".to_string()),

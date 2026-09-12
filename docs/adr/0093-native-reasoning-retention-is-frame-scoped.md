@@ -1,4 +1,4 @@
-# ADR 0092: Native reasoning retention is frame-scoped
+# ADR 0093: Native reasoning retention is frame-scoped
 
 ## Status
 
@@ -53,10 +53,20 @@ and cold-reopened execution because those paths share the durable model
 capability and explicit message-boundary marker. Unsupported choices fail
 deterministically before transport.
 
+Default retention policies remain omitted from serialized capabilities and
+decode as provider-default. A missing message-boundary marker decodes as
+`false`: absence is never evidence of genuine user input and therefore can
+never introduce a client-side retention cut. The explicit `true` marker is
+written only for committed `TurnInput` and direct API user messages.
+
 The new fields advance the remote protocol from 59 to 60, session-head metadata
-from 9 to 10, and session-node bodies from 13 to 14. These generations follow
-the admitted-effect-identity cutover on `main`; no compatibility decoder or
-silent old-generation migration is provided.
+from 9 to 10, and session-node bodies from 13 to 14. The remote and session-head
+fences refuse their immediate predecessors; the head v10 fence is the durable
+refusal point for the model capability and projected message marker. The node
+generation bump is nominal because the node-body fence is forward-only and an
+`LlmMessage` is not stored in a durable node body. These generations follow the
+admitted-effect-identity cutover on `main`; no silent old-generation migration
+is provided.
 
 This decision does not introduce compaction, overflow recovery, byte budgets,
 a universal HTTP bound, a new continuation abstraction, durable rewrites, or
