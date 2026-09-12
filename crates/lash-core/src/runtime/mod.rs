@@ -171,7 +171,7 @@ pub use effect::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, SleepSpec,
     StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,
     ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TriggerLocalExecution, TurnControlBinding, TurnControlParticipation,

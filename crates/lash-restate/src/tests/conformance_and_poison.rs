@@ -1233,7 +1233,7 @@ pub(super) fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
         err.summary.expect("mismatch summary"),
         lash_core::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
-            first_divergent_paths: vec!["command.duration_ms".to_string()],
+            first_divergent_paths: vec!["command.spec.duration_ms".to_string()],
         }
     );
 }
@@ -1258,7 +1258,9 @@ pub(super) fn recorded_runtime_effect_hash_match_returns_replayed_outcome() {
 pub(super) fn test_sleep_envelope(duration_ms: u64) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         turn_effect_invocation("session", "turn", 0, 0, "sleep:test", "sleep:test"),
-        RuntimeEffectCommand::Sleep { duration_ms },
+        RuntimeEffectCommand::Sleep {
+            spec: lash_core::SleepSpec::For { duration_ms },
+        },
     )
 }
 

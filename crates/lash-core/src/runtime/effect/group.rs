@@ -756,7 +756,9 @@ mod effect_group_contract_tests {
             (
                 "sleep",
                 RuntimeEffectKind::Sleep,
-                RuntimeEffectCommand::Sleep { duration_ms: 1_000 },
+                RuntimeEffectCommand::Sleep {
+                    spec: crate::SleepSpec::For { duration_ms: 1_000 },
+                },
             ),
             (
                 "exec_code",
@@ -830,16 +832,20 @@ mod effect_group_contract_tests {
     /// Fixed-byte authority for the v3 admitted-address envelope hashes.
     ///
     /// FIG-2828 deliberately moved every hash from v2 and paired that cutover
-    /// with new SQLite and PostgreSQL store generations. A later change must
-    /// make the same explicit version-and-drain decision before updating these
-    /// constants. The companion omission test still proves that an absent group
-    /// does not perturb this corpus within the v3 format.
+    /// with new SQLite and PostgreSQL store generations. FIG-2968 made the same
+    /// version-and-drain decision for a narrower change: the `sleep` command's
+    /// payload became the canonical `SleepSpec`, which moves only that entry's
+    /// bytes, and the effect-store generations were bumped so pre-cutover
+    /// journals are refused rather than replayed against moved bytes. The hash
+    /// domain tag is unchanged because no non-sleep envelope moved. The
+    /// companion omission test still proves that an absent group does not
+    /// perturb this corpus within the v3 format.
     #[test]
     fn ungrouped_envelope_v3_hash_golden_corpus() {
         let golden = [
             (
                 "sleep",
-                "e5968a7cc365941f52408f27e0817eac2fe0de35e18260fc6b82dbad768b914d",
+                "95a5b578cf5737d9386728f0149c85973f8bc6e87deac069b7c82d1e2d1793ee",
             ),
             (
                 "exec_code",
@@ -925,7 +931,9 @@ mod effect_group_contract_tests {
     fn group_membership_and_wake_drift_change_the_child_hash() {
         let base = RuntimeEffectEnvelope::new(
             invocation(RuntimeEffectKind::Sleep),
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 1 },
+            },
         );
         let ungrouped = base.stable_hash().expect("hashes");
         let first = base
@@ -1007,7 +1015,9 @@ mod effect_group_contract_tests {
     fn group_membership_round_trips_through_the_envelope() {
         let envelope = RuntimeEffectEnvelope::new(
             invocation(RuntimeEffectKind::Sleep),
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 1 },
+            },
         )
         .in_effect_group(
             "scope:group:batch:2",
@@ -1149,7 +1159,9 @@ mod effect_group_contract_tests {
         RuntimeEffectEnvelope::new(
             child_invocation(RuntimeEffectKind::Sleep, position),
             RuntimeEffectCommand::Sleep {
-                duration_ms: position as u64 + 1,
+                spec: crate::SleepSpec::For {
+                    duration_ms: position as u64 + 1,
+                },
             },
         )
         .in_effect_group(group_key, position, wake, LoserPolicy::RunToCompletion)
@@ -1170,7 +1182,9 @@ mod effect_group_contract_tests {
         RuntimeEffectEnvelope::new(
             child_invocation(RuntimeEffectKind::Sleep, position),
             RuntimeEffectCommand::Sleep {
-                duration_ms: position as u64 + 1,
+                spec: crate::SleepSpec::For {
+                    duration_ms: position as u64 + 1,
+                },
             },
         )
     }
@@ -1289,12 +1303,16 @@ mod effect_group_contract_tests {
         let key = "scope:group:batch:0";
         let run = RuntimeEffectEnvelope::new(
             invocation(RuntimeEffectKind::Sleep),
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 1 },
+            },
         )
         .in_effect_group(key, 0, GroupWakePolicy::First, LoserPolicy::RunToCompletion);
         let cancel = RuntimeEffectEnvelope::new(
             invocation(RuntimeEffectKind::Sleep),
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 1 },
+            },
         )
         .in_effect_group(key, 0, GroupWakePolicy::First, LoserPolicy::Cancel);
         assert_ne!(

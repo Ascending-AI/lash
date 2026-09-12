@@ -319,7 +319,9 @@ mod tests {
                     RuntimeEffectEnvelope::new(
                         invocation(format!("replay-{position}")),
                         RuntimeEffectCommand::Sleep {
-                            duration_ms: position as u64 + 1,
+                            spec: crate::SleepSpec::For {
+                                duration_ms: position as u64 + 1,
+                            },
                         },
                     )
                 })

@@ -5,8 +5,8 @@
   "records": {
     "lash:sleep:test": {
       "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"sleep:test\"},\"effect_id\":\"sleep:test\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0}},\"command\":{\"type\":\"sleep\",\"duration_ms\":1}}",
-        "hash": "0b9f0b29e0303cb65bc771e2761543c41a362b8f8a18ca1800809a5f23ef61da"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"sleep:test\"},\"effect_id\":\"sleep:test\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0}},\"command\":{\"type\":\"sleep\",\"spec\":{\"kind\":\"for\",\"duration_ms\":1}}}",
+        "hash": "a118fa4ffd6ec6228d6bdc8300fa3afa9b1fe44da829d5dc839065bf3fd775fd"
       },
       "outcome": {
         "Ok": {

@@ -16,8 +16,8 @@ pub use envelope::{
     AssistantResponseHookEvents, CheckpointClaimSet, LlmRequestSpec, ProcessCommand,
     ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimeLlmCallOutcome, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolBatchEffectOutcome, ToolCallLaunch,
+    RuntimeInvocation, RuntimeLlmCallOutcome, SleepSpec, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{

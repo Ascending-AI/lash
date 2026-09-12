@@ -824,7 +824,9 @@ mod tests {
                 RuntimeAttribution::for_session("session-1"),
                 "sleep-effect",
             ),
-            RuntimeEffectCommand::Sleep { duration_ms: 0 },
+            RuntimeEffectCommand::Sleep {
+                spec: lash_core::SleepSpec::For { duration_ms: 0 },
+            },
         );
 
         let outcome = scoped

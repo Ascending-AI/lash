@@ -187,7 +187,9 @@ async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_exec
             lash_core::RuntimeAttribution::none(),
             "restate-scope-admission-sleep",
         ),
-        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+        RuntimeEffectCommand::Sleep {
+            spec: lash_core::SleepSpec::For { duration_ms: 1 },
+        },
     );
 
     let error = scoped
@@ -228,7 +230,9 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
             lash_core::RuntimeAttribution::none(),
             "wrong-deployment-effect",
         ),
-        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+        RuntimeEffectCommand::Sleep {
+            spec: lash_core::SleepSpec::For { duration_ms: 1 },
+        },
     );
     let local_executions = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&local_executions);
@@ -968,7 +972,9 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
                         "fig779-redrive-sleep",
                     ),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: 60_000,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: 60_000,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation.clone())
@@ -1023,7 +1029,9 @@ impl RestateProcessRunner for Fig788TerminalRedriveRunner {
                         "fig788-terminal-redrive-sleep",
                     ),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: 60_000,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: 60_000,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),
@@ -1133,7 +1141,9 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
                         RuntimeEffectKind::Sleep,
                         "fig811-effectful-terminal-sleep",
                     ),
-                    RuntimeEffectCommand::Sleep { duration_ms: 1 },
+                    RuntimeEffectCommand::Sleep {
+                        spec: lash_core::SleepSpec::For { duration_ms: 1 },
+                    },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),
             )
