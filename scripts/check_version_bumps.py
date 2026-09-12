@@ -69,7 +69,7 @@ REGISTRATION_BASELINES = {
     # FIG-1128: the v2 Restate durable-wait request enrolls an explicit
     # absolute-deadline wire after retiring the unversioned relative timeout.
     "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REQUEST_VERSION": (
-        "sha256:57132ba7af1d2309662351b26b2a007dbd0ce074b362df6bad442da7ca79396d"
+        "sha256:8688d6e37303f8ae6cd69afdc4cdb6f977811cf4c60429b1a95774efa635c8fb"
     ),
     # FIG-2945: the public serialized sans-IO turn checkpoint is enrolled at
     # v2 when completed pre-dispatch reporting joins its pending effect vocabulary.
