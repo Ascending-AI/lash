@@ -872,6 +872,7 @@ impl Provider for CodexProvider {
                                     text, ..
                                 } if !text.is_empty() && provider.options.expose_thinking => {
                                     tx.send(LlmStreamEvent::ReasoningDelta(text.clone()));
+                                    tx.send(LlmStreamEvent::Part(part.clone()));
                                 }
                                 _ => {}
                             }

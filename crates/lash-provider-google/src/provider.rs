@@ -191,6 +191,7 @@ impl GoogleOAuthProvider {
             });
         let mut output_parts: Vec<LlmOutputPart> = Vec::new();
         let mut tool_call_parts: Vec<LlmOutputPart> = Vec::new();
+        let mut reasoning_stream_state = ReasoningStreamState::default();
         let mut finish_event: Option<Value> = None;
         let origin_model = request
             .get("model")
@@ -207,6 +208,7 @@ impl GoogleOAuthProvider {
                 emit_provider_trace(provider_trace.as_ref(), "google", raw);
                 let mut text_deltas = Vec::new();
                 let mut reasoning_deltas = Vec::new();
+                let mut reasoning_events = Vec::new();
                 let prev_usage = usage.clone();
                 let prev_execution_evidence = execution_evidence.clone();
                 let first_new_tool_call = tool_call_parts.len();
@@ -221,6 +223,10 @@ impl GoogleOAuthProvider {
                         execution_evidence: &mut execution_evidence,
                         tool_call_parts: Some(&mut tool_call_parts),
                         output_parts: Some(&mut output_parts),
+                        reasoning_stream: Some(ReasoningStreamSink {
+                            state: &mut reasoning_stream_state,
+                            events: &mut reasoning_events,
+                        }),
                         finish_event: &mut finish_event,
                     },
                     origin_model.as_deref(),
@@ -228,8 +234,8 @@ impl GoogleOAuthProvider {
                 if let Some(tx) = stream_events.as_ref()
                     && self.options.expose_thinking
                 {
-                    for delta in reasoning_deltas {
-                        tx.send(LlmStreamEvent::ReasoningDelta(delta));
+                    for event in reasoning_events {
+                        tx.send(event);
                     }
                 }
                 if let Some(tx) = stream_events.as_ref() {
@@ -261,6 +267,15 @@ impl GoogleOAuthProvider {
             },
         )
         .await;
+
+        if stream_result.is_ok()
+            && self.options.expose_thinking
+            && let Some(index) = reasoning_stream_state.open_output_part_index.take()
+            && let Some(part @ LlmOutputPart::Reasoning { .. }) = output_parts.get(index)
+            && let Some(tx) = stream_events.as_ref()
+        {
+            tx.send(LlmStreamEvent::Part(part.clone()));
+        }
 
         let partial_response = || {
             let mut parts = output_parts.clone();

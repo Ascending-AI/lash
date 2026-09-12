@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ToolCallRecord;
 use crate::llm::types::{
@@ -26,6 +26,97 @@ use super::{
 #[derive(Clone, Debug, Default)]
 pub(super) struct LlmStreamAccumulator {
     pub(super) parts: Vec<LlmOutputPart>,
+}
+
+/// Reasoning parts already published as live activity during one LLM attempt.
+///
+/// Identified parts reconcile by provider item ID. Anonymous delta groups use
+/// provider delivery order; their text is deliberately never compared with
+/// the completed response.
+#[derive(Clone, Debug, Default)]
+pub(super) struct ReasoningPublicationState {
+    published_parts: Vec<Option<String>>,
+    open_delta_part: Option<usize>,
+}
+
+impl ReasoningPublicationState {
+    pub(super) fn record_delta(&mut self) {
+        if self.open_delta_part.is_some() {
+            return;
+        }
+        self.published_parts.push(None);
+        self.open_delta_part = Some(self.published_parts.len() - 1);
+    }
+
+    pub(super) fn record_anonymous_part(&mut self) {
+        self.published_parts.push(None);
+    }
+
+    /// Reconciles the open anonymous delta group with its completed part.
+    ///
+    /// Returns whether a live group was open, in which case the completed part
+    /// is reconciliation state rather than new visible text.
+    pub(super) fn reconcile_completed_part(&mut self, item_id: Option<&str>) -> bool {
+        let Some(index) = self.open_delta_part.take() else {
+            return false;
+        };
+        if let Some(item_id) = item_id.filter(|item_id| !item_id.is_empty()) {
+            self.published_parts[index] = Some(item_id.to_string());
+        }
+        true
+    }
+
+    pub(super) fn record_completed_part(&mut self, item_id: Option<&str>) {
+        self.published_parts.push(
+            item_id
+                .filter(|item_id| !item_id.is_empty())
+                .map(str::to_string),
+        );
+    }
+
+    pub(super) fn published_response_part_indices(
+        &self,
+        parts: &[LlmOutputPart],
+    ) -> BTreeSet<usize> {
+        let mut published = BTreeSet::new();
+
+        // Stable identity takes precedence over positional reconciliation.
+        for item_id in self.published_parts.iter().flatten() {
+            if let Some((index, _)) = parts.iter().enumerate().find(|(index, part)| {
+                !published.contains(index)
+                    && matches!(
+                        part,
+                        LlmOutputPart::Reasoning {
+                            replay: Some(replay),
+                            ..
+                        } if replay.item_id.as_ref() == Some(item_id)
+                    )
+            }) {
+                published.insert(index);
+            }
+        }
+
+        // ReasoningDelta has no wire identity. The stream protocol reconciles
+        // each anonymous live group with the next unmatched completed
+        // reasoning slot in provider delivery order.
+        let mut anonymous_remaining = self
+            .published_parts
+            .iter()
+            .filter(|item_id| item_id.is_none())
+            .count();
+        for (index, part) in parts.iter().enumerate() {
+            if anonymous_remaining == 0 {
+                break;
+            }
+            if matches!(part, LlmOutputPart::Reasoning { text, .. } if !text.is_empty())
+                && !published.contains(&index)
+            {
+                published.insert(index);
+                anonymous_remaining -= 1;
+            }
+        }
+        published
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -67,6 +158,7 @@ pub(super) struct LlmStreamState<'a> {
     pub(super) protocol_iteration: usize,
     pub(super) assistant_prose_correlation: &'a mut Option<crate::TurnActivityId>,
     pub(super) reasoning_correlation: &'a mut Option<crate::TurnActivityId>,
+    pub(super) reasoning_publication: &'a mut ReasoningPublicationState,
     pub(super) assistant_prose_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
     pub(super) reasoning_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
     /// Set to `true` by `forward_provider_stream_event` when a plugin

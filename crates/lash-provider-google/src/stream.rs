@@ -4,6 +4,11 @@
 
 use crate::support::*;
 
+struct ReasoningPieceUpdate {
+    opened_part: Option<usize>,
+    delta: Option<String>,
+}
+
 impl GoogleOAuthProvider {
     pub(crate) fn usage_from_event(event: &Value) -> LlmUsage {
         let meta = event
@@ -187,7 +192,7 @@ impl GoogleOAuthProvider {
         signature: Option<String>,
         reconcile_with_previous_event: bool,
         origin_model: Option<&str>,
-    ) {
+    ) -> ReasoningPieceUpdate {
         let replay = self.reasoning_replay(signature, origin_model);
         if reconcile_with_previous_event
             && let Some(LlmOutputPart::Reasoning {
@@ -206,7 +211,7 @@ impl GoogleOAuthProvider {
                 (Some(existing), Some(incoming)) if existing != incoming
             );
             if signatures_conflict {
-                self.push_reasoning_piece(
+                return self.push_reasoning_piece(
                     parts,
                     reasoning_deltas,
                     piece,
@@ -214,7 +219,6 @@ impl GoogleOAuthProvider {
                     false,
                     origin_model,
                 );
-                return;
             }
 
             let delta = if piece.starts_with(text.as_str()) {
@@ -226,21 +230,42 @@ impl GoogleOAuthProvider {
             };
             if !delta.is_empty() {
                 text.push_str(&delta);
-                reasoning_deltas.push(delta);
+                reasoning_deltas.push(delta.clone());
             }
             if existing_replay.is_none() && replay.is_some() {
                 *existing_replay = replay;
             }
-            return;
+            return ReasoningPieceUpdate {
+                opened_part: None,
+                delta: (!delta.is_empty()).then_some(delta),
+            };
         }
 
-        if !piece.is_empty() {
-            reasoning_deltas.push(piece.clone());
-        }
+        let delta = (!piece.is_empty()).then_some(piece.clone());
+        reasoning_deltas.extend(delta.iter().cloned());
         parts.push(LlmOutputPart::Reasoning {
             text: piece,
             replay,
         });
+        ReasoningPieceUpdate {
+            opened_part: Some(parts.len() - 1),
+            delta,
+        }
+    }
+
+    fn close_reasoning_stream_part(
+        parts: &[LlmOutputPart],
+        reasoning_stream: &mut Option<ReasoningStreamSink<'_>>,
+    ) {
+        let Some(stream) = reasoning_stream.as_mut() else {
+            return;
+        };
+        let Some(index) = stream.state.open_output_part_index.take() else {
+            return;
+        };
+        if let Some(part @ LlmOutputPart::Reasoning { .. }) = parts.get(index) {
+            stream.events.push(LlmStreamEvent::Part(part.clone()));
+        }
     }
 
     fn apply_stream_piece(
@@ -289,6 +314,7 @@ impl GoogleOAuthProvider {
                 execution_evidence: &mut execution_evidence,
                 tool_call_parts,
                 output_parts: None,
+                reasoning_stream: None,
                 finish_event,
             },
             None,
@@ -310,6 +336,7 @@ impl GoogleOAuthProvider {
             execution_evidence,
             tool_call_parts,
             output_parts,
+            mut reasoning_stream,
             finish_event,
         } = sink;
         if raw.trim().is_empty() || raw.trim() == "[DONE]" {
@@ -352,16 +379,33 @@ impl GoogleOAuthProvider {
                 let parts = output_parts
                     .as_deref_mut()
                     .unwrap_or(&mut discarded_output_parts);
-                self.push_reasoning_piece(
+                let may_extend_open_stream_part = reasoning_stream
+                    .as_ref()
+                    .is_none_or(|stream| stream.state.open_output_part_index.is_some());
+                let update = self.push_reasoning_piece(
                     parts,
                     reasoning_deltas,
                     piece,
                     signature,
-                    !saw_thought_in_event,
+                    !saw_thought_in_event && may_extend_open_stream_part,
                     origin_model,
                 );
+                if let Some(opened_part) = update.opened_part {
+                    Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
+                    if let Some(stream) = reasoning_stream.as_mut() {
+                        stream.state.open_output_part_index = Some(opened_part);
+                    }
+                }
+                if let Some(delta) = update.delta
+                    && let Some(stream) = reasoning_stream.as_mut()
+                {
+                    stream.events.push(LlmStreamEvent::ReasoningDelta(delta));
+                }
                 saw_thought_in_event = true;
                 continue;
+            }
+            if let Some(parts) = output_parts.as_deref() {
+                Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
             }
             let Some(delta) = Self::apply_stream_piece(full, text_deltas, &piece) else {
                 continue;
@@ -378,6 +422,11 @@ impl GoogleOAuthProvider {
             }
         }
         let tool_calls = self.tool_call_parts_from_event(&event, origin_model);
+        if !tool_calls.is_empty()
+            && let Some(parts) = output_parts.as_deref()
+        {
+            Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
+        }
         if let Some(parts) = tool_call_parts {
             parts.extend(tool_calls);
         }
@@ -385,6 +434,9 @@ impl GoogleOAuthProvider {
         // streaming finalizer can derive the terminal reason exactly like the
         // non-streaming path instead of hardcoding Stop.
         if Self::finish_reason_str(&event).is_some() {
+            if let Some(parts) = output_parts.as_deref() {
+                Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
+            }
             *finish_event = Some(event);
         }
         Ok(())

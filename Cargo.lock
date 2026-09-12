@@ -2375,6 +2375,7 @@ dependencies = [
  "lash-internal-provider-auth",
  "lash-internal-provider-google",
  "lash-internal-sansio",
+ "lash-runtime",
  "proptest",
  "reqwest 0.13.4",
  "serde",
