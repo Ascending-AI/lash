@@ -247,6 +247,18 @@ impl TestTurnCancelGate {
         self.state.lock_recover().registrations.len()
     }
 
+    pub(super) fn registered_keys(&self) -> Vec<AwaitEventKey> {
+        let mut keys = self
+            .state
+            .lock_recover()
+            .registrations
+            .values()
+            .map(|entry| entry.key.clone())
+            .collect::<Vec<_>>();
+        keys.sort_by_key(AwaitEventKey::promise_key);
+        keys
+    }
+
     fn wake_matching(
         &self,
         predicate: impl Fn(&TestTurnCancelGateEntry) -> bool,

@@ -246,6 +246,7 @@ impl RuntimeTurnDriver<'_> {
         );
         let _ = event_tx;
         let scoped_effect_controller = self.scoped_effect_controller.clone();
+        let turn_cancel_wait = self.turn_cancel_wait(cancel.clone());
         let deadline = _pending
             .deadline
             .map(|duration| self.host.core.clock.now() + duration);
@@ -253,7 +254,7 @@ impl RuntimeTurnDriver<'_> {
             .execute_effect(
                 RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
                 crate::RuntimeEffectLocalExecutor::await_event_under(
-                    &scoped_effect_controller.turn_cancel_wait(cancel.clone()),
+                    &turn_cancel_wait,
                     deadline,
                     Arc::clone(&self.host.core.clock),
                 ),

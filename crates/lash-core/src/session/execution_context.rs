@@ -25,6 +25,10 @@ pub struct RuntimeExecutionContext<'run> {
     pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
     pub(super) cancellation_token: Option<CancellationToken>,
     pub(super) observe_turn_cancel: bool,
+    /// Durable cancellation authority for waits issued by this execution.
+    /// A follow-on physical turn keeps its admitted effect scope but observes
+    /// the cancellation gate addressed to its own turn identity.
+    turn_cancel_scope: Option<crate::ExecutionScope>,
     /// Per-tool trace emission handle for this execution. Present only when the
     /// host installed a trace sink; `None` keeps every trace call a no-op.
     tracing: Option<RuntimeExecutionTracing>,
@@ -284,6 +288,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_event_tx: None,
             cancellation_token: None,
             observe_turn_cancel: true,
+            turn_cancel_scope: None,
             tracing: None,
             code_block_graph_key: None,
             batch_parent_call_id: None,
@@ -307,6 +312,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_event_tx: self.turn_event_tx.clone(),
             cancellation_token: self.cancellation_token.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
+            turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
             batch_parent_call_id: self.batch_parent_call_id.clone(),
@@ -502,6 +508,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    pub(crate) fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
+        self.turn_cancel_scope = Some(scope);
+        self
+    }
+
     /// The complete turn-cancel trio for one wait built from this execution:
     /// the token the wait races against, whether this execution observes turn
     /// cancellation, and the execution scope its turn-cancel gate registers
@@ -516,10 +527,14 @@ impl<'run> RuntimeExecutionContext<'run> {
         cancellation: CancellationToken,
     ) -> crate::runtime::TurnCancelWait {
         if self.observe_turn_cancel {
-            self.dispatch
-                .effect_controller
-                .scoped()
-                .turn_cancel_wait(cancellation)
+            match self.turn_cancel_scope.clone() {
+                Some(scope) => crate::runtime::TurnCancelWait::observing(cancellation, scope),
+                None => self
+                    .dispatch
+                    .effect_controller
+                    .scoped()
+                    .turn_cancel_wait(cancellation),
+            }
         } else {
             crate::runtime::TurnCancelWait::unobserved(cancellation)
         }
