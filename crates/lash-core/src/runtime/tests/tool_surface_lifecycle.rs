@@ -1696,6 +1696,17 @@ fn admit_payload_gated_engine(
     )))
 }
 
+#[test]
+fn process_engine_registration_rejects_a_kind_mismatch() {
+    assert!(matches!(
+        crate::ProcessEngineRegistration::new(
+            Arc::new(PayloadGatedEngine),
+            crate::ProcessEngineAdmission::accepting("different-kind"),
+        ),
+        Err(crate::PluginError::Registration(_))
+    ));
+}
+
 /// Shared fixture: a runtime whose only process engine is
 /// [`PayloadGatedEngine`], plus the registry the started rows land in.
 async fn payload_gated_engine_runtime(
@@ -1709,7 +1720,8 @@ async fn payload_gated_engine_runtime(
                 PAYLOAD_GATED_ENGINE_KIND,
                 admit_payload_gated_engine,
             ),
-        ),
+        )
+        .expect("payload-gated engine and admission share a fixed kind"),
     );
     let env = crate::RuntimeEnvironment::builder(
         crate::CommitBudget::bounded(1024 * 1024, 512),

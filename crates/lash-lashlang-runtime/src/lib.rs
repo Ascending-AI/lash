@@ -1192,6 +1192,7 @@ pub fn lashlang_process_engine_registration(
         Arc::new(engine),
         lash_core::ProcessEngineAdmission::new(LASHLANG_ENGINE_KIND, admit_lashlang_process),
     )
+    .expect("lashlang engine and admission share a fixed kind")
 }
 
 mod bridge;

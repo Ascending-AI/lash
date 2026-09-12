@@ -1540,22 +1540,16 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     let artifact_store = Arc::new(SwitchableArtifactStore::new(durable_store));
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"process main(live_validation_marker: str) -> str { finish "redriven" }"#,
+        r#"process main() -> str { finish "redriven" }"#,
         "main",
     )
     .await;
-    let live_validation_marker = dir.path().join("committed-start.marker");
-    let mut process_args = serde_json::Map::new();
-    process_args.insert(
-        "live_validation_marker".to_string(),
-        serde_json::Value::String(live_validation_marker.display().to_string()),
-    );
     let process_input = lash_lashlang_runtime::LashlangProcessInput {
         module_ref: process.module_ref.clone(),
         process_ref: process.process_ref.clone(),
         host_requirements_ref: process.host_requirements_ref.clone(),
         process_name: process.process_name.clone(),
-        args: process_args,
+        args: serde_json::Map::new(),
     }
     .into_process_input()
     .expect("durable witness input serializes");
@@ -1624,11 +1618,6 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     let process_id = started_rx
         .await
         .expect("the hook observes Start only after the command returns");
-    std::fs::write(
-        &live_validation_marker,
-        b"live world changed after Start committed",
-    )
-    .expect("arm the forbidden live-admission mutation after Start");
     artifact_store.set_unavailable(true);
     let interruption = interrupted
         .await

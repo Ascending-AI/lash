@@ -1587,7 +1587,7 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
         Ok(vec![lash_core::ProcessEngineRegistration::new(
             Arc::new(IngressAdmissionEngine),
             lash_core::ProcessEngineAdmission::new(INGRESS_ENGINE_KIND, admit_ingress_engine),
-        )])
+        )?])
     }
 
     fn build(

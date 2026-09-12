@@ -548,19 +548,24 @@ pub struct ProcessEngineRegistration {
 }
 
 impl ProcessEngineRegistration {
-    pub fn new(engine: Arc<dyn ProcessEngine>, admission: ProcessEngineAdmission) -> Self {
-        assert_eq!(
-            engine.kind(),
-            admission.kind(),
-            "engine/admission kind mismatch"
-        );
-        Self { engine, admission }
+    pub fn new(
+        engine: Arc<dyn ProcessEngine>,
+        admission: ProcessEngineAdmission,
+    ) -> Result<Self, crate::PluginError> {
+        if engine.kind() != admission.kind() {
+            return Err(crate::PluginError::Registration(format!(
+                "process engine kind `{}` does not match admission kind `{}`",
+                engine.kind(),
+                admission.kind()
+            )));
+        }
+        Ok(Self { engine, admission })
     }
 
     /// Pair an engine with the default recorded-input admission policy.
     pub fn accepting(engine: Arc<dyn ProcessEngine>) -> Self {
         let admission = ProcessEngineAdmission::accepting(engine.kind());
-        Self::new(engine, admission)
+        Self { engine, admission }
     }
 }
 
