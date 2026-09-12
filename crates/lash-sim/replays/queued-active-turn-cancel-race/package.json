@@ -4,8 +4,8 @@
   "status": "promoted_deterministic_regression_guard",
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v9",
-  "source": "Generated live through lash-sim run and write_trace on 2026-09-11 with lash-sim.generated-workload.v9; observer events include the ADR 0078 mediated plugin state.",
-  "source_trace_sha256": "3397289187cbec5c6d35be67f8ee9477157cc6dee549be7448afaf9f0a197ea3",
+  "source": "Generated live through lash-sim run and write_trace on 2026-09-12 with lash-sim.generated-workload.v9; observer events include the ADR 0078 mediated plugin state.",
+  "source_trace_sha256": "34e28d4c4be7590f5e6271e9bc9dcb33a41b2b1c565350fc18574c6028eecf99",
   "historical_production_regression": false,
   "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
   "required_boundary_kinds": [

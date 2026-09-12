@@ -460,12 +460,6 @@ impl RlmDialect for TypescriptDialect {
         }
     }
 
-    fn turn_limit_final_copy(&self, max_turns: usize) -> String {
-        format!(
-            "Turn limit reached ({max_turns}). Reply in plain prose with accomplishments, remaining work, and next steps; do not emit a TypeScript block."
-        )
-    }
-
     fn finish_required_copy(&self, requires_schema: bool) -> String {
         if requires_schema {
             "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete, with a value matching the required output schema.".to_string()

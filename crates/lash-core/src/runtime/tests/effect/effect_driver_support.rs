@@ -76,32 +76,13 @@ struct EffectControllerTestProtocolDriver;
 impl ProtocolDriverPlugin for EffectControllerTestProtocolDriver {
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble {
         crate::TurnDriverPreamble {
-            config: crate::TurnDriverConfig::chat(
-                Arc::new(EffectControllerTestDriver),
-                true,
-                Arc::new(effect_controller_turn_limit_final_message),
-            ),
+            config: crate::TurnDriverConfig::chat(Arc::new(EffectControllerTestDriver), true),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names: input.tool_catalog.tool_names(),
             tool_names_fingerprint: input.tool_catalog.tool_names_fingerprint(),
             execution_prompt: Arc::from(""),
             prompt_contributions: input.extra_prompt_contributions,
         }
-    }
-}
-
-fn effect_controller_turn_limit_final_message(
-    message_id: String,
-    max_turns: usize,
-) -> crate::Message {
-    crate::Message {
-        id: message_id.clone(),
-        role: crate::MessageRole::System,
-        parts: crate::shared_parts(vec![crate::Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 

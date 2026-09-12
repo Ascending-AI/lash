@@ -672,7 +672,6 @@ pub(super) struct TurnAssembler {
     pub(super) child_cumulatives: BTreeMap<(String, String, String), TokenUsage>,
     pub(super) issues: Vec<TurnIssue>,
     pub(super) saw_done: bool,
-    pub(super) turn_limit_final_scheduled: bool,
     pub(super) outcome: Option<TurnOutcome>,
 }
 
@@ -694,7 +693,6 @@ impl TurnAssembler {
             child_cumulatives: BTreeMap::new(),
             issues: Vec::new(),
             saw_done: false,
-            turn_limit_final_scheduled: false,
             outcome: None,
         }
     }
@@ -886,8 +884,6 @@ impl TurnAssembler {
             } else {
                 TurnOutcome::Stopped(TurnStop::RuntimeError)
             }
-        } else if self.turn_limit_final_scheduled {
-            TurnOutcome::Stopped(TurnStop::MaxTurns)
         } else {
             TurnOutcome::Finished(TurnFinish::AssistantMessage {
                 text: safe_output.clone(),

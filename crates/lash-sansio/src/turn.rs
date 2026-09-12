@@ -61,11 +61,6 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             turn_id: input.turn_id,
             emit_llm_trace: input.emit_llm_trace,
             termination: input.termination,
-            turn_limit_final_message: input
-                .turn_driver_preamble
-                .config
-                .turn_limit_final_message
-                .clone(),
         },
         input.messages,
         input.events,
@@ -153,11 +148,7 @@ mod tests {
             "read_file",
         )]));
         let turn_driver_preamble = Arc::new(TurnDriverPreamble {
-            config: TurnDriverConfig::chat(
-                Arc::new(NoopDriver),
-                false,
-                Arc::new(test_turn_limit_final_message),
-            ),
+            config: TurnDriverConfig::chat(Arc::new(NoopDriver), false),
             tool_specs: tool_catalog.model_tool_specs(),
             tool_names: tool_catalog.tool_names(),
             tool_names_fingerprint: tool_catalog.tool_names_fingerprint(),
@@ -208,17 +199,5 @@ mod tests {
                 .contains("Be precise.")
         );
         assert_eq!(prepared.turn_driver_preamble.tool_specs.len(), 1);
-    }
-
-    fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> crate::Message {
-        crate::Message {
-            id: message_id.clone(),
-            role: crate::MessageRole::System,
-            parts: crate::shared_parts(vec![crate::Part::error(
-                format!("{message_id}.p0"),
-                format!("Turn limit reached ({max_turns}) before a final test response."),
-            )]),
-            origin: None,
-        }
     }
 }

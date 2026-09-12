@@ -748,7 +748,6 @@ fn rlm_contract_config_with_turn_options(
         turn_id: TurnId::from("rlm-contract-turn"),
         emit_llm_trace: false,
         termination,
-        turn_limit_final_message: Arc::new(contract_turn_limit_final_message),
     })
 }
 

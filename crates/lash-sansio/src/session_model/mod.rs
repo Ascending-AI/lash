@@ -16,7 +16,7 @@ pub use prompt::{
 use std::sync::Arc;
 
 /// Per-turn budget: the maximum number of protocol iterations (model calls) a
-/// single turn may run before a clean MaxTurns stop is scheduled.
+/// single turn may run before it finishes with `Stopped(MaxTurns)`.
 ///
 /// Hosts must choose a finite limit or opt into unlimited execution explicitly.
 /// `Bounded` uses a non-zero value so a turn always has an opportunity to run
@@ -643,49 +643,6 @@ impl TurnCancellationEvidence {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TurnTerminationPolicyState {
-    turn_limit_final_scheduled: bool,
-}
-
-impl Default for TurnTerminationPolicyState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TurnTerminationPolicyState {
-    pub fn new() -> Self {
-        Self {
-            turn_limit_final_scheduled: false,
-        }
-    }
-
-    pub fn should_force_exit_after_grace_turn(&self) -> bool {
-        self.turn_limit_final_scheduled
-    }
-
-    pub fn turn_limit_final_to_schedule(
-        &self,
-        protocol_iteration: usize,
-        protocol_run_offset: usize,
-        turn_budget: TurnBudget,
-    ) -> Option<usize> {
-        if self.turn_limit_final_scheduled {
-            return None;
-        }
-        let max = turn_budget.max_turns()?;
-        if protocol_iteration < protocol_run_offset + max {
-            return None;
-        }
-        Some(max)
-    }
-
-    pub fn mark_turn_limit_final_scheduled(&mut self) {
-        self.turn_limit_final_scheduled = true;
-    }
-}
-
 pub fn make_error_envelope(
     kind: &str,
     code: Option<&str>,
@@ -769,18 +726,8 @@ pub fn model_tool_specs(tools: &[ToolDefinition]) -> Vec<LlmToolSpec> {
 mod tests {
     use super::{
         ErrorEnvelope, NoProgressBudget, SessionStreamEvent, TokenUsage, TurnBudget, TurnOutcome,
-        TurnTerminationPolicyState,
     };
     use crate::llm::types::{LlmTerminalReason, ProviderFailureKind};
-
-    #[test]
-    fn bounded_turn_budget_exhausts_exactly_at_n_iterations() {
-        let state = TurnTerminationPolicyState::new();
-        let budget = TurnBudget::bounded(3);
-
-        assert_eq!(state.turn_limit_final_to_schedule(6, 4, budget), None);
-        assert_eq!(state.turn_limit_final_to_schedule(7, 4, budget), Some(3));
-    }
 
     #[test]
     #[should_panic(expected = "turn budget must be non-zero; use TurnBudget::Unbounded to opt out")]
@@ -820,18 +767,6 @@ mod tests {
     )]
     fn a_bounded_no_progress_budget_rejects_zero() {
         let _ = NoProgressBudget::bounded(0);
-    }
-
-    #[test]
-    fn unbounded_turn_budget_never_schedules_a_limit_stop() {
-        let state = TurnTerminationPolicyState::new();
-
-        for iteration in [0, 1, 10_000, usize::MAX] {
-            assert_eq!(
-                state.turn_limit_final_to_schedule(iteration, 0, TurnBudget::Unbounded),
-                None
-            );
-        }
     }
 
     #[test]

@@ -184,10 +184,6 @@ pub(super) fn projection_test_config(
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions::default())
             .expect("RLM options"),
-        turn_limit_final_message: Arc::new(|message_id, max_turns| {
-            let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
-            crate::protocol::turn_limit_final_message(&dialect, message_id, max_turns)
-        }),
     }
 }
 

@@ -335,7 +335,6 @@ fn assembled_prompt_fragments_with_projection(
             schema: Some(serde_json::json!({"type": "number"})),
         }),
     ));
-    fragments.push(("turn limit", dialect.turn_limit_final_copy(8)));
     fragments.push(("finish required", dialect.finish_required_copy(false)));
     fragments.push(("finish schema", dialect.finish_required_copy(true)));
     fragments.push(("schema mismatch", dialect.finish_schema_mismatch_copy()));
