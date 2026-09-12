@@ -31,6 +31,9 @@ struct GrantBindingProvider {
     prepared_bindings: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     executed_bindings: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 }
+struct GrantDeferralProvider {
+    may_defer: bool,
+}
 struct LeafBatchTool;
 struct LazyLeafBatchTool;
 struct LazyOrchestratingBatchSource;
@@ -170,6 +173,42 @@ impl ToolProvider for GrantBindingProvider {
             .push(call.context.tool_execution_binding().clone());
         ToolOutcome::ok(json!(call.name))
     }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for GrantDeferralProvider {
+    fn tool_manifests(&self) -> Vec<ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+        (id == &tool_id("host_only")).then(|| test_tool("host_only", "host-only").manifest())
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+        None
+    }
+
+    fn attempt_may_defer(&self, id: &ToolId) -> bool {
+        self.may_defer && id == &tool_id("host_only")
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        ToolOutcome::ok(json!("host_only"))
+    }
+}
+
+fn grant_deferral_registry(may_defer: bool) -> ToolRegistry {
+    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    registry
+        .upsert_source(Arc::new(ToolProviderSource::new(
+            "grant-source",
+            vec![Arc::new(GrantDeferralProvider { may_defer })],
+        )))
+        .expect("grant source registered");
+    registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("resident catalog with live grant sources")
 }
 
 #[async_trait::async_trait]
@@ -1430,6 +1469,20 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
         *executed_bindings.lock_recover(),
         vec![json!({ "kind": "test", "route": "grant" })]
     );
+}
+
+#[test]
+fn granted_deferred_source_reports_attempt_may_defer() {
+    let registry = grant_deferral_registry(true);
+
+    assert!(registry.attempt_may_defer_for_grant(&tool_id("host_only"), Some("grant-source")));
+}
+
+#[test]
+fn granted_non_deferred_source_reports_attempt_cannot_defer() {
+    let registry = grant_deferral_registry(false);
+
+    assert!(!registry.attempt_may_defer_for_grant(&tool_id("host_only"), Some("grant-source")));
 }
 
 #[tokio::test]

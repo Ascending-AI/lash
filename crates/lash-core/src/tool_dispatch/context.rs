@@ -189,14 +189,13 @@ impl ToolDispatchContext<'_> {
         grant: Option<&crate::ToolExecutionGrant>,
     ) -> bool {
         // A registry's pinned catalog deliberately omits out-of-catalog grant
-        // routes. Ask its live grant source first, then retain the direct
-        // provider fallback used by non-registry execution contexts.
+        // routes. Only the live source named by the grant can declare deferral;
+        // an unresolved route must not borrow the answer from a same-id catalog
+        // tool. Direct non-registry providers retain their ordinary lookup.
         if let Some(grant) = grant
-            && let Some(result) = self.tool_registry.as_deref().and_then(|registry| {
-                registry.attempt_may_defer_for_grant(tool_id, grant.source_id.as_deref())
-            })
+            && let Some(registry) = self.tool_registry.as_deref()
         {
-            return result;
+            return registry.attempt_may_defer_for_grant(tool_id, grant.source_id.as_deref());
         }
         self.tools.attempt_may_defer(tool_id)
     }

@@ -159,11 +159,11 @@ impl ToolRegistry {
         &self,
         tool_id: &ToolId,
         source_id: Option<&str>,
-    ) -> Option<bool> {
-        let source = self
-            .resolve_granted_execution_source(tool_id, source_id)
-            .ok()?;
-        Some(source.attempt_may_defer(tool_id))
+    ) -> bool {
+        let Ok(source) = self.resolve_granted_execution_source(tool_id, source_id) else {
+            return false;
+        };
+        source.attempt_may_defer(tool_id)
     }
 
     pub(crate) async fn execute_orchestrating_by_id(
