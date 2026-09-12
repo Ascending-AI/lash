@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -379,13 +380,72 @@ impl LashlangSurface {
         &self,
         catalog: &lash_core::ToolCatalog,
     ) -> Result<LashlangHostEnvironment, ToolBindingError> {
+        self.host_environment_masking(catalog, &BTreeSet::new())
+    }
+
+    /// Builds the link-time environment while excluding exact ambient call
+    /// paths already decided by the deferred-resolution journal.
+    ///
+    /// Filtering happens before the flat Tool Catalog and contributed surface
+    /// resources are merged and validated. Thus a recorded authority can mask
+    /// every later ambient claimant for its path, while unrelated collisions
+    /// and malformed definitions retain their normal failures.
+    pub fn host_environment_masking(
+        &self,
+        catalog: &lash_core::ToolCatalog,
+        masked_call_paths: &BTreeSet<String>,
+    ) -> Result<LashlangHostEnvironment, ToolBindingError> {
+        let mut resources = self.resources.clone();
+        for path in masked_call_paths {
+            if let Some((module_path, operation)) = path.rsplit_once('.') {
+                resources.mask_module_operation(module_path, operation);
+            }
+        }
         lashlang_host_environment_from_tool_catalog(
-            catalog,
+            &filtered_tool_catalog(catalog, masked_call_paths),
             self.abilities,
             self.language_features,
-            self.resources.clone(),
+            resources,
         )
     }
+}
+
+fn filtered_tool_catalog(
+    catalog: &lash_core::ToolCatalog,
+    masked_call_paths: &BTreeSet<String>,
+) -> lash_core::ToolCatalog {
+    if masked_call_paths.is_empty() {
+        return catalog.clone();
+    }
+    let mut filtered = catalog.clone();
+    filtered.tools.retain(|entry| {
+        let Ok(binding) = required_tool_lashlang_executable(&entry.manifest) else {
+            // Preserve ordinary validation for malformed unrelated entries.
+            return true;
+        };
+        !masked_call_paths.contains(&format!(
+            "{}.{}",
+            binding.module_path.join("."),
+            binding.operation
+        ))
+    });
+    filtered
+}
+
+pub(crate) fn tool_catalog_provides_call_path(
+    catalog: &lash_core::ToolCatalog,
+    call_path: &str,
+) -> bool {
+    catalog.tools.iter().any(|entry| {
+        if entry.manifest.activation == lash_core::ToolActivation::Internal {
+            return false;
+        }
+        required_tool_lashlang_executable(&entry.manifest)
+            .ok()
+            .is_some_and(|binding| {
+                format!("{}.{}", binding.module_path.join("."), binding.operation) == call_path
+            })
+    })
 }
 
 pub fn lashlang_host_environment_from_tool_catalog(
@@ -1219,9 +1279,10 @@ pub use catalogue_preview::{
     catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
 };
 pub use deferred::{
-    DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver, Resolution,
+    DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
+    DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError, Resolution,
     SharedDeferredToolResolver, ToolGrant, link_with_deferred_resolution,
-    resolve_and_fold_deferred,
+    resolve_and_build_deferred_environment, resolve_and_fold_deferred,
 };
 pub use process::{
     LASHLANG_SEGMENT_STATE_VERSION, lashlang_process_event_types,
