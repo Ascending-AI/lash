@@ -167,6 +167,11 @@ lash_rust_integration_test(
 )
 
 filegroup(
+    name = "test_support_sources",
+    srcs = glob(["tests/support/**/*.rs"]),
+)
+
+filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
 )

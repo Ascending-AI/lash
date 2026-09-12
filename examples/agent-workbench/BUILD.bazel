@@ -22,7 +22,9 @@ lash_rust_binary(
         "default",
         "provider-wire-fixtures",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     include_dev_deps = False,
     library = None,
     library_crate_name = None,
@@ -43,6 +45,9 @@ lash_rust_unit_test(
     declared_features = [
         "default",
         "provider-wire-fixtures",
+    ],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
     ],
     library = None,
     library_crate_name = None,

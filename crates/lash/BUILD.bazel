@@ -50,7 +50,9 @@ lash_rust_unit_test(
         "rlm",
         "testing",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lashlang:package_files",
+    ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     tags = [

@@ -37,6 +37,14 @@ def _compile_data():
         exclude_directories = 1,
     )
 
+def _crate_srcs(crate_root, patterns):
+    """Declares the crate root even when it lives outside the usual source tree."""
+    return [crate_root] + native.glob(
+        patterns,
+        allow_empty = True,
+        exclude = [crate_root],
+    )
+
 def _cargo_check_cfg(declared_features):
     feature_values = ",".join(['"{}"'.format(feature) for feature in declared_features])
     return [
@@ -105,7 +113,10 @@ def lash_rust_library(
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
-        srcs = native.glob(["src/**/*.rs"]),
+        srcs = native.glob(
+            ["src/**/*.rs", "shared/**/*.rs"],
+            allow_empty = True,
+        ),
         version = version,
         visibility = ["//visibility:public"],
     )
@@ -141,7 +152,15 @@ def lash_rust_binary(
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version, rustc_env),
         rustc_flags = _cargo_check_cfg(declared_features),
-        srcs = native.glob(["src/**/*.rs"]),
+        srcs = _crate_srcs(
+            crate_root,
+            [
+                "src/**/*.rs",
+                "examples/**/*.rs",
+                "benches/**/*.rs",
+                "shared/**/*.rs",
+            ],
+        ),
         tags = tags,
         version = version,
         visibility = ["//visibility:public"],
@@ -179,7 +198,10 @@ def lash_rust_unit_test(
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
-        srcs = native.glob(["src/**/*.rs"]),
+        srcs = _crate_srcs(
+            crate_root,
+            ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
+        ),
         tags = tags,
         version = version,
     )
@@ -216,7 +238,10 @@ def lash_rust_integration_test(
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version, rustc_env),
         rustc_flags = _cargo_check_cfg(declared_features),
-        srcs = native.glob(["src/**/*.rs", "tests/**/*.rs"]),
+        srcs = _crate_srcs(
+            crate_root,
+            ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+        ),
         tags = tags,
         version = version,
     )

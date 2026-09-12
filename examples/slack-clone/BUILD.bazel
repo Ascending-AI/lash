@@ -20,7 +20,9 @@ lash_rust_library(
         "e2e",
         "live-e2e",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
     version = "0.0.0-dev",
@@ -37,6 +39,7 @@ lash_rust_unit_test(
         "live-e2e",
     ],
     extra_compile_data = [
+        "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
     ],
     manifest_dir = "examples/slack-clone",
@@ -59,7 +62,9 @@ lash_rust_binary(
         "e2e",
         "live-e2e",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     include_dev_deps = False,
     library = ":slack-clone",
     library_crate_name = "slack_clone",
@@ -79,6 +84,9 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     library = ":slack-clone",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
@@ -96,7 +104,9 @@ lash_rust_binary(
         "e2e",
         "live-e2e",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     include_dev_deps = False,
     library = ":slack-clone",
     library_crate_name = "slack_clone",
@@ -116,6 +126,9 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     library = ":slack-clone",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
@@ -133,7 +146,9 @@ lash_rust_binary(
         "e2e",
         "live-e2e",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     include_dev_deps = False,
     library = ":slack-clone",
     library_crate_name = "slack_clone",
@@ -153,6 +168,9 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     library = ":slack-clone",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
@@ -170,7 +188,9 @@ lash_rust_binary(
         "e2e",
         "live-e2e",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     include_dev_deps = False,
     library = ":slack-clone",
     library_crate_name = "slack_clone",
@@ -190,6 +210,9 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
     library = ":slack-clone",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",
@@ -208,6 +231,7 @@ lash_rust_integration_test(
         "live-e2e",
     ],
     extra_compile_data = [
+        "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin",
     ],
     library = ":slack-clone",

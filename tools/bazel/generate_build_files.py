@@ -155,6 +155,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 
     if library:
         extra_compile_data = []
+        if package["name"] == "slack-clone":
+            extra_compile_data.append("//examples:shared_rust_sources")
         if package["name"] == "lash-runtime":
             extra_compile_data.append("//crates/lashlang:package_files")
         if package["name"] == "lash-perf":
@@ -175,12 +177,19 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         inventory_targets.append({"kind": "lib", "cargo": library["name"], "label": f"//{package_dir}:{primary_target}"})
         if library.get("test", False):
             unit_compile_data = []
+            if package["name"] == "slack-clone":
+                unit_compile_data.append("//examples:shared_rust_sources")
             if package["name"] == "lash-internal-sansio":
                 unit_compile_data.append("//:workspace_rust_sources")
             if package["name"] == "slack-clone":
                 unit_compile_data.append("//:workspace_test_scripts")
             if package["name"] == "lash-perf":
                 unit_compile_data.append("//:perf_guard_budgets")
+            if package["name"] in (
+                "lash-runtime",
+                "lash-internal-sqlite-store",
+            ):
+                unit_compile_data.append("//crates/lashlang:package_files")
             unit_tags = cargo_owned_tags(package["name"], "unit-test", library["name"])
             chunks.append(
                 "lash_rust_unit_test(\n"
@@ -243,6 +252,21 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             test_env["RUST_TEST_THREADS"] = "1"
         extra_compile_data = []
         if package["name"] in (
+            "agent-service",
+            "agent-workbench",
+            "slack-clone",
+            "toolbench",
+        ):
+            extra_compile_data.append("//examples:shared_rust_sources")
+        if package["name"] in (
+            "lash-internal-postgres-store",
+            "lash-internal-sqlite-store",
+        ):
+            extra_compile_data.extend([
+                "//crates/lash-core:test_support_sources",
+                "//crates/lashlang:package_files",
+            ])
+        if package["name"] in (
             "lash-internal-postgres-store",
             "lash-internal-sqlite-store",
         ) and target["name"] == "durable_read_fixture":
@@ -288,13 +312,19 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 
         if kind == "bin" and target.get("test", False):
             bin_unit_tags = cargo_owned_tags(package["name"], "bin-unit-test", target["name"])
-            chunks.append(
-                "lash_rust_unit_test(\n"
-                f"    name = {quote(name + '__unit_test')},\n"
-                f"    crate_features = {string_list(target_features)},\n"
-                f"    crate_name = {quote(crate_name)},\n"
-                f"    crate_root = {quote(crate_root)},\n"
-                f"    declared_features = {string_list(declared_features)},\n"
+            unit_args = [
+                "lash_rust_unit_test(\n",
+                f"    name = {quote(name + '__unit_test')},\n",
+                f"    crate_features = {string_list(target_features)},\n",
+                f"    crate_name = {quote(crate_name)},\n",
+                f"    crate_root = {quote(crate_root)},\n",
+                f"    declared_features = {string_list(declared_features)},\n",
+            ]
+            if extra_compile_data or binary_data:
+                unit_args.append(
+                    f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
+                )
+            unit_args.extend([
                 f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
                 f"    manifest_dir = {quote(package_dir)},\n"
@@ -302,12 +332,21 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    tags = {string_list(bin_unit_tags)},\n"
                 f"    version = {quote(version)},\n"
                 ")\n\n"
-            )
+            ])
+            chunks.append("".join(unit_args))
             inventory_targets.append({
                 "kind": "bin-unit-test",
                 "label": f"//{package_dir}:{name}__unit_test",
                 "tags": bin_unit_tags,
             })
+
+    if package["name"] == "lash-internal-core":
+        chunks.append(
+            "filegroup(\n"
+            "    name = \"test_support_sources\",\n"
+            "    srcs = glob([\"tests/support/**/*.rs\"]),\n"
+            ")\n\n"
+        )
 
     chunks.append(
         "filegroup(\n"

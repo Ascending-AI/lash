@@ -128,7 +128,7 @@ The Bazel default is the development compilation graph. Timing comparisons
 must use Rust 1.98.1, the resolved default workspace features, equivalent
 optimization and debug flags, the same target set, and separately reported
 cold repository, cold action-cache, warm, representative-edit, and second-Orb
-runs. Compare focused Bazel edit builds with Cargo's existing incremental
-`cargo check` path as separate operations: Bazel `build` produces linkable
+runs. Compare focused Bazel edit builds with Cargo's existing `cargo check`
+path as separate operations: Bazel `build` produces linkable
 artifacts, while Cargo `check` normally stops at metadata. Cargo release or
 judged timings are not comparable to this graph.
