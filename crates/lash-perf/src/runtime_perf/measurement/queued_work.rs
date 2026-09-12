@@ -435,7 +435,7 @@ pub(super) fn queued_work_stress_wake(
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation {
-            scope: RuntimeScope::new(session_id),
+            attribution: RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
                 process_id: process_id.clone(),
                 sequence,

@@ -122,21 +122,20 @@ impl crate::GroupExecutors for EveryChildRuns {
 }
 
 fn one_child_group() -> crate::RuntimeEffectGroup {
+    let scope = crate::ExecutionScope::turn("session", "turn");
     let child = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            crate::RuntimeScope::new("session"),
+        RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(scope.clone(), "replay").expect("valid group child address"),
+            crate::RuntimeAttribution::for_session("session"),
             "effect",
-            RuntimeEffectKind::Sleep,
-            "replay",
         ),
         RuntimeEffectCommand::Sleep { duration_ms: 1 },
     );
     crate::RuntimeEffectGroup::try_new(
-        RuntimeInvocation::effect(
-            crate::RuntimeScope::new("session"),
+        RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(scope, "group-replay").expect("valid group address"),
+            crate::RuntimeAttribution::for_session("session"),
             "group",
-            RuntimeEffectKind::Sleep,
-            "group-replay",
         ),
         "session:group:batch:0",
         vec![child],

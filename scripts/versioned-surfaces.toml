@@ -366,7 +366,7 @@ description = "stable process-transfer set identity"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/effect/envelope.rs"]
+paths = ["crates/lash-core/src/runtime/effect/identity_types.rs"]
 symbols = ["process_transfer_set_preimage"]
 
 [[surface]]
@@ -697,6 +697,7 @@ description = "canonical typed MessagePack RLM execution snapshot for globals an
 kind = "rust_serde_shapes"
 paths = [
   "crates/lash-protocol-rlm/src/executor/state.rs",
+  "crates/lash-lashlang-runtime/src/deferred.rs",
   "crates/lash-protocol-rlm/src/protocol/state.rs",
   "crates/lash-protocol-rlm/src/projection/bindings.rs",
 ]

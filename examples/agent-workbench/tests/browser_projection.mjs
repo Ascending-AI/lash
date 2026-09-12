@@ -211,7 +211,6 @@ test("resident replacement async refetch preserves an actual provisional tool ro
     sessionDialect,
     knownModels: new Set(),
     modelListenersBound: false,
-    knownWebState: null,
     knownSessionLabel: null,
     assistantDraft: null,
     assistantDraftTurnId: null,
@@ -311,7 +310,6 @@ test("resident replacement async refetch preserves an actual provisional tool ro
       models: ["resident-model"],
       model_variant: "",
       model_variants: [""],
-      web_configured: true,
       rlm_dialect: "standard",
     },
     observation: { cursor: "cursor-after-resident" },
@@ -1493,7 +1491,6 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       clearTerminalTurnTombstones() {},
       clearTranscript() {},
       validateModel() {},
-      knownWebState: null,
       knownSessionLabel: null,
       // The dialect badge the snapshot paints: it reads the session's recorded
       // dialect out of the same snapshot this block applies.
@@ -2024,7 +2021,6 @@ function shellRender(model) {
     busyPill: element({ className: "pill pending" }),
     streamState: element(),
     sessionId: element(),
-    webState: element(),
     shellStatus: element({ hidden: true }),
     shellStatusText: element(),
     shellStatusDetail: element({ hidden: true }),
@@ -2053,7 +2049,6 @@ function shellRender(model) {
     pillClass: elements.busyPill.className,
     subtitle: elements.streamState.textContent,
     session: elements.sessionId.textContent,
-    web: elements.webState.textContent,
     bannerHidden: elements.shellStatus.hidden,
     banner: elements.shellStatusText.textContent,
     bannerDetail: elements.shellStatusDetail.textContent,
@@ -2099,7 +2094,7 @@ test("a failed /api/state is a visibly different render from an empty session", 
 
   const outageRender = shellRender(shell.shellStatusModel(outage, {}));
   const emptyRender = shellRender(
-    shell.shellStatusModel(settledEmpty, { session: "workbench-a", web: "ready" }),
+    shell.shellStatusModel(settledEmpty, { session: "workbench-a" }),
   );
 
   // The defect this replaces: two different situations rendering the same shell.
@@ -2208,7 +2203,6 @@ test("a drop after hydration reconnects over the last known content", () => {
   const render = shellRender(
     shell.shellStatusModel(availability, {
       session: "workbench-a",
-      web: "ready",
       busy: true,
     }),
   );
@@ -2223,7 +2217,6 @@ test("a drop after hydration reconnects over the last known content", () => {
   );
   assert.doesNotMatch(renderSource, /innerHTML|clearTranscript|timeline\.|renderError/);
   assert.equal(render.session, "workbench-a");
-  assert.equal(render.web, "ready");
   assert.equal(render.pill, "reconnecting");
   assert.equal(render.bannerHidden, false);
   assert.match(render.banner, /live updates paused/);
@@ -2260,7 +2253,6 @@ test("a first connection during an active turn is running, but an established st
   const firstConnection = shellRender(
     shell.shellStatusModel(availability, {
       session: "workbench-a",
-      web: "ready",
       busy: true,
     }),
   );
@@ -2277,7 +2269,6 @@ test("a first connection during an active turn is running, but an established st
   const establishedDrop = shellRender(
     shell.shellStatusModel(availability, {
       session: "workbench-a",
-      web: "ready",
       busy: true,
     }),
   );
@@ -2298,7 +2289,7 @@ test("a successful response is what promotes the shell to session claims", () =>
   assert.equal(shell.shellPhase(availability), "live");
 
   const render = shellRender(
-    shell.shellStatusModel(availability, { session: "workbench-a", web: "ready" }),
+    shell.shellStatusModel(availability, { session: "workbench-a" }),
   );
   assert.equal(render.pill, "idle");
   assert.equal(render.pillClass, "pill");

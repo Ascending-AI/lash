@@ -95,10 +95,12 @@ fn sync_await<T: Send + 'static>(
 
 fn postgres_conformance_invocation(
     controller: PostgresRuntimeEffectController,
+    execution_scope: ExecutionScope,
 ) -> lash_conformance::ConformanceInvocation {
     let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
     lash_conformance::ConformanceInvocation::new(
         live,
+        execution_scope,
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
@@ -872,9 +874,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         sequence: 1,
         event_type: "producer.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::new(session_id),
-            "wake-source-lock",
-            lash_core::RuntimeEffectKind::Process,
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::process("wake-source-lock-process"),
+                "wake-source-lock",
+            )
+            .expect("valid wake effect address"),
+            lash_core::RuntimeAttribution::for_session(session_id),
             "wake-source-lock",
         ),
         process_caused_by: None,
@@ -1362,10 +1367,10 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 89, "Postgres component schema pin");
+    assert_eq!(current_version, 90, "Postgres component schema pin");
     assert_eq!(
         current_version - 1,
-        87,
+        89,
         "immediate predecessor adjacency pin"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(
@@ -1943,7 +1948,7 @@ async fn postgres_effect_replay_satisfies_cold_process_crash_conformance_when_co
     };
 
     let crashed = run("effect_crash").await;
-    assert_eq!(crashed.status.code(), Some(87));
+    assert_eq!(crashed.status.code(), Some(86));
     assert_eq!(
         std::fs::read_to_string(&marker)
             .expect("read crashed effect marker")
@@ -2081,36 +2086,34 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
         "the process and the retired runtime operation each leave one permanent fence"
     );
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-conformance",
-    ));
+    let scope = ExecutionScope::runtime_operation("postgres-effect-controller-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_journaled_effect_replay(|| {
-        postgres_conformance_invocation(controller.clone())
+        postgres_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-mismatch-conformance",
-    ));
+    let scope =
+        ExecutionScope::runtime_operation("postgres-effect-controller-mismatch-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_replay_mismatch_diagnostics(
-        || postgres_conformance_invocation(controller.clone()),
+        || postgres_conformance_invocation(controller.clone(), scope.clone()),
         "postgres_effect_replay_hash_conflict",
     )
     .await;
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-concurrent-conformance",
-    ));
+    let scope =
+        ExecutionScope::runtime_operation("postgres-effect-controller-concurrent-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_concurrent_replay_deterministic(|| {
-        postgres_conformance_invocation(controller.clone())
+        postgres_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-tool-conformance",
-    ));
+    let scope = ExecutionScope::runtime_operation("postgres-effect-controller-tool-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_tool_attempt_fanout_replay_deterministic(|| {
-        postgres_conformance_invocation(controller.clone())
+        postgres_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 }

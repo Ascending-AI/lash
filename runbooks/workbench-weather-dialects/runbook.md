@@ -9,7 +9,7 @@
 TypeScript sessions and judge whether each dialect can turn live web results into a
 finished, source-backed answer without entering a repeated execution-error loop.
 
-**Real tokens.** Both rows use OpenRouter and the bundled Tavily web tools. Current
+**Real tokens.** Both rows use OpenRouter and the keyless Parallel Search MCP web tools. Current
 conditions and exact prose vary. Gate the turn on its terminal outcome, successful tool
 evidence, source-backed values, and rendered answer shape rather than an exact sentence.
 
@@ -20,7 +20,7 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    advice, a preferred weather site, retry advice, or dialect-specific hints. The path from
    search result to parsed values to `finish` is what this scenario judges.
 2. **Validation-only authority.** The only agent tool operations permitted are
-   `web.search` and `web.fetch`. Any process, filesystem, command-execution, messaging,
+   the Parallel web-search and web-fetch MCP tools. Any process, filesystem, command-execution, messaging,
    mutation, or other host-affecting operation is a FAIL and triggers Abort/RCA. Browser
    automation and read-only evidence collection by the runbook operator are not agent tool
    operations.
@@ -30,7 +30,7 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    `outcome.status == "completed"` and `done_reason == "final_value"`. A timeout or any
    other terminal outcome is a FAIL.
 4. **Live evidence must support the answer.** Require at least one successful
-   `web.search` or `web.fetch` call whose returned content names Utrecht and supplies the
+   Parallel web-search or web-fetch call whose returned content names Utrecht and supplies the
    current-condition facts used in the answer. A forecast-only result, model recollection,
    or plausible-looking unsupported prose does not pass. Save the exact successful tool
    result and source URL before judging the answer.
@@ -132,7 +132,7 @@ Do: boot the row, poll `/healthz` to 200, then open its scoped page with
 `wait_until="domcontentloaded"` and explicit waiting assertions.
 
 Expect: the composer is visible; the rendered session id and dialect equal the scoped id
-and row; `/api/state.settings` agrees; `web_configured == true`; the transcript is empty;
+and row; `/api/state.settings` agrees; the transcript is empty;
 the page is idle; the API has no active turns; the dedicated Postgres store has no graph
 rows for the session; and the trace has no turn, code-execution, or tool-call record for the
 session. Record the configured model from state, but treat the served-model evidence after
@@ -196,7 +196,7 @@ rendered value or exact failure replaces a generic “looks good.”
 | Fresh isolated boot | six explicit ports free before boot; scoped DOM/API/store/trace are empty and agree | | `00-*` |
 | Dialect and model identity | badge, state, code/execution events name the row; served model recorded | | `00-identities.json`, `01-finished-trace.json` |
 | Do → expect completion | running observed; then idle + no active turn + one completed/final-value terminal within five minutes | | `01-finished.png`, state, trace |
-| Validation-only tools | every agent tool is `web.search` or `web.fetch` | | `02-execution-history.json` |
+| Validation-only tools | every agent tool is a Parallel web-search or web-fetch MCP call | | `02-execution-history.json` |
 | Live source support | successful Utrecht current-condition result supports temperature, condition, humidity, and wind | | `02-live-sources.json` |
 | No repeated-identical-error loop | no two consecutive failed executions share a non-empty error; otherwise quote it here | | `02-execution-history.json` |
 | Rendered weather shape | concrete temperature/unit, source condition, humidity, and wind/unit; no broken placeholder token | | `03-weather-answer.png`, `03-answer-values.json` |

@@ -149,7 +149,6 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(channel_capacity),
@@ -881,19 +880,19 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     );
     let code_started_event = to_event_value(lash::TurnEvent::CodeBlockStarted {
         language: "lashlang".to_string(),
-        code: "web.search({ query: \"FIG-1350\" })".to_string(),
+        code: "parallel.web_search_57jmhsdk2uvtc7o55qwq73sqyq({ query: \"FIG-1350\" })".to_string(),
         graph_key: None,
     });
     let tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
         call_id: Some("tool-call-1".to_string()),
-        name: "search_web".to_string(),
+        name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350" }),
         graph_key: None,
         parent_call_id: None,
     });
     let tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
         call_id: Some("tool-call-1".to_string()),
-        name: "search_web".to_string(),
+        name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350" }),
         output: lash::tools::ToolCallOutput::success(
             serde_json::json!({ "results": [{ "title": "judged row" }] }),
@@ -904,14 +903,14 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
     });
     let no_id_tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
         call_id: None,
-        name: "search_web".to_string(),
+        name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350 no id" }),
         graph_key: None,
         parent_call_id: None,
     });
     let no_id_tool_completed_event = to_event_value(lash::TurnEvent::ToolCallCompleted {
         call_id: None,
-        name: "search_web".to_string(),
+        name: "mcp__parallel__web_search_57jmhsdk2uvtc7o55qwq73sqyq".to_string(),
         args: serde_json::json!({ "query": "FIG-1350 no id" }),
         output: lash::tools::ToolCallOutput::success(
             serde_json::json!({ "results": [{ "title": "no-id row" }] }),

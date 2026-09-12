@@ -10,11 +10,11 @@ use lash_conformance::{
     StoreContractHandles, StoreContractOp, StoreContractScenario, sample_store_contract_operations,
 };
 use lash_core::{
-    AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectHost,
+    AttachmentCreateMeta, AttachmentStore, AwaitEventWaitIdentity, EffectAddress, EffectHost,
     EffectJournalRetirement, ExecutionScope, MediaType, ProcessExecutionEnvRef, ProcessIdentity,
-    ProcessInput, ProcessOriginator, Resolution, RuntimeEffectCommand, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimeScope, SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
+    ProcessInput, ProcessOriginator, Resolution, RuntimeAttribution, RuntimeEffectCommand,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
+    SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
     TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
     WakeDeliveryDisposition, facade_support::InMemoryAttachmentStore,
     facade_support::InMemoryTriggerStore,
@@ -479,12 +479,13 @@ impl SurfaceRunner {
             }
             SurfaceOperation::EffectRecord { key, duration_ms } => {
                 let replay_key = format!("surface-effect-{key}");
+                let scope = ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN);
                 let envelope = RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn(SURFACE_SESSION, SURFACE_TURN, 1, 0),
-                        &replay_key,
-                        RuntimeEffectKind::Sleep,
-                        &replay_key,
+                    lash_core::RuntimeEffectInvocation::new(
+                        EffectAddress::new(scope.clone(), replay_key.clone())
+                            .expect("surface effect carries an admitted effect scope"),
+                        RuntimeAttribution::for_turn(SURFACE_SESSION, SURFACE_TURN, 1, 0),
+                        replay_key.clone(),
                     ),
                     RuntimeEffectCommand::Sleep {
                         duration_ms: u64::from(*duration_ms),
@@ -492,7 +493,7 @@ impl SurfaceRunner {
                 );
                 let controller = self
                     .effect_host
-                    .scoped(ExecutionScope::turn(SURFACE_SESSION, SURFACE_TURN))
+                    .scoped(scope)
                     .map_err(|error| error.to_string())?;
                 let result = controller
                     .controller()
@@ -695,18 +696,15 @@ impl SurfaceRunner {
                 let mut observed_parent_end_outcomes = Vec::new();
                 for action in actions.iter().take(1).chain(actions.iter()) {
                     let replay_key = format!("{}:parent-end", action.identity.replay_key);
-                    let mut parent = RuntimeInvocation::effect(
-                        RuntimeScope::new(SURFACE_SESSION),
+                    let parent = RuntimeInvocation::effect(
+                        EffectAddress::new(controller.execution_scope().clone(), replay_key)
+                            .expect("surface parent end carries an admitted effect scope"),
+                        RuntimeAttribution::for_session(SURFACE_SESSION),
                         format!("tool-intent-parent-end:{}", action.identity.intent_index),
-                        RuntimeEffectKind::ToolParentEnd,
-                        replay_key.clone(),
+                    )
+                    .with_replay_attribution(
+                        lash_core::RuntimeReplayAttribution::ToolIntent(action.identity.clone()),
                     );
-                    parent.replay = Some(lash_core::RuntimeReplay {
-                        key: replay_key,
-                        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
-                            action.identity.clone(),
-                        )),
-                    });
                     let outcome = processes
                         .finish_recorded_intent_parent(
                             &SessionId::from(SURFACE_SESSION),
@@ -1052,11 +1050,11 @@ impl SurfaceRunner {
                 let scope = ExecutionScope::runtime_operation(surface_operation_id(*key));
                 let replay_key = format!("surface-op-effect-{key}");
                 let envelope = RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn(SURFACE_SESSION, SURFACE_TURN, 1, 0),
-                        &replay_key,
-                        RuntimeEffectKind::Sleep,
-                        &replay_key,
+                    lash_core::RuntimeEffectInvocation::new(
+                        EffectAddress::new(scope.clone(), replay_key.clone())
+                            .expect("surface runtime operation carries an admitted effect scope"),
+                        RuntimeAttribution::for_session(SURFACE_SESSION),
+                        replay_key.clone(),
                     ),
                     RuntimeEffectCommand::Sleep { duration_ms: 1 },
                 );

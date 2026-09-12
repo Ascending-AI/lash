@@ -221,6 +221,16 @@ where
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        if envelope.invocation.execution_scope() != &self.scope {
+            return Err(RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch,
+                format!(
+                    "runtime effect address scope {:?} does not match admitted controller scope {:?}",
+                    envelope.invocation.execution_scope(),
+                    self.scope
+                ),
+            ));
+        }
         let Some(index_key) = self.index_key() else {
             return self.inner.execute_effect(envelope, local_executor).await;
         };
@@ -251,6 +261,7 @@ where
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
         if let Some(index_key) = self.index_key()
             && !self
                 .inner

@@ -1537,11 +1537,14 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             );
             let local_calls = Arc::new(AtomicUsize::new(0));
             let envelope = RuntimeEffectEnvelope::new(
-                RuntimeInvocation::effect(
-                    lash_core::runtime::RuntimeScope::new(process_id.clone()),
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(
+                        ExecutionScope::process(process_id.clone()),
+                        format!("matrix:{process_id}:{ordinal}"),
+                    )
+                    .expect("valid process matrix effect address"),
+                    lash_core::RuntimeAttribution::none(),
                     format!("matrix-effect-{ordinal}"),
-                    RuntimeEffectKind::ToolAttempt,
-                    format!("matrix:{process_id}:{ordinal}"),
                 ),
                 RuntimeEffectCommand::ToolAttempt {
                     call: prepared_tool_call_with(&format!("matrix-call-{ordinal}"), "matrix_tool"),

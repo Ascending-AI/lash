@@ -1,12 +1,12 @@
 {
   "scenario": "scalar-lashlang-tool-attempt",
-  "recorded_at_git_sha": "43b68a105c057077e43025550a5300b034ee1c81",
+  "recorded_at_git_sha": "cb3ad2305918c8090a713e4cda701547ac22c723",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt": {
       "envelope": {
-        "json": "{\"invocation\":{\"scope\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"scalar-lashlang-tool-attempt\",\"kind\":\"tool_attempt\"},\"replay\":{\"key\":\"session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt\"}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"replay-scalar-call\",\"tool_id\":\"tool:replay_scalar_counter\",\"tool_name\":\"replay_scalar_counter\",\"args\":{\"call\":\"replay-scalar-call\"}},\"attempt\":1,\"max_attempts\":1}}",
-        "hash": "1e3f260f22cc1b01e3e6c8c495b5a3aca98351b099adcd2a8712d821dab19742"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt\"},\"effect_id\":\"scalar-lashlang-tool-attempt\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"replay-scalar-call\",\"tool_id\":\"tool:replay_scalar_counter\",\"tool_name\":\"replay_scalar_counter\",\"args\":{\"call\":\"replay-scalar-call\"}},\"attempt\":1,\"max_attempts\":1}}",
+        "hash": "79ed6f3cc3a9ddfe30de64e29c4a0660ec96bad320dcc35f4d826196e7430f2c"
       },
       "outcome": {
         "Ok": {

@@ -872,7 +872,7 @@ pub fn queued_process_wake_draft(
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
-            scope: RuntimeScope::new(session_id),
+            attribution: RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
                 process_id: ProcessId::from(format!("process:{text}")),
                 sequence: 1,

@@ -128,16 +128,26 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
             meta: child(
                 &SessionId::from("layout-child-effect-no-turn-literal"),
                 Some(CausalRef::Effect {
-                    session_id: SessionId::from("layout-effect-session-literal"),
-                    turn_id: None,
-                    effect_id: "layout-effect-id-literal".to_string(),
+                    address: EffectAddress::new(
+                        ExecutionScope::runtime_operation("layout-effect-operation-literal"),
+                        "layout-effect-id-literal",
+                    )
+                    .expect("valid operation effect address"),
                 }),
             ),
             row: RawSessionMetaRow {
                 parent_session_id: Some(SessionId::from("layout-parent-literal")),
-                caused_by_kind: Some("effect".to_string()),
-                caused_by_session_id: Some(SessionId::from("layout-effect-session-literal")),
-                caused_by_effect_id: Some("layout-effect-id-literal".to_string()),
+                caused_by_kind: Some("effect_address".to_string()),
+                caused_by_effect_id: Some(
+                    serde_json::to_string(
+                        &EffectAddress::new(
+                            ExecutionScope::runtime_operation("layout-effect-operation-literal"),
+                            "layout-effect-id-literal",
+                        )
+                        .expect("valid operation effect address"),
+                    )
+                    .expect("serialize operation effect address"),
+                ),
                 ..RawSessionMetaRow::literal(&SessionId::from("layout-child-effect-no-turn-literal"), "child")
             },
             pending_observer_intents: vec![],
@@ -147,17 +157,32 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
             meta: child(
                 &SessionId::from("layout-child-effect-with-turn-literal"),
                 Some(CausalRef::Effect {
-                    session_id: SessionId::from("layout-effect-session-literal"),
-                    turn_id: Some(TurnId::from("layout-effect-turn-literal")),
-                    effect_id: "layout-effect-id-literal".to_string(),
+                    address: EffectAddress::new(
+                        ExecutionScope::turn(
+                            "layout-effect-session-literal",
+                            "layout-effect-turn-literal",
+                        ),
+                        "layout-effect-id-literal",
+                    )
+                    .expect("valid turn effect address"),
                 }),
             ),
             row: RawSessionMetaRow {
                 parent_session_id: Some(SessionId::from("layout-parent-literal")),
-                caused_by_kind: Some("effect".to_string()),
-                caused_by_session_id: Some(SessionId::from("layout-effect-session-literal")),
-                caused_by_turn_id: Some(TurnId::from("layout-effect-turn-literal")),
-                caused_by_effect_id: Some("layout-effect-id-literal".to_string()),
+                caused_by_kind: Some("effect_address".to_string()),
+                caused_by_effect_id: Some(
+                    serde_json::to_string(
+                        &EffectAddress::new(
+                            ExecutionScope::turn(
+                                "layout-effect-session-literal",
+                                "layout-effect-turn-literal",
+                            ),
+                            "layout-effect-id-literal",
+                        )
+                        .expect("valid turn effect address"),
+                    )
+                    .expect("serialize turn effect address"),
+                ),
                 ..RawSessionMetaRow::literal(&SessionId::from("layout-child-effect-with-turn-literal"), "child")
             },
             pending_observer_intents: vec![],

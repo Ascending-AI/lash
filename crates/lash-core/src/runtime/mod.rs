@@ -156,26 +156,27 @@ pub use clock::{Clock, ClockWallTime, SystemClock};
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
     BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet,
-    ChildDrainOutcome, CompletionKeyPreparation, DrainedChild, EffectGroupHandle,
+    ChildDrainOutcome, CompletionKeyPreparation, DrainedChild, EffectAddress, EffectGroupHandle,
     EffectGroupMembership, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupDrainReport,
     GroupExecutors, GroupSettlement, GroupWakePolicy, LlmRequestSpec, LoserPolicy,
     NativeEffectHost, NativeRuntimeEffectController, ProcessCommand, ProcessEffectOutcome,
     ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
     QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution,
-    ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAwaitEventOptions,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
-    RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
+    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
-    RuntimeSleepOptions, RuntimeSubject, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolBatchEffectOutcome, ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlParticipation, refuse_unhonored_group_membership,
-    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
+    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
+    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,
+    ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
+    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
@@ -1228,6 +1229,7 @@ pub struct TurnOptions<'a> {
     scoped_effect_controller: ScopedEffectController<'a>,
     cancel: CancellationToken,
     local_cancel_origin: Option<TurnCancelOriginHint>,
+    runtime_internal_trace_turn_id: Option<TurnId>,
 }
 
 impl<'a> TurnOptions<'a> {
@@ -1241,6 +1243,7 @@ impl<'a> TurnOptions<'a> {
             scoped_effect_controller,
             cancel,
             local_cancel_origin: None,
+            runtime_internal_trace_turn_id: None,
         }
     }
 
@@ -1262,6 +1265,15 @@ impl<'a> TurnOptions<'a> {
 
     pub(crate) fn local_cancel_origin_hint(&self) -> Option<TurnCancelOriginHint> {
         self.local_cancel_origin.clone()
+    }
+
+    pub(crate) fn with_runtime_internal_trace_turn_id(mut self, turn_id: TurnId) -> Self {
+        self.runtime_internal_trace_turn_id = Some(turn_id);
+        self
+    }
+
+    pub(crate) fn runtime_internal_trace_turn_id(&self) -> Option<&TurnId> {
+        self.runtime_internal_trace_turn_id.as_ref()
     }
 
     pub(crate) fn events_or_noop(&self) -> &'a dyn EventSink {

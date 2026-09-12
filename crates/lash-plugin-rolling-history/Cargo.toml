@@ -1,5 +1,5 @@
 [package]
-name = "lash-internal-standard-plugins"
+name = "lash-internal-plugin-rolling-history"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,33 +9,23 @@ homepage.workspace = true
 documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Default plugin stack bundle for the lash agent runtime."
-keywords = ["lash", "agent", "plugins", "llm", "runtime"]
+description = "Rolling-history context plugin for the lash agent runtime."
+keywords = ["lash", "agent", "context", "plugin", "llm"]
 categories = ["asynchronous", "api-bindings"]
 
 [lib]
-name = "lash_standard_plugins"
-
-[features]
-default = []
-lashlang = [
-    "lash-plugin-process-controls/lashlang",
-    "lash-tools/lashlang",
-]
+name = "lash_plugin_rolling_history"
 
 [lints]
 workspace = true
 
 [dependencies]
-lash-sansio = { workspace = true }
 lash-core = { workspace = true }
-lash-plugin-process-controls = { workspace = true }
-lash-plugin-tool-output-budget = { workspace = true }
-lash-tools = { workspace = true }
+lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
-serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

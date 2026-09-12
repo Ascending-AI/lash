@@ -108,8 +108,6 @@ Configuration is read from `.env` or the process environment:
 
 - `OPENROUTER_API_KEY`: model provider key. Startup refuses to continue when it is
   unset or empty unless `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` is active.
-- `TAVILY_API_KEY`: Tavily key for the bundled `web.search(...)` and
-  `web.fetch(...)` tools.
 - `AGENT_WORKBENCH_ADDR`: bind address, default `127.0.0.1:3030`. Passing a
   port to the `just` recipes, for example `just agent-workbench 3000`, binds
   `127.0.0.1:<port>`.
@@ -177,6 +175,11 @@ Configuration is read from `.env` or the process environment:
   then replacement output). These scenarios make
   no provider network calls, print a startup warning, and use the visible
   `dev/failure-paths` model id. Unknown values fail startup.
+
+Web search and fetch come from the free Parallel Search MCP server (`parallel`),
+attached at startup with no API key or auth headers. An unreachable server never
+fails startup: the workbench serves without web tools and reconnects in the
+background.
 
 Open the workbench at `http://127.0.0.1:3030` by default, or at the port passed
 to the `just` recipe. Restate ingress is

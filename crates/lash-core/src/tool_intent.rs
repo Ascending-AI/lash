@@ -341,15 +341,18 @@ pub(crate) fn has_v2_tool_intent_replay_key(identity: &ToolIntentIdentity) -> bo
 }
 
 #[doc(hidden)]
-pub fn legacy_tool_intent_v1_lookup_key(invocation: &crate::RuntimeInvocation) -> Option<String> {
-    let replay = invocation.replay.as_ref()?;
-    let crate::RuntimeReplayAttribution::ToolIntent(identity) = replay.attribution.as_ref()?;
+pub fn legacy_tool_intent_v1_lookup_key(
+    invocation: &crate::RuntimeEffectInvocation,
+) -> Option<String> {
+    let crate::RuntimeReplayAttribution::ToolIntent(identity) =
+        invocation.replay_attribution.as_ref()?;
     if !has_v2_tool_intent_replay_key(identity) {
         return None;
     }
     let legacy_identity = derive_legacy_tool_intent_v1_replay_key(identity);
-    let legacy_lookup = replay.key.replace(&identity.replay_key, &legacy_identity);
-    (legacy_lookup != replay.key).then_some(legacy_lookup)
+    let replay_key = invocation.replay_key();
+    let legacy_lookup = replay_key.replace(&identity.replay_key, &legacy_identity);
+    (legacy_lookup != replay_key).then_some(legacy_lookup)
 }
 
 /// A completed leaf-provider value. Unlike [`crate::ToolOutcome`], this type has

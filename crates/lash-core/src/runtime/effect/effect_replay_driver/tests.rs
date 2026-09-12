@@ -505,10 +505,6 @@ fn vocabularies_reproduce_each_backends_shipped_codes() {
         RuntimeErrorCode::SqliteEffectReplayHashConflict
     );
     assert_eq!(
-        sqlite.code(EffectReplayFailure::KeyMissing),
-        RuntimeErrorCode::SqliteEffectReplayKeyMissing
-    );
-    assert_eq!(
         sqlite.code(EffectReplayFailure::Missing),
         RuntimeErrorCode::SqliteEffectReplayMissing
     );

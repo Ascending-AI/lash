@@ -19,8 +19,11 @@ use tokio::time::{Duration, timeout};
 mod directives;
 mod intent_drain;
 mod internal_activation;
+mod retry_effect_controllers;
 mod retry_turn_cancel_gate;
 mod settlement_order;
+
+use retry_effect_controllers::{FailingSleepEffectController, SleepRecordingEffectController};
 
 type AttemptObservation = (u32, u32, Option<String>);
 type SharedAttemptObservations = Arc<std::sync::Mutex<Vec<AttemptObservation>>>;
@@ -411,11 +414,7 @@ impl crate::RuntimeEffectController for IntentReplayController {
         envelope: crate::RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("law effects carry replay keys")
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         let frame = serde_json::to_string(&envelope).expect("serialize law effect frame");
         self.frame_sightings
             .lock_recover()
@@ -2006,51 +2005,6 @@ async fn scalar_after_tool_hook_runs_once_per_retry_attempt_before_exhaustion() 
     assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
 }
 
-#[derive(Default)]
-struct SleepRecordingEffectController {
-    sleeps: Arc<std::sync::Mutex<Vec<crate::RuntimeInvocation>>>,
-}
-
-impl crate::AwaitEventResolver for SleepRecordingEffectController {}
-
-#[async_trait::async_trait]
-impl crate::RuntimeEffectController for SleepRecordingEffectController {
-    async fn execute_effect(
-        &self,
-        envelope: crate::RuntimeEffectEnvelope,
-        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
-            self.sleeps.lock_recover().push(envelope.invocation);
-            Ok(crate::RuntimeEffectOutcome::Sleep)
-        } else {
-            local_executor.execute(envelope).await
-        }
-    }
-}
-
-struct FailingSleepEffectController;
-
-impl crate::AwaitEventResolver for FailingSleepEffectController {}
-
-#[async_trait::async_trait]
-impl crate::RuntimeEffectController for FailingSleepEffectController {
-    async fn execute_effect(
-        &self,
-        envelope: crate::RuntimeEffectEnvelope,
-        local_executor: crate::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
-            Err(crate::RuntimeEffectControllerError::foreign(
-                "test_sleep_rejected",
-                format!("rejected {}", envelope.command.kind().as_str()),
-            ))
-        } else {
-            local_executor.execute(envelope).await
-        }
-    }
-}
-
 #[tokio::test]
 async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -2080,9 +2034,10 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     assert!(outcome.record.output.is_success());
     let sleeps = recorder.sleeps.lock_recover();
     assert_eq!(sleeps.len(), 1);
-    assert_eq!(
-        sleeps[0].effect_kind(),
-        Some(crate::RuntimeEffectKind::Sleep)
+    assert!(
+        sleeps[0]
+            .effect_id()
+            .is_some_and(|effect_id| effect_id.ends_with(":retry_probe:attempt:1:sleep"))
     );
     assert_eq!(
         sleeps[0].replay_key(),

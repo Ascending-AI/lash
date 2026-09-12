@@ -2,7 +2,6 @@ use crate::support::{
     Arc, EffectHost, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeEnvironment,
     RuntimePersistence, SessionStoreFactory,
 };
-use lash_core::facade_support::ScopedEffectControllerFacadeOps as _;
 use lash_sansio::SessionId;
 use std::time::Instant;
 

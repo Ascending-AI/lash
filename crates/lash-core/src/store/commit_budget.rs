@@ -94,6 +94,47 @@ impl RuntimeCommit {
     /// Bound the complete logical persisted payload carried by this commit
     /// before a backend transaction starts.
     pub fn validate_budget(&self) -> Result<(), StoreError> {
+        self.validate_node_budget()?;
+        let CommitBudgetLimit::Bounded(max_bytes) = self.commit_budget.bytes else {
+            self.trace_unbounded_byte_budget();
+            return Ok(());
+        };
+        let measurement = self.measure_budget()?;
+        self.validate_measured_byte_budget(&measurement, max_bytes.get())
+    }
+
+    /// Validate at the facade boundary and record its single bounded-byte observation.
+    pub(super) fn validate_budget_and_record_size(&self) -> Result<(), StoreError> {
+        let node_result = self.validate_node_budget();
+        let CommitBudgetLimit::Bounded(max_bytes) = self.commit_budget.bytes else {
+            if node_result.is_ok() {
+                self.trace_unbounded_byte_budget();
+            }
+            return node_result;
+        };
+        let measurement = match self.measure_budget() {
+            Ok(measurement) => measurement,
+            Err(measurement_error) => {
+                return match node_result {
+                    Ok(()) => Err(measurement_error),
+                    Err(node_error) => Err(node_error),
+                };
+            }
+        };
+        let outcome = if node_result.is_err() || measurement.total_bytes > max_bytes.get() {
+            "rejected"
+        } else {
+            "admitted"
+        };
+        crate::operational_metrics::record_runtime_commit_budgeted_size(
+            measurement.total_bytes,
+            outcome,
+        );
+        node_result?;
+        self.validate_measured_byte_budget(&measurement, max_bytes.get())
+    }
+
+    fn validate_node_budget(&self) -> Result<(), StoreError> {
         let graph_rows = self.graph.nodes.len();
         let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
         let row_count = graph_rows.saturating_add(adopted_intent_rows);
@@ -139,28 +180,27 @@ impl RuntimeCommit {
             ),
         }
 
-        let CommitBudgetLimit::Bounded(max_bytes) = self.commit_budget.bytes else {
-            tracing::trace!(
-                target: "lash.runtime_commit.budget",
-                session_id = %self.session_id,
-                dimension = "bytes",
-                measurement = "skipped_unbounded",
-                limit = "unbounded",
-                outcome = "admitted",
-                "runtime commit budget decision"
-            );
-            return Ok(());
-        };
-        let measurement = self.measure_budget()?;
-        crate::operational_metrics::record_runtime_commit_budgeted_size(
-            measurement.total_bytes,
-            if measurement.total_bytes > max_bytes.get() {
-                "rejected"
-            } else {
-                "admitted"
-            },
+        Ok(())
+    }
+
+    fn trace_unbounded_byte_budget(&self) {
+        tracing::trace!(
+            target: "lash.runtime_commit.budget",
+            session_id = %self.session_id,
+            dimension = "bytes",
+            measurement = "skipped_unbounded",
+            limit = "unbounded",
+            outcome = "admitted",
+            "runtime commit budget decision"
         );
-        if measurement.total_bytes > max_bytes.get() {
+    }
+
+    fn validate_measured_byte_budget(
+        &self,
+        measurement: &RuntimeCommitBudgetMeasurement,
+        max_bytes: usize,
+    ) -> Result<(), StoreError> {
+        if measurement.total_bytes > max_bytes {
             tracing::warn!(
                 target: "lash.runtime_commit.budget",
                 session_id = %self.session_id,
@@ -177,7 +217,7 @@ impl RuntimeCommit {
                 usage_delta_bytes = measurement.usage_delta_bytes,
                 turn_result_bytes = measurement.turn_result_bytes,
                 actual = measurement.total_bytes,
-                limit = max_bytes.get(),
+                limit = max_bytes,
                 outcome = "rejected",
                 "runtime commit budget decision"
             );
@@ -191,7 +231,7 @@ impl RuntimeCommit {
                 usage_delta_bytes: measurement.usage_delta_bytes,
                 turn_result_bytes: measurement.turn_result_bytes,
                 total_bytes: measurement.total_bytes,
-                max_bytes: max_bytes.get(),
+                max_bytes,
             });
         }
         tracing::trace!(
@@ -210,7 +250,7 @@ impl RuntimeCommit {
             usage_delta_bytes = measurement.usage_delta_bytes,
             turn_result_bytes = measurement.turn_result_bytes,
             actual = measurement.total_bytes,
-            limit = max_bytes.get(),
+            limit = max_bytes,
             outcome = "admitted",
             "runtime commit budget decision"
         );
@@ -374,8 +414,6 @@ mod tests {
 
     #[test]
     fn keyed_budget_counts_root_and_changed_bodies_but_excludes_unchanged_refs() {
-        #[cfg(feature = "otel-trace")]
-        let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-bytes"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
@@ -460,11 +498,6 @@ mod tests {
                         + turn_result_bytes
                 && max_bytes == 128
         ));
-        #[cfg(feature = "otel-trace")]
-        assert_eq!(
-            metrics.histogram_count("lash.runtime_commit.budgeted_size"),
-            1
-        );
     }
 
     #[test]

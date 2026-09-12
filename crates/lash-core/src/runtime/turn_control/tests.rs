@@ -130,6 +130,184 @@ fn bound_driver(host: Arc<NativeEffectHost>, address: &TurnAddress) -> TurnWorkD
     )
 }
 
+fn scoped_turn_controller<'a>(
+    host: &'a NativeEffectHost,
+    address: &TurnAddress,
+) -> ScopedEffectController<'a> {
+    host.scoped(address.execution_scope())
+        .expect("scope turn controller")
+}
+
+#[test]
+fn foreground_turn_cancel_peek_replay_keys_remain_unchanged() {
+    let address = TurnAddress::new("foreground-session", "foreground-turn");
+    let scope = address.execution_scope();
+    let identities = [
+        (TurnCancelPeekIdentity::StartGate, "turn_cancel.start_gate"),
+        (
+            TurnCancelPeekIdentity::PostAbortGate,
+            "turn_cancel.post_abort_gate",
+        ),
+        (
+            TurnCancelPeekIdentity::AfterLlm {
+                protocol_iteration: 7,
+            },
+            "turn_cancel.after_llm.7",
+        ),
+        (
+            TurnCancelPeekIdentity::AfterStep {
+                protocol_iteration: 7,
+            },
+            "turn_cancel.after_step.7",
+        ),
+    ];
+
+    for (identity, expected) in identities {
+        let causal_identity = identity.causal_identity();
+        assert_eq!(causal_identity, expected);
+        assert_eq!(
+            turn_cancel_peek_replay_key(&scope, &address, &causal_identity),
+            expected
+        );
+        let escalation = identity.escalation_causal_identity();
+        assert_eq!(
+            turn_cancel_peek_replay_key(&scope, &address, &escalation),
+            escalation
+        );
+    }
+}
+
+#[test]
+fn process_turn_cancel_peek_replay_keys_cover_physical_turn_and_gate() {
+    let scope = ExecutionScope::process("process:subagent:peek-key");
+    let root = TurnAddress::new("session:subagent:peek-key", "process:subagent:peek-key");
+    let follow_on = TurnAddress::new(&root.session_id, "process:subagent:peek-key:agent-frame:1");
+    assert_eq!(
+        turn_cancel_peek_replay_key(
+            &scope,
+            &root,
+            &TurnCancelPeekIdentity::StartGate.causal_identity(),
+        ),
+        "turn-cancel-peek:v1:blake3:da49b5246b68613ad7de048d74eca8f0655c4fc2b62db4872af62491b5f7656e",
+    );
+    let mut keys = BTreeSet::new();
+
+    for address in [&root, &follow_on] {
+        for identity in [
+            TurnCancelPeekIdentity::StartGate,
+            TurnCancelPeekIdentity::PostAbortGate,
+            TurnCancelPeekIdentity::AfterLlm {
+                protocol_iteration: 7,
+            },
+            TurnCancelPeekIdentity::AfterStep {
+                protocol_iteration: 7,
+            },
+        ] {
+            for causal_identity in [
+                identity.causal_identity(),
+                identity.escalation_causal_identity(),
+            ] {
+                let key = turn_cancel_peek_replay_key(&scope, address, &causal_identity);
+                assert!(
+                    key.starts_with("turn-cancel-peek:v1:blake3:"),
+                    "unexpected Process peek key: {key}"
+                );
+                assert!(keys.insert(key), "Process peek identity collided");
+            }
+        }
+    }
+
+    assert_eq!(keys.len(), 16);
+}
+
+#[test]
+fn every_shared_scope_cancel_peek_key_covers_physical_turn_and_gate() {
+    let cases = [
+        (
+            ExecutionScope::turn("turn-session", "turn-root"),
+            TurnAddress::new("turn-session", "turn-root"),
+            TurnAddress::new("turn-session", "turn-root:agent-frame:1"),
+        ),
+        (
+            ExecutionScope::queue_drain("queue-session", "queue-drain"),
+            TurnAddress::new("queue-session", "queue-root"),
+            TurnAddress::new("queue-session", "queue-follow-on"),
+        ),
+        (
+            ExecutionScope::runtime_operation("runtime-operation"),
+            TurnAddress::new("runtime-session", "runtime-root"),
+            TurnAddress::new("runtime-session", "runtime-follow-on"),
+        ),
+    ];
+
+    for (scope, root, follow_on) in cases {
+        let mut keys = BTreeSet::new();
+        for address in [&root, &follow_on] {
+            for identity in [
+                TurnCancelPeekIdentity::StartGate,
+                TurnCancelPeekIdentity::PostAbortGate,
+                TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: 7,
+                },
+                TurnCancelPeekIdentity::AfterStep {
+                    protocol_iteration: 7,
+                },
+            ] {
+                for causal_identity in [
+                    identity.causal_identity(),
+                    identity.escalation_causal_identity(),
+                ] {
+                    let key = turn_cancel_peek_replay_key(&scope, address, &causal_identity);
+                    assert!(keys.insert(key), "shared-scope peek identity collided");
+                }
+            }
+        }
+        assert_eq!(keys.len(), 16);
+        assert_eq!(
+            turn_cancel_peek_replay_key(
+                &scope,
+                &root,
+                &TurnCancelPeekIdentity::StartGate.causal_identity(),
+            ),
+            turn_cancel_peek_replay_key(
+                &scope,
+                &root,
+                &TurnCancelPeekIdentity::StartGate.causal_identity(),
+            ),
+            "same-frame replay must reconstruct the same key"
+        );
+    }
+}
+
+#[tokio::test]
+async fn process_scoped_turn_control_peek_uses_admitted_effect_scope() {
+    let host = NativeEffectHost::default();
+    let address = TurnAddress::new(
+        "session:subagent:scope-probe",
+        "process:subagent:scope-probe",
+    );
+    let active = ActiveTurnControl::new(&host, address.clone())
+        .await
+        .expect("active process-backed turn control");
+    let process_scope = ExecutionScope::process("process:subagent:scope-probe");
+    let scoped = host
+        .scoped(process_scope.clone())
+        .expect("scope process controller");
+
+    assert_eq!(
+        active
+            .observe_pending_cancel(&scoped, TurnCancelPeekIdentity::StartGate)
+            .await
+            .expect("peek process-backed turn cancellation"),
+        None
+    );
+    assert_eq!(scoped.execution_scope(), &process_scope);
+    assert_eq!(
+        address.execution_scope(),
+        ExecutionScope::turn(&address.session_id, &address.turn_id)
+    );
+}
+
 #[tokio::test]
 async fn first_gate_winner_owns_policy_and_conflict_cannot_escalate() {
     let host = Arc::new(NativeEffectHost::default());
@@ -1109,7 +1287,7 @@ async fn recovered_owner_observes_pending_cancel_after_control_recreation() {
         .await
         .expect("recreate active control under the recovered owner");
     let observed = recovered
-        .observe_pending_cancel(scoped.controller(), TurnCancelPeekIdentity::StartGate)
+        .observe_pending_cancel(&scoped, TurnCancelPeekIdentity::StartGate)
         .await
         .expect("read recovered turn start gate")
         .expect("pending cancellation is visible before recovered effects");
@@ -1478,7 +1656,7 @@ async fn after_step_request_is_deferred_until_immediate_escalates_it() {
     // request is remembered as deferred, never as effective evidence.
     let observed = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped_turn_controller(host.as_ref(), &address),
             TurnCancelPeekIdentity::AfterLlm {
                 protocol_iteration: 0,
             },
@@ -1520,7 +1698,7 @@ async fn after_step_request_is_deferred_until_immediate_escalates_it() {
 
     let observed = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped_turn_controller(host.as_ref(), &address),
             TurnCancelPeekIdentity::AfterLlm {
                 protocol_iteration: 1,
             },
@@ -1624,7 +1802,7 @@ async fn final_settlement_refreshes_cached_base_to_an_already_projected_escalati
         .expect("accept base request");
     let honoured_base = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped_turn_controller(host.as_ref(), &address),
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 3,
             },
@@ -1702,7 +1880,7 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
     assert_eq!(
         active
             .observe_pending_cancel(
-                host.as_ref(),
+                &scoped_turn_controller(host.as_ref(), &address),
                 TurnCancelPeekIdentity::AfterLlm {
                     protocol_iteration: 0,
                 },
@@ -1843,7 +2021,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration(
     assert_eq!(
         active
             .observe_pending_cancel(
-                host.as_ref(),
+                &scoped_turn_controller(host.as_ref(), &address),
                 TurnCancelPeekIdentity::AfterLlm {
                     protocol_iteration: 2,
                 },
@@ -1854,7 +2032,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration(
     );
     let honoured = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped_turn_controller(host.as_ref(), &address),
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 2,
             },
@@ -1903,7 +2081,7 @@ async fn local_after_step_stop_resolves_the_own_gate_and_lands_at_commit() {
         .expect("resolve own gate");
     let honoured = active
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped_turn_controller(host.as_ref(), &address),
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 0,
             },

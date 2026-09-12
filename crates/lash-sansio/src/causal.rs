@@ -1,6 +1,4 @@
-use crate::ProcessId;
-use crate::SessionId;
-use crate::TurnId;
+use crate::{EffectAddress, ProcessId, SessionId, TurnId};
 use serde::{Deserialize, Serialize};
 
 /// Stable semantic reference to the runtime fact that caused another fact.
@@ -12,10 +10,7 @@ pub enum CausalRef {
         turn_id: TurnId,
     },
     Effect {
-        session_id: SessionId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        turn_id: Option<TurnId>,
-        effect_id: String,
+        address: EffectAddress,
     },
     ToolCall {
         session_id: SessionId,

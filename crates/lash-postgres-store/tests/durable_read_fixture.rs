@@ -18,6 +18,10 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-fe2964c7/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-037d9999/postgres-expected.json",
+];
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct PostgresVersion {
@@ -74,7 +78,7 @@ async fn postgres_durable_fixture_expectations_match_what_this_build_writes_when
         .await
         .expect("reopen Postgres write-shape schema with fixed await-event secret");
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
-    let written_now = fixture::seed(&handles).await;
+    let written_now = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
     storage.pool().close().await;
     drop_fixture_schema(&database_url).await;
@@ -93,7 +97,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 89);
+    assert_eq!(PostgresStorage::schema_version(), 90);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -126,7 +130,7 @@ async fn regenerate_postgres_durable_fixture() {
         .await
         .expect("reopen Postgres fixture with fixed await-event secret");
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
-    let expected = fixture::seed(&handles).await;
+    let expected = Box::pin(fixture::seed(&handles)).await;
     normalize_server_authoritative_fixture_rows(&storage).await;
     drop(handles);
     storage.pool().close().await;
@@ -274,7 +278,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          ALTER TABLE lash_turn_cancel_requests
              ALTER COLUMN intent_revision DROP DEFAULT;
          UPDATE lash_schema_versions
-            SET version = 89
+            SET version = 90
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)

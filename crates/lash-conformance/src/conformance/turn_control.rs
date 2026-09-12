@@ -69,7 +69,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn Ef
     // Mid-model-call observation: remembered as deferred, never effective.
     let observed = active
         .observe_pending_cancel(
-            peek.controller(),
+            &peek,
             TurnCancelPeekIdentity::AfterLlm {
                 protocol_iteration: 0,
             },
@@ -110,7 +110,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn Ef
 
     let observed = active
         .observe_pending_cancel(
-            peek.controller(),
+            &peek,
             TurnCancelPeekIdentity::AfterLlm {
                 protocol_iteration: 1,
             },
@@ -148,7 +148,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn Ef
         .await
         .expect("recreate active control");
     let observed = recovered
-        .observe_pending_cancel(peek.controller(), TurnCancelPeekIdentity::StartGate)
+        .observe_pending_cancel(&peek, TurnCancelPeekIdentity::StartGate)
         .await
         .expect("peek start gate")
         .expect("durable abort survives owner loss");
@@ -180,7 +180,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
     assert_eq!(
         active
             .observe_pending_cancel(
-                peek.controller(),
+                &peek,
                 TurnCancelPeekIdentity::AfterLlm {
                     protocol_iteration: 3,
                 },
@@ -192,7 +192,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
     );
     let honoured = active
         .observe_pending_cancel(
-            peek.controller(),
+            &peek,
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 3,
             },
@@ -230,7 +230,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
         .expect("recreate active control");
     let again = recovered
         .observe_pending_cancel(
-            peek.controller(),
+            &peek,
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 3,
             },
@@ -243,7 +243,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
         .await
         .expect("recreate active control");
     let refused = before_start
-        .observe_pending_cancel(peek.controller(), TurnCancelPeekIdentity::StartGate)
+        .observe_pending_cancel(&peek, TurnCancelPeekIdentity::StartGate)
         .await
         .expect("peek start gate")
         .expect("start gate honours either mode");

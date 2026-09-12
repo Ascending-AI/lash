@@ -86,12 +86,17 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             "fig806-non-tool-occurrence",
         )
     };
+    let scoped_controller = crate::ScopedEffectController::borrowed(
+        &controller,
+        crate::ExecutionScope::runtime_operation("fig1127-trigger-emission"),
+    )
+    .expect("bind trigger emitter scope");
     let first = router
-        .emit(occurrence(), &controller)
+        .emit(occurrence(), &scoped_controller)
         .await
         .expect("emit non-tool trigger");
     let redrive = router
-        .emit(occurrence(), &controller)
+        .emit(occurrence(), &scoped_controller)
         .await
         .expect("redrive non-tool trigger");
 

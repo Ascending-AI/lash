@@ -55,7 +55,7 @@ fn deferred_tools_test_core(
             data_dir.join("lash-sessions"),
         )))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_deferred_tools(deferred),
+            WorkbenchPluginFactory::new().with_deferred_tools(deferred),
         ))
         .trigger_store(trigger_store)
         .without_queued_work()

@@ -1,4 +1,3 @@
-use self::facade_ops::ScopedEffectControllerFacadeOps;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
@@ -22,8 +21,7 @@ use super::{TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipat
 // Effect host + controller trait + scope + error
 // =============================================================================
 
-mod execution_scope;
-pub use execution_scope::{EffectJournalIdentity, ExecutionScope};
+pub use lash_sansio::{EffectJournalIdentity, ExecutionScope};
 
 /// Who proves that a scope-exact retirement can no longer be reached.
 ///
@@ -331,6 +329,11 @@ pub struct ScopedEffectController<'run> {
 }
 
 impl<'run> ScopedEffectController<'run> {
+    /// Returns the execution scope this controller has admitted.
+    pub fn execution_scope(&self) -> &ExecutionScope {
+        &self.scope
+    }
+
     /// Validates a scope and binds a borrowed controller for effect-host implementors; invalid or
     /// empty scope identities are rejected before execution.
     pub fn borrowed(
@@ -378,6 +381,26 @@ impl<'run> ScopedEffectController<'run> {
             ScopedEffectControllerInner::Shared(controller) => controller.as_ref(),
             ScopedEffectControllerInner::Owned(controller) => controller.as_ref(),
         }
+    }
+
+    fn validate_envelope_scope(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        envelope.invocation.validate_execution_scope(&self.scope)
+    }
+
+    /// Executes an effect only after proving that its address belongs to this
+    /// controller's admitted scope.
+    pub async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.validate_envelope_scope(&envelope)?;
+        self.controller()
+            .execute_effect(envelope, local_executor)
+            .await
     }
 
     /// Exposes scope id to effect-host implementors while scoping and journaling durable effects.
@@ -458,6 +481,7 @@ pub(crate) mod facade_ops {
             envelope: RuntimeEffectEnvelope,
             local_executor: RuntimeEffectLocalExecutor<'static>,
         ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            self.validate_envelope_scope(&envelope)?;
             let controller = self.controller();
             let (owned_controller, task_requests) = if let Some(owned) = self.owned_controller() {
                 (owned, None)
@@ -473,10 +497,16 @@ pub(crate) mod facade_ops {
             };
             let local_executor = local_executor.with_process_effect_controller(owned_controller);
             if let Some(task_requests) = task_requests {
-                drive_effect_controller_task(controller, envelope, local_executor, task_requests)
-                    .await
+                drive_effect_controller_task(
+                    controller,
+                    self.execution_scope().clone(),
+                    envelope,
+                    local_executor,
+                    task_requests,
+                )
+                .await
             } else {
-                controller.execute_effect(envelope, local_executor).await
+                self.execute_effect(envelope, local_executor).await
             }
         }
     }
@@ -644,6 +674,7 @@ pub trait QueuedLaneProbe: Send + Sync {
 
 pub(crate) enum EffectControllerTaskRequest {
     Execute {
+        scope: ExecutionScope,
         envelope: Box<RuntimeEffectEnvelope>,
         local_executor: Box<RuntimeEffectLocalExecutor<'static>>,
         response: oneshot::Sender<Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>,
@@ -685,11 +716,23 @@ impl EffectControllerTaskRequest {
     ) -> EffectControllerTaskFuture<'run> {
         match self {
             Self::Execute {
+                scope,
                 envelope,
                 local_executor,
                 response,
             } => Box::pin(async move {
-                let _ = response.send(controller.execute_effect(*envelope, *local_executor).await);
+                let result = if envelope.invocation.execution_scope() != &scope {
+                    Err(RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RuntimeEffectScopeMismatch,
+                        format!(
+                            "proxied effect address scope {:?} does not match admitted controller scope {scope:?}",
+                            envelope.invocation.execution_scope()
+                        ),
+                    ))
+                } else {
+                    controller.execute_effect(*envelope, *local_executor).await
+                };
+                let _ = response.send(result);
             }),
             Self::AwaitEventKey {
                 scope,
@@ -743,6 +786,7 @@ pub(super) struct RemoteLocalExecutionRequest {
 #[derive(Clone)]
 pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
+    scope: ExecutionScope,
     supports_concurrent_effects: bool,
     owns_commit_backpressure: bool,
     await_event_authority_binding_id: Option<String>,
@@ -762,6 +806,7 @@ impl EffectTaskController {
         let (requests, request_rx) = mpsc::unbounded_channel();
         let proxy = Self {
             requests,
+            scope: scope.clone(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
             await_event_authority_binding_id: controller.await_event_authority_binding_id(),
@@ -947,10 +992,21 @@ impl RuntimeEffectController for EffectTaskController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        if envelope.invocation.execution_scope() != &self.scope {
+            return Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectScopeMismatch,
+                format!(
+                    "proxied effect address scope {:?} does not match admitted controller scope {:?}",
+                    envelope.invocation.execution_scope(),
+                    self.scope
+                ),
+            ));
+        }
         let (local_executor, mut local_execution) = local_executor.into_remote_execution();
         let (response_tx, response_rx) = oneshot::channel();
         self.requests
             .send(EffectControllerTaskRequest::Execute {
+                scope: self.scope.clone(),
                 envelope: Box::new(envelope),
                 local_executor: Box::new(local_executor),
                 response: response_tx,
@@ -1000,12 +1056,14 @@ impl RuntimeEffectController for EffectTaskController {
 
 pub(crate) async fn drive_effect_controller_task(
     controller: &dyn RuntimeEffectController,
+    scope: ExecutionScope,
     envelope: RuntimeEffectEnvelope,
     local_executor: RuntimeEffectLocalExecutor<'static>,
     mut requests: mpsc::UnboundedReceiver<EffectControllerTaskRequest>,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     let (root_tx, root_rx) = oneshot::channel();
     let root = EffectControllerTaskRequest::Execute {
+        scope,
         envelope: Box::new(envelope),
         local_executor: Box::new(local_executor),
         response: root_tx,

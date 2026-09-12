@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::envelope::{RuntimeEffectOutcome, RuntimeInvocation};
+use super::envelope::{RuntimeEffectInvocation, RuntimeEffectOutcome};
 use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
 
 /// Wake rule of a durable effect group, recorded in the group's journal
@@ -95,7 +95,7 @@ pub struct EffectGroupMembership {
 /// refuses.
 #[derive(Clone, Debug)]
 pub struct RuntimeEffectGroup {
-    invocation: RuntimeInvocation,
+    invocation: RuntimeEffectInvocation,
     group_key: String,
     children: Vec<RuntimeEffectEnvelope>,
     wake: GroupWakePolicy,
@@ -149,7 +149,7 @@ impl RuntimeEffectGroup {
     /// group-drain path had to invent one, silently running a deadline arm's
     /// losers to completion on exactly the failure path this contract exists for.
     pub fn try_new(
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         group_key: impl Into<String>,
         children: Vec<RuntimeEffectEnvelope>,
         wake: GroupWakePolicy,
@@ -211,9 +211,7 @@ impl RuntimeEffectGroup {
             .collect::<Result<Vec<_>, _>>()?;
         let mut first_seen_at: HashMap<&str, usize> = HashMap::with_capacity(children.len());
         for (index, child) in children.iter().enumerate() {
-            let Some(replay_key) = child.invocation.replay_key() else {
-                continue;
-            };
+            let replay_key = child.invocation.replay_key();
             if let Some(first) = first_seen_at.insert(replay_key, index) {
                 return Err(group_shape_error(format!(
                     "children {first} and {index} of durable effect group {group_key} share \
@@ -234,7 +232,7 @@ impl RuntimeEffectGroup {
     /// The group's durable identity. Children derive their replay keys from it
     /// exactly as batch leaves already do.
     #[must_use]
-    pub fn invocation(&self) -> &RuntimeInvocation {
+    pub fn invocation(&self) -> &RuntimeEffectInvocation {
         &self.invocation
     }
 
@@ -266,6 +264,20 @@ impl RuntimeEffectGroup {
     #[must_use]
     pub fn loser_disposition(&self) -> LoserPolicy {
         self.loser_disposition
+    }
+
+    /// Proves that both the group header and every child belong to the scope a
+    /// controller is about to admit. Composite admission must run before any
+    /// resolver, index, journal, or local-execution side effect.
+    pub fn validate_execution_scope(
+        &self,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.invocation.validate_execution_scope(admitted_scope)?;
+        for child in &self.children {
+            child.invocation.validate_execution_scope(admitted_scope)?;
+        }
+        Ok(())
     }
 }
 
@@ -671,24 +683,34 @@ impl LoserPolicy {
 #[cfg(test)]
 mod effect_group_contract_tests {
     use super::*;
+    use crate::RuntimeEffectKind;
     use crate::SessionId;
     use crate::TurnId;
-    use crate::runtime::effect::envelope::{RuntimeEffectCommand, RuntimeEffectKind, RuntimeScope};
+    use crate::runtime::effect::envelope::RuntimeEffectCommand;
 
-    fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
-        RuntimeInvocation::effect(RuntimeScope::new("session"), "effect", kind, "replay")
+    fn invocation(kind: RuntimeEffectKind) -> RuntimeEffectInvocation {
+        let _ = kind;
+        RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(crate::ExecutionScope::turn("session", "turn"), "replay")
+                .expect("valid group contract address"),
+            crate::RuntimeAttribution::for_session("session"),
+            "effect",
+        )
     }
 
     /// A child's invocation, keyed by its position.
     ///
     /// Siblings need distinct replay keys — one replay key is one journaled
     /// child — so a group's children cannot share the flat [`invocation`] key.
-    fn child_invocation(kind: RuntimeEffectKind, position: usize) -> RuntimeInvocation {
-        RuntimeInvocation::effect(
-            RuntimeScope::new("session"),
+    fn child_invocation(_kind: RuntimeEffectKind, position: usize) -> RuntimeEffectInvocation {
+        RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("session", "turn"),
+                format!("replay-{position}"),
+            )
+            .expect("valid child address"),
+            crate::RuntimeAttribution::for_session("session"),
             "effect",
-            kind,
-            format!("replay-{position}"),
         )
     }
 
@@ -805,68 +827,51 @@ mod effect_group_contract_tests {
             .collect()
     }
 
-    /// N2: an ungrouped effect's canonical encoding — and therefore its
-    /// recorded `envelope_hash` — must be byte-identical to what it was before
-    /// effect groups added a field to the envelope.
+    /// Fixed-byte authority for the v3 admitted-address envelope hashes.
     ///
-    /// Provenance, stated precisely because it is the whole value of the test:
-    /// the first six hashes were generated on the pre-change tree (base
-    /// `eb0935293`) and are unchanged by the added field, so they are genuine
-    /// before/after evidence. The last three variants were added afterwards and
-    /// their constants come from the post-change tree; what makes *those* sound
-    /// is the structural argument pinned by
-    /// [`an_ungrouped_envelope_omits_the_group_field_entirely`] — an omitted
-    /// field cannot perturb a preimage — with the constants serving as a
-    /// regression pin on future edits rather than as before/after evidence.
-    ///
-    /// They are golden constants rather than a self-consistency check on
-    /// purpose: the defect
-    /// this guards is a *mass* `ReplayMismatch` on a live Postgres upgrade,
-    /// where every in-flight effect — grouped or not — comes back refused
-    /// because a field those effects never use perturbed their preimage.
-    /// Postgres is not reject-and-recreate, so nothing else catches it before a
-    /// customer's cutover.
-    ///
-    /// If a legitimate future encoding change moves one of these, that change
-    /// must be paired with a drain, exactly as ADR 0055 requires.
+    /// FIG-2828 deliberately moved every hash from v2 and paired that cutover
+    /// with new SQLite and PostgreSQL store generations. A later change must
+    /// make the same explicit version-and-drain decision before updating these
+    /// constants. The companion omission test still proves that an absent group
+    /// does not perturb this corpus within the v3 format.
     #[test]
-    fn ungrouped_envelope_hashes_are_unchanged_by_the_group_field() {
+    fn ungrouped_envelope_v3_hash_golden_corpus() {
         let golden = [
             (
                 "sleep",
-                "d40de91326afc4ef26b20013fc5197fa62410ecdf3ea24d9cd5a647494e636b8",
+                "e5968a7cc365941f52408f27e0817eac2fe0de35e18260fc6b82dbad768b914d",
             ),
             (
                 "exec_code",
-                "f732ad1e1a254c6f4232bbbd16276be45f2d88910eba4d18d1ca3cd4b9f712e4",
+                "7f426da760b9b4e4fbcecbad269ddab57bfecbc805c80552f6aa29e2e27219fc",
             ),
             (
                 "sync_execution_environment",
-                "b3c652f6db0337411e0740a6fb92be08b290674316479ea3ef73ab77c28997c4",
+                "6364c8fedd3f1379cfde023fd703349d4939eedf0241cd1b11161b8afde87b44",
             ),
             (
                 "language_runtime_value",
-                "a8f991dd43c72316b9c512705cae50a9351fdb5e144910bd586ea37b663a3ef4",
+                "0c076b8310466a2a5a24fc49e1afef00612825435004387132d5dc2b85705469",
             ),
             (
                 "tool_attempt",
-                "fc930fc72e8e725e08c30f38dccbe6b77d15f0daf3282fe766c4997c528f1dbf",
+                "14fe59d38589fe58cd66f4328251d301a8a556f886371c8544dcafe8b4cf867d",
             ),
             (
                 "tool_batch",
-                "edb08f2ebaea5cf00b0d4002f049d820afb3266c67a26931ec60350835b69912",
+                "27e239383a54b3fb07f5bf97b56c097ce44bcf277feaa94c89551affa2756d6d",
             ),
             (
                 "checkpoint",
-                "a0d8165b0bf9ce83ce3250f9a0d16c33398ec0ddc001da1d759cee3c6e811499",
+                "d5d9bde834af9f145e121cd2af8fd6d6e630602ccc448c847b0f68d36f9c9768",
             ),
             (
                 "await_event",
-                "5b23f79fe88d65702391870e2587169752418308f85701054979e07d7bf2238d",
+                "2ed3e1075946e128ed12a118c3dbee71f8478d76e1c204b59fd78d314b97fc97",
             ),
             (
                 "peek_await_event",
-                "87723cdf5d8741e9126e14c321b2eee91eac7e3de8d86ea8223847cc050d570d",
+                "9a0613831bc619f17b187c670ef4343829bd3b6d54c7190fc8e2944b2fc35e35",
             ),
         ];
         let corpus = ungrouped_corpus();

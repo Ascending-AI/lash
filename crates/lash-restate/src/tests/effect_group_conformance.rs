@@ -11,9 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use lash_core::{
     ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy, Resolution, RuntimeEffectCommand,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeErrorCode, RuntimeInvocation,
-    RuntimeScope,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeErrorCode,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::endpoint::Endpoint;
@@ -70,7 +69,7 @@ impl GroupExecutors for ConformanceExecutors {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        let replay_key = envelope.invocation.replay_key()?.to_owned();
+        let replay_key = envelope.invocation.replay_key().to_owned();
         if self.mapping_current.load(Ordering::SeqCst) {
             return self
                 .current
@@ -146,11 +145,7 @@ impl WitnessExecutors {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(
-                child
-                    .invocation
-                    .replay_key()
-                    .expect("witness child has replay key")
-                    .to_owned(),
+                child.invocation.replay_key().to_owned(),
                 WitnessRoute { executions, label },
             );
     }
@@ -166,7 +161,7 @@ impl GroupExecutors for WitnessExecutors {
             .staged
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(envelope.invocation.replay_key()?)
+            .get(envelope.invocation.replay_key())
             .cloned()?;
         Some(RuntimeEffectLocalExecutor::testing(move |_| async move {
             route.executions.fetch_add(1, Ordering::SeqCst);
@@ -541,11 +536,14 @@ impl ScopeLivenessProbe for ScopeLivenessProbeImpl {
             .scoped_effect_controller(ExecutionScope::runtime_operation(scope_id.clone()))
             .map_err(TerminalError::from_error)?;
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope::new("scope-liveness"),
+            lash_core::RuntimeEffectInvocation::new(
+                lash_core::EffectAddress::new(
+                    ExecutionScope::runtime_operation(scope_id.clone()),
+                    format!("{scope_id}:work"),
+                )
+                .map_err(TerminalError::from_error)?,
+                lash_core::RuntimeAttribution::none(),
                 "work",
-                RuntimeEffectKind::LanguageRuntimeValue,
-                format!("{scope_id}:work"),
             ),
             RuntimeEffectCommand::LanguageRuntimeValue {
                 operation: "scope-liveness".to_string(),
@@ -626,11 +624,14 @@ async fn cold_reopen_admits_the_registered_process<F, Fut>(
         .await
         .expect("resolve the effect's promise");
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new("cold-reopen"),
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                scope.clone(),
+                format!("cold-reopen-first-{label}-{nonce}"),
+            )
+            .expect("valid cold-reopen effect address"),
+            lash_core::RuntimeAttribution::none(),
             "first",
-            RuntimeEffectKind::AwaitEvent,
-            format!("cold-reopen-first-{label}-{nonce}"),
         ),
         RuntimeEffectCommand::AwaitEvent { key },
     );
@@ -937,11 +938,14 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
 
 fn witness_child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new(group_key),
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::runtime_operation(group_key),
+                format!("{group_key}:child:{position}"),
+            )
+            .expect("valid witness child address"),
+            lash_core::RuntimeAttribution::none(),
             "effect",
-            RuntimeEffectKind::LanguageRuntimeValue,
-            format!("{group_key}:child:{position}"),
         ),
         RuntimeEffectCommand::LanguageRuntimeValue {
             operation: format!("witness-child-{position}"),
@@ -965,7 +969,7 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
         loser_disposition: LoserPolicy::RunToCompletion,
         replay_keys: children
             .iter()
-            .map(|child| child.invocation.replay_key().unwrap().to_owned())
+            .map(|child| child.invocation.replay_key().to_owned())
             .collect(),
         wait_scope: ExecutionScope::runtime_operation(group_key),
     }

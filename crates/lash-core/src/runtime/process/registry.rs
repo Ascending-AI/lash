@@ -338,10 +338,10 @@ mod wake_delivery_identity_tests {
             sequence: 1,
             event_type: "process.wake".to_string(),
             event_invocation: crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::new("session"),
+                crate::EffectAddress::new(crate::ExecutionScope::process("process"), "replay")
+                    .expect("valid wake address"),
+                crate::RuntimeAttribution::none(),
                 "effect",
-                crate::RuntimeEffectKind::Process,
-                "replay",
             ),
             process_caused_by: None,
             authority: crate::QueuedWorkAuthority::default(),
@@ -367,10 +367,10 @@ mod wake_delivery_identity_tests {
                 sequence: 1,
                 event_type: "process.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
-                    crate::RuntimeScope::new("session"),
+                    crate::EffectAddress::new(crate::ExecutionScope::process("process"), "replay")
+                        .expect("valid wake address"),
+                    crate::RuntimeAttribution::none(),
                     "effect",
-                    crate::RuntimeEffectKind::Process,
-                    "replay",
                 ),
                 process_caused_by: None,
                 authority: crate::QueuedWorkAuthority::default(),

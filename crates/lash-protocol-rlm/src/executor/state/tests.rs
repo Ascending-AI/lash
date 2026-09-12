@@ -3,8 +3,6 @@
 
 use super::*;
 use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect};
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 use lashlang::{
     ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record as FlowRecord, Value as FlowValue,
@@ -80,12 +78,11 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         .with_execution_binding(json!({"route": "primary"}));
     let resolution = Resolution::Resolved(Box::new(grant));
     let link_key = DeferredResolutionLinkKey {
-        session_id: SessionId::from("session"),
-        turn_id: Some(TurnId::from("turn")),
-        turn_index: Some(7),
-        protocol_iteration: Some(2),
-        effect_id: "effect".to_string(),
-        replay_key: Some("replay".to_string()),
+        address: lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::turn("session", "turn"),
+            "replay",
+        )
+        .expect("valid snapshot test address"),
     };
     let deferred_resolutions = DeferredResolutionRecord {
         link_key: Some(link_key.clone()),
@@ -131,14 +128,7 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     );
     assert_field_schema(
         DEFERRED_LINK_KEY_FIELDS,
-        &[
-            "session_id",
-            "turn_id",
-            "turn_index",
-            "protocol_iteration",
-            "effect_id",
-            "replay_key",
-        ],
+        &["address"],
         &[serialized_fields(&link_key)],
     );
     assert_field_schema(
@@ -593,11 +583,11 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 
 #[test]
 fn previous_snapshot_version_is_typed_rejection_with_or_without_file_leaves() {
-    const STEP_REPRESENTATION_PREDECESSOR_SNAPSHOT_VERSION: u32 = 16;
+    const EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION: u32 = 17;
     assert_eq!(
         RLM_SNAPSHOT_VERSION,
-        STEP_REPRESENTATION_PREDECESSOR_SNAPSHOT_VERSION + 1,
-        "the FIG-1974 snapshot bump must stay adjacent to its predecessor"
+        EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION + 1,
+        "the effect-address snapshot bump must stay adjacent to its predecessor"
     );
 
     #[derive(Serialize)]
@@ -631,7 +621,7 @@ fn previous_snapshot_version_is_typed_rejection_with_or_without_file_leaves() {
         }
         let hydration = lash_core::plugin::HydratedExecutionState {
             root: rmp_serde::to_vec_named(&PreviousEnvelope {
-                version: STEP_REPRESENTATION_PREDECESSOR_SNAPSHOT_VERSION,
+                version: EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION,
                 engine: "lashlang",
                 globals: [(
                     "kept".to_string(),
@@ -658,7 +648,7 @@ fn previous_snapshot_version_is_typed_rejection_with_or_without_file_leaves() {
             RlmSnapshotError::VersionMismatch {
                 expected: RLM_SNAPSHOT_VERSION,
                 found
-            } if *found == STEP_REPRESENTATION_PREDECESSOR_SNAPSHOT_VERSION
+            } if *found == EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION
         ));
         let message = error.to_string();
         assert!(message.contains("drain in-flight sessions on the old build"));
@@ -718,7 +708,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-17 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-18 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -729,22 +719,21 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_17_root_encodes_to_golden_bytes() {
+fn version_18_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "84a776657273696f6e11a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282",
-        "a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565",
-        "a576616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a4",
-        "6b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f653233376136",
-        "6232376637663439353936616562343139363238363461656363303436633466626662323664336439316239333161313430",
-        "3262636665363937b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657986aa73657373696f6e5f69",
-        "64ae73657373696f6e2d676f6c64656ea77475726e5f6964a67475726e2d37aa7475726e5f696e64657803b270726f746f63",
-        "6f6c5f697465726174696f6e02a96566666563745f6964a86566666563742d39aa7265706c61795f6b6579a87265706c6179",
-        "2d31ab7265736f6c7574696f6e7382a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f",
-        "6e85a26964aa746f6f6c3a6665746368a46e616d65a56665746368ab6465736372697074696f6eae4665746368206f6e6520",
-        "55524c2eac696e7075745f736368656d6181a963616e6f6e6963616c82aa70726f7065727469657381a375726c81a4747970",
-        "65a6737472696e67a474797065a66f626a656374ad6f75747075745f736368656d6181a963616e6f6e6963616c81a4747970",
-        "65a6737472696e67a9736f757263655f6964ac72656769737472793a776562b1657865637574696f6e5f62696e64696e6781",
-        "a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f617661696c61626c65",
+        "84a776657273696f6e12a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6",
+        "696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565a576616c756582a46b696e64",
+        "a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a46b696e64a46c656166a9636f6d706f6e656e",
+        "74d957657865637574696f6e5f73746174652f626c616b65332f653233376136623237663766343935393661656234313936323836346165",
+        "63633034366334666266623236643364393162393331613134303262636665363937b464656665727265645f7265736f6c7574696f6e7382",
+        "a86c696e6b5f6b657981a76164647265737382af657865637574696f6e5f73636f706583a474797065a47475726eaa73657373696f6e5f69",
+        "64ae73657373696f6e2d676f6c64656ea77475726e5f6964a67475726e2d37aa7265706c61795f6b6579a87265706c61792d31ab7265736f",
+        "6c7574696f6e7382a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f6e85a26964aa746f6f6c3a6665",
+        "746368a46e616d65a56665746368ab6465736372697074696f6eae4665746368206f6e652055524c2eac696e7075745f736368656d6181a9",
+        "63616e6f6e6963616c82aa70726f7065727469657381a375726c81a474797065a6737472696e67a474797065a66f626a656374ad6f757470",
+        "75745f736368656d6181a963616e6f6e6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562",
+        "b1657865637574696f6e5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f6176",
+        "61696c61626c65",
     );
 
     let mut resolutions = BTreeMap::new();
@@ -790,12 +779,11 @@ fn version_17_root_encodes_to_golden_bytes() {
         globals,
         deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord {
             link_key: Some(lash_lashlang_runtime::DeferredResolutionLinkKey {
-                session_id: SessionId::from("session-golden"),
-                turn_id: Some(TurnId::from("turn-7")),
-                turn_index: Some(3),
-                protocol_iteration: Some(2),
-                effect_id: "effect-9".to_string(),
-                replay_key: Some("replay-1".to_string()),
+                address: lash_core::EffectAddress::new(
+                    lash_core::ExecutionScope::turn("session-golden", "turn-7"),
+                    "replay-1",
+                )
+                .expect("valid snapshot golden address"),
             }),
             resolutions,
         },
@@ -809,7 +797,7 @@ fn version_17_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-17 root encoding changed; decide on a version bump before updating the golden"
+        "the version-18 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =

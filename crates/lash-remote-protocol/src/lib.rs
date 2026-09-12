@@ -34,6 +34,12 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 60: combine admitted effect identity with cancellation policy
+// conflicts. Both incompatible version-59 parents require exact negotiation.
+// Bumped to 59: runtime effects and causal references carry the admitted
+// execution scope with their replay key, attribution is independently
+// optional, and trigger causes retain complete subscription identity.
+// Version 58 peers would drop or invent authority, so negotiation is exact.
 // Bumped to 58: trigger registration projections no longer carry mutable
 // current-artifact membership. Version 57 peers require that obsolete field,
 // so exact negotiation rejects the incompatible registration shape.
@@ -137,7 +143,7 @@ pub use usage_activity::*;
 // and token-ledger rows (unreported holes with their attempt identities,
 // reconciled corrections) plus the report's unreported/reconciled attempt
 // counts. Peers must adopt 57.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 59;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 60;
 
 /// One versioned remote-protocol message.
 ///

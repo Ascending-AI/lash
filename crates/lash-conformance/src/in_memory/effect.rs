@@ -24,11 +24,14 @@ const SCOPE: &str = "fig1535-session";
 
 fn child(key: &str, position: usize) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            crate::RuntimeScope::new(SCOPE),
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(
+                ExecutionScope::runtime_operation(SCOPE),
+                format!("{key}:child:{position}"),
+            )
+            .expect("valid child effect address"),
+            RuntimeAttribution::none(),
             "effect",
-            RuntimeEffectKind::Sleep,
-            format!("{key}:child:{position}"),
         ),
         RuntimeEffectCommand::Sleep { duration_ms: 0 },
     )
@@ -41,11 +44,14 @@ fn group(
     disposition: LoserPolicy,
 ) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
-        RuntimeInvocation::effect(
-            crate::RuntimeScope::new(SCOPE),
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(
+                ExecutionScope::runtime_operation(SCOPE),
+                format!("{key}:group"),
+            )
+            .expect("valid group effect address"),
+            RuntimeAttribution::none(),
             "group",
-            RuntimeEffectKind::Sleep,
-            format!("{key}:group"),
         ),
         key,
         (0..children).map(|position| child(key, position)).collect(),
@@ -160,7 +166,7 @@ async fn the_native_substrate_supports_groups_through_the_scoped_host_view() {
 
     let host = native_host();
     let scoped = host
-        .scoped(crate::ExecutionScope::runtime_operation("fig1535-scoped"))
+        .scoped(crate::ExecutionScope::runtime_operation(SCOPE))
         .expect("scoped controller");
     assert!(
         scoped.controller().supports_effect_groups(),

@@ -3,36 +3,6 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_cross_owner_attachment_adoption_conformance() {
-    let dir = tempfile::tempdir().unwrap();
-    lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
-        SqliteSessionStoreFactory::new(dir.path()),
-    ))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_attachment_condemnation_enumeration_conformance() {
-    let dir = tempfile::tempdir().unwrap();
-    lash_conformance::attachment_condemnation_enumeration_conformance(Arc::new(
-        SqliteSessionStoreFactory::new(dir.path()),
-    ))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_attachment_condemnation_delete_crash_survives_cold_reopen() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().to_path_buf();
-    lash_conformance::attachment_condemnation_delete_crash_survives_cold_reopen(
-        Arc::new(SqliteSessionStoreFactory::new(&root)),
-        move || async move {
-            Arc::new(SqliteSessionStoreFactory::new(root)) as Arc<dyn SessionStoreFactory>
-        },
-    )
-    .await;
-}
 
 #[tokio::test]
 async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
@@ -92,6 +62,8 @@ async fn sqlite_abandoned_attachment_write_recovery_survives_cold_reopen() {
     }
 }
 
+#[path = "conformance/attachment_adoption.rs"]
+mod attachment_adoption;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 
@@ -108,7 +80,6 @@ use lash_conformance::{
     ReopenableTriggerStore, SessionExecutionLeaseRenewalZeroRowHandles,
     SessionExecutionLeaseRenewalZeroRowInjector,
 };
-use lash_core::runtime::RuntimeScope;
 use lash_core::store::ConformanceSessionStoreFactory;
 use lash_core::{
     AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
@@ -116,9 +87,9 @@ use lash_core::{
     ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
     ProcessRegistrar as _, ProcessRegistration, ProcessRegistry, ProcessStatusFilter,
     RecoveryContract, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence,
-    SessionCommitStore, SessionStoreFactory, TriggerStore,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, SessionCommitStore,
+    SessionStoreFactory, TriggerStore,
 };
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry,
@@ -141,10 +112,12 @@ mod wake_delivery;
 
 fn sqlite_conformance_invocation(
     controller: SqliteRuntimeEffectController,
+    execution_scope: ExecutionScope,
 ) -> lash_conformance::ConformanceInvocation {
     let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
     lash_conformance::ConformanceInvocation::new(
         live,
+        execution_scope,
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
@@ -845,12 +818,16 @@ async fn sqlite_artifact_store_satisfies_conformance() {
     .await;
 }
 
-fn exec_envelope(replay_key: &str, code: &str) -> RuntimeEffectEnvelope {
+fn exec_envelope(
+    scope: ExecutionScope,
+    attribution: lash_core::RuntimeAttribution,
+    replay_key: &str,
+    code: &str,
+) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::for_turn("effect-session", "effect-turn", 1, 0),
-            replay_key,
-            RuntimeEffectKind::ExecCode,
+        RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scope, replay_key).expect("valid SQLite effect address"),
+            attribution,
             replay_key,
         ),
         RuntimeEffectCommand::ExecCode {
@@ -1338,7 +1315,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 18"));
+    assert!(message.contains("supports schema version 19"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1346,12 +1323,12 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_retained_generation_15_schema_before_serving() {
-    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 15;
-    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 16);
+async fn sqlite_effect_controller_rejects_retained_generation_18_schema_before_serving() {
+    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 18;
+    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 19);
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("retained-generation-15-effects.db");
+    let path = dir.path().join("retained-generation-18-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open retained effect db");
     conn.pragma_update(None, "user_version", RETAINED_PRIOR_EFFECT_GENERATION)
         .expect("stamp retained prior effect schema");
@@ -1366,8 +1343,8 @@ async fn sqlite_effect_controller_rejects_retained_generation_15_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 18"));
-    assert!(message.contains("database reports version 15"));
+    assert!(message.contains("supports schema version 19"));
+    assert!(message.contains("database reports version 18"));
 }
 
 #[tokio::test]
@@ -2069,7 +2046,20 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
         async move {
             controller
                 .execute_effect(
-                    exec_envelope("injected-clock-effect", "first"),
+                    exec_envelope(
+                        durable_turn_scope(
+                            "injected-clock-effect-session",
+                            "injected-clock-effect-turn",
+                        ),
+                        lash_core::RuntimeAttribution::for_turn(
+                            "injected-clock-effect-session",
+                            "injected-clock-effect-turn",
+                            1,
+                            0,
+                        ),
+                        "injected-clock-effect",
+                        "first",
+                    ),
                     RuntimeEffectLocalExecutor::testing(move |_| async move {
                         let _ = entered_tx.send(());
                         executor_release.notified().await;
@@ -2241,43 +2231,44 @@ async fn sqlite_real_turn_cancel_closure_survives_every_cold_process_crash_cut()
 
 #[tokio::test]
 async fn sqlite_effect_controller_satisfies_replay_conformance() {
-    let (_controller_dir, controller) = open_ephemeral_effect_controller(durable_turn_scope(
-        "effect-conformance-session",
-        "effect-conformance-turn",
-    ))
-    .await;
+    let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
+    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
 
     lash_conformance::effect_controller_concurrent_replay_deterministic(|| {
-        sqlite_conformance_invocation(controller.clone())
+        sqlite_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 
+    let tool_scope = durable_turn_scope(
+        "tool-attempt-conformance-session",
+        "tool-attempt-conformance-turn",
+    );
     let (_tool_controller_dir, tool_controller) =
-        open_ephemeral_effect_controller(durable_turn_scope(
-            "tool-attempt-conformance-session",
-            "tool-attempt-conformance-turn",
-        ))
-        .await;
+        open_ephemeral_effect_controller(tool_scope.clone()).await;
     lash_conformance::effect_controller_tool_attempt_fanout_replay_deterministic(|| {
-        sqlite_conformance_invocation(tool_controller.clone())
+        sqlite_conformance_invocation(tool_controller.clone(), tool_scope.clone())
     })
     .await;
 
-    let (_durable_controller_dir, durable_controller) = open_ephemeral_effect_controller(
-        durable_turn_scope("durable-step-session", "durable-step-turn"),
-    )
-    .await;
+    let durable_scope = durable_turn_scope("durable-step-session", "durable-step-turn");
+    let (_durable_controller_dir, durable_controller) =
+        open_ephemeral_effect_controller(durable_scope.clone()).await;
     lash_conformance::effect_controller_journaled_effect_replay(|| {
-        sqlite_conformance_invocation(durable_controller.clone())
+        sqlite_conformance_invocation(durable_controller.clone(), durable_scope.clone())
     })
     .await;
 }
 
 #[tokio::test]
 async fn sqlite_effect_controller_replays_without_local_executor() {
-    let (_controller_dir, controller) =
-        open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
-    let envelope = exec_envelope("exec-replay", "first");
+    let scope = durable_turn_scope("session", "turn");
+    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
+    let envelope = exec_envelope(
+        scope,
+        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
+        "exec-replay",
+        "first",
+    );
     let first = controller
         .execute_effect(envelope.clone(), returning_executor("recorded"))
         .await
@@ -2298,10 +2289,15 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
     let path = dir.path().join("recorded-intent-effect.db");
     let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::for_turn("sqlite-intent-session", "sqlite-intent-turn", 0, 0),
-            "sqlite-recorded-intent-attempt",
-            RuntimeEffectKind::ToolAttempt,
+        RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scope.clone(), "sqlite-recorded-intent-attempt")
+                .expect("valid SQLite intent address"),
+            lash_core::RuntimeAttribution::for_turn(
+                "sqlite-intent-session",
+                "sqlite-intent-turn",
+                0,
+                0,
+            ),
             "sqlite-recorded-intent-attempt",
         ),
         RuntimeEffectCommand::ToolAttempt {
@@ -2425,10 +2421,10 @@ async fn sqlite_effect_host_retires_session_journal_rows() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_reports_envelope_divergent_paths() {
-    let (_controller_dir, controller) =
-        open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
+    let scope = durable_turn_scope("session", "turn");
+    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
     lash_conformance::effect_controller_replay_mismatch_diagnostics(
-        || sqlite_conformance_invocation(controller.clone()),
+        || sqlite_conformance_invocation(controller.clone(), scope.clone()),
         "sqlite_effect_replay_hash_conflict",
     )
     .await;

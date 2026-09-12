@@ -1,8 +1,8 @@
 use crate::ProcessId;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use crate::{
-    PreparedToolCall, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeInvocation,
-    ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,
+    PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeInvocation, ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome,
+    ToolRetryPolicy,
 };
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
@@ -33,7 +33,7 @@ impl ToolAttemptEffectIdentity {
         context: &ToolDispatchContext<'_>,
         call: &PreparedToolCall,
         attempt: u32,
-    ) -> RuntimeInvocation {
+    ) -> RuntimeEffectInvocation {
         let replay_prefix = match self {
             Self::Scalar { .. } => call.call_id.clone(),
             Self::Batch { replay_suffix, .. } => replay_suffix.clone(),
@@ -50,6 +50,7 @@ impl ToolAttemptEffectIdentity {
             };
             let parent_effect_id = parent.effect_id().unwrap_or(fallback);
             return crate::runtime::causal::child_effect_invocation(
+                context.effect_controller.scoped().execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
                 RuntimeEffectKind::ToolAttempt,
@@ -58,11 +59,14 @@ impl ToolAttemptEffectIdentity {
         }
 
         let effect_id = format!("tool:{suffix}");
-        RuntimeInvocation::effect(
-            crate::RuntimeScope::new(&context.session_id),
+        RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                context.effect_controller.scoped().execution_scope().clone(),
+                effect_id.clone(),
+            )
+            .expect("tool dispatch carries an admitted effect scope"),
+            context.parentless_attribution(),
             effect_id.clone(),
-            RuntimeEffectKind::ToolAttempt,
-            effect_id,
         )
     }
 
@@ -71,7 +75,7 @@ impl ToolAttemptEffectIdentity {
         context: &ToolDispatchContext<'_>,
         call: &PreparedToolCall,
         attempt: u32,
-    ) -> RuntimeInvocation {
+    ) -> RuntimeEffectInvocation {
         if let Self::Batch {
             parent,
             replay_suffix,
@@ -80,6 +84,7 @@ impl ToolAttemptEffectIdentity {
             let suffix = format!("{replay_suffix}:attempt:{attempt}:sleep");
             let parent_effect_id = parent.effect_id().unwrap_or("tool-batch");
             return crate::runtime::causal::child_effect_invocation(
+                context.effect_controller.scoped().execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
                 RuntimeEffectKind::Sleep,
@@ -87,19 +92,33 @@ impl ToolAttemptEffectIdentity {
             );
         }
         if let Some(parent) = self.parent() {
-            return crate::runtime::tool_retry_sleep_invocation(parent, &call.tool_name, attempt);
+            return crate::runtime::tool_retry_sleep_invocation(
+                context.effect_controller.scoped().execution_scope(),
+                parent,
+                &call.tool_name,
+                attempt,
+            );
         }
 
-        let replay_base = format!(
-            "lash-tool:{}:{}:{}",
-            context.session_id, call.call_id, call.tool_name
-        );
+        let replay_base = match self {
+            Self::Process { process_id, .. } => {
+                format!("process:{process_id}:tool:{}", call.tool_name)
+            }
+            Self::Scalar { .. } => format!(
+                "lash-tool:{}:{}:{}",
+                context.session_id, call.call_id, call.tool_name
+            ),
+            Self::Batch { .. } => unreachable!("batch retry sleeps return above"),
+        };
         let effect_id = format!("{replay_base}:attempt:{attempt}:sleep");
-        RuntimeInvocation::effect(
-            crate::RuntimeScope::new(&context.session_id),
+        RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                context.effect_controller.scoped().execution_scope().clone(),
+                effect_id.clone(),
+            )
+            .expect("tool retry carries an admitted effect scope"),
+            context.parentless_attribution(),
             effect_id.clone(),
-            RuntimeEffectKind::Sleep,
-            effect_id,
         )
     }
 
@@ -337,7 +356,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
         let invocation = identity.attempt_invocation(context, &call, attempt);
         let outcome = context
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation.clone(),
@@ -516,7 +535,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
 /// guard's lifetime: the slot is claimed for the whole drain and discharged
 /// when this body ends, on every path out of it.
 struct TerminalAttemptSettlement<'settlement> {
-    minting_emission: &'settlement RuntimeInvocation,
+    minting_emission: &'settlement RuntimeEffectInvocation,
     intent_drain_slot: Option<IntentDrainGuard>,
     child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
     recorded_call_id: Option<&'settlement str>,
@@ -542,7 +561,7 @@ async fn settle_terminal_attempt(
         slot.begin_final_drain().await;
     }
     let mut intent_context = context.clone();
-    intent_context.parent_invocation = Some(minting_emission.clone());
+    intent_context.parent_invocation = Some(minting_emission.clone().into_runtime_invocation());
     let intent_outcomes = super::execute_final_tool_intents(
         &intent_context,
         recorded_call_id,
@@ -726,13 +745,13 @@ fn runtime_failure_outcome(
 
 async fn sleep_before_retry(
     context: &ToolDispatchContext<'_>,
-    invocation: RuntimeInvocation,
+    invocation: RuntimeEffectInvocation,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     retry_after_ms: u64,
 ) -> Result<(), crate::RuntimeEffectControllerError> {
     let outcome = context
         .effect_controller
-        .controller()
+        .scoped()
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,

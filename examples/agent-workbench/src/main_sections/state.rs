@@ -27,7 +27,6 @@ pub(crate) struct AppState {
     pub(crate) sessions: WorkbenchSessions,
     pub(crate) messages: Arc<Mutex<Vec<ChatMessage>>>,
     pub(crate) selected_model: Arc<Mutex<ModelSelection>>,
-    pub(crate) web_configured: bool,
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
     pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
     pub(crate) event_tx: SessionEventRegistry,
@@ -47,7 +46,6 @@ pub(crate) struct AppState {
 pub(crate) struct Settings {
     pub(crate) model: String,
     pub(crate) model_variant: Option<String>,
-    pub(crate) web_configured: bool,
     pub(crate) model_variants: Vec<&'static str>,
     pub(crate) session_id: SessionId,
     /// The operator's name for this session, or its id when they gave none.

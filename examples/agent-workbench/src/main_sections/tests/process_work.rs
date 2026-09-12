@@ -87,7 +87,6 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
@@ -287,7 +286,6 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),
@@ -547,8 +545,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(record.outcome.is_none());
     let registration_digest = record
         .registration_fingerprint
-        .strip_prefix("process-registration-definition:v2:blake3:")
-        .expect("process registration uses the v2 BLAKE3 definition-fingerprint family");
+        .strip_prefix("process-registration-definition:v5:blake3:")
+        .expect("process registration uses the v5 BLAKE3 definition-fingerprint family");
     assert_eq!(registration_digest.len(), 64);
     assert!(
         registration_digest
@@ -1031,7 +1029,6 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),

@@ -22,7 +22,7 @@
 //! entry points can be called from backend-specific `#[tokio::test]` functions.
 
 pub use lash_core::testing::coordinate_tool_provider_with_services;
-use lash_sansio::SessionId;
+use lash_sansio::{EffectAddress, SessionId};
 
 mod attachment_adoption;
 pub use attachment_adoption::{
@@ -127,14 +127,14 @@ use crate::{
     EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, ModelSpec, PluginState, ProtocolEvent,
     ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaimBoundary,
-    QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimePersistence, RuntimeScope, RuntimeSessionState, RuntimeSubject, RuntimeTurnCommitStamp,
-    ScopedEffectController, SessionMeta, SessionNodePayload, SessionNodeRecord,
-    SessionObservationEvent, SessionObservationEventPayload, SessionPolicy,
-    SessionProcessEventKind, SessionQueueEventKind, SessionRelation, SessionRevision, StoreError,
-    TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
+    QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCommit,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence, RuntimeSessionState,
+    RuntimeSubject, RuntimeTurnCommitStamp, ScopedEffectController, SessionMeta,
+    SessionNodePayload, SessionNodeRecord, SessionObservationEvent, SessionObservationEventPayload,
+    SessionPolicy, SessionProcessEventKind, SessionQueueEventKind, SessionRelation,
+    SessionRevision, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
 };
 use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence};
 use crate::{
@@ -639,13 +639,13 @@ mod tests {
         let process_work = Arc::new(crate::NativeProcessWork::for_registry(
             registry.clone() as Arc<dyn ProcessRegistry>
         ));
-        wake_delivery_crash_matrix(
+        Box::pin(wake_delivery_crash_matrix(
             factory,
             registry,
             clock,
             process_work,
             ProcessTerminalWaitWitness::Direct,
-        )
+        ))
         .await;
     }
 
@@ -772,11 +772,11 @@ mod tests {
         let scope = ExecutionScope::runtime_operation("trigger:button-1");
         let scoped = host.scoped(scope.clone()).expect("scoped controller");
         let envelope = RuntimeEffectEnvelope::new(
-            crate::RuntimeInvocation::effect(
-                RuntimeScope::new("session-1"),
+            crate::RuntimeEffectInvocation::new(
+                EffectAddress::new(scope.clone(), "trigger:button-1:sleep-effect")
+                    .expect("valid recording address"),
+                RuntimeAttribution::for_session("session-1"),
                 "sleep-effect",
-                RuntimeEffectKind::Sleep,
-                "trigger:button-1:sleep-effect",
             ),
             RuntimeEffectCommand::Sleep { duration_ms: 0 },
         );
@@ -792,7 +792,10 @@ mod tests {
         let records = host.records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].execution_scope, scope);
-        assert_eq!(records[0].runtime_scope, RuntimeScope::new("session-1"));
+        assert_eq!(
+            records[0].runtime_attribution,
+            RuntimeAttribution::for_session("session-1")
+        );
         assert_eq!(records[0].effect_id, "sleep-effect");
         assert_eq!(records[0].effect_kind, RuntimeEffectKind::Sleep);
         assert_eq!(

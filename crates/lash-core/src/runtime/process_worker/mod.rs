@@ -904,7 +904,7 @@ impl DurableProcessWorker {
                     .start_delivery(
                         &delivery,
                         Arc::clone(self.config.process_registry()),
-                        scoped_effect_controller.controller(),
+                        &scoped_effect_controller,
                     )
                     .await
                 {

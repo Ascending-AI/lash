@@ -243,10 +243,14 @@ pub struct SessionNodeRecord {
 /// a failure. Reported attempts elide the field, so a v11 body reads as v12
 /// bytes; the fence exists because a v11 reader would drop a hole silently.
 ///
+/// Version 13 carries the full admitted effect address in causal references.
+/// Older readers would collapse equal replay keys from distinct execution
+/// scopes, so the node-body fence rejects them rather than losing authority.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 12;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 13;
 
 /// Generation of a body written before the stamp existed.
 ///

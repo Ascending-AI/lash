@@ -16,8 +16,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use lash_core::runtime::{
-    ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, RuntimeScope,
-    RuntimeSubject,
+    ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, RuntimeSubject,
 };
 use lash_core::{
     AttachmentRootSet, LeaseOwnerIdentity, PendingTurnInputDraft, PluginState, QueuedWorkStore,
@@ -250,7 +249,7 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
-            scope: RuntimeScope::new(session_id),
+            attribution: lash_core::RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
                 process_id: process_id.clone(),
                 sequence,
@@ -577,8 +576,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 60"),
-        "error must report the real expected version 60: {message}"
+        message.contains("schema version 61"),
+        "error must report the real expected version 61: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -614,7 +613,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 60);
+    assert_eq!(user_version, 61);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -728,7 +727,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         Err(error) => error.to_string(),
     };
     assert!(
-        error.contains("schema version 60") && error.contains("version 51"),
+        error.contains("schema version 61") && error.contains("version 51"),
         "{error}"
     );
     let conn = rusqlite::Connection::open(&path).unwrap();

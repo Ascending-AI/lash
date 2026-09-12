@@ -379,10 +379,13 @@ mod tests {
         let outcome = controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
-                    crate::RuntimeInvocation::effect(
-                        crate::RuntimeScope::new("runtime"),
-                        "signal-divergent-ordinal",
-                        crate::RuntimeEffectKind::Process,
+                    crate::RuntimeEffectInvocation::new(
+                        crate::EffectAddress::new(
+                            crate::ExecutionScope::runtime_operation("runtime"),
+                            "signal-divergent-ordinal",
+                        )
+                        .expect("valid signal test address"),
+                        crate::RuntimeAttribution::none(),
                         "signal-divergent-ordinal",
                     ),
                     crate::RuntimeEffectCommand::process(crate::ProcessCommand::Signal {

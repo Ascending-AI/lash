@@ -10,15 +10,7 @@ impl From<lash_core::CausalRef> for RemoteCausalRef {
                 session_id,
                 turn_id,
             },
-            lash_core::CausalRef::Effect {
-                session_id,
-                turn_id,
-                effect_id,
-            } => Self::Effect {
-                session_id,
-                turn_id,
-                effect_id,
-            },
+            lash_core::CausalRef::Effect { address } => Self::Effect { address },
             lash_core::CausalRef::ToolCall {
                 session_id,
                 call_id,
@@ -66,15 +58,7 @@ impl From<RemoteCausalRef> for lash_core::CausalRef {
                 session_id,
                 turn_id,
             },
-            RemoteCausalRef::Effect {
-                session_id,
-                turn_id,
-                effect_id,
-            } => Self::Effect {
-                session_id,
-                turn_id,
-                effect_id,
-            },
+            RemoteCausalRef::Effect { address } => Self::Effect { address },
             RemoteCausalRef::ToolCall {
                 session_id,
                 call_id,

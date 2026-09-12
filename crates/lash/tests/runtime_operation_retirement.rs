@@ -14,11 +14,10 @@ use lash::plugins::{
     SessionPlugin,
 };
 use lash::{LashCore, PluginBinding};
-use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimeScope,
+    AwaitEventKey, AwaitEventWaitIdentity, EffectAddress, ExecutionScope, Resolution,
+    RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome,
 };
 use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::SqliteEffectHost;
@@ -155,16 +154,24 @@ impl SessionPlugin for JournalSessionPlugin {
                     .map_err(|err| PluginOperationFailure::new(err.to_string()))?
                     .key()
                     .to_string();
+                let attribution = ctx
+                    .session_id
+                    .clone()
+                    .map(RuntimeAttribution::for_session)
+                    .unwrap_or_else(RuntimeAttribution::none);
                 let controller = ctx.scoped_effect_controller.controller();
                 let group = lash_core::RuntimeEffectGroup::try_new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn("op-retirement-session", "op-retirement-turn", 1, 0),
+                    lash_core::RuntimeEffectInvocation::new(
+                        EffectAddress::new(scope.clone(), format!("{scope_key}:drain-group"))
+                            .expect("drain group carries an admitted effect scope"),
+                        attribution.clone(),
                         "drain-group",
-                        RuntimeEffectKind::LanguageRuntimeValue,
-                        format!("{scope_key}:drain-group"),
                     ),
                     format!("{scope_key}:drain-group"),
-                    vec![envelope("fast-child"), envelope("draining-child")],
+                    vec![
+                        envelope(&scope, "fast-child", attribution.clone()),
+                        envelope(&scope, "draining-child", attribution),
+                    ],
                     lash_core::GroupWakePolicy::First,
                     lash_core::LoserPolicy::RunToCompletion,
                 )
@@ -262,7 +269,17 @@ async fn journal_under_operation_scope(
         .to_string();
     ctx.scoped_effect_controller
         .controller()
-        .execute_effect(envelope("task-effect"), executor())
+        .execute_effect(
+            envelope(
+                &scope,
+                "task-effect",
+                ctx.session_id
+                    .clone()
+                    .map(RuntimeAttribution::for_session)
+                    .unwrap_or_else(RuntimeAttribution::none),
+            ),
+            executor(),
+        )
         .await
         .map_err(|err| PluginOperationFailure::new(err.to_string()))?;
     let key = config
@@ -293,12 +310,16 @@ async fn journal_under_operation_scope(
     Ok(scope_key)
 }
 
-fn envelope(effect_id: &str) -> RuntimeEffectEnvelope {
+fn envelope(
+    scope: &ExecutionScope,
+    effect_id: &str,
+    attribution: RuntimeAttribution,
+) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::for_turn("op-retirement-session", "op-retirement-turn", 1, 0),
-            effect_id,
-            RuntimeEffectKind::LanguageRuntimeValue,
+        lash_core::RuntimeEffectInvocation::new(
+            EffectAddress::new(scope.clone(), effect_id)
+                .expect("runtime-operation effect carries an admitted scope"),
+            attribution,
             effect_id,
         ),
         RuntimeEffectCommand::LanguageRuntimeValue {
@@ -386,7 +407,10 @@ async fn plugin_task_scopes_retire_after_their_receipt_and_leave_other_operation
     host.scoped(in_flight.clone())
         .expect("in-flight scope binds")
         .controller()
-        .execute_effect(envelope("in-flight-effect"), executor())
+        .execute_effect(
+            envelope(&in_flight, "in-flight-effect", RuntimeAttribution::none()),
+            executor(),
+        )
         .await
         .expect("in-flight operation journals");
     let in_flight_key = in_flight
@@ -806,7 +830,10 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
     host.scoped(in_flight.clone())
         .expect("in-flight scope binds")
         .controller()
-        .execute_effect(envelope("in-flight-effect"), executor())
+        .execute_effect(
+            envelope(&in_flight, "in-flight-effect", RuntimeAttribution::none()),
+            executor(),
+        )
         .await
         .expect("in-flight operation journals");
     let in_flight_key = in_flight
@@ -981,12 +1008,17 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
     let run = |scope: ExecutionScope| {
         let host = Arc::clone(&host);
         let ran = Arc::clone(&ran);
+        let session_id = session_id.clone();
         async move {
-            host.scoped(scope)
+            host.scoped(scope.clone())
                 .expect("the operation scope binds")
                 .controller()
                 .execute_effect(
-                    envelope("receipted-effect"),
+                    envelope(
+                        &scope,
+                        "receipted-effect",
+                        RuntimeAttribution::for_session(session_id.clone()),
+                    ),
                     RuntimeEffectLocalExecutor::testing(move |_| {
                         let ran = Arc::clone(&ran);
                         async move {
@@ -1201,7 +1233,10 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
     host.scoped(scope.clone())
         .expect("scope operation")
         .controller()
-        .execute_effect(envelope("pinned-sweep-effect"), executor())
+        .execute_effect(
+            envelope(&scope, "pinned-sweep-effect", RuntimeAttribution::none()),
+            executor(),
+        )
         .await
         .expect("journal quiescent operation effect");
     let scope_key = scope

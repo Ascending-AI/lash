@@ -298,6 +298,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         scope: &ExecutionScope,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(scope)?;
         let journal_identity = scope
             .journal_identity()
             .map_err(RuntimeEffectControllerError::from)?;
@@ -437,18 +438,14 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         }
         Err(group_shape_error(format!(
             "child {position} of durable effect group {} names a command this \
-             host has no runner for{}, so the group is refused before anything \
+             host has no runner for (replay key {}), so the group is refused before anything \
              of it is journaled: a recorded group whose child can never settle \
              holds a rank no settlement can take, every rank above it is \
              unservable, and a group row left behind by this refusal would make \
              the next attempt a reopen that strands the caller instead of \
-             refusing again",
+            refusing again",
             group.group_key(),
-            child
-                .invocation
-                .replay_key()
-                .map(|key| format!(" (replay key {key})"))
-                .unwrap_or_default(),
+            child.invocation.replay_key(),
         )))
     }
 
@@ -720,24 +717,11 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
 /// sole constructor and refuses two children sharing a replay key, so the
 /// position map this builds is one entry per journaled child by construction.
 fn replay_keys_of(group: &RuntimeEffectGroup) -> Result<Vec<String>, RuntimeEffectControllerError> {
-    group
+    Ok(group
         .children()
         .iter()
-        .enumerate()
-        .map(|(position, child)| {
-            child
-                .invocation
-                .replay_key()
-                .map(str::to_string)
-                .ok_or_else(|| {
-                    group_shape_error(format!(
-                        "child {position} of durable effect group {} has no replay key, \
-                         so it can never be claimed and its rank can never be served",
-                        group.group_key()
-                    ))
-                })
-        })
-        .collect()
+        .map(|child| child.invocation.replay_key().to_string())
+        .collect())
 }
 
 /// A drain refusal a caller fixes by waiting, not by changing anything.

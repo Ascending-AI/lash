@@ -5,7 +5,6 @@ use super::turn_loop::{
 };
 use super::*;
 use crate::TurnId;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 pub(super) const MAX_AGENT_FRAME_SWITCHES: usize = 16;
 
@@ -183,6 +182,7 @@ impl LashRuntime {
         events: &dyn EventSink,
         turn_events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
+        runtime_internal_trace_turn_id: Option<TurnId>,
         cancel: CancellationToken,
         mut claims: LogicalTurnClaims,
         session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
@@ -190,6 +190,29 @@ impl LashRuntime {
     ) -> Result<AgentFrameRun, RuntimeError> {
         let (follow_protocol_turn_options, follow_turn_context, supplied_trace_turn_id) =
             start.continuation_state();
+        if let Some(expected_trace_turn_id) = runtime_internal_trace_turn_id {
+            if supplied_trace_turn_id != expected_trace_turn_id {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                    format!(
+                        "runtime-internal input trace_turn_id `{supplied_trace_turn_id}` does not match admitted child turn id `{expected_trace_turn_id}`"
+                    ),
+                ));
+            }
+        } else if !supplied_trace_turn_id.is_empty()
+            && scoped_effect_controller
+                .execution_scope()
+                .validates_turn_trace_id()
+            && supplied_trace_turn_id.as_str() != scoped_effect_controller.scope_id()
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                format!(
+                    "input trace_turn_id `{supplied_trace_turn_id}` does not match execution scope id `{}`",
+                    scoped_effect_controller.scope_id()
+                ),
+            ));
+        }
         let root_trace_turn_id = if supplied_trace_turn_id.is_empty() {
             TurnId::from(scoped_effect_controller.scope_id())
         } else {
@@ -199,36 +222,10 @@ impl LashRuntime {
 
         loop {
             let turn_trace_turn_id = agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
-            let turn_effect_controller = if turns.is_empty() {
-                scoped_effect_controller.clone()
-            } else {
-                match ScopedEffectController::borrowed(
-                    scoped_effect_controller.controller(),
-                    self.state.turn_scope(&turn_trace_turn_id),
-                ) {
-                    Ok(controller) => controller,
-                    // FIG-1573 exempt: this follow-on turn never started, so no
-                    // input can be pinned to `turn_trace_turn_id` - a host can
-                    // only route into a turn it has observed running. The turn
-                    // that *did* run reached its commit, which carried its own
-                    // re-defer.
-                    Err(err) => {
-                        self.invalidate_resident_session_state();
-                        turns
-                            .last_mut()
-                            .expect("a follow-on scope is created only after a committed turn")
-                            .errors
-                            .push(super::turn_loop::post_commit_delivery_issue(
-                                err.code.as_str(),
-                                err.message,
-                            ));
-                        return Ok(AgentFrameRun {
-                            turns,
-                            acceptance: None,
-                        });
-                    }
-                }
-            };
+            // A frame switch creates a new physical turn identity, but it does
+            // not create new effect authority. Every frame in this admitted
+            // run therefore keeps the controller's exact execution scope.
+            let turn_effect_controller = scoped_effect_controller.clone();
             let teardown_effect_controller = turn_effect_controller.clone();
             let frame_stopwatch = if turns.is_empty() {
                 stopwatch
@@ -477,19 +474,7 @@ impl LashRuntime {
             if turns.len() >= MAX_AGENT_FRAME_SWITCHES {
                 let terminal_trace_turn_id =
                     agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
-                let terminal_effect_controller = match ScopedEffectController::borrowed(
-                    scoped_effect_controller.controller(),
-                    self.state.turn_scope(&terminal_trace_turn_id),
-                ) {
-                    Ok(controller) => controller,
-                    Err(err) => {
-                        self.record_follow_on_failure(&mut turns, err);
-                        return Ok(AgentFrameRun {
-                            turns,
-                            acceptance: None,
-                        });
-                    }
-                };
+                let terminal_effect_controller = scoped_effect_controller.clone();
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
                 Self::emit_physical_turn_start(turn_events, &terminal_trace_turn_id, &next_claims)
                     .await;

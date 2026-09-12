@@ -315,11 +315,7 @@ impl LashRuntime {
                 )
             })?;
         let prepare_phase_turn_id = turn_phase_id(&trace_turn_id, "prepare-turn");
-        let prepare_phase_controller = scoped_child_turn_controller(
-            &scoped_effect_controller,
-            &self.state.session_id,
-            &prepare_phase_turn_id,
-        )?;
+        let prepare_phase_controller = scoped_effect_controller.clone();
         let turn_ctx = crate::TurnTransformContext {
             session_id: self.state.session_id.clone(),
             state: self.read_view(),

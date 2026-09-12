@@ -9,11 +9,12 @@
 use super::*;
 
 impl RuntimeExecutionContext<'_> {
-    fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeInvocation {
+    fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeEffectInvocation {
         let suffix = format!("tool-batch:{batch_id}");
         if let Some(parent) = self.parent_invocation.as_ref() {
             let parent_effect_id = parent.effect_id().unwrap_or("effect");
             return crate::runtime::causal::child_effect_invocation(
+                self.dispatch.effect_controller.scoped().execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
                 crate::RuntimeEffectKind::ToolBatch,
@@ -21,11 +22,18 @@ impl RuntimeExecutionContext<'_> {
             );
         }
         let replay_key = format!("{}:{suffix}", self.execution_scope_id());
-        crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::new(self.session_id.clone()),
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                self.dispatch
+                    .effect_controller
+                    .scoped()
+                    .execution_scope()
+                    .clone(),
+                replay_key,
+            )
+            .expect("tool batch carries an admitted effect scope"),
+            self.effect_attribution(),
             suffix,
-            crate::RuntimeEffectKind::ToolBatch,
-            replay_key,
         )
     }
 
@@ -405,7 +413,7 @@ impl RuntimeExecutionContext<'_> {
             let raw_outcome = self
                 .dispatch
                 .effect_controller
-                .controller()
+                .scoped()
                 .execute_effect(envelope, local_executor)
                 .await;
             let mut outcome =
@@ -491,7 +499,7 @@ impl RuntimeExecutionContext<'_> {
                         let dispatch_outcome = self
                             .await_pending_tool_dispatch_outcome(
                                 &call_id,
-                                Some(invocation.clone()),
+                                Some(invocation.clone().into_runtime_invocation()),
                                 crate::tool_dispatch::PendingToolDispatchOutcome {
                                     tool_name: prepared.tool_name.clone(),
                                     args: prepared.args.clone(),

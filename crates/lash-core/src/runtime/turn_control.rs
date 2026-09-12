@@ -11,9 +11,8 @@ use crate::{ErrorEnvelope, TurnOutcome};
 
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeError, RuntimeInvocation, RuntimeScope,
+    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +69,36 @@ impl TurnCancelPeekIdentity {
     }
 }
 
+const PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION: u8 = 1;
+
+fn turn_cancel_peek_replay_key(
+    execution_scope: &ExecutionScope,
+    address: &TurnAddress,
+    causal_identity: &str,
+) -> String {
+    if matches!(
+        execution_scope,
+        ExecutionScope::Turn {
+            session_id,
+            turn_id,
+        } if session_id == address.session_id && turn_id == address.turn_id
+    ) {
+        return causal_identity.to_string();
+    }
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.turn-cancel-peek",
+        PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION,
+    );
+    identity.string(&address.session_id);
+    identity.string(&address.turn_id);
+    identity.string(causal_identity);
+    crate::stable_identity::rendered_hash(
+        "turn-cancel-peek",
+        PHYSICAL_TURN_CANCEL_PEEK_FAMILY_VERSION,
+        &identity.finish(),
+    )
+}
+
 /// Stable routing identity for one foreground turn.
 ///
 /// These identifiers select work; they are not authorization credentials.
@@ -94,7 +123,7 @@ impl TurnAddress {
     }
 
     fn validate(&self) -> Result<(), RuntimeError> {
-        self.execution_scope().validate()
+        Ok(self.execution_scope().validate()?)
     }
 }
 
@@ -793,7 +822,7 @@ impl TurnWorkDriver {
         // whichever candidate actually resolves the gate is the winner.
         let evidence = request.evidence();
         let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
-        let (outcome, mut base_winner) =
+        let resolved: Result<(TurnCancelOutcome, Option<TurnCancellationEvidence>), RuntimeError> =
             match resolver.resolve_await_event(&key, resolution).await? {
                 ResolveOutcome::Accepted => Ok((
                     TurnCancelOutcome::Requested(evidence.clone()),
@@ -831,7 +860,8 @@ impl TurnWorkDriver {
                     }
                 },
                 ResolveOutcome::UnknownOrRevoked => Ok((TurnCancelOutcome::UnknownOrRevoked, None)),
-            }?;
+            };
+        let (outcome, mut base_winner) = resolved?;
         while let Some(evidence) = base_winner.as_ref() {
             if store
                 .reconcile_turn_cancel_winner(&request.address, &observed, evidence)
@@ -1493,7 +1523,7 @@ impl ActiveTurnControl {
     /// the turn stop there.
     pub async fn observe_pending_cancel(
         &self,
-        controller: &dyn RuntimeEffectController,
+        controller: &ScopedEffectController<'_>,
         identity: TurnCancelPeekIdentity,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
         let Some(gate) = self
@@ -1557,19 +1587,29 @@ impl ActiveTurnControl {
 
     async fn peek(
         &self,
-        controller: &dyn RuntimeEffectController,
+        controller: &ScopedEffectController<'_>,
         causal_identity: String,
         key: &AwaitEventKey,
     ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
-        let invocation = RuntimeInvocation::effect(
-            RuntimeScope {
-                session_id: self.address.session_id.clone(),
+        // TurnAddress continues to route the cancellation promise in `key`;
+        // the journaled observation belongs to the controller's admitted scope.
+        // Keep the shipped foreground key only when the admitted Turn exactly
+        // names this physical turn. Process, queue-drain, runtime-operation,
+        // and follow-on Turn scopes can span physical turns, so their keys
+        // fold in the captured address as well as the gate identity.
+        let replay_key = turn_cancel_peek_replay_key(
+            controller.execution_scope(),
+            &self.address,
+            &causal_identity,
+        );
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(controller.execution_scope().clone(), replay_key)?,
+            RuntimeAttribution {
+                session_id: Some(self.address.session_id.clone()),
                 turn_id: Some(self.address.turn_id.clone()),
                 turn_index: None,
                 protocol_iteration: None,
             },
-            causal_identity.clone(),
-            RuntimeEffectKind::PeekAwaitEvent,
             causal_identity.clone(),
         );
         let outcome = controller

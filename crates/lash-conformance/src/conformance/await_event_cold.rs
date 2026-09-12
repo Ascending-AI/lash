@@ -93,15 +93,15 @@ where
         .await
         .expect("host A mints parked-owner key");
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope {
-                session_id: session_id.clone(),
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(scope.clone(), "cold_await_event.parked_owner")
+                .expect("valid parked-owner address"),
+            RuntimeAttribution {
+                session_id: Some(session_id.clone()),
                 turn_id: Some(turn_id),
                 turn_index: None,
                 protocol_iteration: None,
             },
-            "cold_await_event.parked_owner",
-            RuntimeEffectKind::AwaitEvent,
             "cold_await_event.parked_owner",
         ),
         RuntimeEffectCommand::AwaitEvent { key: key.clone() },
@@ -422,11 +422,12 @@ where
     assert_eq!(mint_error.code.as_str(), "await_event_unknown_or_revoked");
     let host = make();
     let admission = host
-        .scoped(scope)
+        .scoped(scope.clone())
         .expect("a retired scope still binds a controller")
         .controller()
         .execute_effect(
             super::effect_host::exec_code_conformance_envelope(
+                &scope,
                 &format!("{prefix}-post-retirement-effect"),
                 "post-retirement-envelope",
             ),

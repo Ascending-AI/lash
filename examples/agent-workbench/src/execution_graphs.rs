@@ -89,7 +89,7 @@ struct GraphProjection<'a> {
     process_observer: &'a lash::process::ProcessWorkObserver,
     graphs: Vec<TraceLashlangGraph>,
     graph_by_key: BTreeMap<String, usize>,
-    effect_graphs_by_session: BTreeMap<SessionId, Vec<usize>>,
+    effect_graphs_by_session: BTreeMap<Option<SessionId>, Vec<usize>>,
     processes: BTreeMap<ProcessId, Option<lash::process::ObservedProcess>>,
     visible_keys: BTreeSet<String>,
 }
@@ -120,12 +120,9 @@ impl<'a> GraphProjection<'a> {
             .enumerate()
             .map(|(index, graph)| (graph.graph_key.clone(), index))
             .collect::<BTreeMap<_, _>>();
-        let mut effect_graphs_by_session: BTreeMap<SessionId, Vec<usize>> = BTreeMap::new();
+        let mut effect_graphs_by_session: BTreeMap<Option<SessionId>, Vec<usize>> = BTreeMap::new();
         for (index, graph) in graphs.iter().enumerate() {
-            if matches!(
-                &graph.subject,
-                TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
-            ) {
+            if matches!(&graph.subject, TraceRuntimeSubject::Effect { .. }) {
                 effect_graphs_by_session
                     .entry(graph.scope.session_id.clone())
                     .or_default()
@@ -143,7 +140,7 @@ impl<'a> GraphProjection<'a> {
 
         let mut visible_keys = BTreeSet::new();
         for graph in &graphs {
-            if graph.scope.session_id == current_session_id {
+            if graph.scope.session_id.as_ref() == Some(current_session_id) {
                 visible_keys.insert(graph.graph_key.clone());
             }
             if let TraceRuntimeSubject::Process { process_id } = &graph.subject
@@ -383,7 +380,7 @@ impl<'a> GraphProjection<'a> {
 
     fn child_session_effect_graphs(&self, session_id: &SessionId) -> Vec<&TraceLashlangGraph> {
         self.effect_graphs_by_session
-            .get(session_id)
+            .get(&Some(session_id.clone()))
             .into_iter()
             .flatten()
             .filter_map(|index| self.graphs.get(*index))
@@ -442,8 +439,10 @@ fn graph_sort_key(scope: &TraceRuntimeScope, graph_key: &str) -> (usize, usize, 
 
 fn graph_kind(graph: &TraceLashlangGraph) -> String {
     match &graph.subject {
-        TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code" => "foreground".to_string(),
-        TraceRuntimeSubject::Effect { kind, .. } => kind.clone(),
+        TraceRuntimeSubject::Effect { .. } if graph.entry_name == "main" => {
+            "foreground".to_string()
+        }
+        TraceRuntimeSubject::Effect { .. } => "effect".to_string(),
         TraceRuntimeSubject::Process { .. } => "process".to_string(),
     }
 }
@@ -553,8 +552,12 @@ mod tests {
             "effect:session:turn:exec",
             &SessionId::from("session"),
             TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn("session", "turn-1"),
+                    "exec",
+                )
+                .expect("valid test effect address"),
                 effect_id: "exec".to_string(),
-                kind: "exec_code".to_string(),
             },
             Vec::new(),
         );
@@ -592,14 +595,18 @@ mod tests {
         let parent_graph = TraceLashlangGraph {
             graph_key: "effect:root:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
-                session_id: SessionId::from("root"),
+                session_id: Some(SessionId::from("root")),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
             },
             subject: TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn("root", "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid parent effect address"),
                 effect_id: "exec-1".to_string(),
-                kind: "exec_code".to_string(),
             },
             module_ref: "parent-module".to_string(),
             entry_kind: "main".to_string(),
@@ -620,14 +627,18 @@ mod tests {
         let child_graph = TraceLashlangGraph {
             graph_key: "effect:child-session:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
-                session_id: SessionId::from(child_session_id.to_string()),
+                session_id: Some(SessionId::from(child_session_id.to_string())),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
             },
             subject: TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(child_session_id, "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid child effect address"),
                 effect_id: "exec-1".to_string(),
-                kind: "exec_code".to_string(),
             },
             module_ref: "child-module".to_string(),
             entry_kind: "main".to_string(),
@@ -725,8 +736,12 @@ mod tests {
             "effect:current-session:turn-1:exec-1",
             current_session_id,
             TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(current_session_id, "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid current-session effect address"),
                 effect_id: "exec-1".to_string(),
-                kind: "exec_code".to_string(),
             },
             vec![TraceLashlangGraphChildLink {
                 parent_graph_key: "effect:current-session:turn-1:exec-1".to_string(),
@@ -749,8 +764,12 @@ mod tests {
             "effect:child-session:turn-1:exec-1",
             child_session_id,
             TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(child_session_id, "turn-1"),
+                    "exec-1",
+                )
+                .expect("valid child-session effect address"),
                 effect_id: "exec-1".to_string(),
-                kind: "exec_code".to_string(),
             },
             Vec::new(),
         );

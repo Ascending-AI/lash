@@ -62,26 +62,16 @@ impl LashRuntime {
                 .is_some()
             {}
         }
-        if let Some(input_turn_id) = input.trace_turn_id.as_deref()
-            && scoped_effect_controller
-                .execution_scope()
-                .validates_turn_trace_id()
-            && input_turn_id != scoped_effect_controller.scope_id()
-        {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-                format!(
-                    "input trace_turn_id `{input_turn_id}` does not match execution scope id `{}`",
-                    scoped_effect_controller.scope_id()
-                ),
-            ));
-        }
         let turn_id = input
             .trace_turn_id
             .get_or_insert_with(|| TurnId::from(scoped_effect_controller.scope_id()))
             .clone();
-        let scoped_effect_controller =
-            scoped_effect_controller.rescope(self.state.turn_scope(&turn_id))?;
+        // The scope identifies the authority that admitted this run. Physical
+        // turn ids remain separate routing and trace attribution, including for
+        // queued drains, runtime operations, processes, and follow-on frames.
+        // Re-scoping a borrowed or shared controller would change only the
+        // outer address while leaving the host's inner fence on the admitted
+        // scope, so preserve the controller unchanged for the complete run.
         // The stable execution-scope turn id is attached to every write-ahead
         // intent before ingress, tools, plugins, or envelope normalization can
         // put bytes. Replays bind the same id; no live pending-id state is used.
@@ -204,11 +194,13 @@ impl LashRuntime {
         else {
             *session_execution_lease = self.claim_session_execution_lease().await?;
             let scoped_effect_controller = opts.scoped_effect_controller();
+            let runtime_internal_trace_turn_id = opts.runtime_internal_trace_turn_id().cloned();
             let result = Box::pin(self.drive_logical_turn(
                 LogicalTurnStart::Input(input),
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 scoped_effect_controller,
+                runtime_internal_trace_turn_id,
                 cancel,
                 LogicalTurnClaims::new(Vec::new(), Vec::new()),
                 session_execution_lease,
@@ -254,12 +246,12 @@ impl LashRuntime {
         // turn runs, which puts it inside a durable engine's replay window, and
         // a replayed handler must re-derive this admission rather than mint a
         // second one (ADR 0069 §6).
-        let accepted = opts
-            .scoped_effect_controller()
-            .controller()
+        let scoped_effect_controller = opts.scoped_effect_controller();
+        let accepted = scoped_effect_controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     super::causal::turn_acceptance_effect_invocation(
+                        scoped_effect_controller.execution_scope(),
                         &self.state.session_id,
                         &trace_turn_id,
                         // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
@@ -519,11 +511,13 @@ impl LashRuntime {
 
         let claim_for_abandon = drive.clone();
         let scoped_effect_controller = opts.scoped_effect_controller();
+        let runtime_internal_trace_turn_id = opts.runtime_internal_trace_turn_id().cloned();
         let result = Box::pin(self.drive_logical_turn(
             LogicalTurnStart::Input(driven),
             opts.events_or_noop(),
             opts.turn_events_or_noop(),
             scoped_effect_controller,
+            runtime_internal_trace_turn_id,
             cancel,
             LogicalTurnClaims::new(Vec::new(), vec![drive]),
             session_execution_lease,
@@ -603,6 +597,7 @@ impl LashRuntime {
                 events,
                 turn_events,
                 scoped_effect_controller,
+                None,
                 cancel,
                 LogicalTurnClaims::new(
                     initial_queue_claim.into_iter().collect(),

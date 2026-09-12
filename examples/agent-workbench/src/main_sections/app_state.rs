@@ -146,7 +146,6 @@ impl AppState {
         Settings {
             model: selected_model.model,
             model_variant: selected_model.model_variant,
-            web_configured: self.web_configured,
             model_variants: vec!["", "low", "medium", "high"],
             session_name: self
                 .sessions

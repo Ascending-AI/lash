@@ -108,8 +108,6 @@ pub const FIXED_AGENT_PRODUCT_CONTRACTS: &[&str] = &[
     "agent.foreground_tool_call_round_trip",
     "agent.started_process_tool_call_graph",
     "agent.durable_input_suspension_resolution",
-    "agent.shell_results_are_data",
-    "agent.shell_output_print_projection_survives",
     "agent.started_process_subagent_spawn",
     "agent.nested_process_start_await",
     "agent.session_turn_process_child",
@@ -148,10 +146,6 @@ pub(super) fn agent_contract_runner(
         "agent.durable_input_suspension_resolution" => {
             Ok(run_agent_durable_input_suspension_resolution)
         }
-        "agent.shell_results_are_data" => Ok(run_agent_shell_results_are_data),
-        "agent.shell_output_print_projection_survives" => {
-            Ok(run_agent_shell_output_print_projection_survives)
-        }
         "agent.started_process_subagent_spawn" => Ok(run_agent_started_process_subagent_spawn),
         "agent.nested_process_start_await" => Ok(run_agent_nested_process_start_await),
         "agent.session_turn_process_child" => Ok(run_agent_session_turn_process_child),
@@ -182,18 +176,6 @@ fn run_agent_durable_input_suspension_resolution(
     runtime: &tokio::runtime::Runtime,
 ) -> Result<Value, FixedScriptRunnerError> {
     runtime.block_on(agent_durable_input_suspension_resolution_execution())
-}
-
-fn run_agent_shell_results_are_data(
-    runtime: &tokio::runtime::Runtime,
-) -> Result<Value, FixedScriptRunnerError> {
-    runtime.block_on(agent_shell_results_are_data_execution())
-}
-
-fn run_agent_shell_output_print_projection_survives(
-    runtime: &tokio::runtime::Runtime,
-) -> Result<Value, FixedScriptRunnerError> {
-    runtime.block_on(agent_shell_output_print_projection_survives_execution())
 }
 
 fn run_agent_started_process_subagent_spawn(
@@ -313,43 +295,6 @@ async fn agent_durable_input_suspension_resolution_execution()
     )
 }
 
-async fn agent_shell_results_are_data_execution() -> Result<Value, FixedScriptRunnerError> {
-    let expected = json!({
-        "pipe_exit": 0,
-        "pipe_output": "line\nline\nline\n",
-        "missing_exit": 1,
-        "missing_status": "completed"
-    });
-    let result = facade_final_value_execution_with_tools(
-        "lash_runtime agent shell results data",
-        &SessionId::from("sim-agent-shell-results-data-contract"),
-        "Run shell commands and report their result metadata.",
-        vec![
-            r#"<lashlang>
-pipe = await shell.exec({ cmd: "yes line | head -n 3", login: false })?
-missing = await shell.exec({ cmd: "test -f /tmp/agent-scenario-definitely-missing-file", login: false })?
-finish {
-  pipe_exit: pipe.exit_code,
-  pipe_output: pipe.output,
-  missing_exit: missing.exit_code,
-  missing_status: missing.status
-}
-</lashlang>"#,
-        ],
-        &expected,
-        Some(Arc::new(lash_tools::shell::shell_provider(
-            lash_tools::shell::StandardShell::new(),
-        )) as Arc<dyn lash_core::ToolProvider>),
-    )
-    .await?;
-    contract_execution_payload(
-        "agent.shell_results_are_data",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_shell_nonzero_and_pipeline_results_are_data",
-        result,
-    )
-}
-
 async fn agent_nested_process_start_await_execution() -> Result<Value, FixedScriptRunnerError> {
     let expected = json!({ "parent": "done" });
     let result = facade_agent_process_execution(
@@ -380,44 +325,6 @@ finish result
         "agent.nested_process_start_await",
         "crates/lash/src/tests/agent_scenarios/cases.rs",
         "agent_scenario_nested_process_start_await",
-        result,
-    )
-}
-
-async fn agent_shell_output_print_projection_survives_execution()
--> Result<Value, FixedScriptRunnerError> {
-    let expected = json!({
-        "chars": 60000,
-        "tail": "x\nx\n",
-        "has_full_output_path": true
-    });
-    let result = facade_final_value_execution_with_tools(
-        "lash_runtime agent shell output projection",
-        &SessionId::from("sim-agent-shell-output-projection-contract"),
-        "Run a large shell command, inspect it, then report retained metadata.",
-        vec![
-            r#"<lashlang>
-big = await shell.exec({ cmd: "yes x | head -c 60000", login: false })?
-print big.output
-</lashlang>"#,
-            r#"<lashlang>
-finish {
-  chars: len(big.output),
-  tail: slice(big.output, 59996, null),
-  has_full_output_path: big.full_output_path == null ? false : len(big.full_output_path) > 0
-}
-</lashlang>"#,
-        ],
-        &expected,
-        Some(Arc::new(lash_tools::shell::shell_provider(
-            lash_tools::shell::StandardShell::new(),
-        )) as Arc<dyn lash_core::ToolProvider>),
-    )
-    .await?;
-    contract_execution_payload(
-        "agent.shell_output_print_projection_survives",
-        "crates/lash/src/tests/agent_scenarios/cases.rs",
-        "agent_scenario_shell_output_survives_print_projection_in_variable",
         result,
     )
 }
@@ -1307,10 +1214,10 @@ fn agent_contract_graph_facts(
         *graph_status_counts
             .entry(trace_lashlang_status_label(graph.status).to_string())
             .or_default() += 1;
-        if graph.scope.session_id != root_session_id
+        if graph.scope.session_id.as_ref() != Some(root_session_id)
             && matches!(
                 &graph.subject,
-                lash::tracing::TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
+                lash::tracing::TraceRuntimeSubject::Effect { .. }
             )
         {
             match graph.status {

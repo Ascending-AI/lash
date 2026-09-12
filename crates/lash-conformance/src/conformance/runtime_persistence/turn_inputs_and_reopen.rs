@@ -1751,7 +1751,7 @@ pub(super) async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_on
         sequence: 7,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
-            scope: RuntimeScope::new("root"),
+            attribution: RuntimeAttribution::for_session("root"),
             subject: RuntimeSubject::ProcessEvent {
                 process_id: ProcessId::from("process-1"),
                 sequence: 7,

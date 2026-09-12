@@ -396,13 +396,7 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
-        let replay_key = envelope
-            .invocation
-            .replay
-            .as_ref()
-            .expect("ingress effect carries replay identity")
-            .key
-            .clone();
+        let replay_key = envelope.invocation.replay_key().to_owned();
         if let Some(recorded) = self
             .recorded
             .lock()
@@ -502,11 +496,7 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> std::result::Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>
     {
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("ingress envelope has a replay key")
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         let envelope_hash = envelope.stable_hash()?;
         let submitted_admission = MockEffectAdmission {
             replay_key,

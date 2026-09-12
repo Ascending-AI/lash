@@ -1491,19 +1491,53 @@ async fn session_store_factory_round_trips_every_relation_shape(
             })),
         ),
         (
-            "child-effect-no-turn",
+            "child-effect-runtime-operation",
             child(Some(crate::CausalRef::Effect {
-                session_id: SessionId::from("cause-session"),
-                turn_id: None,
-                effect_id: "cause-effect".to_string(),
+                address: EffectAddress::new(
+                    ExecutionScope::runtime_operation("cause-operation"),
+                    "cause-effect",
+                )
+                .expect("valid operation effect cause"),
             })),
         ),
         (
-            "child-effect-with-turn",
+            "child-effect-turn",
             child(Some(crate::CausalRef::Effect {
-                session_id: SessionId::from("cause-session"),
-                turn_id: Some(TurnId::from("cause-turn")),
-                effect_id: "cause-effect".to_string(),
+                address: EffectAddress::new(
+                    ExecutionScope::turn("cause-session", "cause-turn"),
+                    "cause-effect",
+                )
+                .expect("valid turn effect cause"),
+            })),
+        ),
+        (
+            "child-effect-process",
+            child(Some(crate::CausalRef::Effect {
+                address: EffectAddress::new(
+                    ExecutionScope::process("cause-process"),
+                    "cause-effect",
+                )
+                .expect("valid process effect cause"),
+            })),
+        ),
+        (
+            "child-effect-queue-drain",
+            child(Some(crate::CausalRef::Effect {
+                address: EffectAddress::new(
+                    ExecutionScope::queue_drain("cause-session", "cause-drain"),
+                    "cause-effect",
+                )
+                .expect("valid queue-drain effect cause"),
+            })),
+        ),
+        (
+            "child-effect-session-delete",
+            child(Some(crate::CausalRef::Effect {
+                address: EffectAddress::new(
+                    ExecutionScope::session_delete("cause-session"),
+                    "cause-effect",
+                )
+                .expect("valid session-delete effect cause"),
             })),
         ),
         (

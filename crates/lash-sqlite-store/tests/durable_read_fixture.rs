@@ -14,6 +14,10 @@ use serde::{Deserialize, Serialize};
 mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-fe2964c7/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-037d9999/sqlite-expected.json",
+];
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct SqliteVersions {
@@ -59,7 +63,7 @@ async fn sqlite_durable_fixture_reads_with_identical_semantics() {
 async fn sqlite_durable_fixture_expectations_match_what_this_build_writes() {
     let temp = tempfile::tempdir().expect("SQLite write-shape tempdir");
     let handles = open_handles(temp.path(), fixture::FIXTURE_WRITE_MS).await;
-    let written_now = fixture::seed(&handles).await;
+    let written_now = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
     fixture::assert_committed_expectations_match_current_writes(
         &std::fs::read(fixture_dir().join("expected.json"))
@@ -109,7 +113,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 60"),
+        message.contains("supports schema version 61"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -134,7 +138,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 60"),
+        message.contains("supports schema version 61"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
@@ -153,7 +157,7 @@ async fn regenerate_sqlite_durable_fixture() {
     );
     let temp = tempfile::tempdir().expect("SQLite generator tempdir");
     let handles = open_handles(temp.path(), fixture::FIXTURE_WRITE_MS).await;
-    let expected = fixture::seed(&handles).await;
+    let expected = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
     checkpoint_files(temp.path());
 

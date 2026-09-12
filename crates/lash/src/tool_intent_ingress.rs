@@ -288,7 +288,7 @@ impl crate::LashCore {
         session_id: impl Into<SessionId>,
         scope: lash_core::ExecutionScope,
     ) -> crate::Result<ToolIntentIngress> {
-        scope.validate()?;
+        scope.validate().map_err(lash_core::RuntimeError::from)?;
         let session_id = session_id.into();
         if session_id.trim().is_empty() {
             return Err(lash_core::RuntimeError::new(
@@ -948,7 +948,7 @@ impl ToolIntentIngress {
             .effect_host
             .scoped(self.scope.clone())?;
         router
-            .emit_recorded(request, scoped.controller())
+            .emit_recorded(request, &scoped)
             .await
             .map_err(Into::into)
     }
@@ -1040,18 +1040,15 @@ impl ToolIntentIngress {
             .control
             .effect_host
             .scoped(self.scope.clone())?;
-        let mut invocation = lash_core::RuntimeInvocation::effect(
-            lash_core::runtime::RuntimeScope::new(&self.session_id),
+        let invocation = lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scoped.execution_scope().clone(), replay_key.clone())
+                .expect("tool intent ingress carries an admitted effect scope"),
+            lash_core::RuntimeAttribution::for_session(self.session_id.clone()),
             format!("tool-intent-ingress:{}", identity.intent_index),
-            lash_core::RuntimeEffectKind::Process,
-            replay_key.clone(),
-        );
-        invocation.replay = Some(lash_core::RuntimeReplay {
-            key: replay_key,
-            attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
-                identity.clone(),
-            )),
-        });
+        )
+        .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        ));
         let realized_now = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let outcome_observer: lash_core::ProcessOutcomeObserver = {
             let realized_now = std::sync::Arc::clone(&realized_now);

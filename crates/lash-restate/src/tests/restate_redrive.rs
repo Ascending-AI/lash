@@ -368,6 +368,17 @@ pub(super) fn process_journal_completion(
     }
 }
 
+/// Complete the effect-recording calls around each replayed trigger delivery
+/// and its terminal delivery-sink call.
+fn trigger_journal_completion(
+    command: &endpoint_protocol::RecordedCommand,
+) -> Option<serde_json::Value> {
+    let (service, handler) = command.call.as_ref()?;
+    durable_wait_index_call_response(service, handler).or_else(|| {
+        (handler == "complete" && service == "Fig806TriggerSink").then_some(serde_json::Value::Null)
+    })
+}
+
 #[tokio::test]
 pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
     let process_id = "fig779-durable-cancel-redrive";
@@ -1043,43 +1054,64 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
     };
     let workflow_key = "fig806-trigger-redrive";
 
-    let suspended = invoke_endpoint(
+    let invocation_id = "inv_fig806_trigger_process";
+    let suspended = invoke_endpoint_with_scripted_responses(
         &endpoint,
         "Fig806TriggerRedrive",
         "run",
         workflow_key,
         &input,
+        vec![invocation_id.to_string()],
+        vec![serde_json::Value::Bool(true), serde_json::Value::Null],
     )
     .await
-    .expect("trigger start should suspend on its invocation id");
+    .expect("trigger start should suspend on its terminal delivery call");
     assert_eq!(
         restate_message_types(&suspended).expect("decode trigger suspension"),
-        vec![0x040E, RESTATE_SUSPENSION_MESSAGE_TYPE],
+        vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            0x040E,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
         "endpoint error: {:?}",
         restate_error_message(&suspended)
     );
-    let replay = encode_one_way_call_replay(workflow_key, &input, &suspended)
-        .expect("splice deployed trigger process start");
-    let output = invoke_endpoint_body_with_json_call_responses(
-        &endpoint,
-        "Fig806TriggerRedrive",
-        "run",
-        replay,
-        vec![serde_json::Value::Null],
-    )
-    .await
-    .expect("reserved trigger redrive must preserve the process-start prefix");
-
-    let report = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&output)
-        .expect("decode trigger emit report");
-    assert_eq!(report.deliveries.len(), 1);
     assert_eq!(
-        restate_call_frames(&output)
-            .expect("decode post-start call")
+        restate_call_frames(&suspended)
+            .expect("decode trigger calls")
             .iter()
             .map(|call| call.handler.as_str())
             .collect::<Vec<_>>(),
-        vec!["complete"]
+        vec!["begin_effect", "end_effect", "complete"]
+    );
+    let replay = encode_recorded_commands_with_invocations_replay(
+        workflow_key,
+        &input,
+        &[&suspended],
+        &[invocation_id],
+        trigger_journal_completion,
+    )
+    .expect("splice the complete deployed trigger delivery journal");
+    let output = invoke_endpoint_body(&endpoint, "Fig806TriggerRedrive", "run", replay)
+        .await
+        .expect("reserved trigger redrive must preserve the process-start prefix");
+
+    let report = restate_output_json::<lash_core::facade_support::TriggerEmitReport>(&output)
+        .expect("decode trigger emit report");
+    assert!(matches!(
+        report.deliveries.as_slice(),
+        [lash_core::facade_support::TriggerDeliveryEmitReceipt {
+            outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::AlreadyReserved,
+            ..
+        }]
+    ));
+    assert!(
+        restate_call_frames(&output)
+            .expect("decode post-journal output")
+            .is_empty(),
+        "the replayed terminal call must not be emitted a second time"
     );
     assert_eq!(
         registry
@@ -1196,15 +1228,24 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         workflow_key,
         &input,
         invocation_ids.iter().map(ToString::to_string).collect(),
-        Vec::new(),
+        vec![
+            serde_json::Value::Bool(true),
+            serde_json::Value::Null,
+            serde_json::Value::Bool(true),
+            serde_json::Value::Null,
+        ],
     )
     .await
     .expect("initial multi-subscription attempt should suspend after both starts");
     assert_eq!(
         restate_message_types(&suspended).expect("decode multi-subscription suspension"),
         vec![
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             0x040E,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             0x040E,
+            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
         ],
@@ -1212,12 +1253,27 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         restate_error_message(&suspended)
     );
 
-    let replay = encode_two_one_way_calls_and_call_replay(
+    assert_eq!(
+        restate_call_frames(&suspended)
+            .expect("decode multi-subscription calls")
+            .iter()
+            .map(|call| call.handler.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "begin_effect",
+            "end_effect",
+            "begin_effect",
+            "end_effect",
+            "complete"
+        ]
+    );
+
+    let replay = encode_recorded_commands_with_invocations_replay(
         workflow_key,
         &input,
-        &suspended,
-        invocation_ids,
-        serde_json::Value::Null,
+        &[&suspended],
+        &invocation_ids,
+        trigger_journal_completion,
     )
     .expect("splice both deployed process starts");
     let output = invoke_endpoint_body(&endpoint, "Fig806TriggerRedrive", "run", replay)
@@ -1298,7 +1354,11 @@ pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_
         "fig811-client-attempt-one",
         &input,
         vec![workflow_invocation_id.to_string()],
-        vec![serde_json::Value::Null],
+        vec![
+            serde_json::Value::Bool(true),
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ],
     )
     .await
     .expect("first independent client invocation");
@@ -1319,7 +1379,11 @@ pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_
         "fig811-client-attempt-two",
         &input,
         vec![workflow_invocation_id.to_string()],
-        vec![serde_json::Value::Null],
+        vec![
+            serde_json::Value::Bool(true),
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+        ],
     )
     .await
     .expect("second independent client invocation");

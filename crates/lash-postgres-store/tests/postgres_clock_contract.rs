@@ -638,7 +638,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     else {
         return;
     };
-    const INJECTED_COMMIT_MS: u64 = 1_234_567_890_000;
+    const INJECTED_COMMIT_MS: u64 = 1_234_567_900_000;
     let session_id = unique_id("clock-contract-final-commit");
     let clock = Arc::new(TestClock::new(INJECTED_COMMIT_MS));
     let factory = storage

@@ -13,9 +13,8 @@ use crate::support::{
 };
 use futures_util::Stream;
 use lash_core::facade_support::{
-    RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
-    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnCancelMode,
-    TurnContextFacadeOps,
+    RuntimeSessionStateFacadeOps, SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError,
+    TurnCancelMode, TurnContextFacadeOps,
 };
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};

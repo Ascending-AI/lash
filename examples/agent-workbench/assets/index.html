@@ -2494,7 +2494,6 @@
       </form>
 
       <div class="status-stack">
-        <div class="status-row"><span>web</span><span id="webState">checking</span></div>
         <div class="status-row"><span>session</span><span id="sessionId">connecting…</span><button
                 id="sessionCopy" class="copy-btn" type="button" hidden
                 title="Copy the full session id">copy</button></div>
@@ -2763,7 +2762,6 @@
     const shellStatusRetry = document.getElementById("shellStatusRetry");
     const busyPill = document.getElementById("busyPill");
     const busyText = document.getElementById("busyText");
-    const webState = document.getElementById("webState");
     const sessionId = document.getElementById("sessionId");
     const sessionCopy = document.getElementById("sessionCopy");
     const usageTotal = document.getElementById("usageTotal");
@@ -3210,7 +3208,6 @@
         pillTone: phase === "connecting" ? "pending" : "degraded",
         subtitle: "connecting…",
         session: phase === "connecting" ? "connecting…" : "unknown",
-        web: view.web || (phase === "connecting" ? "checking" : "unknown"),
         placeholder: timelinePlaceholder(phase),
         placeholderTone: phase === "live" ? "" : (phase === "connecting" ? "pending" : "degraded"),
         banner: { hidden: true, text: "", detail: shellReason(availability) }
@@ -3268,7 +3265,6 @@
 
     const shellAvailability = createShellAvailability();
     let knownSessionLabel = null;
-    let knownWebState = null;
     let busyLabel = "ready";
 
     // BEGIN WORKBENCH_SHELL_STATUS_RENDER
@@ -3280,7 +3276,6 @@
       busyPill.className = "pill" + (model.pillTone ? " " + model.pillTone : "");
       streamState.textContent = model.subtitle;
       sessionId.textContent = model.session;
-      webState.textContent = model.web;
       shellStatus.hidden = model.banner.hidden;
       shellStatusText.textContent = model.banner.text;
       shellStatusDetail.textContent = model.banner.detail;
@@ -3297,8 +3292,7 @@
       applyShellStatus(shellStatusModel(shellAvailability, {
         busy,
         busyLabel,
-        session: knownSessionLabel,
-        web: knownWebState
+        session: knownSessionLabel
       }));
       /* The session id is the value most often carried out of this console into
          a curl or a log query, and it is long enough to wrap. Offer it whole,
@@ -4037,8 +4031,8 @@
     }
 
     function displayToolName(name) {
-      if (name === "search_web") return "web.search";
-      if (name === "fetch_url") return "web.fetch";
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_search_")) return "web.search";
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_fetch_")) return "web.fetch";
       if (name === "spawn_agent") return "agents.spawn";
       return name || "tool";
     }
@@ -4107,11 +4101,11 @@
     }
 
     function summarizeToolResult(name, result) {
-      if (name === "search_web") {
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_search_")) {
         const count = Array.isArray(result?.results) ? result.results.length : 0;
         return `Search completed · ${count} result${count === 1 ? "" : "s"}`;
       }
-      if (name === "fetch_url") {
+      if (typeof name === "string" && name.startsWith("mcp__parallel__web_fetch_")) {
         const chars = typeof result?.content === "string" ? result.content.length : 0;
         return `Fetched ${result?.url || "URL"} · ${chars} chars`;
       }
@@ -5754,7 +5748,6 @@
         variantSelect.addEventListener("change", validateModel);
         modelListenersBound = true;
       }
-      knownWebState = state.settings.web_configured ? "ready" : "not configured";
       knownSessionLabel = state.settings.session_id;
       /* The badge says what this session recorded, which the snapshot carries;
          the page never labels a session from a deployment-wide setting. */

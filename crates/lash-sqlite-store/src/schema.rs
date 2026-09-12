@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     source_node_id                    TEXT,
     observer_inheritance_kind         TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
-    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only'))
 );
 
@@ -608,7 +608,10 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 /// authorization so lease takeover cannot forget or replace promise work.
 /// Version 60 persists retired physical scopes so cancellation authorization
 /// and Process-journal retirement remain serialized across owner restarts.
-pub(crate) const SCHEMA_VERSION: i32 = 60;
+/// Version 61 composes that cancellation lineage with the truthful admitted
+/// effect identity carried by the other component-57 parent. Both parent
+/// shapes are rejected rather than interpreting either incomplete contract.
+pub(crate) const SCHEMA_VERSION: i32 = 61;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -877,7 +880,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version-29 registries are rejected rather than migrated.
 /// Version 31 removes the unread process waiting projection and its index.
 /// Version-30 registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 32;
+/// Version 33 persists full admitted effect addresses and optional truthful
+/// attribution in process registration and wake payloads. Older registries are
+/// rejected rather than fabricating an execution scope or session owner.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 33;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1120,7 +1126,10 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 // Version 18 adds owner-side cancellation-closure participants. This makes
 // scope retirement serialize with authorization held in separate session
 // catalogs; pre-18 effect databases are rejected and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 18;
+// The other version-18 parent persists the admitted execution scope with every
+// replay key. Version 19 composes both incompatible version-18 shapes, so either
+// parent journal is rejected and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 19;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -1455,6 +1464,17 @@ mod check_constraint_tests {
             &core,
             "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
              VALUES ('bad-cause', 'child', 'timer')",
+            "ck_session_meta_caused_by_kind",
+        );
+        core.execute_batch(
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
+             VALUES ('effect-address-cause', 'child', 'effect_address')",
+        )
+        .expect("current effect-address discriminator is admitted");
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
+             VALUES ('legacy-effect-cause', 'child', 'effect')",
             "ck_session_meta_caused_by_kind",
         );
         assert_check_rejects(

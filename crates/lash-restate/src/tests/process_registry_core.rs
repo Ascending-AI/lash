@@ -17,31 +17,6 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
                         0 => lash_core::LlmResponse {
                             parts: vec![
                                 lash_core::LlmOutputPart::ToolCall {
-                                    call_id: "fig1293-shell-start".to_string(),
-                                    tool_name: "start_command".to_string(),
-                                    input_json: serde_json::json!({"cmd": "printf tracked"})
-                                        .to_string(),
-                                    replay: None,
-                                },
-                                lash_core::LlmOutputPart::ToolCall {
-                                    call_id: "fig1293-shell-detach".to_string(),
-                                    tool_name: "start_command".to_string(),
-                                    input_json: serde_json::json!({"cmd": "true", "detach": true})
-                                        .to_string(),
-                                    replay: None,
-                                },
-                                lash_core::LlmOutputPart::ToolCall {
-                                    call_id: "fig1293-shell-write".to_string(),
-                                    tool_name: "write_stdin".to_string(),
-                                    input_json: serde_json::json!({
-                                        "process_id": "fig1293-control-target",
-                                        "chars": "fig1293\n",
-                                        "close_stdin": false,
-                                    })
-                                    .to_string(),
-                                    replay: None,
-                                },
-                                lash_core::LlmOutputPart::ToolCall {
                                     call_id: "fig1293-process-cancel".to_string(),
                                     tool_name: "cancel_process".to_string(),
                                     input_json: serde_json::json!({
@@ -169,14 +144,11 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     assert_eq!(
         attempt_names,
         vec![
-            "start_command".to_string(),
-            "start_command".to_string(),
-            "write_stdin".to_string(),
             "cancel_process".to_string(),
             lash_core::testing::FIXTURE_ECHO_TOOL.to_string(),
             lash_core::testing::FIXTURE_ECHO_TOOL.to_string(),
         ],
-        "leaf tools and batch children are attempts; batch, spawn_agent, and the shell process body are not"
+        "cancel_process and batch children are attempts; batch and spawn_agent are not"
     );
     let outer_batch = before
         .iter()
@@ -189,11 +161,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
                 )
         })
         .expect("outer FIG-1293 Restate tool-batch frame");
-    let outer_causal_ref = outer_batch
-        .1
-        .invocation
-        .causal_ref()
-        .expect("outer FIG-1293 Restate batch causal ref");
+    let outer_causal_ref = outer_batch.1.invocation.causal_ref();
     let outer_recorded: RecordedRuntimeEffect = serde_json::from_slice(
         context
             .records
@@ -208,12 +176,10 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
         !outer_outcome_json.contains(r#""status":"refused""#),
         "every migrated Restate public intent must execute: {outer_outcome_json}",
     );
-    for kind in ["start_process", "signal_process", "cancel_process"] {
-        assert!(
-            outer_outcome_json.contains(&format!(r#""kind":"{kind}""#)),
-            "missing executed Restate {kind} outcome: {outer_outcome_json}",
-        );
-    }
+    assert!(
+        outer_outcome_json.contains(r#""kind":"cancel_process""#),
+        "the retained process-controls cancel intent must execute: {outer_outcome_json}",
+    );
     let direct_orchestration_children = before
         .iter()
         .map(|(_, envelope)| envelope)
@@ -283,37 +249,6 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     assert_eq!(
         outputs,
         vec![
-            (
-                "start_command".to_string(),
-                serde_json::json!({
-                    "__handle__": "process",
-                    "done": false,
-                    "id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
-                    "incarnation": 3,
-                    "process_id": "tool-intent:v2:blake3:dd925daabf745ca6a896a25a04953d64cc6f0ff1acc778a3b155945cdb218e5b",
-                    "running": true,
-                    "status": "running",
-                }),
-            ),
-            (
-                "start_command".to_string(),
-                serde_json::json!({
-                    "__handle__": "process",
-                    "done": true,
-                    "id": "tool-intent:v2:blake3:58c100661aca7a188965f9cc5f6ad14dc19f23a3f4f23a90fa426b5af449429e:detached",
-                    "process_id": "tool-intent:v2:blake3:58c100661aca7a188965f9cc5f6ad14dc19f23a3f4f23a90fa426b5af449429e:detached",
-                    "running": false,
-                    "status": "detached",
-                }),
-            ),
-            (
-                "write_stdin".to_string(),
-                serde_json::json!({
-                    "process_id": "fig1293-control-target",
-                    "sequence": 2,
-                    "status": "signalled",
-                }),
-            ),
             (
                 "cancel_process".to_string(),
                 serde_json::json!({
@@ -1476,8 +1411,8 @@ finish (await handle)?
     );
     let (scalar_effect_name, scalar_envelope) = scalar_tool_attempts[0];
     assert_eq!(
-        scalar_envelope.invocation.effect_kind(),
-        Some(RuntimeEffectKind::ToolAttempt)
+        scalar_envelope.command.kind(),
+        RuntimeEffectKind::ToolAttempt
     );
     let RuntimeEffectCommand::ToolAttempt {
         call,

@@ -107,7 +107,7 @@ pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         SqliteConstraintDatabase::DurableCore,
         "session_meta",
         "ck_session_meta_caused_by_kind",
-        "caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+        "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
     ),
     sqlite_constraint(
         SqliteConstraintDatabase::DurableCore,
@@ -198,7 +198,7 @@ pub const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         "lash_session_meta",
         "ck_session_meta_caused_by_kind",
-        "caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+        "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
     ),
     expected_constraint(
         "lash_session_meta",

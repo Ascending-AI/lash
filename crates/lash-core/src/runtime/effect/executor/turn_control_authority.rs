@@ -18,7 +18,7 @@ pub fn turn_control_binding_id_for_scope(
             identity.key()
         )),
         Ok(_) => Ok(base.to_string()),
-        Err(error) => Err(error),
+        Err(error) => Err(error.into()),
     }
 }
 

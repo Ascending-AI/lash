@@ -7,6 +7,11 @@ use schemars::JsonSchema;
 
 use super::*;
 
+#[path = "tests/identity.rs"]
+mod identity_tests;
+#[path = "tests/process_validation.rs"]
+mod process_validation_tests;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[derive(serde::Deserialize)]
@@ -1262,7 +1267,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 58,
+            expected: 60,
         }
     ));
 
@@ -1452,7 +1457,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 58,
+            "protocol_version": 60,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1467,7 +1472,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 58,
+            actual: 60,
             expected: 41,
         }
     ));
@@ -1513,7 +1518,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 58,
+            expected: 60,
         }
     ));
 
@@ -1531,7 +1536,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 #[test]
 fn remote_process_dtos_json_round_trip() {
     assert_eq!(
-        REMOTE_PROTOCOL_VERSION, 59,
+        REMOTE_PROTOCOL_VERSION, 60,
         "turn-cancel policy-conflict wire-shape pin"
     );
     let start = RemoteProcessStartRequest {
@@ -1866,7 +1871,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 58,
+            expected: 60,
         })
     ));
 }
@@ -1897,8 +1902,7 @@ enum Protocol37RuntimeEffectKind {
 
 #[test]
 fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_decode() {
-    let kind = serde_json::to_value(RemoteRuntimeEffectKind::LanguageRuntimeValue)
-        .expect("serialize the version 38 effect kind");
+    let kind = serde_json::json!("language_runtime_value");
     assert_eq!(kind, serde_json::json!("language_runtime_value"));
 
     assert!(
@@ -1906,7 +1910,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 58,
+                expected: 60,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1942,7 +1946,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 58,
+                expected: 60,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1989,8 +1993,7 @@ enum Protocol39RuntimeEffectKind {
 /// supposed to cost an edit here.
 #[test]
 fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_decode() {
-    let kind = serde_json::to_value(RemoteRuntimeEffectKind::AssistantResponseHooks)
-        .expect("serialize the version 40 effect kind");
+    let kind = serde_json::json!("assistant_response_hooks");
     assert_eq!(kind, serde_json::json!("assistant_response_hooks"));
 
     assert!(
@@ -1998,7 +2001,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 58,
+                expected: 60,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -2030,7 +2033,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 58,
+                expected: 60,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2414,69 +2417,6 @@ fn remote_process_record() -> RemoteProcessRecord {
     }
 }
 
-#[test]
-fn remote_terminal_semantics_reject_non_terminal_status() {
-    let terminal = RemoteProcessTerminalSpec {
-        status: RemoteProcessStatus::Running,
-        await_output: Some(RemoteProcessValueSelector::Payload),
-    };
-    assert!(
-        terminal
-            .validate("RemoteProcessTerminalSpec")
-            .expect_err("running terminal semantics must be rejected")
-            .to_string()
-            .contains("require a terminal status")
-    );
-}
-
-#[test]
-fn remote_process_record_rejects_contradictory_status_and_outcome() {
-    let mut terminal_without_outcome = remote_process_record();
-    terminal_without_outcome.status = RemoteProcessStatus::Completed;
-    assert!(
-        terminal_without_outcome
-            .validate("RemoteProcessRecord")
-            .expect_err("terminal status without outcome must be rejected")
-            .to_string()
-            .contains("must carry an outcome")
-    );
-
-    let mut non_terminal_with_outcome = remote_process_record();
-    non_terminal_with_outcome.outcome = Some(RemoteProcessAwaitOutput::Settled {
-        output: RemoteProcessToolCallOutput {
-            outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
-            control: None,
-        },
-    });
-    assert!(
-        non_terminal_with_outcome
-            .validate("RemoteProcessRecord")
-            .expect_err("non-terminal status with outcome must be rejected")
-            .to_string()
-            .contains("must not carry an outcome")
-    );
-
-    let mut mismatched = remote_process_record();
-    mismatched.status = RemoteProcessStatus::Completed;
-    mismatched.outcome = Some(RemoteProcessAwaitOutput::Settled {
-        output: RemoteProcessToolCallOutput {
-            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
-                message: "cancelled".to_string(),
-                source: RemoteProcessToolFailureSource::Cancellation,
-                raw: None,
-            }),
-            control: None,
-        },
-    });
-    assert!(
-        mismatched
-            .validate("RemoteProcessRecord")
-            .expect_err("mismatched terminal status and outcome must be rejected")
-            .to_string()
-            .contains("contradicts its outcome")
-    );
-}
-
 fn remote_process_event() -> RemoteProcessEvent {
     RemoteProcessEvent {
         process_id: ProcessId::from("process:1"),
@@ -2485,8 +2425,8 @@ fn remote_process_event() -> RemoteProcessEvent {
         event_type: "process.completed".to_string(),
         payload: serde_json::json!({ "await_output": { "type": "success", "value": true } }),
         invocation: Some(RemoteRuntimeInvocation {
-            scope: RemoteRuntimeScope {
-                session_id: SessionId::from("session"),
+            attribution: RemoteRuntimeAttribution {
+                session_id: Some(SessionId::from("session")),
                 turn_id: Some(TurnId::from("turn")),
                 turn_index: Some(1),
                 protocol_iteration: Some(0),

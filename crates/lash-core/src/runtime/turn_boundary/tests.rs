@@ -195,9 +195,12 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         crate::runtime::turn_control::ActiveTurnControl::new(host.as_ref(), address.clone())
             .await
             .expect("create turn gate");
+    let scoped = host
+        .scoped(address.execution_scope())
+        .expect("scope final-cancel CAS controller");
     let honoured = control
         .observe_pending_cancel(
-            host.as_ref(),
+            &scoped,
             TurnCancelPeekIdentity::AfterStep {
                 protocol_iteration: 7,
             },

@@ -1548,9 +1548,12 @@ async fn mixed_era_floor_and_ordering(
             sequence,
             event_type: "producer.wake".to_string(),
             event_invocation: crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::new(target_session_id),
-                format!("wake:mixed-era:{sequence}"),
-                crate::RuntimeEffectKind::Process,
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::process(process_id),
+                    format!("wake:mixed-era:{sequence}"),
+                )
+                .expect("valid process wake test address"),
+                crate::RuntimeAttribution::none(),
                 format!("wake:mixed-era:{sequence}"),
             ),
             process_caused_by: None,
@@ -1577,9 +1580,12 @@ async fn mixed_era_floor_and_ordering(
                 sequence: 3,
                 event_type: "producer.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
-                    crate::RuntimeScope::new(target_session_id),
-                    "wake:mixed-era:3",
-                    crate::RuntimeEffectKind::Process,
+                    crate::EffectAddress::new(
+                        crate::ExecutionScope::process(process_id),
+                        "wake:mixed-era:3",
+                    )
+                    .expect("valid process wake test address"),
+                    crate::RuntimeAttribution::none(),
                     "wake:mixed-era:3",
                 ),
                 process_caused_by: None,
@@ -1612,9 +1618,12 @@ async fn mixed_era_floor_and_ordering(
                 sequence: 2,
                 event_type: "producer.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
-                    crate::RuntimeScope::new(target_session_id),
-                    "wake:mixed-era:2",
-                    crate::RuntimeEffectKind::Process,
+                    crate::EffectAddress::new(
+                        crate::ExecutionScope::process(process_id),
+                        "wake:mixed-era:2",
+                    )
+                    .expect("valid process wake test address"),
+                    crate::RuntimeAttribution::none(),
                     "wake:mixed-era:2",
                 ),
                 process_caused_by: None,
@@ -1708,9 +1717,12 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         sequence: 10,
         event_type: "producer.wake".to_string(),
         event_invocation: crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::new(target_session_id),
-            "wake:store-rewind:10",
-            crate::RuntimeEffectKind::Process,
+            crate::EffectAddress::new(
+                crate::ExecutionScope::process(process_id),
+                "wake:store-rewind:10",
+            )
+            .expect("valid process wake test address"),
+            crate::RuntimeAttribution::none(),
             "wake:store-rewind:10",
         ),
         process_caused_by: None,

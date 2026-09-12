@@ -1833,11 +1833,14 @@ pub(super) fn durable_wait_index_k_effect_measurements_are_linear() {
 
 #[test]
 pub(super) fn restate_effect_name_uses_lash_replay_key() {
-    let invocation = RuntimeInvocation::effect(
-        lash_core::runtime::RuntimeScope::for_turn("session", "turn", 1, 2),
+    let invocation = lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(
+            durable_turn_scope("session", "turn"),
+            "session:turn:1:2:tool_attempt:effect",
+        )
+        .expect("valid Restate effect-name address"),
+        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 2),
         "effect",
-        RuntimeEffectKind::ToolAttempt,
-        "session:turn:1:2:tool_attempt:effect",
     );
 
     assert_eq!(

@@ -76,33 +76,6 @@ pub(super) fn agent_contract_execution_fact(
                 "process_event": "work.input_request.opened",
             })
         }
-        "agent.shell_results_are_data" => {
-            let expected = json!({
-                "pipe_exit": 0,
-                "pipe_output": "line\nline\nline\n",
-                "missing_exit": 1,
-                "missing_status": "completed"
-            });
-            require_agent_final_value(result, &expected, contract)?;
-            json!({
-                "final_value": expected,
-                "nonzero_shell_exit_is_data": true,
-                "pipeline_output": "line\nline\nline\n",
-            })
-        }
-        "agent.shell_output_print_projection_survives" => {
-            let expected = json!({
-                "chars": 60000,
-                "tail": "x\nx\n",
-                "has_full_output_path": true
-            });
-            require_agent_final_value(result, &expected, contract)?;
-            json!({
-                "final_value": expected,
-                "shell_output_chars": 60000,
-                "projection_tail": "x\nx\n",
-            })
-        }
         "agent.started_process_subagent_spawn" => {
             require_agent_final_value(result, &json!({ "len": 2 }), contract)?;
             require_agent_completed_process_entry(result, "spawn_child", contract)?;
@@ -257,16 +230,6 @@ pub(super) fn agent_contract_metadata(
             "agent_scenario_process_durable_input_request_tool",
             "agent_durable_input_suspension_resolution_execution",
             "Agent facade suspends a durable input process before external resolution and resumes to a concrete final value",
-        )),
-        "agent.shell_results_are_data" => Ok((
-            "agent_scenario_shell_nonzero_and_pipeline_results_are_data",
-            "agent_shell_results_are_data_execution",
-            "Agent facade preserves shell pipeline output and nonzero shell status as final-value data",
-        )),
-        "agent.shell_output_print_projection_survives" => Ok((
-            "agent_scenario_shell_output_survives_print_projection_in_variable",
-            "agent_shell_output_print_projection_execution",
-            "Agent facade keeps large shell output addressable after print projection and finishes retained metadata",
         )),
         "agent.started_process_subagent_spawn" => Ok((
             "agent_scenario_started_process_labeled_subagent_spawn",

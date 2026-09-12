@@ -338,7 +338,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // cancellation authorization.
 // Version 89 registers every cancellation-closure catalog with the actual
 // effect owner so direct retirement cannot bypass an outstanding catalog pin.
-const SCHEMA_VERSION: i32 = 89;
+// Version 90 composes that owner-wide lifecycle fence with the truthful admitted
+// effect identity carried by the other component-86 parent. Both parent shapes
+// are rejected rather than interpreting either incomplete contract.
+const SCHEMA_VERSION: i32 = 90;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

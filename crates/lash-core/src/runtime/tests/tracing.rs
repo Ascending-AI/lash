@@ -632,15 +632,20 @@ impl crate::RuntimeEffectController for PendingBatchOutcomeController {
                 let call_id = batch.calls[0].call.call_id.clone();
                 let turn_id = envelope
                     .invocation
-                    .scope
-                    .turn_id
-                    .clone()
+                    .execution_scope()
+                    .turn_id()
+                    .cloned()
                     .expect("turn-scoped tool batch");
                 Ok(crate::RuntimeEffectOutcome::ToolBatch {
                     launches: vec![crate::runtime::ToolCallLaunch::Pending {
                         key: Box::new(crate::AwaitEventKey {
                             scope: crate::ExecutionScope::turn(
-                                envelope.invocation.scope.session_id.clone(),
+                                envelope
+                                    .invocation
+                                    .execution_scope()
+                                    .session_id()
+                                    .cloned()
+                                    .expect("turn-scoped tool batch"),
                                 turn_id,
                             ),
                             wait: crate::AwaitEventWaitIdentity::tool_completion(call_id),
