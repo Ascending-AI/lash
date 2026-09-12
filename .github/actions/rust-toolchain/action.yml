@@ -7,7 +7,10 @@ inputs:
   toolchain:
     description: Rust toolchain specification.
     required: false
-    default: stable
+    # Keep CI aligned with rust-toolchain.toml and the hermetic Bazel toolchain.
+    # The workspace rust-version remains the declared compatibility floor for
+    # published crates.
+    default: 1.98.1
   targets:
     description: Comma-separated target triples.
     required: false

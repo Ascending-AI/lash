@@ -1,0 +1,8 @@
+exports_files([
+    "generate_build_files.py",
+    "lash_rust.bzl",
+    "target-inventory.json",
+    "workspace_targets.bzl",
+])
+
+exports_files(["patches/libsqlite3-sys-hermetic-manifest-dir.patch"])

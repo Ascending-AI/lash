@@ -43,6 +43,13 @@ Keep local validation proportional to the change:
   the current CI plan does not exercise. Merely touching `lash-core` or
   `lash-restate` does not require running both durable geometries locally.
 
+For Rust compilation, target analysis, and focused unit or integration tests,
+use the checkout-independent Bazel workflow in
+[`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md). Its default
+entry point uses the shared local executor and cache; the named Cargo recipes
+retain feature-matrix, service, doctest, trybuild, fuzz, judged, packaging, and
+release semantics.
+
 `just push-gate` and the `just confidence*` lanes remain available as explicit
 full diagnostics before an unusual-risk change, release work, or when a user
 requests them. They are not routine push or merge prerequisites. Stop once the
