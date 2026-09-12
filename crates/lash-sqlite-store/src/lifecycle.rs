@@ -16,6 +16,27 @@
 use super::*;
 use lash_sansio::SessionId;
 
+pub(super) fn canonical_catalog_identity(path: &Path) -> PathBuf {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut existing = absolute.as_path();
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else {
+            return absolute;
+        };
+        missing.push(name.to_os_string());
+        let Some(parent) = existing.parent() else {
+            return absolute;
+        };
+        existing = parent;
+    }
+    let mut canonical = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    for component in missing.into_iter().rev() {
+        canonical.push(component);
+    }
+    canonical
+}
+
 impl SqliteSessionStoreFactory {
     pub(super) fn turn_cancel_closure_owner_binding(
         &self,

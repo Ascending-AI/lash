@@ -825,9 +825,7 @@ impl SqliteSessionStoreFactory {
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
-        let catalog =
-            std::path::absolute(self.catalog_path()).unwrap_or_else(|_| self.catalog_path());
-        let catalog = std::fs::canonicalize(&catalog).unwrap_or(catalog);
+        let catalog = lifecycle::canonical_catalog_identity(&self.catalog_path());
         *self
             .turn_cancel_closure_owner
             .lock()

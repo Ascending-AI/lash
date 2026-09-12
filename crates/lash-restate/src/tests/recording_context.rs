@@ -539,6 +539,7 @@ pub(super) struct RecordingContext {
     process_terminal_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     session_waits: Mutex<HashMap<SessionId, Vec<AwaitEventKey>>>,
     revoked_sessions: Mutex<HashSet<SessionId>>,
+    pub(super) session_revocation_checks: AtomicUsize,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
 }
 
@@ -993,6 +994,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     where
         'ctx: 'run,
     {
+        self.session_revocation_checks
+            .fetch_add(1, Ordering::SeqCst);
         let revoked = self.revoked_sessions.lock_recover().contains(&session_id);
         Box::pin(async move { Ok(revoked) })
     }

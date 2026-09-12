@@ -1,6 +1,46 @@
 use super::*;
 
 #[tokio::test]
+pub(super) async fn execute_await_event_rejects_foreign_authority_before_context_work() {
+    let context = Arc::new(RecordingContext::default());
+    let owner = RestateAuthorityId::new("execute-await-owner").expect("valid owner authority");
+    let foreign =
+        RestateAuthorityId::new("execute-await-foreign").expect("valid foreign authority");
+    let controller = RestateRuntimeEffectController::new(context.clone(), owner);
+    let key = restate_await_event_key_for_authority(
+        &foreign,
+        &durable_turn_scope("foreign-await-session", "turn"),
+        AwaitEventWaitIdentity::Custom {
+            key: "foreign-await".to_string(),
+        },
+    )
+    .expect("foreign authority key");
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+
+    let error = controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::AwaitEvent, "foreign-authority-await"),
+                RuntimeEffectCommand::AwaitEvent { key },
+            ),
+            RuntimeEffectLocalExecutor::await_event(cancellation, None),
+        )
+        .await
+        .expect_err("foreign authority must refuse before handler context work");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked
+    );
+    assert_eq!(
+        context.session_revocation_checks.load(Ordering::SeqCst),
+        0,
+        "authority refusal must precede the session-tombstone lookup"
+    );
+}
+
+#[tokio::test]
 pub(super) async fn recording_context_propagates_revoked_session_from_turn_cancel_gate() {
     let context = Arc::new(RecordingContext::default());
     RestateControllerContext::update_session_waits(

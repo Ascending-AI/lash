@@ -1115,3 +1115,673 @@ async fn sqlite_caller_supplied_scope_survives_the_reclaim_sweep() {
 async fn postgres_caller_supplied_scope_survives_the_reclaim_sweep() {
     caller_supplied_scope_survives_the_reclaim_sweep(true).await;
 }
+
+/// The maintenance sweep is another public retirement path, so it must hold
+/// the same promise-owner participant fence as direct host retirement. A
+/// receipted, quiescent operation stays replayable while its closure is pinned
+/// and retires normally after the catalog consumes and releases that pin.
+async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let label = if pg { "postgres" } else { "sqlite" };
+    let mut postgres = None;
+    let mut sqlite_catalog = None;
+    let (host, journal, factory): (
+        Arc<dyn EffectHost>,
+        Journal,
+        Arc<dyn lash::persistence::SessionStoreFactory>,
+    ) = if pg {
+        let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+            assert!(
+                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
+                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            eprintln!("skipping Postgres pinned-sweep test: database URL is not set");
+            return;
+        };
+        let admin = sqlx::PgPool::connect(&url).await.expect("connect postgres");
+        let name = format!("pinned_sweep_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE DATABASE {name}"))
+            .execute(&admin)
+            .await
+            .expect("create a private database");
+        admin.close().await;
+        let (base, _) = url.rsplit_once('/').expect("database url has a path");
+        let storage = lash_postgres_store::PostgresStorage::connect(&format!("{base}/{name}"))
+            .await
+            .expect("connect the private database");
+        let host = storage.effect_host();
+        let factory = storage.session_store_factory_with_shared_process_registry();
+        let pool = storage.pool().clone();
+        postgres = Some(storage);
+        (Arc::new(host), Journal::Postgres(pool), Arc::new(factory))
+    } else {
+        let effect_path = dir.path().join("pinned-sweep-effects.db");
+        let catalog_root = dir.path().join("pinned-sweep-sessions");
+        let host = SqliteEffectHost::open(&effect_path)
+            .await
+            .expect("SQLite effect host");
+        let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&catalog_root);
+        sqlite_catalog = Some(factory.catalog_path());
+        (
+            Arc::new(host),
+            Journal::Sqlite(effect_path),
+            Arc::new(factory),
+        )
+    };
+    let _postgres = postgres.take();
+    factory.bind_effect_host(&host);
+
+    let session_id = SessionId::from(format!("pinned-sweep-{label}"));
+    let address = lash_core::runtime::TurnAddress::new(&session_id, "turn");
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create pinned-sweep session");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &lash_core::LeaseOwnerIdentity::opaque(label, format!("{label}:incarnation")),
+            &format!("{label}:executor"),
+            60_000,
+        )
+        .await
+        .expect("claim pinned-sweep lease")
+        .acquired()
+        .expect("pinned-sweep lease is free");
+    let scope = ExecutionScope::runtime_operation(lash_core::store::mint_facade_operation_id(
+        &session_id,
+        lash_core::store::FacadePluginOperation::Task,
+        "pinned_sweep",
+    ));
+    host.scoped(scope.clone())
+        .expect("scope operation")
+        .controller()
+        .execute_effect(envelope("pinned-sweep-effect"), executor())
+        .await
+        .expect("journal quiescent operation effect");
+    let scope_key = scope
+        .journal_identity()
+        .expect("operation journal identity")
+        .key()
+        .to_string();
+    let receipt_key = lash_core::store::plugin_operation_receipt_storage_key(&scope)
+        .expect("operation receipt key");
+    match &journal {
+        Journal::Sqlite(_) => {
+            rusqlite::Connection::open(sqlite_catalog.expect("sqlite catalog"))
+                .expect("open session catalog")
+                .execute(
+                    "INSERT INTO runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES (?1, ?2, 'witness', '{}', 0)",
+                    rusqlite::params![session_id.as_str(), receipt_key],
+                )
+                .expect("record operation receipt");
+        }
+        Journal::Postgres(pool) => {
+            sqlx::query(
+                "INSERT INTO lash_runtime_turn_commits (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms) VALUES ($1, $2, 'witness', '{}', 0)",
+            )
+            .bind(session_id.as_str())
+            .bind(receipt_key)
+            .execute(pool)
+            .await
+            .expect("record operation receipt");
+        }
+    }
+
+    let scoped = host.scoped(scope.clone()).expect("scope closure owner");
+    let binding = host
+        .turn_control_binding(&scoped)
+        .await
+        .expect("bind closure owner");
+    store
+        .validate_turn_cancellation_binding(
+            &session_id,
+            &lease.fence(),
+            binding.binding_id(),
+            &scope,
+        )
+        .await
+        .expect("persist operation admission scope");
+    let resolver = binding.resolver();
+    let authorization = lash_core::TurnCancelClosureAuthorization::new(
+        address.clone(),
+        binding.binding_id(),
+        scope.clone(),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .await
+            .expect("base key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelEscalation,
+            )
+            .await
+            .expect("escalation key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnTerminal,
+            )
+            .await
+            .expect("terminal key"),
+        lash_core::TurnCancelClosureProposal::CompletionSealed,
+        lash_core::TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )
+    .expect("materialize operation closure");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize and register operation closure");
+
+    let sweep = || async {
+        factory
+            .reclaim_retained_evidence(lash::persistence::RetentionBound {
+                committed_before_epoch_ms: 0,
+            })
+            .await
+            .expect("reclaim sweep commits")
+    };
+    let blocked = sweep().await;
+    assert_eq!(
+        blocked.retired_effect_scope_count, 0,
+        "a closure participant blocks maintenance retirement: {blocked:?}"
+    );
+    assert_eq!(journal.effects(&scope_key).await, 1);
+    assert_eq!(journal.fences(&scope_key).await, 0);
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read closure pins")
+            .len(),
+        1
+    );
+
+    let authority =
+        lash_core::TurnCancellationAuthority::new(host.turn_control_binding_id(), host.clone());
+    let settlement = authority
+        .settle_authorized_closure(&authorization)
+        .await
+        .expect("settle operation closure");
+    store
+        .repair_orphaned_active_turn_inputs(
+            &session_id,
+            &lease.fence(),
+            &address.turn_id,
+            authorization.observed_intent(),
+            Some(&settlement),
+        )
+        .await
+        .expect("consume operation closure")
+        .into_applied()
+        .expect("operation repair applies");
+    factory
+        .retire_turn_cancel_closure_scope(&scope)
+        .await
+        .expect("retire catalog scope and release participant");
+
+    let retired = sweep().await;
+    assert_eq!(retired.retired_effect_scope_count, 1, "{retired:?}");
+    assert_eq!(journal.effects(&scope_key).await, 0);
+    assert_eq!(journal.fences(&scope_key).await, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_reclaim_sweep_respects_turn_cancel_closure_participant() {
+    reclaim_sweep_respects_turn_cancel_closure_participant(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_reclaim_sweep_respects_turn_cancel_closure_participant() {
+    reclaim_sweep_respects_turn_cancel_closure_participant(true).await;
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParticipantCrashBoundary {
+    AfterOwnerRegister,
+    BeforeOwnerRelease,
+}
+
+struct ParticipantCrashHost {
+    inner: Arc<dyn EffectHost>,
+    boundary: ParticipantCrashBoundary,
+    marker: std::path::PathBuf,
+}
+
+impl ParticipantCrashHost {
+    async fn stop_at_boundary(&self) -> ! {
+        std::fs::write(&self.marker, b"durable boundary reached\n")
+            .expect("write participant crash marker");
+        std::future::pending().await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for ParticipantCrashHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+}
+
+#[async_trait::async_trait]
+impl EffectHost for ParticipantCrashHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.inner.turn_control_binding_id()
+    }
+
+    fn scoped<'run>(
+        &'run self,
+        scope: ExecutionScope,
+    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        self.inner.scoped(scope)
+    }
+
+    fn scoped_static(
+        &self,
+        scope: ExecutionScope,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.scoped_static(scope)
+    }
+
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self.inner.await_event_resolver()
+    }
+
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .register_turn_cancel_closure_participant(participant_id, scope)
+            .await?;
+        if self.boundary == ParticipantCrashBoundary::AfterOwnerRegister {
+            self.stop_at_boundary().await;
+        }
+        Ok(())
+    }
+
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        if self.boundary == ParticipantCrashBoundary::BeforeOwnerRelease {
+            self.stop_at_boundary().await;
+        }
+        self.inner
+            .release_turn_cancel_closure_participant(participant_id, scope)
+            .await
+    }
+}
+
+async fn participant_crash_handles(
+    backend: &str,
+    locator: &str,
+) -> (Arc<dyn EffectHost>, Arc<dyn lash_core::SessionStoreFactory>) {
+    if backend == "postgres" {
+        let storage = lash_postgres_store::PostgresStorage::connect(locator)
+            .await
+            .expect("connect participant-crash PostgreSQL database");
+        (
+            Arc::new(storage.effect_host()),
+            Arc::new(storage.session_store_factory_with_shared_process_registry()),
+        )
+    } else {
+        let root = std::path::Path::new(locator);
+        let host = SqliteEffectHost::open(&root.join("effects.db"))
+            .await
+            .expect("open participant-crash SQLite owner");
+        (
+            Arc::new(host),
+            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                root.join("catalog"),
+            )),
+        )
+    }
+}
+
+async fn authorize_participant_crash_closure(
+    host: &Arc<dyn EffectHost>,
+    factory: &Arc<dyn lash_core::SessionStoreFactory>,
+    scenario: &str,
+    scope: &ExecutionScope,
+) -> (
+    Arc<dyn lash_core::RuntimePersistence>,
+    lash_core::SessionExecutionLease,
+    lash_core::TurnCancelClosureAuthorization,
+) {
+    factory.bind_effect_host(host);
+    let session_id = SessionId::from(format!("participant-crash-{scenario}"));
+    let address = lash_core::runtime::TurnAddress::new(&session_id, "turn");
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create participant-crash session");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &lash_core::LeaseOwnerIdentity::opaque(scenario, format!("{scenario}:incarnation")),
+            &format!("{scenario}:executor"),
+            60_000,
+        )
+        .await
+        .expect("claim participant-crash lease")
+        .acquired()
+        .expect("participant-crash lease is free");
+    let scoped = host.scoped(scope.clone()).expect("scope participant owner");
+    let binding = host
+        .turn_control_binding(&scoped)
+        .await
+        .expect("bind participant owner");
+    store
+        .validate_turn_cancellation_binding(
+            &session_id,
+            &lease.fence(),
+            binding.binding_id(),
+            scope,
+        )
+        .await
+        .expect("persist participant-crash admission");
+    let resolver = binding.resolver();
+    let authorization = lash_core::TurnCancelClosureAuthorization::new(
+        address.clone(),
+        binding.binding_id(),
+        scope.clone(),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .await
+            .expect("participant base key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnCancelEscalation,
+            )
+            .await
+            .expect("participant escalation key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                AwaitEventWaitIdentity::TurnTerminal,
+            )
+            .await
+            .expect("participant terminal key"),
+        lash_core::TurnCancelClosureProposal::CompletionSealed,
+        lash_core::TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )
+    .expect("materialize participant-crash closure");
+    (store, lease, authorization)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "spawned and killed by the participant lifecycle crash laws"]
+async fn participant_protocol_crash_child() {
+    let backend = std::env::var("LASH_PARTICIPANT_CRASH_BACKEND").expect("child backend");
+    let locator = std::env::var("LASH_PARTICIPANT_CRASH_LOCATOR").expect("child locator");
+    let scenario = std::env::var("LASH_PARTICIPANT_CRASH_SCENARIO").expect("child scenario");
+    let marker = std::env::var_os("LASH_PARTICIPANT_CRASH_MARKER")
+        .map(std::path::PathBuf::from)
+        .expect("child marker");
+    let boundary = match std::env::var("LASH_PARTICIPANT_CRASH_BOUNDARY")
+        .expect("child boundary")
+        .as_str()
+    {
+        "register" => ParticipantCrashBoundary::AfterOwnerRegister,
+        "release" => ParticipantCrashBoundary::BeforeOwnerRelease,
+        boundary => panic!("unknown participant crash boundary {boundary}"),
+    };
+    let (inner, factory) = participant_crash_handles(&backend, &locator).await;
+    let host: Arc<dyn EffectHost> = Arc::new(ParticipantCrashHost {
+        inner,
+        boundary,
+        marker,
+    });
+    factory.bind_effect_host(&host);
+    let scope = ExecutionScope::runtime_operation(format!("participant-crash-{scenario}"));
+    if boundary == ParticipantCrashBoundary::AfterOwnerRegister {
+        let (store, lease, authorization) =
+            authorize_participant_crash_closure(&host, &factory, &scenario, &scope).await;
+        store
+            .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+            .await
+            .expect("register boundary never returns before the parent kills this child");
+    } else {
+        factory
+            .retire_turn_cancel_closure_scope(&scope)
+            .await
+            .expect("release boundary never returns before the parent kills this child");
+    }
+    panic!("participant crash child passed its deterministic kill boundary");
+}
+
+fn kill_child_at_participant_boundary(
+    backend: &str,
+    locator: &str,
+    scenario: &str,
+    boundary: &str,
+    marker: &std::path::Path,
+) {
+    let mut child = std::process::Command::new(
+        std::env::current_exe().expect("locate participant-crash test binary"),
+    )
+    .args([
+        "--exact",
+        "participant_protocol_crash_child",
+        "--ignored",
+        "--nocapture",
+    ])
+    .env("LASH_PARTICIPANT_CRASH_BACKEND", backend)
+    .env("LASH_PARTICIPANT_CRASH_LOCATOR", locator)
+    .env("LASH_PARTICIPANT_CRASH_SCENARIO", scenario)
+    .env("LASH_PARTICIPANT_CRASH_BOUNDARY", boundary)
+    .env("LASH_PARTICIPANT_CRASH_MARKER", marker)
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .expect("spawn participant-crash child");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !marker.exists() {
+        if let Some(status) = child.try_wait().expect("poll participant-crash child") {
+            panic!("participant-crash child exited before its boundary: {status}");
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "participant-crash child did not reach {boundary} boundary"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    child
+        .kill()
+        .expect("kill child at durable participant boundary");
+    let status = child.wait().expect("reap participant-crash child");
+    assert!(!status.success(), "the boundary child must be killed");
+}
+
+async fn private_participant_crash_postgres_url(label: &str) -> Option<String> {
+    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        assert!(
+            std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
+            "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        eprintln!("skipping PostgreSQL participant-crash law: database URL is not set");
+        return None;
+    };
+    let admin = sqlx::PgPool::connect(&url)
+        .await
+        .expect("connect participant-crash PostgreSQL admin");
+    let name = format!(
+        "participant_crash_{label}_{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    sqlx::query(&format!("CREATE DATABASE {name}"))
+        .execute(&admin)
+        .await
+        .expect("create participant-crash database");
+    admin.close().await;
+    let (base, _) = url.rsplit_once('/').expect("database URL has a path");
+    Some(format!("{base}/{name}"))
+}
+
+async fn participant_protocol_survives_both_crash_windows(backend: &str, locator: &str) {
+    let evidence = tempfile::tempdir().expect("participant crash marker directory");
+
+    let register_scenario = format!("{backend}-register");
+    let register_scope =
+        ExecutionScope::runtime_operation(format!("participant-crash-{register_scenario}"));
+    let register_marker = evidence.path().join("after-owner-register");
+    kill_child_at_participant_boundary(
+        backend,
+        locator,
+        &register_scenario,
+        "register",
+        &register_marker,
+    );
+    let (register_host, register_factory) = participant_crash_handles(backend, locator).await;
+    register_factory.bind_effect_host(&register_host);
+    let register_session = SessionId::from(format!("participant-crash-{register_scenario}"));
+    assert_eq!(
+        register_factory
+            .pending_turn_cancel_closure_pins(&register_session)
+            .await
+            .expect("inspect register-crash local pins")
+            .len(),
+        0,
+        "the crash happened before the local authorization committed"
+    );
+    assert!(
+        register_host
+            .retire_effect_journal(
+                EffectJournalRetirement::for_scope(&register_scope).expect("retirable scope")
+            )
+            .await
+            .is_err(),
+        "the committed owner participant survives the register crash"
+    );
+    register_factory
+        .retire_turn_cancel_closure_scope(&register_scope)
+        .await
+        .expect("restart fences the empty catalog scope and releases the orphan participant");
+    register_factory
+        .retire_turn_cancel_closure_scope(&register_scope)
+        .await
+        .expect("orphan participant release is idempotent");
+    register_host
+        .retire_effect_journal(
+            EffectJournalRetirement::for_scope(&register_scope).expect("retirable scope"),
+        )
+        .await
+        .expect("owner scope retires after orphan participant recovery");
+
+    let release_scenario = format!("{backend}-release");
+    let release_scope =
+        ExecutionScope::runtime_operation(format!("participant-crash-{release_scenario}"));
+    let (release_host, release_factory) = participant_crash_handles(backend, locator).await;
+    let (store, lease, authorization) = authorize_participant_crash_closure(
+        &release_host,
+        &release_factory,
+        &release_scenario,
+        &release_scope,
+    )
+    .await;
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize release-crash closure");
+    let authority = lash_core::TurnCancellationAuthority::new(
+        release_host.turn_control_binding_id(),
+        release_host.clone(),
+    );
+    let settlement = authority
+        .settle_authorized_closure(&authorization)
+        .await
+        .expect("settle release-crash closure");
+    store
+        .repair_orphaned_active_turn_inputs(
+            authorization.session_id(),
+            &lease.fence(),
+            authorization.turn_id(),
+            authorization.observed_intent(),
+            Some(&settlement),
+        )
+        .await
+        .expect("consume release-crash authorization")
+        .into_applied()
+        .expect("release-crash repair applies");
+    drop(store);
+    drop(release_factory);
+    drop(release_host);
+
+    let release_marker = evidence.path().join("before-owner-release");
+    kill_child_at_participant_boundary(
+        backend,
+        locator,
+        &release_scenario,
+        "release",
+        &release_marker,
+    );
+    let (release_host, release_factory) = participant_crash_handles(backend, locator).await;
+    release_factory.bind_effect_host(&release_host);
+    assert!(
+        release_host
+            .retire_effect_journal(
+                EffectJournalRetirement::for_scope(&release_scope).expect("retirable scope")
+            )
+            .await
+            .is_err(),
+        "the owner participant remains after local retirement crashes before release"
+    );
+    release_factory
+        .retire_turn_cancel_closure_scope(&release_scope)
+        .await
+        .expect("restart repeats the local fence and releases the retained participant");
+    release_factory
+        .retire_turn_cancel_closure_scope(&release_scope)
+        .await
+        .expect("post-crash participant release is idempotent");
+    release_host
+        .retire_effect_journal(
+            EffectJournalRetirement::for_scope(&release_scope).expect("retirable scope"),
+        )
+        .await
+        .expect("owner retirement succeeds after release recovery");
+    println!(
+        "participant crash cuts passed: backend={backend} after_owner_register=1 before_owner_release=1"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_participant_protocol_survives_register_and_release_process_crashes() {
+    let root = tempfile::tempdir().expect("SQLite participant-crash root");
+    participant_protocol_survives_both_crash_windows(
+        "sqlite",
+        root.path().to_str().expect("UTF-8 SQLite crash path"),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_participant_protocol_survives_register_and_release_process_crashes() {
+    let Some(url) = private_participant_crash_postgres_url("both_boundaries").await else {
+        return;
+    };
+    participant_protocol_survives_both_crash_windows("postgres", &url).await;
+}

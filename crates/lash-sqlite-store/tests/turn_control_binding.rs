@@ -424,3 +424,74 @@ async fn owner_retirement_before_authorization_refuses_the_catalog_without_a_pin
             .is_empty()
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn catalog_participant_identity_survives_precreation_symlink_reopen() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().expect("temporary database directory");
+    let real_root = dir.path().join("real-catalog");
+    std::fs::create_dir_all(&real_root).expect("create real catalog root");
+    let alias_root = dir.path().join("catalog-alias");
+    symlink(&real_root, &alias_root).expect("create catalog root alias");
+    let host = Arc::new(
+        SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
+            .await
+            .expect("open effect owner"),
+    );
+    let effect_host: Arc<dyn EffectHost> = host.clone();
+    let alias_factory = SqliteSessionStoreFactory::new(&alias_root);
+    alias_factory.bind_effect_host(&effect_host);
+    assert!(
+        !alias_factory.catalog_path().exists(),
+        "binding precedes first catalog creation"
+    );
+    let scope = ExecutionScope::runtime_operation("aliased-catalog-owner");
+    let (store, lease, authorization) = authorize_completion_closure(
+        &host,
+        &alias_factory,
+        "aliased-catalog-session",
+        "turn",
+        &scope,
+    )
+    .await;
+    assert!(
+        host.retire_effect_journal(EffectJournalRetirement::for_scope(&scope).unwrap())
+            .await
+            .is_err(),
+        "the aliased pre-creation binding registers its owner participant"
+    );
+
+    let authority = lash_core::TurnCancellationAuthority::new(
+        effect_host.turn_control_binding_id(),
+        effect_host,
+    );
+    let settlement = authority
+        .settle_authorized_closure(&authorization)
+        .await
+        .expect("settle aliased catalog closure");
+    store
+        .repair_orphaned_active_turn_inputs(
+            authorization.session_id(),
+            &lease.fence(),
+            authorization.turn_id(),
+            authorization.observed_intent(),
+            Some(&settlement),
+        )
+        .await
+        .expect("consume aliased catalog pin")
+        .into_applied()
+        .expect("aliased catalog repair applies");
+
+    let reopened = SqliteSessionStoreFactory::new(&real_root);
+    let effect_host: Arc<dyn EffectHost> = host.clone();
+    reopened.bind_effect_host(&effect_host);
+    reopened
+        .retire_turn_cancel_closure_scope(&scope)
+        .await
+        .expect("real-path reopen releases the alias-created participant");
+    host.retire_effect_journal(EffectJournalRetirement::for_scope(&scope).unwrap())
+        .await
+        .expect("no stale alias participant permanently leaks");
+}

@@ -37,8 +37,8 @@ use serde::Serialize;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
     RestateTurnCancelRaceOutcome, restate_await_event_key_for_authority,
-    restate_await_event_key_is_valid, restate_await_event_key_is_valid_for_authority,
-    restate_durable_wait_request, restate_unknown_or_revoked,
+    restate_await_event_key_is_valid_for_authority, restate_durable_wait_request,
+    restate_unknown_or_revoked,
 };
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
@@ -1105,7 +1105,7 @@ where
                 Ok(RuntimeEffectOutcome::Sleep)
             }
             RestateEffectExecution::AwaitEvent { invocation, key } => {
-                if !restate_await_event_key_is_valid(&key) {
+                if !restate_await_event_key_is_valid_for_authority(&self.authority_id, &key) {
                     return Err(RuntimeEffectControllerError::from(
                         restate_unknown_or_revoked(),
                     ));

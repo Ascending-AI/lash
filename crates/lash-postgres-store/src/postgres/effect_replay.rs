@@ -700,16 +700,9 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         // the same transaction so the fence and the deletions land together.
         if let Some(scope) = fenced_scope.as_ref() {
             lock_scope(&mut tx, &key).await.map_err(retirement_error)?;
-            let has_closure_participant: bool = sqlx::query_scalar(
-                "SELECT EXISTS(
-                    SELECT 1 FROM lash_turn_cancel_closure_participants
-                    WHERE scope_id = $1
-                 )",
-            )
-            .bind(&key)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(retirement_error)?;
+            let has_closure_participant = scope_has_turn_cancel_closure_participant(&mut tx, &key)
+                .await
+                .map_err(retirement_error)?;
             if has_closure_participant {
                 tx.rollback().await.map_err(retirement_error)?;
                 return Err(effect_replay_driver::scope_not_quiescent(&key));
@@ -804,6 +797,24 @@ pub(crate) async fn scope_is_quiescent(
     .fetch_one(&mut **tx)
     .await?;
     Ok(!live)
+}
+
+/// Whether any session catalog still owns an authorization lifetime in this
+/// physical promise-owner scope. Callers hold the scope advisory lock and
+/// retain it through any retirement-fence write.
+pub(crate) async fn scope_has_turn_cancel_closure_participant(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    scope_id: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM lash_turn_cancel_closure_participants
+            WHERE scope_id = $1
+         )",
+    )
+    .bind(scope_id)
+    .fetch_one(&mut **tx)
+    .await
 }
 
 /// Scope-exact retirement (N4) of one non-session scope under the caller's

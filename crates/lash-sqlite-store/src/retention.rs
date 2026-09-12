@@ -205,12 +205,19 @@ fn retire_quiescent_operation_scopes(
         if !receipt_recorded {
             continue;
         }
-        if effect_replay::scope_is_quiescent(
+        let closure_pinned = effect_replay::scope_has_turn_cancel_closure_participant(
             tx,
             EFFECT_JOURNAL_SCHEMA,
             identity.key(),
-            &scope_json,
-        )? {
+        )?;
+        if !closure_pinned
+            && effect_replay::scope_is_quiescent(
+                tx,
+                EFFECT_JOURNAL_SCHEMA,
+                identity.key(),
+                &scope_json,
+            )?
+        {
             effect_replay::retire_scope_rows(
                 tx,
                 EFFECT_JOURNAL_SCHEMA,

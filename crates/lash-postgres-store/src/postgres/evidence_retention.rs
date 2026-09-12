@@ -140,7 +140,11 @@ async fn retire_quiescent_operation_scopes(
             continue;
         }
         crate::await_event::lock_scope(tx, identity.key()).await?;
-        if effect_replay::scope_is_quiescent(tx, identity.key(), &scope_json).await? {
+        let closure_pinned =
+            effect_replay::scope_has_turn_cancel_closure_participant(tx, identity.key()).await?;
+        if !closure_pinned
+            && effect_replay::scope_is_quiescent(tx, identity.key(), &scope_json).await?
+        {
             effect_replay::retire_scope_rows_tx(tx, identity.key(), &scope_json).await?;
             retired += 1;
         } else {

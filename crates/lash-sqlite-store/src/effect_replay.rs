@@ -978,11 +978,8 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             let scope_json = scope_json.clone();
             self.conn
                 .write(move |tx| {
-                    let closure_pinned: bool = tx.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM turn_cancel_closure_participants WHERE scope_id = ?1)",
-                        params![scope_id],
-                        |row| row.get(0),
-                    )?;
+                    let closure_pinned =
+                        scope_has_turn_cancel_closure_participant(tx, JOURNAL_SCHEMA, &scope_id)?;
                     if closure_pinned {
                         return Ok(None);
                     }
@@ -1082,6 +1079,26 @@ pub(crate) fn scope_is_quiescent(
         |row| row.get(0),
     )?;
     Ok(!live)
+}
+
+/// Whether any session catalog still owns an authorization lifetime in this
+/// physical promise-owner scope. Callers read this in the same write
+/// transaction that would insert the retirement fence.
+pub(crate) fn scope_has_turn_cancel_closure_participant(
+    tx: &rusqlite::Transaction<'_>,
+    schema: &str,
+    scope_id: &str,
+) -> rusqlite::Result<bool> {
+    tx.query_row(
+        &format!(
+            "SELECT EXISTS(
+                SELECT 1 FROM {schema}.turn_cancel_closure_participants
+                WHERE scope_id = ?1
+             )"
+        ),
+        params![scope_id],
+        |row| row.get(0),
+    )
 }
 
 /// Scope-exact retirement (N4) of one non-session scope whose fence shares
