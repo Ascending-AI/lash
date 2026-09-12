@@ -1458,6 +1458,7 @@ impl RuntimeEffectController for RestateEffectHostController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::durable_wait::restate_await_event_key;
 
     fn service_call_error(status: u16) -> crate::RestateHttpError {
         crate::RestateHttpError::Status {
