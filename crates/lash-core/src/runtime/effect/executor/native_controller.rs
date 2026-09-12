@@ -301,6 +301,10 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
 }
 
 impl NativeRuntimeEffectController {
+    pub(in crate::runtime::effect) fn await_event_registry(&self) -> Arc<AwaitEventRegistry> {
+        Arc::clone(&self.await_events)
+    }
+
     /// Register the resolver that says what code runs a grouped child, once.
     ///
     /// Until this is called the controller answers

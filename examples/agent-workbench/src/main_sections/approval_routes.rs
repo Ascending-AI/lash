@@ -1,8 +1,35 @@
 use super::*;
 use lash::SessionId;
 
-// The approval routes: listing pending tool approvals, and submitting operator
-// approve / deny decisions that resolve parked durable tool completions.
+// Operator durable-wait discovery plus the separate, host-owned approval
+// routes. A wait key is not itself an approval request: approval context stays
+// in the workbench ledger below.
+
+pub(crate) async fn list_session_waits(
+    State(state): State<AppState>,
+    AxumPath(session_id): AxumPath<String>,
+) -> Result<Json<Vec<lash::AwaitEventKey>>, AppError> {
+    let session_id = SessionId::from(session_id);
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::Observe {
+            session_id: session_id.clone(),
+        })?;
+    // Returned keys carry resolution authority. This example reuses its
+    // deployment-wide operator capability; production hosts should map the
+    // same requirement to their own session-aware authorization policy.
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
+    Ok(Json(
+        state
+            .core
+            .completions()
+            .outstanding(&session_id)
+            .await
+            .map_err(AppError::internal)?,
+    ))
+}
 
 pub(crate) async fn list_approvals(
     State(state): State<AppState>,

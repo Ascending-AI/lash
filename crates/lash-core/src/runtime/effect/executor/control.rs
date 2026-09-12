@@ -14,6 +14,7 @@ use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{EffectGroupHandle, GroupSettlement, LoserPolicy, RuntimeEffectGroup};
+use super::await_event_support::await_event_scope_not_retirable;
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
 
 // =============================================================================
@@ -261,16 +262,6 @@ pub struct ExternalCompletionError {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
-}
-
-impl ExternalCompletionError {
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            message: message.into(),
-            raw: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1398,20 +1389,30 @@ pub trait AwaitEventResolver: Send + Sync {
     }
 }
 
-/// Refuse a session-bearing scope on the scope-retirement lever.
-pub fn await_event_scope_not_retirable(scope: &ExecutionScope) -> RuntimeError {
-    RuntimeError::new(
-        crate::RuntimeErrorCode::AwaitEventScopeNotRetirable,
-        format!(
-            "await-event scope retirement covers process and runtime-operation scopes only; scope `{}` belongs to a session and is revoked through session revocation",
-            scope.id()
-        ),
-    )
-}
-
 /// Deployment-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
+    /// List the registered, unresolved await-event keys owned by `session_id`.
+    ///
+    /// This is a deployment-administrative snapshot, not a replay-sensitive
+    /// per-run observation. A key may resolve concurrently after it is
+    /// returned; callers must handle the existing first-writer-wins
+    /// [`ResolveOutcome`] when they act on it. Possession of a returned key is
+    /// resolution authority, so hosts must expose this read only to callers
+    /// authorized to resolve that session's waits.
+    ///
+    /// Hosts that cannot enumerate their registry fail explicitly rather than
+    /// reporting an empty session.
+    async fn list_outstanding_await_event_keys(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        Err(RuntimeError::new(
+            crate::RuntimeErrorCode::AwaitEventUnsupported,
+            "this effect host does not support listing outstanding await-event keys",
+        ))
+    }
+
     /// Project the terminal attachment owned by this same effect deployment.
     /// Durable hosts override this projection; native hosts use keyed promises through the host.
     fn turn_attach(&self) -> Option<Arc<dyn crate::TurnAttach>> {

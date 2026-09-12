@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+mod await_event_support;
 pub(crate) mod control;
 mod controller_error;
 mod native_controller;
@@ -19,6 +20,7 @@ mod scoped;
 mod task_panic;
 mod trigger;
 
+pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
@@ -27,7 +29,6 @@ pub use control::{
     ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
     ToolIntentSubmissionGuard, TurnControlBinding, TurnControlParticipation,
-    await_event_scope_not_retirable,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,

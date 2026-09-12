@@ -6,6 +6,9 @@ use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
 
+mod outstanding_waits;
+pub(super) use outstanding_waits::effect_host_lists_registered_unresolved_waits;
+
 /// One scope selected by an [`EffectHost`] and one effect envelope executed
 /// through the scoped controller.
 #[derive(Clone, Debug)]
@@ -205,6 +208,8 @@ where
     witness(make()).await;
     effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
+    let host = make();
+    effect_host_lists_registered_unresolved_waits(Arc::clone(&host), Arc::clone(&host), host).await;
     effect_host_await_event_rejects_tampered_keys(make()).await;
 }
 
