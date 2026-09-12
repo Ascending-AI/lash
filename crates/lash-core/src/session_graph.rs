@@ -1280,6 +1280,10 @@ impl SessionGraph {
         &mut self,
         append: &crate::store::GraphAppend,
     ) -> Result<(), crate::StoreError> {
+        for node in self.nodes.iter().chain(&append.nodes) {
+            crate::session_graph_integrity::validate_node_id(&node.node_id)?;
+        }
+
         let mut occupied_ids = HashSet::with_capacity(self.nodes.len() + append.nodes.len());
         for node in &self.nodes {
             if !occupied_ids.insert(node.node_id.as_str()) {

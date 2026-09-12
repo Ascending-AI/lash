@@ -101,7 +101,7 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
     )]);
     let resident_leaf = graph.leaf_node_id.clone().expect("resident leaf");
     let before_graph = serde_json::to_value(&graph).expect("serialize graph preimage");
-    let before_read = graph.read_model();
+    let before_read = graph.read_model(None).expect("read resident graph");
     let node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
         node_id: node_id.to_string(),
         parent_node_id: Some(parent_node_id.to_string()),
@@ -111,6 +111,15 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
             body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
         },
     };
+
+    let empty_node_id = GraphAppend {
+        nodes: vec![node("", &resident_leaf)],
+        leaf_node_id: Some(String::new()),
+    };
+    assert!(matches!(
+        graph.apply_append(&empty_node_id),
+        Err(crate::StoreError::InvalidGraphNodeId { node_id }) if node_id.is_empty()
+    ));
 
     let duplicate = GraphAppend {
         nodes: vec![node(&resident_leaf, &resident_leaf)],
@@ -150,7 +159,7 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
         serde_json::to_value(&graph).expect("serialize graph after refusals"),
         before_graph
     );
-    let after_read = graph.read_model();
+    let after_read = graph.read_model(None).expect("read graph after refusals");
     assert!(std::sync::Arc::ptr_eq(
         &before_read.active_events,
         &after_read.active_events
