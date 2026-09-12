@@ -286,9 +286,7 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePers
     );
 }
 
-pub(super) async fn commit_rejects_leaf_without_frame_open_ancestor(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("missing-frame-root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -329,7 +327,7 @@ pub(super) async fn commit_rejects_leaf_without_frame_open_ancestor(
     ));
 }
 
-pub(super) async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
+pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "turn-input-application";
@@ -426,7 +424,7 @@ pub(super) async fn turn_input_application_identity_survives_pending_tombstone_v
     );
 }
 
-pub(super) async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersistence>) {
+pub async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersistence>) {
     let session_id = "checkpoint-work";
     let turn_id = crate::TurnId::from("checkpoint-turn");
     let owner = lease_owner("checkpoint-owner");
@@ -503,7 +501,7 @@ pub(super) async fn checkpoint_work_claims_both_families_once(store: Arc<dyn Run
 /// (`claim_active_turn_inputs`): `BeforeCompletion` ingress is withheld at
 /// `AfterWork` and admitted at `BeforeCompletion`; `AfterWork` ingress is
 /// admitted at both (FIG-1524).
-pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
+pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "checkpoint-min-boundary";
@@ -668,7 +666,7 @@ pub(super) async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 /// A checkpoint claim spans pending inputs and queued work atomically. If the
 /// queued head cannot fit the context window, the active-turn input must remain
 /// pending and visible rather than being left accepted under a discarded claim.
-pub(super) async fn checkpoint_budget_refusal_preserves_active_turn_input(
+pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "checkpoint-budget-atomicity";

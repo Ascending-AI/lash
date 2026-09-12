@@ -1,7 +1,7 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-pub(super) async fn commit_increments_head_and_round_trips_agent_frames(
+pub async fn commit_increments_head_and_round_trips_agent_frames(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let mut state = RuntimeSessionState {
@@ -72,9 +72,7 @@ pub(super) async fn commit_increments_head_and_round_trips_agent_frames(
     );
 }
 
-pub(super) async fn concurrent_head_revision_cas_applies_exactly_once(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
     let session_id = "concurrent-head-cas";
     let lease =
         claim_session_execution_lease_for_test(&store, &SessionId::from(session_id), "cas-owner")
@@ -160,7 +158,7 @@ pub(super) async fn concurrent_head_revision_cas_applies_exactly_once(
     release_session_execution_lease_for_test(&store, &lease).await;
 }
 
-pub(super) async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence>) {
     let alpha = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -188,7 +186,7 @@ pub(super) async fn commit_rejects_a_different_session_id(store: Arc<dyn Runtime
     );
 }
 
-pub(super) async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
+pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("hydrated"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -235,7 +233,7 @@ pub(super) async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePer
     assert_eq!(read.token_ledger[0].usage.input_tokens, 11);
 }
 
-pub(super) async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
+pub async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     let fresh_retry_owner = lease_owner("fresh-retry-owner");
     let fresh_retry_nonce = crate::LeaseClaimNonce::new();
     let fresh_retry = store
@@ -801,7 +799,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
     release_session_execution_lease_for_test(&store, &rotated).await;
 }
 
-pub(super) async fn same_incarnation_rotation_gates_claims_not_commits(
+pub async fn same_incarnation_rotation_gates_claims_not_commits(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let mut state = RuntimeSessionState {
@@ -1016,7 +1014,7 @@ pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
 /// same per-session advisory lock. Either linearization is legal, but a renewal
 /// that runs after rotation must return the named refusal rather than fabricate
 /// success for the stale token.
-pub(super) async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(
+pub async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "concurrent-rotation-renewal";
@@ -1089,7 +1087,7 @@ pub(super) async fn concurrent_session_execution_lease_rotation_and_stale_renewa
     release_session_execution_lease_for_test(&store, &successor).await;
 }
 
-pub(super) async fn session_execution_lease_expires_by_ttl_contract<F>(
+pub async fn session_execution_lease_expires_by_ttl_contract<F>(
     make: &F,
     lease_timing: &RuntimePersistenceLeaseTiming,
 ) where
@@ -1301,9 +1299,7 @@ pub(super) async fn claim_turn_input_under_short_lease(
 /// reports the exact holder facts, a lapsed row is still reported (expiry is not
 /// filtered), and a takeover is visible as a strictly higher generation under a
 /// different holder.
-pub(super) async fn session_execution_lease_diagnostic_read_contract(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn RuntimePersistence>) {
     assert!(
         store
             .get_session_execution_lease(&SessionId::from("lease-diagnostics-unknown"))
@@ -1671,14 +1667,12 @@ pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersiste
 /// it binds every implementation of the fencing trait, doubles included. There is
 /// nothing extra a durable backend owes here: the displacement report and the
 /// `previous + 1` generation law are both trait-level obligations.
-pub(super) async fn session_execution_lease_displacement_contract(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn session_execution_lease_displacement_contract(store: Arc<dyn RuntimePersistence>) {
     session_execution_lease_displacement(store.as_ref(), &SessionId::from("lease-displacement"))
         .await;
 }
 
-pub(super) async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
+pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
     let root = sample_session_node(&SessionId::from("branchy"), "root-node", None);
     let root_node_id = root.node_id.clone();
     let graph = crate::SessionGraph::from_nodes(

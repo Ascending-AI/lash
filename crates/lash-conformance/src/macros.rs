@@ -1,420 +1,280 @@
-//! Named backend test registration. Every invocation gets a fresh fixture.
+//! Named backend test registration. Every generated test owns a fresh fixture.
 
-/// Register one independently reported test per runtime persistence vector.
+/// Expansion machinery for the runtime-persistence registration macros.
+#[doc(hidden)]
 #[macro_export]
-macro_rules! runtime_persistence_tests {
-    ($runner:ident) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_increments_head_and_round_trips_agent_frames() { $runner($crate::RuntimePersistenceLaw::commit_increments_head_and_round_trips_agent_frames).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_head_revision_cas_applies_exactly_once() { $runner($crate::RuntimePersistenceLaw::concurrent_head_revision_cas_applies_exactly_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_a_different_session_id() { $runner($crate::RuntimePersistenceLaw::commit_rejects_a_different_session_id).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_carried_nondefault_node_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_carried_nondefault_node_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_carried_nondefault_byte_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_carried_nondefault_byte_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_queue_batch_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_queue_batch_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_agent_frame_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_agent_frame_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_usage_delta_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_usage_delta_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_turn_result_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_turn_result_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_with_every_payload_family_inside_budget_succeeds() { $runner($crate::RuntimePersistenceLaw::commit_with_every_payload_family_inside_budget_succeeds).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn plugin_state_boundary() { $runner($crate::RuntimePersistenceLaw::plugin_state_boundary).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_hydrates_checkpoint_and_usage() { $runner($crate::RuntimePersistenceLaw::load_hydrates_checkpoint_and_usage).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_retains_reasoning_only_usage() { $runner($crate::RuntimePersistenceLaw::load_retains_reasoning_only_usage).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts() { $runner($crate::RuntimePersistenceLaw::load_retains_usage_dispositions_and_rebuilds_outstanding_attempts).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_restore_rejects_turn_index_without_increment_headroom() { $runner($crate::RuntimePersistenceLaw::checkpoint_restore_rejects_turn_index_without_increment_headroom).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows() { $runner($crate::RuntimePersistenceLaw::checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_rejects_token_usage_overflow() { $runner($crate::RuntimePersistenceLaw::load_rejects_token_usage_overflow).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn usage_delta_identity_is_idempotent_across_commits() { $runner($crate::RuntimePersistenceLaw::usage_delta_identity_is_idempotent_across_commits).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay() { $runner($crate::RuntimePersistenceLaw::usage_ordinal_reuse_with_different_payload_survives_receipt_replay).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref() { $runner($crate::RuntimePersistenceLaw::execution_state_replace_then_clear_removes_the_live_checkpoint_ref).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_rejects_unknown_component_ref() { $runner($crate::RuntimePersistenceLaw::checkpoint_rejects_unknown_component_ref).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_read_loads_persisted_history() { $runner($crate::RuntimePersistenceLaw::session_read_loads_persisted_history).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_prompt_layer_round_trips_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_prompt_layer_round_trips_through_the_committed_head).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_protocol_turn_options_round_trip_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_protocol_turn_options_round_trip_through_the_committed_head).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_metadata_round_trips() { $runner($crate::RuntimePersistenceLaw::session_metadata_round_trips).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn attachment_manifest_records_intent_and_commit_stamps() { $runner($crate::RuntimePersistenceLaw::attachment_manifest_records_intent_and_commit_stamps).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn attachment_manifest_keeps_same_content_ownership_per_session() { $runner($crate::RuntimePersistenceLaw::attachment_manifest_keeps_same_content_ownership_per_session).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn attachment_manifest_reference_tracking_and_gc_root_set() { $runner($crate::RuntimePersistenceLaw::attachment_manifest_reference_tracking_and_gc_root_set).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash() { $runner($crate::RuntimePersistenceLaw::final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_receipt_replays_after_head_advance() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_replays_after_head_advance).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_receipt_rejects_changed_content() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_rejects_changed_content).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_exact_hash_rejects_changed_ancestor() { $runner($crate::RuntimePersistenceLaw::append_request_exact_hash_rejects_changed_ancestor).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_receipt_rejects_corrupt_node_count() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_rejects_corrupt_node_count).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn semantic_boundary_receipt_replays_after_head_advance() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_replays_after_head_advance).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn semantic_boundary_receipt_rejects_changed_content() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_changed_content).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn semantic_boundary_receipt_rejects_mislabeled_identity() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_mislabeled_identity).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_same_append_operation_applies_exactly_once() { $runner($crate::RuntimePersistenceLaw::concurrent_same_append_operation_applies_exactly_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn legacy_append_receipt_keeps_exact_hash_semantics() { $runner($crate::RuntimePersistenceLaw::legacy_append_receipt_keeps_exact_hash_semantics).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics() { $runner($crate::RuntimePersistenceLaw::append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_receipt_and_graph_append_are_atomic() { $runner($crate::RuntimePersistenceLaw::append_receipt_and_graph_append_are_atomic).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn fresh_append_receipt_enforces_ancestor_precondition() { $runner($crate::RuntimePersistenceLaw::fresh_append_receipt_enforces_ancestor_precondition).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn store_computed_hash_rejects_mutated_commit() { $runner($crate::RuntimePersistenceLaw::store_computed_hash_rejects_mutated_commit).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_non_derived_append_node_ids() { $runner($crate::RuntimePersistenceLaw::commit_rejects_non_derived_append_node_ids).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_rejects_duplicate_batch_node_ids() { $runner($crate::RuntimePersistenceLaw::append_rejects_duplicate_batch_node_ids).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_rejects_existing_node_id_collision() { $runner($crate::RuntimePersistenceLaw::append_rejects_existing_node_id_collision).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf() { $runner($crate::RuntimePersistenceLaw::head_retirement_gate_distinguishes_leaf_change_from_same_leaf).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_unresolvable_leaf() { $runner($crate::RuntimePersistenceLaw::commit_rejects_unresolvable_leaf).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_missing_leaf() { $runner($crate::RuntimePersistenceLaw::commit_rejects_missing_leaf).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn empty_append_cannot_move_the_head() { $runner($crate::RuntimePersistenceLaw::empty_append_cannot_move_the_head).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_leaf_without_frame_open_ancestor() { $runner($crate::RuntimePersistenceLaw::commit_rejects_leaf_without_frame_open_ancestor).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn borrowed_session_execution_lease_commit_contract() { $runner($crate::RuntimePersistenceLaw::borrowed_session_execution_lease_commit_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn same_incarnation_rotation_gates_claims_not_commits() { $runner($crate::RuntimePersistenceLaw::same_incarnation_rotation_gates_claims_not_commits).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn same_host_distinct_executors_are_lane_less_without_revoking_holder() { $runner($crate::RuntimePersistenceLaw::same_host_distinct_executors_are_lane_less_without_revoking_holder).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_fence_authority() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_fence_authority).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable() { $runner($crate::RuntimePersistenceLaw::concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_expires_by_ttl_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_expires_by_ttl_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn durable_queued_drain_wait_store_laws() { $runner($crate::RuntimePersistenceLaw::durable_queued_drain_wait_store_laws).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_diagnostic_read_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_diagnostic_read_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_displacement_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_displacement_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_source_keys_are_idempotent_and_list_ordered() { $runner($crate::RuntimePersistenceLaw::queued_work_source_keys_are_idempotent_and_list_ordered).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing() { $runner($crate::RuntimePersistenceLaw::concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn decorated_queued_work_source_key_replay_reports_absorbed() { $runner($crate::RuntimePersistenceLaw::decorated_queued_work_source_key_replay_reports_absorbed).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_session_work_ordering_agrees_across_ingress_families() { $runner($crate::RuntimePersistenceLaw::pending_session_work_ordering_agrees_across_ingress_families).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_queue_and_turn_input_claims_have_one_owner() { $runner($crate::RuntimePersistenceLaw::concurrent_queue_and_turn_input_claims_have_one_owner).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_work_claims_both_families_once() { $runner($crate::RuntimePersistenceLaw::checkpoint_work_claims_both_families_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_budget_refusal_preserves_active_turn_input() { $runner($crate::RuntimePersistenceLaw::checkpoint_budget_refusal_preserves_active_turn_input).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint() { $runner($crate::RuntimePersistenceLaw::checkpoint_claims_honor_min_boundary_at_every_checkpoint).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_cancel_removes_only_unclaimed_batches() { $runner($crate::RuntimePersistenceLaw::queued_work_cancel_removes_only_unclaimed_batches).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_exact_claim_uses_selected_batch_ids() { $runner($crate::RuntimePersistenceLaw::queued_work_exact_claim_uses_selected_batch_ids).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_classes_gate_command_and_turn_claims() { $runner($crate::RuntimePersistenceLaw::queued_work_classes_gate_command_and_turn_claims).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion() { $runner($crate::RuntimePersistenceLaw::queued_work_claims_respect_boundaries_abandon_and_stale_completion).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_claims_supersede_across_session_lease_generations_with_timing() { $runner($crate::RuntimePersistenceLaw::queued_work_claims_supersede_across_session_lease_generations_with_timing).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn claim_liveness_for_lease_less_paths_tracks_session_generations() { $runner($crate::RuntimePersistenceLaw::claim_liveness_for_lease_less_paths_tracks_session_generations).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus() { $runner($crate::RuntimePersistenceLaw::same_generation_claim_scans_reach_rows_beyond_the_scan_surplus).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions() { $runner($crate::RuntimePersistenceLaw::queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_join_groups_by_delivery_policy_and_merge_key() { $runner($crate::RuntimePersistenceLaw::queued_work_join_groups_by_delivery_policy_and_merge_key).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations() { $runner($crate::RuntimePersistenceLaw::abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_preserves_interrupted_batch_composition() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_preserves_interrupted_batch_composition).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one() { $runner($crate::RuntimePersistenceLaw::queued_work_names_a_deferred_lane_apart_from_an_exhausted_one).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_selects_claim_identity_across_ready_gap() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_selects_claim_identity_across_ready_gap).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_obeys_delivery_boundary_before_identity() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_obeys_delivery_boundary_before_identity).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_ignores_successor_row_limit() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_ignores_successor_row_limit).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_ignores_a_changed_drain_policy() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_ignores_a_changed_drain_policy).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_selected_multi_identity_validation_and_abandon_restore() { $runner($crate::RuntimePersistenceLaw::queued_work_selected_multi_identity_validation_and_abandon_restore).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks() { $runner($crate::RuntimePersistenceLaw::queued_work_exact_claim_preserves_physical_order_and_key_breaks).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn process_wakes_batch_by_default() { $runner($crate::RuntimePersistenceLaw::process_wakes_batch_by_default).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_completion_is_lease_guarded() { $runner($crate::RuntimePersistenceLaw::queued_work_completion_is_lease_guarded).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once() { $runner($crate::RuntimePersistenceLaw::queued_wake_delivery_is_source_key_idempotent_and_claimed_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queue_completion_and_turn_commit_stamp_are_atomic() { $runner($crate::RuntimePersistenceLaw::queue_completion_and_turn_commit_stamp_are_atomic).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session() { $runner($crate::RuntimePersistenceLaw::pending_turn_inputs_source_keys_order_cancel_and_cross_session).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_input_bulk_and_suffix_cancellation() { $runner($crate::RuntimePersistenceLaw::pending_turn_input_bulk_and_suffix_cancellation).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_input_claims_reclaim_complete_and_fence() { $runner($crate::RuntimePersistenceLaw::pending_turn_input_claims_reclaim_complete_and_fence).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn turn_input_application_identity_survives_pending_tombstone_vacuum() { $runner($crate::RuntimePersistenceLaw::turn_input_application_identity_survives_pending_tombstone_vacuum).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn turn_input_claims_supersede_across_session_lease_generations_with_timing() { $runner($crate::RuntimePersistenceLaw::turn_input_claims_supersede_across_session_lease_generations_with_timing).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint() { $runner($crate::RuntimePersistenceLaw::active_turn_input_claim_reacquires_after_unrecorded_checkpoint).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_input_cancel_covers_active_and_deferred_states() { $runner($crate::RuntimePersistenceLaw::pending_turn_input_cancel_covers_active_and_deferred_states).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt() { $runner($crate::RuntimePersistenceLaw::pending_active_turn_inputs_defer_unaccepted_once_on_interrupt).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it() { $runner($crate::RuntimePersistenceLaw::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn fresh_instances() { $runner($crate::RuntimePersistenceLaw::fresh_instances).await; }
+macro_rules! __runtime_persistence_register {
+    (plain $fixture:block;
+        stores [$(( $store_law:ident, $store_label:literal )),* $(,)?]
+        store_refs [$(( $store_ref_law:ident, $store_ref_label:literal )),* $(,)?]
+        factories [$(( $factory_law:ident, $factory_label:literal )),* $(,)?]
+        timed_stores [$(( $timed_law:ident, $timed_label:literal )),* $(,)?]
+        timed_factories [$(( $timed_factory_law:ident, $timed_factory_label:literal )),* $(,)?]
+        plain_factories [$(( $plain_factory_law:ident, $plain_factory_label:literal )),* $(,)?]
+    ) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $store_law() {
+                let (make, _lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$store_law(make($store_label)).await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $store_ref_law() {
+                let (make, _lease_timing) = $fixture;
+                let store = make($store_ref_label);
+                $crate::runtime_persistence_macro_support::$store_ref_law(store.as_ref()).await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $factory_law() {
+                let (make, _lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$factory_law(make, $factory_label)
+                    .await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $timed_law() {
+                let (make, lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$timed_law(
+                    make($timed_label),
+                    &lease_timing,
+                )
+                .await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $timed_factory_law() {
+                let (make, lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$timed_factory_law(
+                    &|| make($timed_factory_label),
+                    &lease_timing,
+                )
+                .await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $plain_factory_law() {
+                let (make, _lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$plain_factory_law(
+                    make,
+                    $plain_factory_label,
+                )
+                .await;
+            }
+        )*
+    };
+    (reopenable $fixture:block;
+        stores [$(( $store_law:ident, $store_label:literal )),* $(,)?]
+        store_refs [$(( $store_ref_law:ident, $store_ref_label:literal )),* $(,)?]
+        factories [$(( $factory_law:ident, $factory_label:literal )),* $(,)?]
+        timed_stores [$(( $timed_law:ident, $timed_label:literal )),* $(,)?]
+        timed_factories [$(( $timed_factory_law:ident, $timed_factory_label:literal )),* $(,)?]
+        plain_factories [$(( $plain_factory_law:ident, $plain_factory_label:literal )),* $(,)?]
+    ) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $store_law() {
+                let (make, _lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$store_law(make($store_label).open)
+                    .await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $store_ref_law() {
+                let (make, _lease_timing) = $fixture;
+                let store = make($store_ref_label).open;
+                $crate::runtime_persistence_macro_support::$store_ref_law(store.as_ref()).await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $factory_law() {
+                let (make, _lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$factory_law(
+                    |label| make(label).open,
+                    $factory_label,
+                )
+                .await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $timed_law() {
+                let (make, lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$timed_law(
+                    make($timed_label).open,
+                    &lease_timing,
+                )
+                .await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $timed_factory_law() {
+                let (make, lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$timed_factory_law(
+                    &|| make($timed_factory_label).open,
+                    &lease_timing,
+                )
+                .await;
+            }
+        )*
     };
 }
-/// Register one independently reported test per runtime persistence vector.
+
+/// Register one independently reported test per plain runtime-persistence law.
+#[macro_export]
+macro_rules! runtime_persistence_tests {
+    ($fixture:block) => {
+        $crate::runtime_persistence_tests!(@catalogue plain $fixture);
+    };
+    (@catalogue $mode:ident $fixture:block) => {
+        $crate::__runtime_persistence_register! {
+            $mode $fixture;
+            stores [
+            (commit_increments_head_and_round_trips_agent_frames, "root"),
+            (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
+            (commit_rejects_a_different_session_id, "alpha"),
+            (commit_rejects_carried_nondefault_node_budget, "root"),
+            (commit_rejects_carried_nondefault_byte_budget, "root"),
+            (commit_rejects_queue_batch_bytes_over_budget, "root"),
+            (commit_rejects_agent_frame_bytes_over_budget, "root"),
+            (commit_rejects_usage_delta_bytes_over_budget, "root"),
+            (commit_rejects_turn_result_bytes_over_budget, "root"),
+            (commit_with_every_payload_family_inside_budget_succeeds, "root"),
+            (load_hydrates_checkpoint_and_usage, "hydrated"),
+            (load_retains_reasoning_only_usage, "root"),
+            (load_retains_usage_dispositions_and_rebuilds_outstanding_attempts, "root"),
+            (checkpoint_restore_rejects_turn_index_without_increment_headroom, "root"),
+            (checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows, "root"),
+            (load_rejects_token_usage_overflow, "root"),
+            (usage_delta_identity_is_idempotent_across_commits, "root"),
+            (usage_ordinal_reuse_with_different_payload_survives_receipt_replay, "root"),
+            (execution_state_replace_then_clear_removes_the_live_checkpoint_ref, "execution-state-replace-then-clear"),
+            (checkpoint_rejects_unknown_component_ref, "checkpoint-unknown-ref"),
+            (session_read_loads_persisted_history, "branchy"),
+            (session_prompt_layer_round_trips_through_the_committed_head, "session-prompt-layer"),
+            (session_protocol_turn_options_round_trip_through_the_committed_head, "session-protocol-turn-options"),
+            (session_metadata_round_trips, "root"),
+            (attachment_manifest_records_intent_and_commit_stamps, "root"),
+            (attachment_manifest_keeps_same_content_ownership_per_session, "root"),
+            (attachment_manifest_reference_tracking_and_gc_root_set, "root"),
+            (final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash, "root"),
+            (append_request_receipt_replays_after_head_advance, "root"),
+            (append_request_receipt_rejects_changed_content, "root"),
+            (append_request_exact_hash_rejects_changed_ancestor, "root"),
+            (append_request_receipt_rejects_corrupt_node_count, "root"),
+            (semantic_boundary_receipt_replays_after_head_advance, "root"),
+            (semantic_boundary_receipt_rejects_changed_content, "root"),
+            (semantic_boundary_receipt_rejects_mislabeled_identity, "root"),
+            (concurrent_same_append_operation_applies_exactly_once, "root"),
+            (legacy_append_receipt_keeps_exact_hash_semantics, "root"),
+            (append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics, "root"),
+            (append_receipt_and_graph_append_are_atomic, "root"),
+            (fresh_append_receipt_enforces_ancestor_precondition, "root"),
+            (store_computed_hash_rejects_mutated_commit, "root"),
+            (commit_rejects_non_derived_append_node_ids, "root"),
+            (append_rejects_duplicate_batch_node_ids, "root"),
+            (append_rejects_existing_node_id_collision, "root"),
+            (head_retirement_gate_distinguishes_leaf_change_from_same_leaf, "root"),
+            (commit_rejects_unresolvable_leaf, "root"),
+            (commit_rejects_missing_leaf, "root"),
+            (empty_append_cannot_move_the_head, "empty-append-head-move"),
+            (commit_rejects_leaf_without_frame_open_ancestor, "missing-frame-root"),
+            (session_execution_lease_contract, "root"),
+            (borrowed_session_execution_lease_commit_contract, "borrowed-commit-fence"),
+            (same_incarnation_rotation_gates_claims_not_commits, "root"),
+            (same_host_distinct_executors_are_lane_less_without_revoking_holder, "fig1133-same-host-session"),
+            (concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable, "concurrent-rotation-renewal"),
+            (session_execution_lease_diagnostic_read_contract, "lease-diagnostic"),
+            (session_execution_lease_displacement_contract, "lease-displacement"),
+            (queued_work_source_keys_are_idempotent_and_list_ordered, "queued-work-source-keys"),
+            (concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing, "concurrent-queued-work-source-key"),
+            (decorated_queued_work_source_key_replay_reports_absorbed, "decorated-queued-work-source-key"),
+            (pending_session_work_ordering_agrees_across_ingress_families, "pending-work-ordering"),
+            (concurrent_queue_and_turn_input_claims_have_one_owner, "concurrent-queue-input"),
+            (checkpoint_work_claims_both_families_once, "checkpoint-work"),
+            (checkpoint_budget_refusal_preserves_active_turn_input, "checkpoint-budget-refusal"),
+            (checkpoint_claims_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),
+            (queued_work_cancel_removes_only_unclaimed_batches, "queued-work-cancel"),
+            (queued_work_exact_claim_uses_selected_batch_ids, "root"),
+            (queued_work_classes_gate_command_and_turn_claims, "root"),
+            (queued_work_claims_respect_boundaries_abandon_and_stale_completion, "root"),
+            (same_generation_claim_scans_reach_rows_beyond_the_scan_surplus, "claim-scan"),
+            (queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions, "queued-membership"),
+            (queued_work_join_groups_by_delivery_policy_and_merge_key, "queued-join"),
+            (abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations, "abandoned-predecessor-generation"),
+            (queued_work_redrive_preserves_interrupted_batch_composition, "redrive-composition"),
+            (queued_work_redrive_obeys_delivery_boundary_before_identity, "redrive-boundary"),
+            (queued_work_redrive_ignores_successor_row_limit, "redrive-row-limit"),
+            (queued_work_redrive_ignores_a_changed_drain_policy, "redrive-drain-policy"),
+            (queued_work_selected_multi_identity_validation_and_abandon_restore, "selected-multi-identity"),
+            (queued_work_exact_claim_preserves_physical_order_and_key_breaks, "physical-order"),
+            (process_wakes_batch_by_default, "wake-default-batch"),
+            (queued_work_completion_is_lease_guarded, "root"),
+            (queued_wake_delivery_is_source_key_idempotent_and_claimed_once, "root"),
+            (queue_completion_and_turn_commit_stamp_are_atomic, "root"),
+            (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
+            (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
+            (pending_turn_input_claims_reclaim_complete_and_fence, "root"),
+            (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),
+            (active_turn_input_claim_reacquires_after_unrecorded_checkpoint, "fig905-active-reacquire"),
+            (pending_turn_input_cancel_covers_active_and_deferred_states, "root"),
+            (pending_active_turn_inputs_defer_unaccepted_once_on_interrupt, "root"),
+            (a_turn_that_cannot_commit_leaves_no_input_pinned_to_it, "root"),
+            ]
+            store_refs [
+            (session_execution_lease_fence_authority, "lease-fence-authority"),
+            ]
+            factories [
+            (plugin_state_boundary, "plugin-state"),
+            ]
+            timed_stores [
+            (durable_queued_drain_wait_store_laws, "durable-queued-drain"),
+            (queued_work_claims_supersede_across_session_lease_generations_with_timing, "root"),
+            (claim_liveness_for_lease_less_paths_tracks_session_generations, "claim-liveness"),
+            (queued_work_names_a_deferred_lane_apart_from_an_exhausted_one, "deferred-versus-exhausted"),
+            (queued_work_redrive_selects_claim_identity_across_ready_gap, "redrive-ready-gap"),
+            (turn_input_claims_supersede_across_session_lease_generations_with_timing, "root"),
+            ]
+            timed_factories [
+            (session_execution_lease_expires_by_ttl_contract, "ttl-expiry"),
+            ]
+            plain_factories [
+            (fresh_instances, "fresh-instance-probe"),
+            ]
+        }
+    };
+}
+
+/// Register the shared runtime-persistence laws plus durable reopen laws.
 #[macro_export]
 macro_rules! runtime_persistence_reopenable_tests {
-    ($runner:ident) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_increments_head_and_round_trips_agent_frames() { $runner($crate::RuntimePersistenceLaw::commit_increments_head_and_round_trips_agent_frames).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_head_revision_cas_applies_exactly_once() { $runner($crate::RuntimePersistenceLaw::concurrent_head_revision_cas_applies_exactly_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_a_different_session_id() { $runner($crate::RuntimePersistenceLaw::commit_rejects_a_different_session_id).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_carried_nondefault_node_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_carried_nondefault_node_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_carried_nondefault_byte_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_carried_nondefault_byte_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_queue_batch_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_queue_batch_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_agent_frame_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_agent_frame_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_usage_delta_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_usage_delta_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_turn_result_bytes_over_budget() { $runner($crate::RuntimePersistenceLaw::commit_rejects_turn_result_bytes_over_budget).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_with_every_payload_family_inside_budget_succeeds() { $runner($crate::RuntimePersistenceLaw::commit_with_every_payload_family_inside_budget_succeeds).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn plugin_state_boundary() { $runner($crate::RuntimePersistenceLaw::plugin_state_boundary).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_hydrates_checkpoint_and_usage() { $runner($crate::RuntimePersistenceLaw::load_hydrates_checkpoint_and_usage).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_retains_reasoning_only_usage() { $runner($crate::RuntimePersistenceLaw::load_retains_reasoning_only_usage).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts() { $runner($crate::RuntimePersistenceLaw::load_retains_usage_dispositions_and_rebuilds_outstanding_attempts).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_restore_rejects_turn_index_without_increment_headroom() { $runner($crate::RuntimePersistenceLaw::checkpoint_restore_rejects_turn_index_without_increment_headroom).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows() { $runner($crate::RuntimePersistenceLaw::checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn load_rejects_token_usage_overflow() { $runner($crate::RuntimePersistenceLaw::load_rejects_token_usage_overflow).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn usage_delta_identity_is_idempotent_across_commits() { $runner($crate::RuntimePersistenceLaw::usage_delta_identity_is_idempotent_across_commits).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay() { $runner($crate::RuntimePersistenceLaw::usage_ordinal_reuse_with_different_payload_survives_receipt_replay).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref() { $runner($crate::RuntimePersistenceLaw::execution_state_replace_then_clear_removes_the_live_checkpoint_ref).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_rejects_unknown_component_ref() { $runner($crate::RuntimePersistenceLaw::checkpoint_rejects_unknown_component_ref).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_read_loads_persisted_history() { $runner($crate::RuntimePersistenceLaw::session_read_loads_persisted_history).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_prompt_layer_round_trips_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_prompt_layer_round_trips_through_the_committed_head).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_protocol_turn_options_round_trip_through_the_committed_head() { $runner($crate::RuntimePersistenceLaw::session_protocol_turn_options_round_trip_through_the_committed_head).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_metadata_round_trips() { $runner($crate::RuntimePersistenceLaw::session_metadata_round_trips).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn attachment_manifest_records_intent_and_commit_stamps() { $runner($crate::RuntimePersistenceLaw::attachment_manifest_records_intent_and_commit_stamps).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn attachment_manifest_keeps_same_content_ownership_per_session() { $runner($crate::RuntimePersistenceLaw::attachment_manifest_keeps_same_content_ownership_per_session).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn attachment_manifest_reference_tracking_and_gc_root_set() { $runner($crate::RuntimePersistenceLaw::attachment_manifest_reference_tracking_and_gc_root_set).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash() { $runner($crate::RuntimePersistenceLaw::final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_receipt_replays_after_head_advance() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_replays_after_head_advance).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_receipt_rejects_changed_content() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_rejects_changed_content).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_exact_hash_rejects_changed_ancestor() { $runner($crate::RuntimePersistenceLaw::append_request_exact_hash_rejects_changed_ancestor).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_request_receipt_rejects_corrupt_node_count() { $runner($crate::RuntimePersistenceLaw::append_request_receipt_rejects_corrupt_node_count).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn semantic_boundary_receipt_replays_after_head_advance() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_replays_after_head_advance).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn semantic_boundary_receipt_rejects_changed_content() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_changed_content).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn semantic_boundary_receipt_rejects_mislabeled_identity() { $runner($crate::RuntimePersistenceLaw::semantic_boundary_receipt_rejects_mislabeled_identity).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_same_append_operation_applies_exactly_once() { $runner($crate::RuntimePersistenceLaw::concurrent_same_append_operation_applies_exactly_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn legacy_append_receipt_keeps_exact_hash_semantics() { $runner($crate::RuntimePersistenceLaw::legacy_append_receipt_keeps_exact_hash_semantics).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics() { $runner($crate::RuntimePersistenceLaw::append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_receipt_and_graph_append_are_atomic() { $runner($crate::RuntimePersistenceLaw::append_receipt_and_graph_append_are_atomic).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn fresh_append_receipt_enforces_ancestor_precondition() { $runner($crate::RuntimePersistenceLaw::fresh_append_receipt_enforces_ancestor_precondition).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn store_computed_hash_rejects_mutated_commit() { $runner($crate::RuntimePersistenceLaw::store_computed_hash_rejects_mutated_commit).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_non_derived_append_node_ids() { $runner($crate::RuntimePersistenceLaw::commit_rejects_non_derived_append_node_ids).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_rejects_duplicate_batch_node_ids() { $runner($crate::RuntimePersistenceLaw::append_rejects_duplicate_batch_node_ids).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_rejects_existing_node_id_collision() { $runner($crate::RuntimePersistenceLaw::append_rejects_existing_node_id_collision).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf() { $runner($crate::RuntimePersistenceLaw::head_retirement_gate_distinguishes_leaf_change_from_same_leaf).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_unresolvable_leaf() { $runner($crate::RuntimePersistenceLaw::commit_rejects_unresolvable_leaf).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_missing_leaf() { $runner($crate::RuntimePersistenceLaw::commit_rejects_missing_leaf).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn empty_append_cannot_move_the_head() { $runner($crate::RuntimePersistenceLaw::empty_append_cannot_move_the_head).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn commit_rejects_leaf_without_frame_open_ancestor() { $runner($crate::RuntimePersistenceLaw::commit_rejects_leaf_without_frame_open_ancestor).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn borrowed_session_execution_lease_commit_contract() { $runner($crate::RuntimePersistenceLaw::borrowed_session_execution_lease_commit_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn same_incarnation_rotation_gates_claims_not_commits() { $runner($crate::RuntimePersistenceLaw::same_incarnation_rotation_gates_claims_not_commits).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn same_host_distinct_executors_are_lane_less_without_revoking_holder() { $runner($crate::RuntimePersistenceLaw::same_host_distinct_executors_are_lane_less_without_revoking_holder).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_fence_authority() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_fence_authority).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable() { $runner($crate::RuntimePersistenceLaw::concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_expires_by_ttl_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_expires_by_ttl_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn durable_queued_drain_wait_store_laws() { $runner($crate::RuntimePersistenceLaw::durable_queued_drain_wait_store_laws).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_diagnostic_read_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_diagnostic_read_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn session_execution_lease_displacement_contract() { $runner($crate::RuntimePersistenceLaw::session_execution_lease_displacement_contract).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_source_keys_are_idempotent_and_list_ordered() { $runner($crate::RuntimePersistenceLaw::queued_work_source_keys_are_idempotent_and_list_ordered).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing() { $runner($crate::RuntimePersistenceLaw::concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn decorated_queued_work_source_key_replay_reports_absorbed() { $runner($crate::RuntimePersistenceLaw::decorated_queued_work_source_key_replay_reports_absorbed).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_session_work_ordering_agrees_across_ingress_families() { $runner($crate::RuntimePersistenceLaw::pending_session_work_ordering_agrees_across_ingress_families).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn concurrent_queue_and_turn_input_claims_have_one_owner() { $runner($crate::RuntimePersistenceLaw::concurrent_queue_and_turn_input_claims_have_one_owner).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_work_claims_both_families_once() { $runner($crate::RuntimePersistenceLaw::checkpoint_work_claims_both_families_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_budget_refusal_preserves_active_turn_input() { $runner($crate::RuntimePersistenceLaw::checkpoint_budget_refusal_preserves_active_turn_input).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint() { $runner($crate::RuntimePersistenceLaw::checkpoint_claims_honor_min_boundary_at_every_checkpoint).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_cancel_removes_only_unclaimed_batches() { $runner($crate::RuntimePersistenceLaw::queued_work_cancel_removes_only_unclaimed_batches).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_exact_claim_uses_selected_batch_ids() { $runner($crate::RuntimePersistenceLaw::queued_work_exact_claim_uses_selected_batch_ids).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_classes_gate_command_and_turn_claims() { $runner($crate::RuntimePersistenceLaw::queued_work_classes_gate_command_and_turn_claims).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion() { $runner($crate::RuntimePersistenceLaw::queued_work_claims_respect_boundaries_abandon_and_stale_completion).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_claims_supersede_across_session_lease_generations_with_timing() { $runner($crate::RuntimePersistenceLaw::queued_work_claims_supersede_across_session_lease_generations_with_timing).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn claim_liveness_for_lease_less_paths_tracks_session_generations() { $runner($crate::RuntimePersistenceLaw::claim_liveness_for_lease_less_paths_tracks_session_generations).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus() { $runner($crate::RuntimePersistenceLaw::same_generation_claim_scans_reach_rows_beyond_the_scan_surplus).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions() { $runner($crate::RuntimePersistenceLaw::queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_join_groups_by_delivery_policy_and_merge_key() { $runner($crate::RuntimePersistenceLaw::queued_work_join_groups_by_delivery_policy_and_merge_key).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations() { $runner($crate::RuntimePersistenceLaw::abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_preserves_interrupted_batch_composition() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_preserves_interrupted_batch_composition).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one() { $runner($crate::RuntimePersistenceLaw::queued_work_names_a_deferred_lane_apart_from_an_exhausted_one).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_selects_claim_identity_across_ready_gap() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_selects_claim_identity_across_ready_gap).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_obeys_delivery_boundary_before_identity() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_obeys_delivery_boundary_before_identity).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_ignores_successor_row_limit() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_ignores_successor_row_limit).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_redrive_ignores_a_changed_drain_policy() { $runner($crate::RuntimePersistenceLaw::queued_work_redrive_ignores_a_changed_drain_policy).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_selected_multi_identity_validation_and_abandon_restore() { $runner($crate::RuntimePersistenceLaw::queued_work_selected_multi_identity_validation_and_abandon_restore).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks() { $runner($crate::RuntimePersistenceLaw::queued_work_exact_claim_preserves_physical_order_and_key_breaks).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn process_wakes_batch_by_default() { $runner($crate::RuntimePersistenceLaw::process_wakes_batch_by_default).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_work_completion_is_lease_guarded() { $runner($crate::RuntimePersistenceLaw::queued_work_completion_is_lease_guarded).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once() { $runner($crate::RuntimePersistenceLaw::queued_wake_delivery_is_source_key_idempotent_and_claimed_once).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn queue_completion_and_turn_commit_stamp_are_atomic() { $runner($crate::RuntimePersistenceLaw::queue_completion_and_turn_commit_stamp_are_atomic).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session() { $runner($crate::RuntimePersistenceLaw::pending_turn_inputs_source_keys_order_cancel_and_cross_session).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_input_bulk_and_suffix_cancellation() { $runner($crate::RuntimePersistenceLaw::pending_turn_input_bulk_and_suffix_cancellation).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_input_claims_reclaim_complete_and_fence() { $runner($crate::RuntimePersistenceLaw::pending_turn_input_claims_reclaim_complete_and_fence).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn turn_input_application_identity_survives_pending_tombstone_vacuum() { $runner($crate::RuntimePersistenceLaw::turn_input_application_identity_survives_pending_tombstone_vacuum).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn turn_input_claims_supersede_across_session_lease_generations_with_timing() { $runner($crate::RuntimePersistenceLaw::turn_input_claims_supersede_across_session_lease_generations_with_timing).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint() { $runner($crate::RuntimePersistenceLaw::active_turn_input_claim_reacquires_after_unrecorded_checkpoint).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_turn_input_cancel_covers_active_and_deferred_states() { $runner($crate::RuntimePersistenceLaw::pending_turn_input_cancel_covers_active_and_deferred_states).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt() { $runner($crate::RuntimePersistenceLaw::pending_active_turn_inputs_defer_unaccepted_once_on_interrupt).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it() { $runner($crate::RuntimePersistenceLaw::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn reopen_mint_identity() { $runner($crate::RuntimePersistenceLaw::reopen_mint_identity).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn gc_blobs() { $runner($crate::RuntimePersistenceLaw::gc_blobs).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn append_receipt_reopen() { $runner($crate::RuntimePersistenceLaw::append_receipt_reopen).await; }
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn runtime_reopen() { $runner($crate::RuntimePersistenceLaw::runtime_reopen).await; }
+    ($fixture:block) => {
+        $crate::runtime_persistence_tests!(@catalogue reopenable $fixture);
+        $crate::runtime_persistence_reopenable_tests!(@reopen_laws $fixture;
+            [
+                (reopen_mint_identity, "pending-turn-input-multi-store-mint"),
+                (gc_blobs, "gc-blobs"),
+                (append_receipt_reopen, "root"),
+                (runtime_reopen, "root"),
+            ]
+        );
+    };
+    (@reopen_laws $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (make, _lease_timing) = $fixture;
+                $crate::runtime_persistence_macro_support::$law(make($label)).await;
+            }
+        )*
     };
 }
