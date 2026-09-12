@@ -129,7 +129,7 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
     release_session_execution_lease_for_test(&store, &input_lease).await;
 }
 
-pub(super) async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(
+pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(
     store: Arc<dyn RuntimePersistence>,
 ) {
     store
@@ -354,7 +354,7 @@ pub(super) async fn queued_work_respects_membership_limits_exclusivity_reclaim_a
     assert_eq!(remaining.batches[0].batch_id, limited_third.batch_id);
 }
 
-pub(super) async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
+pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let first = store
@@ -457,7 +457,7 @@ pub(super) async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
 }
 
-pub(super) async fn queued_work_redrive_preserves_interrupted_batch_composition(
+pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
     store: Arc<dyn RuntimePersistence>,
 ) {
     for (source_key, label) in [("redrive-w1", "w1"), ("redrive-w2", "w2")] {
@@ -606,7 +606,7 @@ pub(super) async fn queued_work_redrive_preserves_interrupted_batch_composition(
     release_session_execution_lease_for_test(&store, &third_lease).await;
 }
 
-pub(super) async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations(
+pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "abandoned-predecessor-generation";
@@ -783,7 +783,7 @@ pub(super) async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_
 /// state machine, and a host reading one as the other either abandons intact
 /// work or waits forever on a queue that will never fill. Every backend must
 /// tell them apart identically.
-pub(super) async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
+pub async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
 ) {
@@ -988,7 +988,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
-pub(super) async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
+pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "interrupted-batch-delivery-gate";
@@ -1126,7 +1126,7 @@ pub(super) async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
 /// still redrive that exact committed composition: the policy runs pre-request
 /// and its selection is journaled with the claim, so replay serves history
 /// instead of re-deciding it.
-pub(super) async fn queued_work_redrive_ignores_a_changed_drain_policy(
+pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "interrupted-batch-drain-policy";
@@ -1218,9 +1218,7 @@ pub(super) async fn queued_work_redrive_ignores_a_changed_drain_policy(
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
-pub(super) async fn queued_work_redrive_ignores_successor_row_limit(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn RuntimePersistence>) {
     let session_id = "interrupted-batch-row-limit";
     for (source_key, label) in [
         ("limit-w1", "w1"),
@@ -1352,7 +1350,7 @@ pub(super) async fn queued_work_redrive_ignores_successor_row_limit(
     release_session_execution_lease_for_test(&store, &selected_lease).await;
 }
 
-pub(super) async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
+pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "selected-multi-identity";
@@ -1530,7 +1528,7 @@ pub(super) async fn queued_work_selected_multi_identity_validation_and_abandon_r
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
-pub(super) async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {
+pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {
     let merged_wakes = [
         policy_test_wake(
             &SessionId::from("wake-default-batch"),
@@ -1640,7 +1638,7 @@ pub(super) fn policy_test_wake(
     }
 }
 
-pub(super) async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersistence>) {
+pub async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersistence>) {
     let first = store
         .enqueue_queued_work(
             queued_draft(
@@ -1726,9 +1724,7 @@ pub(super) async fn queued_work_completion_is_lease_guarded(store: Arc<dyn Runti
     );
 }
 
-pub(super) async fn queue_completion_and_turn_commit_stamp_are_atomic(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn RuntimePersistence>) {
     let batch = store
         .enqueue_queued_work(queued_draft(
             &SessionId::from("root"),

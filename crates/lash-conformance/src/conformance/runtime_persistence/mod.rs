@@ -118,13 +118,26 @@ mod queue_redrive;
 mod suite_and_receipts;
 mod turn_inputs_and_reopen;
 
+/// Public implementation paths used only by the exported registration macros.
+#[doc(hidden)]
+pub mod runtime_persistence_macro_support {
+    pub use super::append_receipts::*;
+    pub use super::attachments_and_queue::*;
+    pub use super::checkpoint_claims::*;
+    pub use super::leases::*;
+    pub use super::queue_redrive::*;
+    pub use super::suite_and_receipts::*;
+    pub use super::turn_inputs_and_reopen::*;
+    pub use crate::conformance::durable_queued_drain_wait::*;
+    pub use crate::conformance::plugin_state::*;
+}
+
 use append_receipts::*;
 pub use append_receipts::{
     append_receipt_corrupt_identity_encoding_version_is_refused,
     append_request_receipt_replays_after_ancestor_superseded,
     inactive_append_ancestor_precedes_stale_head, tombstoned_old_leaf_is_rejected,
 };
-use attachments_and_queue::*;
 pub use attachments_and_queue::{
     queued_work_claims_supersede_across_session_lease_generations,
     queued_work_exact_claim_preserves_physical_order_and_key_breaks,
@@ -140,18 +153,15 @@ pub use leases::{
     same_host_distinct_executors_are_lane_less_without_revoking_holder,
     session_execution_lease_displacement, session_execution_lease_fence_authority,
 };
-use queue_redrive::*;
 pub use queue_redrive::{
     queued_work_redrive_selects_claim_identity_across_ready_gap,
     same_generation_claim_scans_reach_rows_beyond_the_scan_surplus,
 };
 pub use suite_and_receipts::{
-    RuntimePersistenceLaw, UnboundSessionAdmissionState, UnboundSessionResolutionHandles,
-    runtime_persistence, runtime_persistence_clock_expiry, runtime_persistence_reopenable,
-    unbound_session_meta_refuses_ambiguous_resolution,
+    UnboundSessionAdmissionState, UnboundSessionResolutionHandles,
+    runtime_persistence_clock_expiry, unbound_session_meta_refuses_ambiguous_resolution,
     unbound_session_reads_resolve_the_same_session,
 };
-use turn_inputs_and_reopen::*;
 pub use turn_inputs_and_reopen::{
     a_turn_that_cannot_commit_leaves_no_input_pinned_to_it,
     active_turn_input_claim_reacquires_after_unrecorded_checkpoint,
