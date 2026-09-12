@@ -108,7 +108,9 @@ impl ReasoningPublicationState {
             if anonymous_remaining == 0 {
                 break;
             }
-            if matches!(part, LlmOutputPart::Reasoning { .. }) && !published.contains(&index) {
+            if matches!(part, LlmOutputPart::Reasoning { text, .. } if !text.is_empty())
+                && !published.contains(&index)
+            {
                 published.insert(index);
                 anonymous_remaining -= 1;
             }

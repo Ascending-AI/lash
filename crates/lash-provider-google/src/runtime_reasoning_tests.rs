@@ -174,3 +174,98 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
     assert_eq!(durable, ["same reasoning", "same reasoning"]);
     assert_eq!(output.assistant_message(), Some("done"));
 }
+
+#[tokio::test]
+async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_only_part() {
+    let response = vec![json!({"response":{"candidates":[{
+        "content":{"parts":[
+            {
+                "thought":true,
+                "thoughtSignature":"U0lHLTE="
+            },
+            {
+                "text":"visible reasoning",
+                "thought":true,
+                "thoughtSignature":"U0lHLTI="
+            }
+        ]},
+        "finishReason":"STOP"
+    }]}})];
+    let transport = Arc::new(ScriptedSseTransport {
+        bodies: std::sync::Mutex::new([sse_body(&response)].into_iter().collect()),
+    });
+    let provider = GoogleOAuthProvider::new(
+        "access",
+        "refresh",
+        u64::MAX,
+        GoogleOAuthClient {
+            id: "oauth-client-id".into(),
+            secret: "oauth-client-secret".into(),
+        },
+    )
+    .with_project_id(Some("test-project".into()))
+    .with_options(ProviderOptions {
+        expose_thinking: true,
+        ..ProviderOptions::default()
+    })
+    .with_stream_termination(StreamTermination::RequireTerminalEvidence)
+    .with_transport(transport);
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .provider(ProviderHandle::new(provider.into_components()))
+        .model(
+            lash::ModelSpec::builder("gemini-test")
+                .context_window_tokens(16_000)
+                .build()
+                .expect("valid model spec"),
+        )
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "google-signature-only-reasoning-test",
+            "google-signature-only-reasoning-test-boot",
+        ))
+        .expect("core");
+    let session = core
+        .session("google-signature-only-reasoning")
+        .open()
+        .await
+        .expect("session");
+
+    let output = session
+        .turn(lash::TurnInput::text("reason about the answer"))
+        .run()
+        .await
+        .expect("turn");
+    let activities = output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash::TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let read_view = output
+        .result
+        .state
+        .read_view()
+        .expect("test runtime frame scope resolves");
+    let durable = read_view
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| part.kind == lash_core::PartKind::Reasoning)
+        .map(|part| part.content.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(activities, ["visible reasoning"]);
+    assert_eq!(durable, ["", "visible reasoning"]);
+}
