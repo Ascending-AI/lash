@@ -62,7 +62,7 @@ struct TurnCommitRequest<'commit> {
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
     interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
-    turn_cancel_closure_authorization: Option<crate::TurnCancelClosureAuthorization>,
+    turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
     turn_control_resolver: &'commit dyn crate::AwaitEventResolver,
 }
 
@@ -141,7 +141,7 @@ impl PreparedTurn {
             recorded_attachment_intent_ids,
             interrupted_turn_input_cancellation,
             interrupted_turn_cancel_intent,
-            turn_cancel_closure_authorization,
+            turn_cancel_closure_settlement,
             turn_control_resolver,
         } = request;
         let accepted = self
@@ -158,7 +158,7 @@ impl PreparedTurn {
                 Some(trace_turn_id.clone()),
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
-                turn_cancel_closure_authorization,
+                turn_cancel_closure_settlement,
                 Some(turn_control_resolver),
                 recorded_attachment_intent_ids,
                 release_session_execution_lease
@@ -383,7 +383,10 @@ impl LashRuntime {
                 loop {
                     let authorization = turn_control.closure_authorization(
                         &turn_control_binding_id,
-                        scoped_effect_controller.execution_scope().clone(),
+                        crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                            &crate::TurnAddress::new(&self.state.session_id, &trace_turn_id),
+                            scoped_effect_controller.execution_scope(),
+                        ),
                         &lease.fence(),
                         observed.clone(),
                         assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
@@ -413,12 +416,16 @@ impl LashRuntime {
             }
             _ => None,
         };
-        let cancellation = match turn_cancel_closure_authorization.as_ref() {
-            Some(authorization) => {
+        let turn_cancel_closure_settlement = match turn_cancel_closure_authorization.as_ref() {
+            Some(authorization) => Some(
                 turn_control
                     .settle_authorized(turn_control_resolver, authorization)
-                    .await?
-            }
+                    .await?,
+            ),
+            None => None,
+        };
+        let cancellation = match turn_cancel_closure_settlement.as_ref() {
+            Some(settlement) => settlement.effective_cancellation().cloned(),
             None => {
                 turn_control
                     .settle_before_commit(
@@ -585,7 +592,7 @@ impl LashRuntime {
                         .recorded_turn_intent_ids(&trace_turn_id),
                     interrupted_turn_input_cancellation: cancellation.clone(),
                     interrupted_turn_cancel_intent,
-                    turn_cancel_closure_authorization,
+                    turn_cancel_closure_settlement,
                     turn_control_resolver,
                 },
                 TurnCommitAdmission {

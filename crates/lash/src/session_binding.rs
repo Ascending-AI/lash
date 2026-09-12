@@ -171,8 +171,12 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         &'a self,
         scoped: &'a lash_core::ScopedEffectController<'_>,
     ) -> Result<lash_core::TurnControlBinding<'a>, lash_core::RuntimeError> {
+        let binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
+            self.authority.binding_id(),
+            scoped.execution_scope(),
+        )?;
         Ok(lash_core::TurnControlBinding::HostOwned {
-            binding_id: self.authority.binding_id().to_string(),
+            binding_id,
             resolver: self,
             peek: lash_core::ScopedEffectController::shared(
                 Arc::clone(&self.peek_controller) as Arc<dyn lash_core::RuntimeEffectController>,

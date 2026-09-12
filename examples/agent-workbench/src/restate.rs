@@ -206,7 +206,10 @@ impl WorkbenchTurnWorkflow for WorkbenchTurnWorkflowImpl {
         Json(request): Json<WorkbenchTurnWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
         let session_id = request.session_id.clone();
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            configured_restate_authority_id()?,
+        );
         Box::pin(run_user_turn_terminalized(
             self.state.clone(),
             request,
@@ -247,7 +250,10 @@ impl WorkbenchQueuedTurnWorkflow for WorkbenchQueuedTurnWorkflowImpl {
         Json(request): Json<WorkbenchQueuedTurnWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
         let session_id = request.session_id.clone();
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            configured_restate_authority_id()?,
+        );
         Box::pin(run_queued_turn_terminalized(
             self.state.clone(),
             request,
@@ -293,7 +299,10 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
         Json(request): Json<WorkbenchButtonTriggerWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
         let session_id = request.session_id.clone();
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            configured_restate_authority_id()?,
+        );
         run_button_trigger(self.state.clone(), request, &controller)
             .await
             .map_err(terminal_handler_error)?;
@@ -329,7 +338,10 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
         Json(request): Json<WorkbenchMailReceivedWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
         let session_id = request.session_id.clone();
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            configured_restate_authority_id()?,
+        );
         run_mail_received(self.state.clone(), request, &controller)
             .await
             .map_err(terminal_handler_error)?;
@@ -383,6 +395,7 @@ impl WorkbenchSessionDeleteWorkflow for WorkbenchSessionDeleteWorkflowImpl {
                         self.state.restate_ingress_url.clone(),
                         self.state.restate_http.clone(),
                     ),
+                    configured_restate_authority_id().map_err(AppError::internal)?,
                 ))
             })
             .await
@@ -416,7 +429,10 @@ impl WorkbenchProcessCancelWorkflow for WorkbenchProcessCancelWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<WorkbenchProcessCancelWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            configured_restate_authority_id()?,
+        );
         run_process_cancel(self.state.clone(), request, &controller)
             .await
             .map_err(terminal_handler_error)?;
@@ -497,7 +513,10 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
                 .await?;
             CronSessionDisposition::from_journal_value(&journal_value)?
         };
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
+        let controller = lash_restate::RestateRuntimeEffectController::new(
+            ctx,
+            configured_restate_authority_id()?,
+        );
         let decision = cron_tick_decision(disposition, &state, controller.context().key());
         let cancel_surface = RestateCronTickCancelSurface::new(self.state.clone(), &controller);
         if Box::pin(handle_observed_cron_tick(&cancel_surface, &state, decision)).await?
@@ -1552,10 +1571,8 @@ mod error_helpers;
 use error_helpers::*;
 mod session_admission;
 use session_admission::journaled_session_admission;
-
 #[cfg(test)]
 mod tests;
-
 #[async_trait::async_trait]
 trait QueuedWorkExt {
     async fn drain_session(
@@ -1564,7 +1581,6 @@ trait QueuedWorkExt {
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError>;
 }
-
 #[async_trait::async_trait]
 impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
     async fn drain_session(

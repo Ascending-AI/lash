@@ -143,7 +143,7 @@ pub struct RuntimeCommit {
     /// cancellation-dependent commit. Receipt replay is adjudicated first and
     /// may consume only the same exact still-pending authorization.
     #[serde(skip)]
-    pub turn_cancel_closure_authorization: Option<crate::TurnCancelClosureAuthorization>,
+    pub turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins.

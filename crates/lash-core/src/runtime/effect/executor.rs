@@ -38,8 +38,9 @@ pub use native_controller::NativeRuntimeEffectController;
 pub use trigger::TriggerLocalExecution;
 pub use turn_control_authority::{
     TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlParticipation,
+    TurnControlBinding, TurnControlParticipation, turn_control_binding_id_for_scope,
 };
+pub(crate) use turn_control_authority::{admitted_turn_cancel_scope, binding_id_admits_scope};
 
 use crate::LlmRequest as CoreLlmRequest;
 use crate::ProcessRegistry;

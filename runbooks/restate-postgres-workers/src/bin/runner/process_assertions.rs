@@ -9,7 +9,7 @@ pub(super) async fn drive_durable_wait_index_scenarios(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
-    let host = RestateEffectHost::new(ingress_url.to_string());
+    let host = RestateEffectHost::new(ingress_url.to_string(), restate_authority_id()?);
     // 1) A controller-owned wait registers in the real Restate session index
     //    and observes cancel_all as a terminal cancellation.
     let cancel_key = host
@@ -143,8 +143,12 @@ pub(super) async fn wait_for_queued_work(
     let registry = process_registry_from_storage(storage);
     let continuations =
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
-    let deployment =
-        RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
+    let deployment = RestateProcessDeployment::new(
+        ingress_url.to_string(),
+        restate_authority_id()?,
+        registry,
+        continuations,
+    );
     let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-queue-watch".to_string(),
@@ -153,6 +157,7 @@ pub(super) async fn wait_for_queued_work(
             as Arc<dyn lash::persistence::AttachmentStore>,
         process_work_driver,
         restate_ingress_url: ingress_url.to_string(),
+        restate_authority_id: restate_authority_id()?,
         mock_provider_base_url: mock_provider_base_url.to_string(),
         trace_dir,
         fail_once: false,
@@ -213,8 +218,12 @@ pub(super) async fn emit_button_event(
     let registry = process_registry_from_storage(storage);
     let continuations =
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
-    let deployment =
-        RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
+    let deployment = RestateProcessDeployment::new(
+        ingress_url.to_string(),
+        restate_authority_id()?,
+        registry,
+        continuations,
+    );
     let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner".to_string(),
@@ -223,6 +232,7 @@ pub(super) async fn emit_button_event(
             as Arc<dyn lash::persistence::AttachmentStore>,
         process_work_driver,
         restate_ingress_url: ingress_url.to_string(),
+        restate_authority_id: restate_authority_id()?,
         mock_provider_base_url: mock_provider_base_url.to_string(),
         trace_dir,
         fail_once: false,
@@ -850,8 +860,12 @@ pub(super) async fn assert_reopened_session_agrees(
     let registry = process_registry_from_storage(storage);
     let continuations =
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
-    let deployment =
-        RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
+    let deployment = RestateProcessDeployment::new(
+        ingress_url.to_string(),
+        restate_authority_id()?,
+        registry,
+        continuations,
+    );
     let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-reopen".to_string(),
@@ -860,6 +874,7 @@ pub(super) async fn assert_reopened_session_agrees(
             as Arc<dyn lash::persistence::AttachmentStore>,
         process_work_driver,
         restate_ingress_url: ingress_url.to_string(),
+        restate_authority_id: restate_authority_id()?,
         mock_provider_base_url: mock_provider_base_url.to_string(),
         trace_dir,
         fail_once: false,

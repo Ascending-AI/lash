@@ -27,7 +27,7 @@ use super::{TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipat
 /// The scope is chosen by the host boundary before any nondeterministic work is
 /// planned. It is intentionally generic: Restate, an native test host, or a
 /// future durable effect host all receive the same Lash scope vocabulary.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecutionScope {
     Turn {
@@ -1626,13 +1626,15 @@ pub trait EffectHost: AwaitEventResolver {
         &'a self,
         scoped: &'a ScopedEffectController<'_>,
     ) -> Result<TurnControlBinding<'a>, RuntimeError> {
-        // Local turn gates must share the host registry used by the live watcher
-        // and external cancellation requests. Durable observations remain journaled.
+        let binding_id = super::turn_control_authority::turn_control_binding_id_for_scope(
+            &self.turn_control_binding_id(),
+            scoped.execution_scope(),
+        )?;
         match scoped.controller().turn_control_participation().await? {
             TurnControlParticipation::Local => {
                 let resolver = self.await_event_resolver();
                 Ok(TurnControlBinding::host_owned(
-                    self.turn_control_binding_id(),
+                    binding_id,
                     resolver,
                     self.scoped(scoped.execution_scope().clone())?,
                     self.turn_attach(),
@@ -1641,7 +1643,7 @@ pub trait EffectHost: AwaitEventResolver {
             TurnControlParticipation::DurableJournaled => {
                 let resolver = scoped.controller();
                 Ok(TurnControlBinding::run_scoped(
-                    self.turn_control_binding_id(),
+                    binding_id,
                     resolver,
                     true,
                     self.turn_attach(),

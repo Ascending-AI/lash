@@ -334,7 +334,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 87 adds the selected turn-control binding and non-overwritable exact
 // closure authorization. Component-86 stores cannot recover these obligations
 // across owner failure and are rejected rather than silently adopting them.
-const SCHEMA_VERSION: i32 = 87;
+// Version 88 persists retired physical scopes under the same advisory fence as
+// cancellation authorization.
+const SCHEMA_VERSION: i32 = 88;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

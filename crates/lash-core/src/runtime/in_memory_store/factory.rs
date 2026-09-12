@@ -39,6 +39,7 @@ pub struct InMemorySessionStoreFactory {
     /// intent insert meets the sweeper's condemn CAS in one place.
     pub(super) attachment_condemnations: super::SharedAttachmentCondemnations,
     pub(super) attachment_manifest: super::SharedAttachmentManifest,
+    pub(super) retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
     #[cfg(any(test, feature = "testing"))]
     fail_next_session_blob_delete: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -69,6 +70,7 @@ impl InMemorySessionStoreFactory {
             session_catalog: Arc::new(Mutex::new(HashMap::new())),
             attachment_condemnations: Arc::new(Mutex::new(HashMap::new())),
             attachment_manifest: Arc::new(Mutex::new(HashMap::new())),
+            retired_turn_cancel_scopes: Arc::new(Mutex::new(HashSet::new())),
             #[cfg(any(test, feature = "testing"))]
             fail_next_session_blob_delete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
@@ -165,6 +167,7 @@ impl InMemorySessionStoreFactory {
                     Arc::clone(&self.session_catalog),
                     Arc::clone(&self.attachment_condemnations),
                     Arc::clone(&self.attachment_manifest),
+                    Arc::clone(&self.retired_turn_cancel_scopes),
                 ));
                 *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
@@ -289,6 +292,39 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             }
             None => Ok(Vec::new()),
         }
+    }
+
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        scope: &crate::ExecutionScope,
+    ) -> Result<(), crate::StoreError> {
+        let scope_id = scope
+            .journal_identity()
+            .map_err(|error| crate::StoreError::Backend(error.to_string()))?
+            .key()
+            .to_string();
+        let _transaction = self.write_transaction.lock_recover();
+        for store in self.stores.lock_recover().values() {
+            let pins = store.turn_cancel_closure_authorizations.lock_recover();
+            let matching = pins
+                .values()
+                .filter(|authorization| authorization.admitted_scope() == scope)
+                .count();
+            if matching != 0 {
+                return Err(crate::StoreError::TurnCancelClosureLifecyclePinned {
+                    session_id: store
+                        .bound_session_id
+                        .lock_recover()
+                        .clone()
+                        .unwrap_or_else(|| crate::SessionId::from("unbound")),
+                    pending_count: matching,
+                });
+            }
+        }
+        self.retired_turn_cancel_scopes
+            .lock_recover()
+            .insert(scope_id);
+        Ok(())
     }
 
     async fn has_claimable_queued_work(
@@ -692,6 +728,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.session_catalog),
             Arc::clone(&self.attachment_condemnations),
             Arc::clone(&self.attachment_manifest),
+            Arc::clone(&self.retired_turn_cancel_scopes),
         ));
         *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
         *store.session_graph.lock_recover() = resident_graph.clone();

@@ -174,7 +174,8 @@ pub use effect::{
     ToolBatchEffectOutcome, ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
     ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancellationAuthority,
     TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    refuse_unhonored_group_membership, validate_replayed_effect_envelope,
+    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
@@ -286,10 +287,10 @@ pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
 pub use turn_control::{
     TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
-    TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord,
-    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
+    TurnCancelRequestRecord, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
 pub(crate) use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
@@ -1362,6 +1363,17 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "SessionStoreFactory::pending_turn_cancel_closure_pins",
+        })
+    }
+
+    /// Atomically refuse retirement while any closure names `scope`, otherwise
+    /// persist the scope tombstone that every later authorization checks.
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        _scope: &ExecutionScope,
+    ) -> Result<(), crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::retire_turn_cancel_closure_scope",
         })
     }
 

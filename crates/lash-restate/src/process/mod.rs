@@ -28,7 +28,7 @@ use restate_sdk::context::ContextPromises;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use serde::Serialize;
 
-use crate::durable_wait::restate_await_event_key;
+use crate::durable_wait::restate_await_event_key_for_authority;
 use crate::ingress::{RestateConnection, RestateIngressClient};
 
 pub use workflow::{
@@ -140,9 +140,11 @@ pub(crate) fn missing_segment_is_superseded(
 }
 
 pub(crate) fn restate_process_terminal_await_key(
+    authority_id: &crate::RestateAuthorityId,
     process_id: &ProcessId,
 ) -> Result<AwaitEventKey, RuntimeError> {
-    restate_await_event_key(
+    restate_await_event_key_for_authority(
+        authority_id,
         &ExecutionScope::process(process_id.to_string()),
         AwaitEventWaitIdentity::Custom {
             key: "process_terminal".to_string(),
@@ -199,13 +201,14 @@ pub(crate) fn restate_process_terminal_output(
 
 fn resolve_process_terminal_promise<'ctx, C>(
     context: &C,
+    authority_id: &crate::RestateAuthorityId,
     process_id: &ProcessId,
     output: &ProcessAwaitOutput,
 ) -> HandlerResult<()>
 where
     C: ContextPromises<'ctx>,
 {
-    let key = restate_process_terminal_await_key(process_id)
+    let key = restate_process_terminal_await_key(authority_id, process_id)
         .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
     let resolution = restate_process_terminal_resolution(output)
         .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
@@ -731,15 +734,31 @@ pub struct RestateProcessDeployment {
     registry: Arc<dyn ProcessRegistry>,
     ingress: RestateIngressClient,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    authority_id: crate::RestateAuthorityId,
 }
 
 impl RestateProcessDeployment {
     pub fn new(
         connection: impl Into<RestateConnection>,
+        authority_id: crate::RestateAuthorityId,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     ) -> Self {
-        Self::new_with_sink(connection, registry, continuations, None)
+        Self::new_with_sink(connection, authority_id, registry, continuations, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        connection: impl Into<RestateConnection>,
+        registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    ) -> Self {
+        Self::new(
+            connection,
+            crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+            registry,
+            continuations,
+        )
     }
 
     /// Like [`new`](Self::new), but installs a host-facing
@@ -750,6 +769,7 @@ impl RestateProcessDeployment {
     /// See [`ProcessEventSink`] for the freshness-not-truth contract.
     pub fn new_with_sink(
         connection: impl Into<RestateConnection>,
+        authority_id: crate::RestateAuthorityId,
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         sink: Option<Arc<dyn ProcessEventSink>>,
@@ -776,7 +796,24 @@ impl RestateProcessDeployment {
             registry,
             ingress: RestateIngressClient::new(connection),
             continuations,
+            authority_id,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_sink_for_test(
+        connection: impl Into<RestateConnection>,
+        registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+        sink: Option<Arc<dyn ProcessEventSink>>,
+    ) -> Self {
+        Self::new_with_sink(
+            connection,
+            crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+            registry,
+            continuations,
+            sink,
+        )
     }
 
     pub fn process_work(&self) -> ProcessWorkWiring {
@@ -804,6 +841,7 @@ impl RestateProcessDeployment {
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
             self.ingress.clone(),
+            self.authority_id.clone(),
         );
         if let Some(sink) = trace_sink {
             workflow.with_trace_sink(sink, trace_context)

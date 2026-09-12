@@ -3,6 +3,54 @@ use std::sync::Arc;
 use super::control::{AwaitEventResolver, ScopedEffectController};
 use crate::RuntimeError;
 
+const PHYSICAL_SCOPE_BINDING_SEPARATOR: &str = "#lash-physical-scope:";
+
+/// Bind a durable cancellation authority to the non-session physical scope
+/// that owns its journal. Turn/session scopes are already tied to their
+/// address and keep the deployment identity unchanged.
+pub fn turn_control_binding_id_for_scope(
+    base: &str,
+    scope: &crate::ExecutionScope,
+) -> Result<String, RuntimeError> {
+    match scope.journal_identity() {
+        Ok(identity) if scope.session_id().is_none() => Ok(format!(
+            "{base}{PHYSICAL_SCOPE_BINDING_SEPARATOR}{}",
+            identity.key()
+        )),
+        Ok(_) => Ok(base.to_string()),
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn binding_id_admits_scope(binding_id: &str, scope: &crate::ExecutionScope) -> bool {
+    match scope.journal_identity() {
+        Ok(identity) if scope.session_id().is_none() => binding_id.ends_with(&format!(
+            "{PHYSICAL_SCOPE_BINDING_SEPARATOR}{}",
+            identity.key()
+        )),
+        Ok(_) => !binding_id.contains(PHYSICAL_SCOPE_BINDING_SEPARATOR),
+        Err(_) => false,
+    }
+}
+
+/// Select the scope persisted with a turn-closure authorization.
+///
+/// Session-bound controllers may be driving a queue drain or another turn when
+/// they discover an orphan. The durable input row's turn address is the
+/// canonical admission identity in that case. Process and runtime-operation
+/// controllers instead carry the physical journal identity selected before
+/// session work began, so recovery must preserve it exactly.
+pub(crate) fn admitted_turn_cancel_scope(
+    address: &crate::TurnAddress,
+    controller_scope: &crate::ExecutionScope,
+) -> crate::ExecutionScope {
+    if controller_scope.session_id().is_some() {
+        address.execution_scope()
+    } else {
+        controller_scope.clone()
+    }
+}
+
 /// Whether turn-control reads participate in a durable controller journal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnControlParticipation {
@@ -150,25 +198,68 @@ impl TurnCancellationAuthority {
     pub async fn settle_authorized_closure(
         &self,
         authorization: &crate::TurnCancelClosureAuthorization,
-    ) -> Result<Option<crate::TurnCancellationEvidence>, RuntimeError> {
+    ) -> Result<crate::TurnCancelClosureSettlement, RuntimeError> {
         authorization.validate()?;
-        if authorization.binding_id() != self.binding_id {
+        let expected_binding =
+            turn_control_binding_id_for_scope(&self.binding_id, authorization.admitted_scope())?;
+        if authorization.binding_id() != expected_binding {
             return Err(RuntimeError::new(
                 crate::RuntimeErrorCode::InvalidTurnCancelRequest,
                 format!(
                     "turn cancellation closure binding `{}` does not match authority `{}`",
                     authorization.binding_id(),
-                    self.binding_id
+                    expected_binding
                 ),
             ));
         }
-        let control = crate::runtime::turn_control::ActiveTurnControl::new(
+        let control = match crate::runtime::turn_control::ActiveTurnControl::new(
             self.resolver.as_ref(),
             authorization.address(),
         )
-        .await?;
+        .await
+        {
+            Ok(control) => control,
+            Err(error) if error.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Err(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                    format!(
+                        "turn `{}` in session `{}` was revoked before authorized closure settlement",
+                        authorization.turn_id(),
+                        authorization.session_id()
+                    ),
+                ));
+            }
+            Err(error) => return Err(error),
+        };
         control
             .settle_authorized(self.resolver.as_ref(), authorization)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::admitted_turn_cancel_scope;
+
+    #[test]
+    fn orphan_recovery_uses_persisted_turn_address_for_session_scopes() {
+        let address = crate::TurnAddress::new("session", "original-turn");
+        let successor_drain = crate::ExecutionScope::queue_drain("session", "successor-drain");
+
+        assert_eq!(
+            admitted_turn_cancel_scope(&address, &successor_drain),
+            address.execution_scope()
+        );
+    }
+
+    #[test]
+    fn orphan_recovery_preserves_previously_admitted_physical_scope() {
+        let address = crate::TurnAddress::new("session", "turn");
+        let process_scope = crate::ExecutionScope::process("original-process");
+
+        assert_eq!(
+            admitted_turn_cancel_scope(&address, &process_scope),
+            process_scope
+        );
     }
 }

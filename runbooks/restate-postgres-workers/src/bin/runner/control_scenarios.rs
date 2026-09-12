@@ -4,7 +4,7 @@ pub(super) async fn run_engine_promise_conformance(
     admin_url: &str,
     ingress_url: &str,
 ) -> Result<()> {
-    let key_host = RestateEffectHost::new(ingress_url.to_string());
+    let key_host = RestateEffectHost::new(ingress_url.to_string(), restate_authority_id()?);
     let attached_key = engine_conformance_key(&key_host, "waiter-before-resolution").await?;
     let attached_expected = Resolution::Ok(json!({ "ordering": "waiter-before-resolution" }));
     let attached_wait_key = attached_key.clone();
@@ -120,7 +120,7 @@ pub(super) async fn drive_turn_control_scenarios(
     storage: &PostgresStorage,
     ingress_url: &str,
 ) -> Result<()> {
-    let deployment = RestateTurnDeployment::new(ingress_url.to_string());
+    let deployment = RestateTurnDeployment::new(ingress_url.to_string(), restate_authority_id()?);
     let driver = deployment.turn_work_driver(Arc::new(storage.session_store_factory()));
 
     let completed = TurnRequest {
@@ -385,7 +385,7 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
     report_workflow_progress(&request.workflow_id, "durable-sleep-suspended");
 
     let evidence_id = "e2e-cancel-suspended-sleep";
-    let driver = RestateTurnDeployment::new(ingress_url.to_string())
+    let driver = RestateTurnDeployment::new(ingress_url.to_string(), restate_authority_id()?)
         .turn_work_driver(Arc::new(storage.session_store_factory()));
     let started = Instant::now();
     let receipt = driver
@@ -419,7 +419,7 @@ pub(super) async fn drive_engine_restart_scenario(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
-    let driver = RestateTurnDeployment::new(ingress_url.to_string())
+    let driver = RestateTurnDeployment::new(ingress_url.to_string(), restate_authority_id()?)
         .turn_work_driver(Arc::new(storage.session_store_factory()));
     let parked = turn_control_request("e2e-engine-restart-cancel", false);
     submit_workflow(ingress_url, &parked).await?;
@@ -618,7 +618,10 @@ pub(super) async fn drive_break_glass_scenario(
     wait_for_invocation_terminal(&admin, &invocation_id).await?;
 
     let driver = TurnWorkDriver::for_catalog(
-        Arc::new(RestateEffectHost::new(ingress_url.to_string())),
+        Arc::new(RestateEffectHost::new(
+            ingress_url.to_string(),
+            restate_authority_id()?,
+        )),
         Arc::new(storage.session_store_factory()),
     );
     if let Ok(Ok(terminal)) = tokio::time::timeout(

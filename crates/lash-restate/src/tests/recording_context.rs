@@ -577,7 +577,8 @@ impl RecordingContext {
         process_id: &ProcessId,
         resolution: Resolution,
     ) {
-        let key = restate_process_terminal_await_key(process_id).expect("terminal await key");
+        let key = restate_process_terminal_await_key(&test_restate_authority_id(), process_id)
+            .expect("terminal await key");
         self.awaited_events
             .lock_recover()
             .insert(key.promise_key(), resolution);
@@ -900,7 +901,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             .push(format!("call:{process_id}"));
         let context = Arc::clone(self);
         Box::pin(async move {
-            let key = restate_process_terminal_await_key(&process_id)
+            let key = restate_process_terminal_await_key(&test_restate_authority_id(), &process_id)
                 .map_err(TerminalError::from_error)?;
             let notify = context.process_terminal_notify(&process_id);
             let resolution = loop {
@@ -1064,7 +1065,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
         ctx: WorkflowContext<'_>,
         Json(()): Json<()>,
     ) -> HandlerResult<Json<serde_json::Value>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let scope = ExecutionScope::turn(TOOL_INTENT_CORPUS_SESSION, TOOL_INTENT_CORPUS_TURN);
         let attempt = controller
             .execute_effect(
@@ -1899,7 +1900,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                 return Err(TerminalError::new("process workflow start is unsupported"));
             };
             let process_id = registration.id.clone();
-            let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+            let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
             let scoped_effect_controller = controller
                 .scoped_effect_controller(ExecutionScope::process(&process_id))
                 .map_err(TerminalError::from_error)?;

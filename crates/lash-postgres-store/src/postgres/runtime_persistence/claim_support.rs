@@ -744,12 +744,14 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     live_generation: u64,
     turn_id: &TurnId,
     observed: &lash_core::TurnCancelIntentSnapshot,
-    decision: &lash_core::TurnCancelRepairDecision,
+    settlement: Option<&lash_core::TurnCancelClosureSettlement>,
 ) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
     if load_turn_cancel_intent_snapshot_tx(tx, session_id, turn_id).await? != *observed {
         return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
     }
-    if let lash_core::TurnCancelRepairDecision::CancellationWon(evidence) = decision {
+    if let Some(evidence) =
+        settlement.and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+    {
         if !reconcile_turn_cancel_winner_tx(tx, session_id, turn_id, observed, evidence).await? {
             return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
         }
@@ -772,7 +774,9 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     .await
     .map_err(store_sqlx_error)?;
     let scope = lash_core::OrphanedTurnInputScope::Turn(turn_id);
-    let disposition = decision.disposition();
+    let effective =
+        settlement.and_then(lash_core::TurnCancelClosureSettlement::effective_cancellation);
+    let disposition = effective.map_or(lash_core::TurnCancelDisposition::Defer, |e| e.undelivered);
     let mut repairable = Vec::new();
     for (input_id, state, ingress_json, input_json, claim_token, claim_generation) in rows {
         let state = lash_core::TurnInputState::from_wire_str(&state)
@@ -834,10 +838,7 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
             payload,
             disposition,
         };
-        if matches!(
-            decision,
-            lash_core::TurnCancelRepairDecision::CancellationWon(_)
-        ) {
+        if effective.is_some() {
             append_turn_cancel_outcome_tx(tx, session_id, turn_id, affected.clone()).await?;
         }
         outcome.affected_inputs.push(affected);

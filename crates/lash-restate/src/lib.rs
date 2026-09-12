@@ -37,7 +37,13 @@
 //!         ctx: WorkflowContext<'_>,
 //!         Json(req): Json<TurnRequest>,
 //!     ) -> HandlerResult<Json<TurnResponse>> {
-//!         let effect_controller = RestateRuntimeEffectController::new(ctx);
+//!         let authority_id = lash_restate::RestateAuthorityId::new(
+//!             "production-restate-authority",
+//!         ).map_err(TerminalError::from_error)?;
+//!         let effect_controller = RestateRuntimeEffectController::new(
+//!             ctx,
+//!             authority_id,
+//!         );
 //!         let turn_id = req.turn_id.clone();
 //!         let scoped_effect_controller = effect_controller
 //!             .scoped_effect_controller(lash_core::ExecutionScope::turn("session", &turn_id))
@@ -118,8 +124,9 @@ pub use effect_group::{
 };
 pub use effect_host::RestateEffectHost;
 pub use ingress::{
-    DeploymentOpenInvocations, RestateAdminClient, RestateConnection, RestateConnectionConfig,
-    RestateHttpError, RestateIngressClient, RestateInvocationId, RestateInvocationStatus,
+    DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
+    RestateConnectionConfig, RestateHttpError, RestateIngressClient, RestateInvocationId,
+    RestateInvocationStatus,
 };
 pub use process::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,

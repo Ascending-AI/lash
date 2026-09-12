@@ -611,6 +611,7 @@ pub struct E2eCoreConfig {
     pub attachment_store: Arc<dyn AttachmentStore>,
     pub process_work_driver: lash::process::ProcessWorkWiring,
     pub restate_ingress_url: String,
+    pub restate_authority_id: lash_restate::RestateAuthorityId,
     pub mock_provider_base_url: String,
     pub trace_dir: Option<PathBuf>,
     pub fail_once: bool,
@@ -671,7 +672,10 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(process_env_store)
         .effect_host(
-            Arc::new(RestateEffectHost::new(config.restate_ingress_url.clone()))
+            Arc::new(RestateEffectHost::new(
+                config.restate_ingress_url.clone(),
+                config.restate_authority_id.clone(),
+            ))
                 as Arc<dyn EffectHost>,
         )
         .trigger_store(trigger_store)
@@ -686,6 +690,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             pool: config.storage.pool().clone(),
             worker_id: config.worker_id.clone(),
             restate_ingress_url: config.restate_ingress_url,
+            restate_authority_id: config.restate_authority_id,
             fail_once: config.fail_once,
         }));
     if let Some(trace_dir) = config.trace_dir.as_ref() {
@@ -719,6 +724,7 @@ struct E2ePluginFactory {
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
+    restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
 }
 
@@ -762,6 +768,7 @@ impl PluginFactory for E2ePluginFactory {
             pool: self.pool.clone(),
             worker_id: self.worker_id.clone(),
             restate_ingress_url: self.restate_ingress_url.clone(),
+            restate_authority_id: self.restate_authority_id.clone(),
             fail_once: self.fail_once,
         }))
     }
@@ -772,6 +779,7 @@ struct E2eSessionPlugin {
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
+    restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
 }
 
@@ -792,6 +800,7 @@ impl SessionPlugin for E2eSessionPlugin {
                 self.pool.clone(),
                 self.worker_id.clone(),
                 self.restate_ingress_url.clone(),
+                self.restate_authority_id.clone(),
                 self.fail_once,
             ))
             .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))?;
@@ -843,6 +852,7 @@ fn e2e_tool_provider(
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
+    restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
 ) -> Arc<dyn ToolProvider> {
     Arc::new(StaticToolProvider::new(
@@ -1018,6 +1028,7 @@ fn e2e_tool_provider(
             pool,
             worker_id,
             restate_ingress_url,
+            restate_authority_id,
             fail_once,
         },
     )) as Arc<dyn ToolProvider>
@@ -1040,6 +1051,7 @@ struct E2eTools {
     pool: PgPool,
     worker_id: String,
     restate_ingress_url: String,
+    restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
 }
 
@@ -1146,9 +1158,10 @@ impl E2eTools {
         let pool = self.pool.clone();
         let worker_id = self.worker_id.clone();
         let restate_ingress_url = self.restate_ingress_url.clone();
+        let restate_authority_id = self.restate_authority_id.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let host = RestateEffectHost::new(restate_ingress_url);
+            let host = RestateEffectHost::new(restate_ingress_url, restate_authority_id);
             let resolution = lash_core::Resolution::Ok(result.clone());
             let outcome = host
                 .resolve_await_event(&completion_key, resolution)

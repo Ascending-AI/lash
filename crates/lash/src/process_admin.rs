@@ -614,38 +614,18 @@ impl Processes {
         let prunable = registry
             .prunable_terminal_processes(cutoff_epoch_ms, filter.cloned(), watermark)
             .await?;
-        if let Some(factory) = self.core.store_factory.as_ref() {
-            let prunable_ids = prunable.iter().collect::<std::collections::BTreeSet<_>>();
-            let sessions = factory
-                .list_sessions(&lash_core::SessionListFilter {
-                    deleted: Some(false),
-                    ..lash_core::SessionListFilter::default()
-                })
-                .await?;
-            for session in sessions {
-                let matching = factory
-                    .pending_turn_cancel_closure_pins(&session.session_id)
-                    .await?
-                    .into_iter()
-                    .filter(|authorization| {
-                        matches!(
-                            authorization.admitted_scope(),
-                            lash_core::ExecutionScope::Process {
-                                process_id: admitted
-                            } if prunable_ids.contains(admitted)
-                        )
-                    })
-                    .count();
-                if matching != 0 {
-                    return Err(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
-                        session_id: session.session_id,
-                        pending_count: matching,
-                    }
-                    .into());
-                }
-            }
-        }
         for process_id in prunable {
+            let process_scope = lash_core::ExecutionScope::process(process_id.clone());
+            if let Some(factory) = self.core.store_factory.as_ref() {
+                // This is the cancellation-admission serialization point. The
+                // factory checks every persisted closure and writes the scope
+                // tombstone under the same backend fence later authorization
+                // uses. Either an existing/new pin makes this call fail, or
+                // every later authorization is refused before it is written.
+                factory
+                    .retire_turn_cancel_closure_scope(&process_scope)
+                    .await?;
+            }
             // The process journal and the worker's trigger-delivery reconcile
             // scope for the same process: that runtime operation exists only
             // to admit this process, so nothing can replay it once the row is
@@ -656,9 +636,7 @@ impl Processes {
             let reconcile_scope =
                 lash_core::facade_support::trigger_delivery_reconcile_scope(&process_id);
             let retirements = [
-                Some(lash_core::EffectJournalRetirement::process(
-                    process_id.clone(),
-                )),
+                lash_core::EffectJournalRetirement::for_scope(&process_scope),
                 lash_core::EffectJournalRetirement::for_scope(&reconcile_scope),
             ];
             for retirement in retirements.into_iter().flatten() {

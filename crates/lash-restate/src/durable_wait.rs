@@ -19,11 +19,12 @@
 //! from ingress-side `RestateEffectHostController::await_event_key`, which is not
 //! executing inside a Restate journal and still refuses revoked sessions eagerly.
 //!
-//! Identity epoch 4 is a hard cutover: every wait request and indexed state
-//! value carries the full [`AwaitEventKey`] preimage, and handlers derive scope,
-//! classification, and workflow address locally. Deployments must drain and
-//! recreate both durable-wait services before upgrading; there is no tolerant
-//! decoder, address migration, or overlap window for pre-epoch-4 state.
+//! Identity epoch 6 is a hard cutover: every externally minted wait request
+//! and indexed state value carries the full authority-bound [`AwaitEventKey`]
+//! preimage, and handlers derive scope, classification, and workflow address
+//! locally. Deployments must drain and recreate both durable-wait services
+//! before upgrading; there is no tolerant decoder, address migration, or
+//! overlap window for pre-epoch-6 state.
 
 use lash_sansio::SessionId;
 use std::time::Duration;
@@ -40,21 +41,56 @@ use restate_sdk::serde::Json;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::ingress::RestateAuthorityId;
+
 pub(crate) fn restate_await_event_key(
     scope: &ExecutionScope,
     wait: AwaitEventWaitIdentity,
 ) -> Result<AwaitEventKey, RuntimeError> {
-    let key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;
+    let base_key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;
     Ok(AwaitEventKey {
         scope: scope.clone(),
         wait,
-        key_id,
+        key_id: base_key_id,
         signature: "restate-handler".to_string(),
     })
 }
 
+pub(crate) fn restate_await_event_key_for_authority(
+    authority_id: &RestateAuthorityId,
+    scope: &ExecutionScope,
+    wait: AwaitEventWaitIdentity,
+) -> Result<AwaitEventKey, RuntimeError> {
+    let base_key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;
+    let mut preimage = Vec::with_capacity(authority_id.binding_id().len() + base_key_id.len() + 1);
+    preimage.extend_from_slice(authority_id.binding_id().as_bytes());
+    preimage.push(0);
+    preimage.extend_from_slice(base_key_id.as_bytes());
+    let key_id = format!("{:x}", Sha256::digest(preimage));
+    Ok(AwaitEventKey {
+        scope: scope.clone(),
+        wait,
+        key_id,
+        signature: authority_id.binding_id().to_string(),
+    })
+}
+
 pub(crate) fn restate_await_event_key_is_valid(key: &AwaitEventKey) -> bool {
-    let Ok(expected) = restate_await_event_key(&key.scope, key.wait.clone()) else {
+    if key.signature == "restate-handler" {
+        let Ok(expected) = restate_await_event_key(&key.scope, key.wait.clone()) else {
+            return false;
+        };
+        return lash_core::facade_support::promise_semantics::constant_time_eq(
+            expected.key_id.as_bytes(),
+            key.key_id.as_bytes(),
+        );
+    }
+    let Some(authority_id) = RestateAuthorityId::from_binding_id(&key.signature) else {
+        return false;
+    };
+    let Ok(expected) =
+        restate_await_event_key_for_authority(&authority_id, &key.scope, key.wait.clone())
+    else {
         return false;
     };
     lash_core::facade_support::promise_semantics::constant_time_eq(
@@ -66,6 +102,11 @@ pub(crate) fn restate_await_event_key_is_valid(key: &AwaitEventKey) -> bool {
     )
 }
 
+pub(crate) fn restate_authority_id_for_key(key: &AwaitEventKey) -> Option<RestateAuthorityId> {
+    RestateAuthorityId::from_binding_id(&key.signature)
+        .filter(|_| restate_await_event_key_is_valid(key))
+}
+
 pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     RuntimeError::new(
         lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked,
@@ -73,7 +114,7 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     )
 }
 const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
-pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 5;
+pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 6;
 const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";

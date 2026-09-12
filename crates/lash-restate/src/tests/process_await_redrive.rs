@@ -149,7 +149,7 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig790ProcessAwaitRedriveInput>,
     ) -> HandlerResult<Json<ProcessAwaitOutput>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let cancellation = tokio_util::sync::CancellationToken::new();
         let effect = controller.execute_effect(
             RuntimeEffectEnvelope::new(
@@ -886,7 +886,7 @@ impl Fig1631SleepGate for Fig1631SleepGateImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig1631SleepGateInput>,
     ) -> HandlerResult<Json<String>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let outcome = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
@@ -950,7 +950,7 @@ impl Fig1631AwaitEventGate for Fig1631AwaitEventGateImpl {
             AwaitEventWaitIdentity::tool_completion("fig1631-await-call"),
         )
         .map_err(TerminalError::from_error)?;
-        let outcome = RestateRuntimeEffectController::new(ctx)
+        let outcome = RestateRuntimeEffectController::new_for_test(ctx)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1631-await-gate"),
@@ -1848,6 +1848,8 @@ pub(super) fn restate_effect_name_uses_lash_replay_key() {
 
 #[tokio::test]
 pub(super) async fn restate_effect_host_satisfies_scope_factory_conformance() {
-    lash_conformance::effect_host(|| Arc::new(RestateEffectHost::new("http://127.0.0.1:8080")))
-        .await;
+    lash_conformance::effect_host(|| {
+        Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:8080"))
+    })
+    .await;
 }

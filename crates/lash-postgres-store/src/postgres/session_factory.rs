@@ -153,7 +153,12 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .pending_turn_cancel_closure_pins()
             .await
     }
-
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        crate::turn_cancel_closure::retire_scope(&self.pool, scope).await
+    }
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
@@ -947,15 +952,11 @@ pub(crate) async fn delete_process_sessions_tx(
     if session_ids.is_empty() {
         return Ok(lash_core::SessionBlobReclaimReport::default());
     }
-    crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
-
     let session_id_texts: Vec<_> = session_ids.iter().map(SessionId::as_str).collect();
     let mut report = lash_core::SessionBlobReclaimReport::default();
     let outcome: Result<(), StoreError> = async {
-        // Take every session-history mutation fence before deleting heads or
-        // deciding whether graph cleanup is required.
         crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
-
+        crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
         let checkpoint_refs = sqlx::query_scalar::<_, String>(
             "SELECT DISTINCT checkpoint_ref
          FROM lash_sessions
@@ -981,8 +982,7 @@ pub(crate) async fn delete_process_sessions_tx(
         .await?;
         report.enumerated_blob_count = candidates.len();
 
-        // Permanent identity evidence for every materialized id in the batch,
-        // recorded before the rows go away so the reclaim arm below can see it.
+        // Record permanent identity before deletion so reclaim can see it.
         sqlx::query(
             "INSERT INTO lash_deleted_sessions
          (session_id, created_at_ms, last_commit_at_ms, head_revision,

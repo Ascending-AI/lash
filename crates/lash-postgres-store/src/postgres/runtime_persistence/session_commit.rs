@@ -271,7 +271,7 @@ impl SessionCommitStore for PostgresSessionStore {
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
         ensure_session_not_deleted_tx(&mut tx, &commit.session_id).await?;
-        if commit.turn_cancel_closure_authorization.is_none()
+        if commit.turn_cancel_closure_settlement.is_none()
             && let Some(fence) = commit.session_execution_lease_fence.as_ref()
         {
             ensure_session_execution_lease_tx(&mut tx, &commit.session_id, fence).await?;
@@ -344,7 +344,7 @@ impl SessionCommitStore for PostgresSessionStore {
             }
         }
         if commit.interrupted_turn_cancel_intent.is_some()
-            && commit.turn_cancel_closure_authorization.is_none()
+            && commit.turn_cancel_closure_settlement.is_none()
         {
             return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                 session_id: commit.session_id.clone(),
@@ -354,7 +354,16 @@ impl SessionCommitStore for PostgresSessionStore {
                     .unwrap_or_else(|| TurnId::from("missing-turn-id")),
             });
         }
-        if let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() {
+        if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
+            let closure = settlement.authorization();
+            if commit.interrupted_turn_input_cancellation.as_ref()
+                != settlement.effective_cancellation()
+            {
+                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                    session_id: commit.session_id.clone(),
+                    turn_id: closure.turn_id().clone(),
+                });
+            }
             let current_fence = commit
                 .session_execution_lease_fence
                 .as_ref()
@@ -703,7 +712,11 @@ impl SessionCommitStore for PostgresSessionStore {
                 .map_or(lash_core::TurnCancelDisposition::Defer, |evidence| {
                     evidence.undelivered
                 });
-            if let Some(evidence) = cancellation {
+            if let Some(evidence) = commit
+                .turn_cancel_closure_settlement
+                .as_ref()
+                .and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+            {
                 let observed = commit
                     .interrupted_turn_cancel_intent
                     .as_ref()
@@ -879,7 +892,8 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
             }
         }
-        if let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() {
+        if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
+            let closure = settlement.authorization();
             sqlx::query(
                 "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1 AND turn_id = $2",
             )

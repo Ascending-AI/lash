@@ -167,9 +167,10 @@ pub struct InMemorySessionStore {
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
     session_execution_leases: Mutex<HashMap<SessionId, InMemorySessionExecutionLease>>,
-    turn_cancellation_binding_id: Mutex<Option<String>>,
+    turn_cancellation_binding: Mutex<Option<(String, Option<crate::ExecutionScope>)>>,
     turn_cancel_closure_authorizations:
         Mutex<HashMap<TurnId, crate::TurnCancelClosureAuthorization>>,
+    retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
     queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     queued_work_next_seq: Mutex<u64>,
     /// Receiver-side sender allocation floor. This is a redelivery fence, not
@@ -272,6 +273,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashSet::new())),
         )
     }
 
@@ -291,6 +293,7 @@ impl InMemorySessionStore {
         session_catalog: SharedSessionCatalog,
         attachment_condemnations: SharedAttachmentCondemnations,
         attachment_manifest: SharedAttachmentManifest,
+        retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
         warnings::process_owner_death_degraded("InMemorySessionStore::with_shared_history");
         Self {
@@ -317,8 +320,9 @@ impl InMemorySessionStore {
             runtime_commit_count: Mutex::new(0),
             runtime_turn_commits: Mutex::new(std::collections::HashMap::new()),
             session_execution_leases: Mutex::new(HashMap::new()),
-            turn_cancellation_binding_id: Mutex::new(None),
+            turn_cancellation_binding: Mutex::new(None),
             turn_cancel_closure_authorizations: Mutex::new(HashMap::new()),
+            retired_turn_cancel_scopes,
             queued_work: Mutex::new(Vec::new()),
             queued_work_next_seq: Mutex::new(0),
             wake_redelivery_fences: Mutex::new(HashMap::new()),
@@ -1052,7 +1056,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         "turn_cancel_intent_revision",
                         stored.intent_revision,
                     )?;
-                    stored.record.request = request;
                 }
                 Some(_) => {}
                 None => {
@@ -1387,7 +1390,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     .map_or(crate::TurnCancelDisposition::Defer, |evidence| {
                         evidence.undelivered
                     });
-                if let Some(evidence) = cancellation {
+                if let Some(evidence) = commit
+                    .turn_cancel_closure_settlement
+                    .as_ref()
+                    .and_then(crate::TurnCancelClosureSettlement::base_cancellation)
+                {
                     let existing_outcome = requests
                         .get(turn_id)
                         .and_then(|stored| stored.record.outcome.clone());
@@ -1395,24 +1402,15 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         &crate::TurnAddress::new(&commit.session_id, turn_id),
                         evidence,
                     );
-                    let revision = match requests.get(turn_id) {
-                        Some(stored) if stored.record.request == request => stored.intent_revision,
-                        Some(stored) => crate::StoreError::checked_monotonic_increment(
-                            "turn_cancel_intent_revision",
-                            stored.intent_revision,
-                        )?,
-                        None => 1,
-                    };
-                    requests.insert(
-                        TurnId::from(turn_id),
+                    requests.entry(TurnId::from(turn_id)).or_insert_with(|| {
                         InMemoryTurnCancelRequest {
                             record: crate::TurnCancelRequestRecord {
                                 request,
                                 outcome: existing_outcome,
                             },
-                            intent_revision: revision,
-                        },
-                    );
+                            intent_revision: 1,
+                        }
+                    });
                 }
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == commit.session_id

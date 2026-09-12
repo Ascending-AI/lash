@@ -289,7 +289,7 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
 
         let durable_cell = ProductionToolCell::new(ControllerMode::Durable, &manifest.name).await;
         let context = Arc::new(ReplayableRecordingContext::default());
-        let durable = RestateRuntimeEffectController::new(Arc::clone(&context));
+        let durable = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
         durable_cell.run(&durable, || context.start_replay()).await;
         let tool_attempts = context
             .recorded_runtime_effect_envelopes()

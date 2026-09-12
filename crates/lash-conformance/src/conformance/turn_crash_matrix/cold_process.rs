@@ -275,11 +275,13 @@ async fn recover_turn_cancel_closure(
     let authority = store
         .turn_cancellation_authority()
         .expect("persistent backend exposes reopenable cancellation authority");
+    let admitted_scope = crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id);
     store
         .validate_turn_cancellation_binding(
             &identity.session_id,
             &lease.fence(),
             authority.binding_id(),
+            &admitted_scope,
         )
         .await
         .expect("successor adopts the selected cancellation binding");
@@ -301,6 +303,7 @@ async fn recover_turn_cancel_closure(
                 &identity.session_id,
                 &lease.fence(),
                 authority.binding_id(),
+                &admitted_scope,
             )
             .await
             .expect("load pending closure authorization");
@@ -359,19 +362,18 @@ async fn recover_turn_cancel_closure(
                 .expect("successor persists exact closure authorization");
             authorization
         };
-        let cancellation = authority
+        let settlement = authority
             .settle_authorized_closure(&authorization)
             .await
-            .expect("successor settles the authorized promise pair")
-            .expect("the durable base winner is cancellation");
+            .expect("successor settles the authorized promise pair");
+        assert!(settlement.effective_cancellation().is_some());
         let outcome = store
             .repair_orphaned_active_turn_inputs(
                 &identity.session_id,
                 &lease.fence(),
                 &identity.turn_id,
                 authorization.observed_intent(),
-                crate::TurnCancelRepairDecision::CancellationWon(cancellation),
-                Some(&authorization),
+                Some(&settlement),
             )
             .await
             .expect("apply cancellation effects and consume authorization")

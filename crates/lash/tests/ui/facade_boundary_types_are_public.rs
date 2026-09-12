@@ -248,9 +248,10 @@ impl TurnInputStore for FacadeStore {
         _session_id: &SessionId,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _turn_id: &TurnId,
-        _decision: lash::TurnCancelRepairDecision,
-    ) -> Result<lash::TurnCancelInputOutcome, StoreError> {
-        Ok(Default::default())
+        _observed: &lash::TurnCancelIntentSnapshot,
+        _settlement: Option<&lash::TurnCancelClosureSettlement>,
+    ) -> Result<lash::TurnCancelRepairResult, StoreError> {
+        Ok(lash::TurnCancelRepairResult::Applied(Default::default()))
     }
 }
 

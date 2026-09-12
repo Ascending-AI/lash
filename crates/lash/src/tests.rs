@@ -732,6 +732,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _binding_id: &str,
+        _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<(), lash_core::StoreError> {
         Ok(())
     }
@@ -750,6 +751,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _binding_id: &str,
+        _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
     {
         Ok(Vec::new())
@@ -931,8 +933,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _turn_id: &lash_core::TurnId,
         _observed: &lash_core::TurnCancelIntentSnapshot,
-        _decision: lash_core::TurnCancelRepairDecision,
-        _closure: Option<&lash_core::TurnCancelClosureAuthorization>,
+        _settlement: Option<&lash_core::TurnCancelClosureSettlement>,
     ) -> std::result::Result<lash_core::TurnCancelRepairResult, lash_core::store::StoreError> {
         Ok(lash_core::TurnCancelRepairResult::Applied(
             Default::default(),
@@ -1141,6 +1142,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _binding_id: &str,
+        _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<(), lash_core::StoreError> {
         Ok(())
     }
@@ -1159,6 +1161,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _session_id: &SessionId,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _binding_id: &str,
+        _admitted_scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
     {
         Ok(Vec::new())
@@ -1246,8 +1249,7 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _turn_id: &lash_core::TurnId,
         _observed: &lash_core::TurnCancelIntentSnapshot,
-        _decision: lash_core::TurnCancelRepairDecision,
-        _closure: Option<&lash_core::TurnCancelClosureAuthorization>,
+        _settlement: Option<&lash_core::TurnCancelClosureSettlement>,
     ) -> std::result::Result<lash_core::TurnCancelRepairResult, lash_core::store::StoreError> {
         Ok(lash_core::TurnCancelRepairResult::Applied(
             Default::default(),

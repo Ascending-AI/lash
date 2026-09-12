@@ -85,6 +85,7 @@ services:
       LASH_E2E_FAIL_ONCE: "1"
       DATABASE_URL: postgres://lash:lash@postgres:5432/lash
       RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
       MINIO_ENDPOINT: http://minio:9000
       MINIO_BUCKET: lash-attachments
       MINIO_REGION: us-east-1
@@ -117,6 +118,7 @@ services:
       LASH_E2E_FAIL_ONCE: "1"
       DATABASE_URL: postgres://lash:lash@postgres:5432/lash
       RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
       MINIO_ENDPOINT: http://minio:9000
       MINIO_BUCKET: lash-attachments
       MINIO_REGION: us-east-1
@@ -158,6 +160,7 @@ services:
       DATABASE_URL: postgres://lash:lash@postgres:5432/lash
       RESTATE_ADMIN_URL: http://restate:9070
       RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
       WORKER_DEPLOYMENT_URL: http://worker-proxy:18100
       MINIO_ENDPOINT: http://minio:9000
       MINIO_BUCKET: lash-attachments

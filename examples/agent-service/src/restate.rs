@@ -83,7 +83,10 @@ impl AgentServiceTurnWorkflow for AgentServiceTurnWorkflowImpl {
             AgentServiceTurnWorkflowRequest,
         >,
     ) -> restate_sdk::errors::HandlerResult<restate_sdk::serde::Json<()>> {
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
+        let authority_id = self.state.restate_authority_id().cloned().ok_or_else(|| {
+            restate_sdk::errors::TerminalError::new("Restate authority id is not configured")
+        })?;
+        let controller = lash_restate::RestateRuntimeEffectController::new(ctx, authority_id);
         run_restate_chat_turn_and_persist(self.state.clone(), request, &controller)
             .await
             .map_err(restate_sdk::errors::TerminalError::from_error)?;
@@ -691,7 +694,10 @@ mod restate_tests {
         // members. This separate wait proves the underlying await-event
         // terminal itself is durable: a fresh observer sees `Cancelled`, a
         // second await returns immediately, and a late completion cannot win.
-        let wait_host = RestateEffectHost::new(ingress_url);
+        let wait_host = RestateEffectHost::new(
+            ingress_url,
+            RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
+        );
         let wait_scope = ExecutionScope::turn(
             format!("agent-service-await-session-{}", uuid::Uuid::new_v4()),
             "cancelled-await-event",
@@ -856,10 +862,14 @@ finish "done via Restate E2E"
         );
         let process_deployment = lash_restate::RestateProcessDeployment::new(
             ingress_url.clone(),
+            lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
             Arc::clone(&process_registry),
             process_continuations,
         );
-        let turn_deployment = lash_restate::RestateTurnDeployment::new(ingress_url);
+        let turn_deployment = lash_restate::RestateTurnDeployment::new(
+            ingress_url,
+            lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
+        );
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)

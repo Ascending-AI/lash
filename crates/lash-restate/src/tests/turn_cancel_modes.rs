@@ -26,7 +26,7 @@ where
     C: Send + Sync + 'static,
 {
     TurnWorkDriver::for_session(
-        Arc::new(RestateRuntimeEffectController::new(context)),
+        Arc::new(RestateRuntimeEffectController::new_for_test(context)),
         SESSION,
         Arc::new(lash_core::facade_support::InMemorySessionStore::default()),
     )
@@ -42,7 +42,7 @@ where
     C: Send + Sync + 'static,
 {
     TurnWorkDriver::for_session(
-        Arc::new(RestateRuntimeEffectController::new(context)),
+        Arc::new(RestateRuntimeEffectController::new_for_test(context)),
         session_id,
         store,
     )
@@ -75,7 +75,7 @@ fn spawn_parked_sleep(
 ) -> tokio::task::JoinHandle<Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError>>
 {
     tokio::spawn(async move {
-        RestateRuntimeEffectController::new(context)
+        RestateRuntimeEffectController::new_for_test(context)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::Sleep, effect_id),
@@ -220,7 +220,7 @@ async fn after_step_during_a_parked_await_event_keeps_waiting_for_the_event() {
         let cancellation = cancellation.clone();
         let awaited_key = awaited_key.clone();
         tokio::spawn(async move {
-            RestateRuntimeEffectController::new(context)
+            RestateRuntimeEffectController::new_for_test(context)
                 .execute_effect(
                     RuntimeEffectEnvelope::new(
                         runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig635-await-event"),
@@ -281,7 +281,7 @@ async fn after_step_during_a_parked_process_await_lets_the_process_finish() {
         let registry = Arc::clone(&registry);
         let cancellation = cancellation.clone();
         tokio::spawn(async move {
-            RestateRuntimeEffectController::new(context)
+            RestateRuntimeEffectController::new_for_test(context)
                 .execute_effect(
                     RuntimeEffectEnvelope::new(
                         runtime_invocation(RuntimeEffectKind::Process, "fig635-process-await"),
@@ -474,7 +474,7 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
     let turn = {
         let context = Arc::clone(&context);
         tokio::spawn(async move {
-            let controller = RestateRuntimeEffectController::new(context);
+            let controller = RestateRuntimeEffectController::new_for_test(context);
             let scoped = controller
                 .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
                 .expect("scoped restate controller");

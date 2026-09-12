@@ -328,8 +328,18 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     let authority = store
         .turn_cancellation_authority()
         .expect("factory-created in-memory store exposes its cancellation authority");
+    let physical_scope = lash_core::ExecutionScope::process(process_id.clone());
+    let binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
+        authority.binding_id(),
+        &physical_scope,
+    )?;
     store
-        .validate_turn_cancellation_binding(&session_id, &lease.fence(), authority.binding_id())
+        .validate_turn_cancellation_binding(
+            &session_id,
+            &lease.fence(),
+            &binding_id,
+            &physical_scope,
+        )
         .await?;
     let turn_id = lash_core::TurnId::from("process-prune-closure-turn");
     let address = lash_core::facade_support::TurnAddress::new(&session_id, &turn_id);
@@ -354,8 +364,8 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         .await?;
     let authorization = lash_core::TurnCancelClosureAuthorization::new(
         address,
-        authority.binding_id(),
-        lash_core::ExecutionScope::process(process_id.clone()),
+        binding_id,
+        physical_scope,
         cancel_key,
         escalation_key,
         terminal_key,
@@ -384,14 +394,14 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         "the refused prune retains the terminal process and its journal"
     );
 
+    let settlement = authority.settle_authorized_closure(&authorization).await?;
     store
         .repair_orphaned_active_turn_inputs(
             &session_id,
             &lease.fence(),
             &turn_id,
             &lash_core::TurnCancelIntentSnapshot::Absent,
-            lash_core::TurnCancelRepairDecision::CancellationDidNotWin,
-            Some(&authorization),
+            Some(&settlement),
         )
         .await?
         .into_applied()
@@ -401,6 +411,88 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
         .await?;
     assert_eq!(report.pruned_processes, 1);
+
+    let late_session_id = lash_core::SessionId::from("process-prune-closure-late-session");
+    let late_store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: late_session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await?;
+    let late_lease = late_store
+        .try_claim_session_execution_lease(
+            &late_session_id,
+            &lash_core::LeaseOwnerIdentity::opaque(
+                "process-prune-closure-late-owner",
+                "process-prune-closure-late-owner:incarnation",
+            ),
+            "process-prune-closure-late-executor",
+            60_000,
+        )
+        .await?
+        .acquired()
+        .expect("fresh late session lane is available");
+    let late_authority = late_store
+        .turn_cancellation_authority()
+        .expect("late store exposes cancellation authority");
+    let late_scope = lash_core::ExecutionScope::process(process_id.clone());
+    let late_binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
+        late_authority.binding_id(),
+        &late_scope,
+    )?;
+    late_store
+        .validate_turn_cancellation_binding(
+            &late_session_id,
+            &late_lease.fence(),
+            &late_binding_id,
+            &late_scope,
+        )
+        .await?;
+    let late_address = lash_core::facade_support::TurnAddress::new(
+        &late_session_id,
+        lash_core::TurnId::from("process-prune-closure-late-turn"),
+    );
+    let late_resolver = late_authority.resolver();
+    let late_authorization = lash_core::TurnCancelClosureAuthorization::new(
+        late_address.clone(),
+        late_binding_id,
+        lash_core::ExecutionScope::process(process_id),
+        late_resolver
+            .await_event_key(
+                &late_address.execution_scope(),
+                lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .await?,
+        late_resolver
+            .await_event_key(
+                &late_address.execution_scope(),
+                lash_core::AwaitEventWaitIdentity::TurnCancelEscalation,
+            )
+            .await?,
+        late_resolver
+            .await_event_key(
+                &late_address.execution_scope(),
+                lash_core::AwaitEventWaitIdentity::TurnTerminal,
+            )
+            .await?,
+        lash_core::TurnCancelClosureProposal::CompletionSealed,
+        lash_core::TurnCancelIntentSnapshot::Absent,
+        &late_lease.fence(),
+    )?;
+    assert!(matches!(
+        late_store
+            .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
+            .await,
+        Err(lash_core::StoreError::TurnCancelClosureScopeRetired { .. })
+    ));
+    assert!(
+        late_store
+            .pending_turn_cancel_closure_pins()
+            .await?
+            .is_empty()
+    );
 
     Ok(())
 }

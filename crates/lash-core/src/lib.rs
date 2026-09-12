@@ -463,6 +463,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnCancelClosureAuthorization;
     pub use crate::runtime::TurnCancelClosureAuthorizationOutcome;
     pub use crate::runtime::TurnCancelClosureProposal;
+    pub use crate::runtime::TurnCancelClosureSettlement;
     pub use crate::runtime::TurnCancelDisposition;
     pub use crate::runtime::TurnCancelInputOutcome;
     pub use crate::runtime::TurnCancelIntentSnapshot;
@@ -512,6 +513,7 @@ pub mod facade_support {
     #[doc(hidden)]
     pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::trigger_delivery_reconcile_scope;
+    pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     #[doc(hidden)]
@@ -1184,11 +1186,11 @@ pub use runtime::{
     StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
     TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
-    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
-    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation, TurnEvent,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelOriginHint, TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
+    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
     TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
     TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
     TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, UnreportedLedgerAttempt,

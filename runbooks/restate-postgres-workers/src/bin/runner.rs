@@ -14,8 +14,9 @@ use lash_core::{
 };
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
-    RestateAdminClient, RestateConnection, RestateEffectHost, RestateIngressClient,
-    RestateInvocationId, RestateInvocationStatus, RestateProcessDeployment, RestateTurnDeployment,
+    RestateAdminClient, RestateAuthorityId, RestateConnection, RestateEffectHost,
+    RestateIngressClient, RestateInvocationId, RestateInvocationStatus, RestateProcessDeployment,
+    RestateTurnDeployment,
 };
 use lash_restate_postgres_workers_e2e::{
     ATTACHMENT_MIME, BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
@@ -37,6 +38,13 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::process::Command;
 
 const DEFAULT_RUNNER_STALL_TIMEOUT: Duration = Duration::from_secs(240);
+
+fn restate_authority_id() -> Result<RestateAuthorityId> {
+    RestateAuthorityId::new(
+        std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
+    )
+    .map_err(anyhow::Error::from)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WorkflowSegment {

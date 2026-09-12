@@ -391,6 +391,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
                 Arc::clone(&registry),
                 continuation_store(),
                 cancel_ingress,
+                test_restate_authority_id(),
             )
             .serve(),
         )

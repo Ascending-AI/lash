@@ -22,8 +22,8 @@ use lash_core::{
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
-    durable_wait_index_object_key, restate_await_event_key, restate_await_event_key_is_valid,
-    restate_durable_wait_request, restate_unknown_or_revoked,
+    durable_wait_index_object_key, restate_await_event_key_for_authority,
+    restate_await_event_key_is_valid, restate_durable_wait_request, restate_unknown_or_revoked,
 };
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
@@ -33,7 +33,7 @@ use crate::effect_group::{
     EffectGroupWaitResolution, decode_wait_resolution, group_shape_error, payload_key,
     rank_wait_request, ready_wait_request, settlement_from_payload,
 };
-use crate::ingress::{RestateConnection, RestateIngressClient};
+use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 
 /// Deployment-level Restate effect host for long-lived Lash cores.
 ///
@@ -51,19 +51,32 @@ pub struct RestateEffectHost {
 }
 
 impl RestateEffectHost {
-    pub fn new(connection: impl Into<RestateConnection>) -> Self {
+    pub fn new(connection: impl Into<RestateConnection>, authority_id: RestateAuthorityId) -> Self {
         let connection = connection.into();
-        let turn_control_binding_id: Arc<str> = Arc::from("restate-await-events-v1");
+        let turn_control_binding_id: Arc<str> = Arc::from(authority_id.binding_id());
+        let turn_attach_authority_id = authority_id.clone();
         Self {
             controller: Arc::new(RestateEffectHostController {
                 await_event_ingress: RestateAwaitEventIngress {
                     ingress: RestateIngressClient::new(connection.clone()),
                 },
+                authority_id,
                 registrations: std::sync::Mutex::new(None),
             }),
-            turn_attach: Arc::new(crate::turn::RestateTurnAttach::new(connection)),
+            turn_attach: Arc::new(crate::turn::RestateTurnAttach::new(
+                connection,
+                turn_attach_authority_id,
+            )),
             turn_control_binding_id,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(connection: impl Into<RestateConnection>) -> Self {
+        Self::new(
+            connection,
+            RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+        )
     }
 
     pub(crate) fn turn_attach_handle(&self) -> Arc<crate::turn::RestateTurnAttach> {
@@ -653,6 +666,7 @@ async fn await_restate_await_event_via_ingress(
 }
 struct RestateEffectHostController {
     await_event_ingress: RestateAwaitEventIngress,
+    authority_id: RestateAuthorityId,
     /// The bound process registry's registration truth (ADR 0049): a process
     /// scope's index says `revoked` only as a cache of the registry's fence,
     /// so a revoked index on a registered process is stale and is reinstated
@@ -698,7 +712,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         if !self.scope_admits_mint(scope).await? {
             return Err(restate_unknown_or_revoked());
         }
-        restate_await_event_key(scope, wait)
+        restate_await_event_key_for_authority(&self.authority_id, scope, wait)
     }
 
     async fn resolve_await_event(

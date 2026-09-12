@@ -19,8 +19,8 @@ use crate::controller::{
 use crate::durable_wait::{
     DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_INDEX_METADATA_KEY,
     RestateDurableWaitIndexMetadata, RestateTurnCancelWake, durable_wait_address_from_state_key,
-    durable_wait_index_state_key, restate_await_event_key, split_cancellable_waits,
-    validate_durable_wait_index_epoch,
+    durable_wait_index_state_key, restate_await_event_key, restate_await_event_key_for_authority,
+    split_cancellable_waits, validate_durable_wait_index_epoch,
 };
 use crate::process::{
     boundary_must_be_declined, handler_error_from_plugin, missing_segment_is_superseded,
@@ -40,8 +40,9 @@ use lash_core::{
     ProcessExecutionContext, ProcessExternalRef, ProcessRegistry, QueuedLaneAcquisition,
     QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
-    facade_support::DurableProcessWorker, facade_support::TurnAddress, facade_support::TurnAttach,
+    RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController, SessionExecutionLeaseStore,
+    TurnInputStore, facade_support::DurableProcessWorker, facade_support::TurnAddress,
+    facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::HttpRequest;
@@ -66,6 +67,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
+
+fn test_restate_authority_id() -> RestateAuthorityId {
+    RestateAuthorityId::new("lash-restate-tests").expect("valid test Restate authority id")
+}
 
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
@@ -135,7 +140,8 @@ async fn assert_restate_queued_lane_conformance() {
         QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_400)),
         QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_401)),
     ]));
-    let controller = RestateRuntimeEffectController::new(Arc::new(RecordingContext::default()));
+    let controller =
+        RestateRuntimeEffectController::new_for_test(Arc::new(RecordingContext::default()));
     let result = lash_conformance::durable_queued_drain_wait_contract(
         &controller,
         Arc::clone(&controller_probe) as Arc<dyn QueuedLaneProbe>,
@@ -155,7 +161,7 @@ async fn assert_restate_queued_lane_conformance() {
     let host_probe = Arc::new(QueuedLaneProbeDouble::new([QueuedLaneAttempt::Busy(
         lash_core::testing::queued_lane_holder_for_testing(7_400),
     )]));
-    let host = RestateEffectHost::new("http://127.0.0.1:8080");
+    let host = RestateEffectHost::new_for_test("http://127.0.0.1:8080");
     let result = lash_conformance::durable_queued_drain_wait_contract(
         &host,
         Arc::clone(&host_probe) as Arc<dyn QueuedLaneProbe>,
@@ -984,7 +990,7 @@ impl Fig806TriggerRedrive for Fig806TriggerRedriveImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig806TriggerRedriveInput>,
     ) -> HandlerResult<Json<lash_core::facade_support::TriggerEmitReport>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let report = self
             .router
             .emit(input.occurrence, &controller)
@@ -1039,7 +1045,7 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
         ctx: WorkflowContext<'_>,
         Json(_input): Json<Fig793LlmGateRedriveInput>,
     ) -> HandlerResult<Json<bool>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         controller
             .execute_effect(
                 fig793_llm_envelope(),
@@ -1096,7 +1102,7 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
             AwaitEventWaitIdentity::tool_completion("fig1126-revoked-call"),
         )
         .map_err(TerminalError::from_error)?;
-        let outcome = RestateRuntimeEffectController::new(ctx)
+        let outcome = RestateRuntimeEffectController::new_for_test(ctx)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1126-revoked-await"),
@@ -1183,7 +1189,7 @@ impl Fig1142ReplayDivergence for Fig1142ReplayDivergenceImpl {
         Json(_input): Json<Fig1142ReplayDivergenceInput>,
     ) -> HandlerResult<Json<bool>> {
         let model_version = self.model_version.load(Ordering::SeqCst);
-        RestateRuntimeEffectController::new(ctx)
+        RestateRuntimeEffectController::new_for_test(ctx)
             .execute_effect(
                 fig1142_llm_envelope(model_version),
                 RuntimeEffectLocalExecutor::testing(|_| async { Ok(fig793_llm_outcome()) }),
@@ -1200,7 +1206,7 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
         ctx: WorkflowContext<'_>,
         Json(_input): Json<Fig1126PendingToolRedriveInput>,
     ) -> HandlerResult<Json<Resolution>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let scope = durable_turn_scope("fig1126-session", "fig1126-turn");
         let pending_scope = scope.clone();
         let pending = controller

@@ -10,3 +10,4 @@
 # owning backend's component schema version whenever that happens.
 # Regenerate with LASH_UPDATE_PAYLOAD_SCHEMA_FINGERPRINTS=1 cargo test -p
 # lash-postgres-store committed_fingerprints_match_every_registered_carrier.
+payload-fingerprint postgres lash_turn_cancellation_bindings.admitted_scope_json ExecutionScope sha256:83f8b4aa1ce72550e98cab640f1ac6b331a8f97e6e1dbb7efc08e9b5499ed3b8

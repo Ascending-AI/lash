@@ -1972,8 +1972,14 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref())
         .await
         .expect("reopen recovery session catalog");
-    let driver = lash_restate::RestateTurnDeployment::new(ingress_url)
-        .turn_work_driver(Arc::clone(&stores.session_store_factory));
+    let driver = lash_restate::RestateTurnDeployment::new(
+        ingress_url,
+        lash_restate::RestateAuthorityId::new(
+            std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
+        )
+        .expect("valid Restate authority id"),
+    )
+    .turn_work_driver(Arc::clone(&stores.session_store_factory));
     let receipt = driver
         .request_cancel(
             lash::TurnCancelRequest::new(

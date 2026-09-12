@@ -691,12 +691,22 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
 
 
 --
+-- Name: lash_turn_cancel_retired_scopes; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_retired_scopes (
+    scope_id text NOT NULL
+);
+
+
+--
 -- Name: lash_turn_cancellation_bindings; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_turn_cancellation_bindings (
     session_id text NOT NULL,
     binding_id text NOT NULL,
+    admitted_scope_json text,
     CONSTRAINT lash_turn_cancellation_bindings_binding_id_check CHECK ((length(binding_id) > 0))
 );
 
@@ -994,7 +1004,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 87);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 88);
 
 
 --
@@ -1072,6 +1082,12 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigge
 
 --
 -- Data for Name: lash_turn_cancel_requests; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_cancel_retired_scopes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1522,6 +1538,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_closure_authorizatio
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_requests
     ADD CONSTRAINT lash_turn_cancel_requests_pkey PRIMARY KEY (session_id, turn_id);
+
+
+--
+-- Name: lash_turn_cancel_retired_scopes lash_turn_cancel_retired_scopes_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_retired_scopes
+    ADD CONSTRAINT lash_turn_cancel_retired_scopes_pkey PRIMARY KEY (scope_id);
 
 
 --

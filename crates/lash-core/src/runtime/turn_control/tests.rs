@@ -329,7 +329,12 @@ async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() 
         .expect("snapshot cancellation intent before authorization");
     let binding_id = host.turn_control_binding_id();
     store
-        .validate_turn_cancellation_binding(&address.session_id, &lease.fence(), &binding_id)
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
         .await
         .expect("bind turn cancellation authority");
     let authorization = active
@@ -346,10 +351,13 @@ async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() 
         .authorize_turn_cancel_closure(&lease.fence(), &authorization)
         .await
         .expect("authorize closure");
-    let winner = active
+    let settlement = active
         .settle_authorized(host.as_ref(), &authorization)
         .await
-        .expect("settle cancellation gate")
+        .expect("settle cancellation gate");
+    let winner = settlement
+        .effective_cancellation()
+        .cloned()
         .expect("request won the gate");
 
     let mut state = crate::RuntimeSessionState {
@@ -367,7 +375,7 @@ async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() 
     commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(winner);
     commit.interrupted_turn_cancel_intent = Some(observed);
-    commit.turn_cancel_closure_authorization = Some(authorization);
+    commit.turn_cancel_closure_settlement = Some(settlement);
     commit.session_execution_lease_fence = Some(lease.fence());
     let committed = store
         .commit_runtime_state(commit)
@@ -680,7 +688,12 @@ async fn authorized_completion_adopts_a_legitimate_different_cancel_winner() {
         .expect("active control");
     let binding_id = host.turn_control_binding_id();
     store
-        .validate_turn_cancellation_binding(&address.session_id, &lease.fence(), &binding_id)
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
         .await
         .expect("bind authority");
     let authorization = active
@@ -707,10 +720,13 @@ async fn authorized_completion_adopts_a_legitimate_different_cancel_winner() {
         .expect("cancel wins after completion was proposed");
     assert!(matches!(accepted.outcome, TurnCancelOutcome::Requested(_)));
 
-    let settled = active
+    let settlement = active
         .settle_authorized(host.as_ref(), &authorization)
         .await
-        .expect("adopt the promise's actual winner")
+        .expect("adopt the promise's actual winner");
+    let settled = settlement
+        .effective_cancellation()
+        .cloned()
         .expect("cancel is the actual winner");
     assert_eq!(settled.request_id, cancel.request_id);
     assert_eq!(
@@ -723,12 +739,103 @@ async fn authorized_completion_adopts_a_legitimate_different_cancel_winner() {
                     .turn_cancel_request_intent(&address)
                     .await
                     .expect("refresh intent after the differing winner"),
-                crate::TurnCancelRepairDecision::CancellationWon(settled),
-                Some(&authorization),
+                Some(&settlement),
             )
             .await
             .expect("consume exact authorization under current fence"),
         crate::TurnCancelRepairResult::Applied(crate::TurnCancelInputOutcome::default())
+    );
+}
+
+#[tokio::test]
+async fn wrong_owner_and_revoked_authorized_closure_retain_the_store_pin() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("authorized-owner-refusal");
+    let store = Arc::new(InMemorySessionStore::default());
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("admit session");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &address.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "authorized-owner-refusal",
+                "authorized-owner-refusal:incarnation",
+            ),
+            "authorized-owner-refusal:executor",
+            60_000,
+        )
+        .await
+        .expect("claim closure lane")
+        .acquired()
+        .expect("closure lane is free");
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("active control");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
+        .await
+        .expect("bind authority");
+    let authorization = active
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            TurnCancelIntentSnapshot::Absent,
+            false,
+            None,
+        )
+        .expect("assemble completion authorization");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("persist authorization before settlement");
+
+    let wrong_owner = crate::TurnCancellationAuthority::new(
+        "another-durable-owner",
+        Arc::new(NativeEffectHost::default()),
+    );
+    let wrong = wrong_owner
+        .settle_authorized_closure(&authorization)
+        .await
+        .expect_err("another promise owner cannot settle this authorization");
+    assert_eq!(
+        wrong.code,
+        crate::RuntimeErrorCode::InvalidTurnCancelRequest
+    );
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("wrong owner leaves pin"),
+        vec![authorization.clone()]
+    );
+
+    host.revoke_await_events_for_session(&address.session_id)
+        .await
+        .expect("revoke the exact promise owner");
+    let exact_owner = crate::TurnCancellationAuthority::new(binding_id, host);
+    let revoked = exact_owner
+        .settle_authorized_closure(&authorization)
+        .await
+        .expect_err("revoked promise evidence cannot authenticate settlement");
+    assert_eq!(
+        revoked.code,
+        crate::RuntimeErrorCode::TurnControlUnknownOrRevoked
+    );
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("revoked evidence leaves pin"),
+        vec![authorization]
     );
 }
 
@@ -1390,7 +1497,12 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
         .expect("test lane is free");
     let binding_id = host.turn_control_binding_id();
     store
-        .validate_turn_cancellation_binding(&address.session_id, &lease.fence(), &binding_id)
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
         .await
         .expect("bind turn cancellation authority");
     let authorization = active
@@ -1407,10 +1519,13 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
         .authorize_turn_cancel_closure(&lease.fence(), &authorization)
         .await
         .expect("authorize closure");
-    let settled = active
+    let settlement = active
         .settle_authorized(host.as_ref(), &authorization)
         .await
-        .expect("close and observe escalation before final commit")
+        .expect("close and observe escalation before final commit");
+    let settled = settlement
+        .effective_cancellation()
+        .cloned()
         .expect("accepted escalation wins");
     assert_eq!(settled.request_id, immediate.request_id);
     assert_eq!(settled.mode, TurnCancelMode::Immediate);
@@ -1441,7 +1556,7 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
     commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
     commit.interrupted_turn_input_cancellation = Some(settled);
     commit.interrupted_turn_cancel_intent = Some(before_gate_acceptance);
-    commit.turn_cancel_closure_authorization = Some(authorization);
+    commit.turn_cancel_closure_settlement = Some(settlement);
     commit.session_execution_lease_fence = Some(lease.fence());
     assert!(matches!(
         store.commit_runtime_state(commit.clone()).await,

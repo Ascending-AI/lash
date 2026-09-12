@@ -130,16 +130,28 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), crate::store::StoreError> {
+        admitted_scope
+            .validate()
+            .map_err(|error| crate::StoreError::StoredDataCorrupt {
+                record_kind: "TurnCancellationBinding",
+                message: error.to_string(),
+            })?;
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
-        let mut selected = self.turn_cancellation_binding_id.lock_recover();
-        match selected.as_deref() {
-            None => *selected = Some(binding_id.to_string()),
-            Some(expected) if expected == binding_id => {}
-            Some(expected) => {
+        let admitted_physical_scope = admitted_scope
+            .session_id()
+            .is_none()
+            .then(|| admitted_scope.clone());
+        let mut selected = self.turn_cancellation_binding.lock_recover();
+        match selected.as_ref() {
+            None => *selected = Some((binding_id.to_string(), admitted_physical_scope.clone())),
+            Some((expected, expected_scope))
+                if expected == binding_id && expected_scope == &admitted_physical_scope => {}
+            Some((expected, _)) => {
                 return Err(crate::StoreError::TurnCancelBindingMismatch {
                     session_id: session_id.clone(),
                     expected: expected.to_string(),
@@ -174,11 +186,38 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 session_id: authorization.session_id().clone(),
             });
         }
-        let selected = self.turn_cancellation_binding_id.lock_recover();
-        if selected.as_deref() != Some(authorization.binding_id()) {
+        if authorization.admitted_scope().session_id().is_none() {
+            let scope_id = authorization
+                .admitted_scope()
+                .journal_identity()
+                .map_err(|error| crate::StoreError::Backend(error.to_string()))?
+                .key()
+                .to_string();
+            if self
+                .retired_turn_cancel_scopes
+                .lock_recover()
+                .contains(&scope_id)
+            {
+                return Err(crate::StoreError::TurnCancelClosureScopeRetired { scope_id });
+            }
+        }
+        let selected = self.turn_cancellation_binding.lock_recover();
+        let admitted_physical_scope = authorization
+            .admitted_scope()
+            .session_id()
+            .is_none()
+            .then(|| authorization.admitted_scope().clone());
+        if selected
+            .as_ref()
+            .map(|(binding, scope)| (binding.as_str(), scope))
+            != Some((authorization.binding_id(), &admitted_physical_scope))
+        {
             return Err(crate::StoreError::TurnCancelBindingMismatch {
                 session_id: authorization.session_id().clone(),
-                expected: selected.clone().unwrap_or_default(),
+                expected: selected
+                    .as_ref()
+                    .map(|(binding, scope)| format!("{binding} at {scope:?}"))
+                    .unwrap_or_default(),
                 presented: authorization.binding_id().to_string(),
             });
         }
@@ -212,9 +251,15 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::store::StoreError> {
-        self.validate_turn_cancellation_binding(session_id, session_execution_lease, binding_id)
-            .await?;
+        self.validate_turn_cancellation_binding(
+            session_id,
+            session_execution_lease,
+            binding_id,
+            admitted_scope,
+        )
+        .await?;
         Ok(self
             .turn_cancel_closure_authorizations
             .lock_recover()
@@ -280,14 +325,14 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 },
                 intent_revision: 1,
             });
-        // First writer wins, except that a stronger mode escalates the durable
-        // request; the repair outcome accumulated so far stays attached.
+        // The first policy acceptor is immutable. A stronger same-policy
+        // request advances the closure-CAS revision; its effective timing is
+        // recorded by the settled gate.
         if request.mode.is_stronger_than(stored.record.request.mode) {
             stored.intent_revision = crate::store::StoreError::checked_monotonic_increment(
                 "turn_cancel_intent_revision",
                 stored.intent_revision,
             )?;
-            stored.record.request = request;
         }
         Ok(stored.record.clone())
     }
@@ -623,19 +668,21 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
-        decision: crate::TurnCancelRepairDecision,
-        closure: Option<&crate::TurnCancelClosureAuthorization>,
+        settlement: Option<&crate::TurnCancelClosureSettlement>,
     ) -> Result<crate::store::TurnCancelRepairResult, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(session_id)?;
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
-        let closure_required = !matches!(observed, crate::TurnCancelIntentSnapshot::Absent)
-            || !matches!(
-                decision,
-                crate::TurnCancelRepairDecision::NoCancellationIntent
-            );
-        if closure_required != closure.is_some()
+        let closure = settlement.map(crate::TurnCancelClosureSettlement::authorization);
+        let pending_closure = self
+            .turn_cancel_closure_authorizations
+            .lock_recover()
+            .get(turn_id)
+            .cloned();
+        let closure_required = pending_closure.is_some()
+            || !matches!(observed, crate::TurnCancelIntentSnapshot::Absent);
+        if closure_required != settlement.is_some()
             || closure.is_some_and(|authorization| {
                 authorization.session_id() != session_id || authorization.turn_id() != turn_id
             })
@@ -645,45 +692,39 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 turn_id: turn_id.clone(),
             });
         }
-        if let Some(closure) = closure {
-            let pending = self.turn_cancel_closure_authorizations.lock_recover();
-            if pending.get(turn_id) != Some(closure) {
-                return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
-                    session_id: session_id.clone(),
-                    turn_id: turn_id.clone(),
-                });
-            }
+        if let Some(closure) = closure
+            && pending_closure.as_ref() != Some(closure)
+        {
+            return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            });
         }
         let mut pending = self.pending_turn_inputs.lock_recover();
         let mut requests = self.turn_cancel_requests.lock_recover();
         if snapshot(&requests, turn_id) != *observed {
             return Ok(crate::store::TurnCancelRepairResult::IntentChanged);
         }
-        let disposition = decision.disposition();
-        if let crate::TurnCancelRepairDecision::CancellationWon(evidence) = &decision {
+        let effective =
+            settlement.and_then(crate::TurnCancelClosureSettlement::effective_cancellation);
+        let disposition = effective.map_or(crate::TurnCancelDisposition::Defer, |e| e.undelivered);
+        if let Some(evidence) =
+            settlement.and_then(crate::TurnCancelClosureSettlement::base_cancellation)
+        {
             let prior_outcome = requests
                 .get(turn_id)
                 .and_then(|stored| stored.record.outcome.clone());
             let request =
                 request_from_evidence(&crate::TurnAddress::new(session_id, turn_id), evidence);
-            let revision = match requests.get(turn_id) {
-                Some(stored) if stored.record.request == request => stored.intent_revision,
-                Some(stored) => crate::store::StoreError::checked_monotonic_increment(
-                    "turn_cancel_intent_revision",
-                    stored.intent_revision,
-                )?,
-                None => 1,
-            };
-            requests.insert(
-                turn_id.clone(),
-                super::InMemoryTurnCancelRequest {
+            requests
+                .entry(turn_id.clone())
+                .or_insert_with(|| super::InMemoryTurnCancelRequest {
                     record: crate::TurnCancelRequestRecord {
                         request,
                         outcome: prior_outcome,
                     },
-                    intent_revision: revision,
-                },
-            );
+                    intent_revision: 1,
+                });
         }
         let mut outcome = crate::TurnCancelInputOutcome::default();
         for entry in pending.iter_mut() {
@@ -714,10 +755,8 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 }
             }
             entry.clear_claim();
-            if matches!(
-                &decision,
-                crate::TurnCancelRepairDecision::CancellationWon(_)
-            ) && let Some(record) = requests.get_mut(turn_id)
+            if effective.is_some()
+                && let Some(record) = requests.get_mut(turn_id)
             {
                 record
                     .record
@@ -728,7 +767,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             }
             outcome.affected_inputs.push(affected);
         }
-        if closure.is_some() {
+        if settlement.is_some() {
             self.turn_cancel_closure_authorizations
                 .lock_recover()
                 .remove(turn_id);

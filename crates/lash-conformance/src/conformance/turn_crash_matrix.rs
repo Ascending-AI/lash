@@ -704,7 +704,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let operation = if commit.turn_cancel_closure_authorization.is_some() {
+        let operation = if commit.turn_cancel_closure_settlement.is_some() {
             TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
         } else {
             TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
@@ -771,10 +771,9 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
-        decision: crate::TurnCancelRepairDecision,
-        closure: Option<&crate::TurnCancelClosureAuthorization>,
+        settlement: Option<&crate::TurnCancelClosureSettlement>,
     ) -> Result<crate::TurnCancelRepairResult, StoreError> {
-        let operation = if closure.is_some() {
+        let operation = if settlement.is_some() {
             TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
         } else {
             TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs)
@@ -787,8 +786,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
                     session_execution_lease,
                     turn_id,
                     observed,
-                    decision,
-                    closure,
+                    settlement,
                 ),
             )
             .await

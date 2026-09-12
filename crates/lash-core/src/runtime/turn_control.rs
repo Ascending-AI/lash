@@ -233,6 +233,49 @@ pub struct TurnCancelClosureAuthorization {
     authorizing_fencing_token: u64,
 }
 
+/// Authenticated terminal produced by the exact durable promise owner for one
+/// persisted cancellation-closure authorization.
+///
+/// Callers cannot construct this value. Stores accept it instead of a
+/// caller-supplied repair decision, so consuming an authorization necessarily
+/// follows successful settlement by the binding recorded in that
+/// authorization. `base_cancellation` is the immutable first policy acceptor;
+/// `effective_cancellation` may carry a later same-policy timing escalation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnCancelClosureSettlement {
+    authorization: TurnCancelClosureAuthorization,
+    base_cancellation: Option<TurnCancellationEvidence>,
+    effective_cancellation: Option<TurnCancellationEvidence>,
+}
+
+impl TurnCancelClosureSettlement {
+    pub fn authorization(&self) -> &TurnCancelClosureAuthorization {
+        &self.authorization
+    }
+
+    pub fn base_cancellation(&self) -> Option<&TurnCancellationEvidence> {
+        self.base_cancellation.as_ref()
+    }
+
+    pub fn effective_cancellation(&self) -> Option<&TurnCancellationEvidence> {
+        self.effective_cancellation.as_ref()
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn settled_for_test(
+        authorization: TurnCancelClosureAuthorization,
+        base_cancellation: Option<TurnCancellationEvidence>,
+        effective_cancellation: Option<TurnCancellationEvidence>,
+    ) -> Self {
+        Self {
+            authorization,
+            base_cancellation,
+            effective_cancellation,
+        }
+    }
+}
+
 impl TurnCancelClosureAuthorization {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -262,6 +305,12 @@ impl TurnCancelClosureAuthorization {
             ));
         }
         let expected_scope = address.execution_scope();
+        if admitted_scope.session_id().is_some() && admitted_scope != expected_scope {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "session-scoped turn cancellation closure admission must name its exact turn",
+            ));
+        }
         if cancel_key.scope != expected_scope
             || escalation_key.scope != expected_scope
             || terminal_key.scope != expected_scope
@@ -296,10 +345,16 @@ impl TurnCancelClosureAuthorization {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         self.address().validate()?;
         self.admitted_scope.validate()?;
+        let expected_scope = self.address().execution_scope();
         if self.binding_id.trim().is_empty()
-            || self.cancel_key.scope != self.address().execution_scope()
-            || self.escalation_key.scope != self.address().execution_scope()
-            || self.terminal_key.scope != self.address().execution_scope()
+            || !crate::runtime::effect::executor::binding_id_admits_scope(
+                &self.binding_id,
+                &self.admitted_scope,
+            )
+            || (self.admitted_scope.session_id().is_some() && self.admitted_scope != expected_scope)
+            || self.cancel_key.scope != expected_scope
+            || self.escalation_key.scope != expected_scope
+            || self.terminal_key.scope != expected_scope
             || self.cancel_key.wait != AwaitEventWaitIdentity::TurnCancelGate
             || self.escalation_key.wait != AwaitEventWaitIdentity::TurnCancelEscalation
             || self.terminal_key.wait != AwaitEventWaitIdentity::TurnTerminal
@@ -1189,7 +1244,7 @@ impl ActiveTurnControl {
         &self,
         resolver: &dyn AwaitEventResolver,
         authorization: &TurnCancelClosureAuthorization,
-    ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+    ) -> Result<TurnCancelClosureSettlement, RuntimeError> {
         authorization.validate()?;
         if authorization.address() != self.address
             || authorization.cancel_key() != &self.cancel_key
@@ -1207,7 +1262,13 @@ impl ActiveTurnControl {
             }
             TurnCancelClosureProposal::CompletionSealed => TurnGateTerminal::CompletionSealed,
         };
-        self.settle_proposed(resolver, proposed).await
+        let effective_cancellation = self.settle_proposed(resolver, proposed).await?;
+        let base_cancellation = Self::peek_base_cancel_evidence(resolver, &self.address).await?;
+        Ok(TurnCancelClosureSettlement {
+            authorization: authorization.clone(),
+            base_cancellation,
+            effective_cancellation,
+        })
     }
 
     async fn settle_proposed(

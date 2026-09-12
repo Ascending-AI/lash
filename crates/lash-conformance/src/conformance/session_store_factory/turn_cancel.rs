@@ -16,6 +16,20 @@ fn cancel_evidence(request: &crate::TurnCancelRequest) -> crate::TurnCancellatio
     }
 }
 
+fn request_from_evidence_for_test(
+    address: &crate::TurnAddress,
+    evidence: &crate::TurnCancellationEvidence,
+) -> crate::TurnCancelRequest {
+    crate::TurnCancelRequest {
+        address: address.clone(),
+        request_id: evidence.request_id.clone(),
+        origin: evidence.origin.clone(),
+        reason: evidence.reason.clone(),
+        undelivered: evidence.undelivered,
+        mode: evidence.mode,
+    }
+}
+
 const TURN_CANCEL_BINDING_ID: &str = "lash-conformance-turn-cancel-v1";
 
 fn closure_key(
@@ -39,7 +53,12 @@ async fn authorize_closure(
     proposed: crate::TurnCancelClosureProposal,
 ) -> crate::TurnCancelClosureAuthorization {
     store
-        .validate_turn_cancellation_binding(&address.session_id, fence, TURN_CANCEL_BINDING_ID)
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            fence,
+            TURN_CANCEL_BINDING_ID,
+            &address.execution_scope(),
+        )
         .await
         .expect("bind cancellation authority under the current lease");
     let authorization = closure_authorization(
@@ -63,9 +82,12 @@ fn closure_authorization(
     proposed: crate::TurnCancelClosureProposal,
     fence: &crate::SessionExecutionLeaseAuthority,
 ) -> crate::TurnCancelClosureAuthorization {
+    let binding_id =
+        crate::turn_control_binding_id_for_scope(TURN_CANCEL_BINDING_ID, &admitted_scope)
+            .expect("bind physical cancellation scope");
     crate::TurnCancelClosureAuthorization::new(
         address.clone(),
-        TURN_CANCEL_BINDING_ID,
+        binding_id,
         admitted_scope,
         closure_key(
             address,
@@ -89,10 +111,21 @@ fn closure_authorization(
     .expect("construct exact closure authorization")
 }
 
+fn settled_closure(
+    authorization: &crate::TurnCancelClosureAuthorization,
+    effective: Option<crate::TurnCancellationEvidence>,
+) -> crate::TurnCancelClosureSettlement {
+    let base = match authorization.proposed_base() {
+        crate::TurnCancelClosureProposal::CancelRequested(evidence) => Some(evidence.clone()),
+        crate::TurnCancelClosureProposal::CompletionSealed => None,
+    };
+    crate::TurnCancelClosureSettlement::settled_for_test(authorization.clone(), base, effective)
+}
+
 /// The durable closure slot is non-overwritable, survives lease-generation
 /// changes, preserves its admitted physical scope, and can be consumed only by
 /// a current owner presenting the exact authorization.
-pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwritable(
+pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritable(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
@@ -112,11 +145,16 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
         .expect("claim first closure lane")
         .acquired()
         .expect("first closure lane is free");
+    let physical_scope = crate::ExecutionScope::process("turn-cancel-shared-process");
+    let selected_binding =
+        crate::turn_control_binding_id_for_scope(TURN_CANCEL_BINDING_ID, &physical_scope)
+            .expect("bind process scope");
     store
         .validate_turn_cancellation_binding(
             &request.session_id,
             &first.fence(),
-            TURN_CANCEL_BINDING_ID,
+            &selected_binding,
+            &physical_scope,
         )
         .await
         .expect("bind the first authority");
@@ -124,7 +162,7 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
     let address = crate::TurnAddress::new(&request.session_id, &turn);
     let exact = closure_authorization(
         &address,
-        crate::ExecutionScope::process("turn-cancel-shared-process"),
+        physical_scope.clone(),
         crate::TurnCancelIntentSnapshot::Absent,
         crate::TurnCancelClosureProposal::CompletionSealed,
         &first.fence(),
@@ -145,9 +183,16 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
     );
     let conflicting = closure_authorization(
         &address,
-        address.execution_scope(),
+        physical_scope.clone(),
         crate::TurnCancelIntentSnapshot::Absent,
-        crate::TurnCancelClosureProposal::CompletionSealed,
+        crate::TurnCancelClosureProposal::CancelRequested(crate::TurnCancellationEvidence {
+            request_id: "conflicting-terminal".to_string(),
+            origin: None,
+            reason: None,
+            undelivered: crate::TurnCancelDisposition::Defer,
+            mode: crate::TurnCancelMode::Immediate,
+            honoured_after_step: None,
+        }),
         &first.fence(),
     );
     assert!(matches!(
@@ -161,7 +206,8 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
             .pending_turn_cancel_closures(
                 &request.session_id,
                 &first.fence(),
-                TURN_CANCEL_BINDING_ID,
+                &selected_binding,
+                &physical_scope,
             )
             .await
             .expect("read exact pending authorization"),
@@ -197,7 +243,23 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
             .pending_turn_cancel_closures(
                 &request.session_id,
                 &first.fence(),
-                "different-turn-control-owner",
+                &crate::turn_control_binding_id_for_scope(
+                    TURN_CANCEL_BINDING_ID,
+                    &crate::ExecutionScope::process("turn-cancel-wrong-successor-process"),
+                )
+                .expect("bind wrong successor physical scope"),
+                &crate::ExecutionScope::process("turn-cancel-wrong-successor-process"),
+            )
+            .await,
+        Err(crate::StoreError::TurnCancelBindingMismatch { .. })
+    ));
+    assert!(matches!(
+        store
+            .pending_turn_cancel_closures(
+                &request.session_id,
+                &first.fence(),
+                &selected_binding,
+                &crate::ExecutionScope::process("turn-cancel-wrong-successor-process"),
             )
             .await,
         Err(crate::StoreError::TurnCancelBindingMismatch { .. })
@@ -226,7 +288,8 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
             .pending_turn_cancel_closures(
                 &request.session_id,
                 &successor.fence(),
-                TURN_CANCEL_BINDING_ID,
+                &selected_binding,
+                &physical_scope,
             )
             .await
             .expect("successor adopts pending authorization"),
@@ -245,7 +308,7 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
         .expect("stamp stale closure commit operation");
     stale_commit.interrupted_turn_input_turn_id = Some(turn.clone());
     stale_commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
-    stale_commit.turn_cancel_closure_authorization = Some(exact.clone());
+    stale_commit.turn_cancel_closure_settlement = Some(settled_closure(&exact, None));
     stale_commit.release_session_execution_lease = Some(first.completion());
     assert!(matches!(
         store.commit_runtime_state(stale_commit).await,
@@ -259,14 +322,32 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
             .expect("stale commit retains the exact closure pin"),
         vec![exact.clone()]
     );
+    assert!(matches!(
+        store
+            .repair_orphaned_active_turn_inputs(
+                &request.session_id,
+                &successor.fence(),
+                &turn,
+                &crate::TurnCancelIntentSnapshot::Absent,
+                Some(&settled_closure(&conflicting, None)),
+            )
+            .await,
+        Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch { .. })
+    ));
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("wrong terminal cannot consume the authorization"),
+        vec![exact.clone()]
+    );
     store
         .repair_orphaned_active_turn_inputs(
             &request.session_id,
             &successor.fence(),
             &turn,
             &crate::TurnCancelIntentSnapshot::Absent,
-            crate::TurnCancelRepairDecision::CancellationDidNotWin,
-            Some(&exact),
+            Some(&settled_closure(&exact, None)),
         )
         .await
         .expect("current successor consumes exact authorization")
@@ -277,7 +358,8 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
             .pending_turn_cancel_closures(
                 &request.session_id,
                 &successor.fence(),
-                TURN_CANCEL_BINDING_ID,
+                &selected_binding,
+                &physical_scope,
             )
             .await
             .expect("read drained closure slot")
@@ -304,7 +386,7 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
     );
     let stale = closure_authorization(
         &second_address,
-        second_address.execution_scope(),
+        physical_scope.clone(),
         crate::TurnCancelIntentSnapshot::Absent,
         crate::TurnCancelClosureProposal::CompletionSealed,
         &first.fence(),
@@ -318,7 +400,7 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
     ));
     let current = closure_authorization(
         &second_address,
-        second_address.execution_scope(),
+        physical_scope,
         crate::TurnCancelIntentSnapshot::Absent,
         crate::TurnCancelClosureProposal::CompletionSealed,
         &successor.fence(),
@@ -336,13 +418,384 @@ pub(super) async fn turn_cancel_closure_authorization_is_fenced_and_non_overwrit
             &successor.fence(),
             &second_address.turn_id,
             &crate::TurnCancelIntentSnapshot::Absent,
-            crate::TurnCancelRepairDecision::CancellationDidNotWin,
-            Some(&current),
+            Some(&settled_closure(&current, None)),
         )
         .await
         .expect("consume successor authorization")
         .into_applied()
         .expect("successor intent remains absent");
+
+    // A session authority is stable across turns, while each authorization
+    // retains the exact turn address recovered from durable input state.
+    let session_request = session_store_request(
+        &SessionId::from("turn-cancel-session-scope-variation"),
+        "turn-cancel-session-scope-model",
+        crate::SessionRelation::Root,
+    );
+    let session_store = factory
+        .create_store(&session_request)
+        .await
+        .expect("create session-scoped store");
+    let session_lease = session_store
+        .try_claim_session_execution_lease(
+            &session_request.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "session-scope-owner",
+                "session-scope-owner:incarnation",
+            ),
+            "session-scope-executor",
+            60_000,
+        )
+        .await
+        .expect("claim session-scoped lane")
+        .acquired()
+        .expect("session-scoped lane is free");
+    let first_session_address = crate::TurnAddress::new(
+        &session_request.session_id,
+        TurnId::from("session-scope:first"),
+    );
+    let second_session_address = crate::TurnAddress::new(
+        &session_request.session_id,
+        TurnId::from("session-scope:second"),
+    );
+    assert!(
+        crate::TurnCancelClosureAuthorization::new(
+            first_session_address.clone(),
+            TURN_CANCEL_BINDING_ID,
+            second_session_address.execution_scope(),
+            closure_key(
+                &first_session_address,
+                crate::AwaitEventWaitIdentity::TurnCancelGate,
+                "wrong-scope-cancel",
+            ),
+            closure_key(
+                &first_session_address,
+                crate::AwaitEventWaitIdentity::TurnCancelEscalation,
+                "wrong-scope-escalation",
+            ),
+            closure_key(
+                &first_session_address,
+                crate::AwaitEventWaitIdentity::TurnTerminal,
+                "wrong-scope-terminal",
+            ),
+            crate::TurnCancelClosureProposal::CompletionSealed,
+            crate::TurnCancelIntentSnapshot::Absent,
+            &session_lease.fence(),
+        )
+        .is_err()
+    );
+    for address in [&first_session_address, &second_session_address] {
+        session_store
+            .validate_turn_cancellation_binding(
+                &session_request.session_id,
+                &session_lease.fence(),
+                TURN_CANCEL_BINDING_ID,
+                &address.execution_scope(),
+            )
+            .await
+            .expect("same session authority admits a distinct turn");
+        let authorization = closure_authorization(
+            address,
+            address.execution_scope(),
+            crate::TurnCancelIntentSnapshot::Absent,
+            crate::TurnCancelClosureProposal::CompletionSealed,
+            &session_lease.fence(),
+        );
+        assert_eq!(authorization.admitted_scope(), &address.execution_scope());
+        session_store
+            .authorize_turn_cancel_closure(&session_lease.fence(), &authorization)
+            .await
+            .expect("authorize exact session turn");
+        session_store
+            .repair_orphaned_active_turn_inputs(
+                &session_request.session_id,
+                &session_lease.fence(),
+                &address.turn_id,
+                &crate::TurnCancelIntentSnapshot::Absent,
+                Some(&settled_closure(&authorization, None)),
+            )
+            .await
+            .expect("consume exact session-turn authorization")
+            .into_applied()
+            .expect("session-turn intent remains absent");
+    }
+}
+
+/// An escalation can change effective timing while repair retains the first
+/// accepted request and its provenance across owner loss and reopen.
+pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reopen(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    async fn claim(
+        store: &Arc<dyn crate::RuntimePersistence>,
+        session_id: &SessionId,
+        owner: &str,
+    ) -> crate::SessionExecutionLease {
+        store
+            .try_claim_session_execution_lease(
+                session_id,
+                &crate::LeaseOwnerIdentity::opaque(owner, format!("{owner}:incarnation")),
+                "repair-base-executor",
+                60_000,
+            )
+            .await
+            .expect("claim repair base lane")
+            .acquired()
+            .expect("repair base lane is free")
+    }
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-repair-base-acceptor"),
+        "turn-cancel-repair-base-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let turn_id = TurnId::from("turn-cancel-repair-base-acceptor:turn");
+    let address = crate::TurnAddress::new(&request.session_id, &turn_id);
+    store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &request.session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("repair after escalation"),
+        ))
+        .await
+        .expect("enqueue interrupted input");
+    let base = crate::TurnCancelRequest::new(address.clone(), "repair-base-after-step", None)
+        .mode(crate::TurnCancelMode::AfterStep);
+    store
+        .record_turn_cancel_request(base.clone())
+        .await
+        .expect("persist base acceptor");
+    let escalation =
+        crate::TurnCancelRequest::new(address.clone(), "repair-effective-immediate", None);
+    store
+        .record_turn_cancel_request(escalation.clone())
+        .await
+        .expect("advance escalation revision");
+    let observed = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot escalated intent");
+    assert!(matches!(
+        &observed,
+        crate::TurnCancelIntentSnapshot::Present { request, revision: 2 }
+            if request == &base
+    ));
+    let authorizing = claim(&store, &request.session_id, "repair-base-owner").await;
+    let authorization = authorize_closure(
+        &store,
+        &authorizing.fence(),
+        &address,
+        observed.clone(),
+        crate::TurnCancelClosureProposal::CancelRequested(cancel_evidence(&base)),
+    )
+    .await;
+    store
+        .release_session_execution_lease(&authorizing.completion())
+        .await
+        .expect("release crashed owner");
+    drop(store);
+
+    let reopened = factory
+        .open_existing_store(&request)
+        .await
+        .expect("reopen repair store")
+        .expect("repair store exists");
+    let successor = claim(&reopened, &request.session_id, "repair-base-successor").await;
+    reopened
+        .repair_orphaned_active_turn_inputs(
+            &request.session_id,
+            &successor.fence(),
+            &turn_id,
+            &observed,
+            Some(&crate::TurnCancelClosureSettlement::settled_for_test(
+                authorization,
+                Some(cancel_evidence(&base)),
+                Some(cancel_evidence(&escalation)),
+            )),
+        )
+        .await
+        .expect("repair with authenticated effective escalation")
+        .into_applied()
+        .expect("escalated intent remains stable");
+    assert_eq!(
+        reopened
+            .turn_cancel_request(&address)
+            .await
+            .expect("read repaired base")
+            .expect("repaired base remains present")
+            .request,
+        base,
+    );
+}
+
+/// Process-scope retirement and cancellation authorization are one
+/// linearizable lifecycle boundary. Both deterministic orders and a
+/// barrier-released overlap have exactly one winner, and retirement remains a
+/// permanent admission refusal for that physical scope.
+pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    async fn prepared(
+        factory: &Arc<dyn crate::SessionStoreFactory>,
+        suffix: &str,
+        scope: crate::ExecutionScope,
+    ) -> (
+        Arc<dyn crate::RuntimePersistence>,
+        crate::SessionExecutionLease,
+        crate::TurnCancelClosureAuthorization,
+    ) {
+        let request = session_store_request(
+            &SessionId::from(format!("turn-cancel-scope-retirement:{suffix}")),
+            "turn-cancel-scope-retirement-model",
+            crate::SessionRelation::Root,
+        );
+        let store = factory.create_store(&request).await.expect("create store");
+        let lease = store
+            .try_claim_session_execution_lease(
+                &request.session_id,
+                &crate::LeaseOwnerIdentity::opaque(
+                    format!("scope-retirement:{suffix}"),
+                    format!("scope-retirement:{suffix}:incarnation"),
+                ),
+                "scope-retirement:executor",
+                60_000,
+            )
+            .await
+            .expect("claim lifecycle lane")
+            .acquired()
+            .expect("lifecycle lane is free");
+        let binding = crate::turn_control_binding_id_for_scope(TURN_CANCEL_BINDING_ID, &scope)
+            .expect("bind physical scope");
+        store
+            .validate_turn_cancellation_binding(
+                &request.session_id,
+                &lease.fence(),
+                &binding,
+                &scope,
+            )
+            .await
+            .expect("select physical cancellation owner");
+        let address = crate::TurnAddress::new(
+            &request.session_id,
+            TurnId::from(format!("turn-cancel-scope-retirement:{suffix}:turn")),
+        );
+        let authorization = closure_authorization(
+            &address,
+            scope,
+            crate::TurnCancelIntentSnapshot::Absent,
+            crate::TurnCancelClosureProposal::CompletionSealed,
+            &lease.fence(),
+        );
+        (store, lease, authorization)
+    }
+
+    let authorization_first_scope =
+        crate::ExecutionScope::process("turn-cancel-scope-retirement:authorization-first");
+    let (authorization_first_store, authorization_first_lease, authorization_first) = prepared(
+        &factory,
+        "authorization-first",
+        authorization_first_scope.clone(),
+    )
+    .await;
+    authorization_first_store
+        .authorize_turn_cancel_closure(&authorization_first_lease.fence(), &authorization_first)
+        .await
+        .expect("authorization wins before retirement");
+    assert!(matches!(
+        factory
+            .retire_turn_cancel_closure_scope(&authorization_first_scope)
+            .await,
+        Err(crate::StoreError::TurnCancelClosureLifecyclePinned { .. })
+    ));
+    authorization_first_store
+        .repair_orphaned_active_turn_inputs(
+            authorization_first.session_id(),
+            &authorization_first_lease.fence(),
+            authorization_first.turn_id(),
+            &crate::TurnCancelIntentSnapshot::Absent,
+            Some(&settled_closure(&authorization_first, None)),
+        )
+        .await
+        .expect("consume authorized closure")
+        .into_applied()
+        .expect("absent intent remains stable");
+    factory
+        .retire_turn_cancel_closure_scope(&authorization_first_scope)
+        .await
+        .expect("retire after the pin is consumed");
+
+    let retired_first_scope =
+        crate::ExecutionScope::process("turn-cancel-scope-retirement:retired-first");
+    factory
+        .retire_turn_cancel_closure_scope(&retired_first_scope)
+        .await
+        .expect("retirement wins before authorization");
+    let (retired_first_store, retired_first_lease, retired_first) =
+        prepared(&factory, "retired-first", retired_first_scope).await;
+    assert!(matches!(
+        retired_first_store
+            .authorize_turn_cancel_closure(&retired_first_lease.fence(), &retired_first)
+            .await,
+        Err(crate::StoreError::TurnCancelClosureScopeRetired { .. })
+    ));
+    assert!(
+        retired_first_store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("inspect retirement-first pins")
+            .is_empty()
+    );
+
+    let overlapping_scope =
+        crate::ExecutionScope::process("turn-cancel-scope-retirement:overlapping");
+    let (overlapping_store, overlapping_lease, overlapping) =
+        prepared(&factory, "overlapping", overlapping_scope.clone()).await;
+    let start = Arc::new(tokio::sync::Barrier::new(2));
+    let authorize_start = Arc::clone(&start);
+    let retire_start = Arc::clone(&start);
+    let retire_factory = Arc::clone(&factory);
+    let authorize_store = Arc::clone(&overlapping_store);
+    let authorize_fence = overlapping_lease.fence();
+    let authorize_value = overlapping.clone();
+    let retire_scope = overlapping_scope.clone();
+    let (authorized, retired) = tokio::join!(
+        async move {
+            authorize_start.wait().await;
+            authorize_store
+                .authorize_turn_cancel_closure(&authorize_fence, &authorize_value)
+                .await
+        },
+        async move {
+            retire_start.wait().await;
+            retire_factory
+                .retire_turn_cancel_closure_scope(&retire_scope)
+                .await
+        }
+    );
+    match (authorized, retired) {
+        (Ok(_), Err(crate::StoreError::TurnCancelClosureLifecyclePinned { .. })) => {
+            assert_eq!(
+                overlapping_store
+                    .pending_turn_cancel_closure_pins()
+                    .await
+                    .expect("read overlapping winner"),
+                vec![overlapping]
+            );
+        }
+        (Err(crate::StoreError::TurnCancelClosureScopeRetired { .. }), Ok(())) => {
+            assert!(
+                overlapping_store
+                    .pending_turn_cancel_closure_pins()
+                    .await
+                    .expect("read overlapping retirement winner")
+                    .is_empty()
+            );
+        }
+        outcomes => panic!("scope lifecycle race did not linearize: {outcomes:?}"),
+    }
 }
 
 /// Every persisted disposition survives the owner crash that separates cancel
@@ -472,7 +925,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     .expect("snapshot cancellation intent before final commit"),
             );
             commit.release_session_execution_lease = Some(authorizing_lease.completion());
-            commit.turn_cancel_closure_authorization = Some(closure_authorization.clone());
+            commit.turn_cancel_closure_settlement = Some(settled_closure(
+                &closure_authorization,
+                Some(cancel_evidence(&cancel)),
+            ));
             let receipt = store
                 .commit_runtime_state(commit)
                 .await
@@ -539,8 +995,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     &lease.fence(),
                     &turn_id,
                     &observed,
-                    crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
-                    Some(&closure_authorization),
+                    Some(&settled_closure(
+                        &closure_authorization,
+                        Some(cancel_evidence(&cancel)),
+                    )),
                 )
                 .await
                 .expect("repair the dead turn")
@@ -634,8 +1092,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
                     &lease.fence(),
                     &turn_id,
                     &intent,
-                    crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
-                    Some(&later_authorization),
+                    Some(&settled_closure(
+                        &later_authorization,
+                        Some(cancel_evidence(&cancel)),
+                    )),
                 )
                 .await
                 .expect("repair later input from retained winner intent")
@@ -647,10 +1107,9 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
     }
 }
 
-/// Escalating a durable after-step request to an immediate abort upgrades the
-/// row in place: the address keeps one record, the record carries the
-/// stronger request, and a same-or-weaker request never downgrades it.
-pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
+/// Escalating a durable after-step request advances the intent revision while
+/// the one durable row retains the first request and its provenance.
+pub(super) async fn turn_cancel_request_escalation_advances_intent_without_replacing_base(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
     let request = session_store_request(
@@ -764,15 +1223,15 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
     store
         .record_turn_cancel_request(abort.clone())
         .await
-        .expect("escalate the durable request");
+        .expect("record the effective escalation");
     let durable = store
         .turn_cancel_request(&address)
         .await
         .expect("read durable request")
         .expect("request persists");
     assert_eq!(
-        durable.request, abort,
-        "an immediate abort upgrades the after-step row in place"
+        durable.request, stop,
+        "an immediate escalation cannot replace the original policy acceptor"
     );
     assert!(durable.outcome.is_none());
 
@@ -796,13 +1255,13 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         .expect("read durable request after stale projection")
         .expect("request persists");
     assert_eq!(
-        durable.request, abort,
-        "a delayed base-gate projection cannot downgrade an accepted escalation"
+        durable.request, stop,
+        "a delayed projection cannot replace the immutable base acceptor"
     );
 
-    // Exact header equality is not a sufficient CAS: project B, return to the
-    // byte-identical A through a stronger ingress write, then prove that the
-    // original A snapshot is still stale because its revision did not return.
+    // A gate-authoritative base projection may replace an unaccepted ingress
+    // header. A later timing escalation advances freshness without replacing
+    // that projected acceptor.
     let original_a = store
         .turn_cancel_request_intent(&address)
         .await
@@ -811,18 +1270,24 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         store
             .reconcile_turn_cancel_winner(&address, &original_a, &stale_base)
             .await
-            .expect("project B with current authority")
+            .expect("reconcile current base with current authority")
     );
     store
         .record_turn_cancel_request(abort.clone())
         .await
-        .expect("return the request header from B to A");
+        .expect("record another effective escalation");
     let current_a = store
         .turn_cancel_request_intent(&address)
         .await
-        .expect("read A after ABA");
-    assert_eq!(current_a.request(), original_a.request());
-    assert_ne!(current_a, original_a, "ABA must advance intent freshness");
+        .expect("read projected base after escalation");
+    assert_eq!(
+        current_a.request(),
+        Some(&request_from_evidence_for_test(&address, &stale_base))
+    );
+    assert_ne!(
+        current_a, original_a,
+        "projection and escalation advance freshness"
+    );
     assert!(
         !store
             .reconcile_turn_cancel_winner(&address, &original_a, &stale_base)
@@ -847,12 +1312,13 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         .expect("read durable request")
         .expect("request persists");
     assert_eq!(
-        durable.request, abort,
-        "a weaker request never downgrades the upgraded row"
+        durable.request,
+        request_from_evidence_for_test(&address, &stale_base),
+        "a weaker request never replaces the base acceptor"
     );
 
-    // Reopen models an owner crash after the upgrade: the upgraded record is
-    // what the successor reads.
+    // Reopen models an owner crash after escalation: the projected base
+    // acceptor is what the successor reads.
     drop(store);
     let reopened = factory
         .open_existing_store(&request)
@@ -864,7 +1330,10 @@ pub(super) async fn turn_cancel_request_escalation_upgrades_the_durable_record(
         .await
         .expect("read durable request after reopen")
         .expect("request survives reopen");
-    assert_eq!(durable.request, abort);
+    assert_eq!(
+        durable.request,
+        request_from_evidence_for_test(&address, &stale_base)
+    );
 }
 
 /// Ordinary orphan repair and cancellation intent serialize in the store.
@@ -931,7 +1400,6 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
                 &fence,
                 &turn_id,
                 &stale_absent,
-                crate::TurnCancelRepairDecision::NoCancellationIntent,
                 None,
             )
             .await
@@ -973,8 +1441,10 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
                 &fence,
                 &turn_id,
                 &stale_after_step,
-                crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
-                Some(&closure_authorization),
+                Some(&settled_closure(
+                    &closure_authorization,
+                    Some(cancel_evidence(&cancel)),
+                )),
             )
             .await
             .expect("stale after-step repair observes immediate escalation"),
@@ -995,8 +1465,10 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             &fence,
             &turn_id,
             &observed,
-            crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&stronger_cancel)),
-            Some(&closure_authorization),
+            Some(&settled_closure(
+                &closure_authorization,
+                Some(cancel_evidence(&stronger_cancel)),
+            )),
         )
         .await
         .expect("apply authoritative gate winner")
@@ -1033,7 +1505,6 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             &fence,
             &turn_id,
             &crate::TurnCancelIntentSnapshot::Absent,
-            crate::TurnCancelRepairDecision::NoCancellationIntent,
             None,
         )
         .await
@@ -1074,8 +1545,10 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
                 &fence,
                 &turn_id,
                 &late_observed,
-                crate::TurnCancelRepairDecision::CancellationWon(cancel_evidence(&cancel)),
-                Some(&late_authorization),
+                Some(&settled_closure(
+                    &late_authorization,
+                    Some(cancel_evidence(&cancel)),
+                )),
             )
             .await
             .expect("late winner sees no targeted input")
@@ -1137,8 +1610,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
             &fence,
             &turn_id,
             &completion_observed,
-            crate::TurnCancelRepairDecision::CancellationDidNotWin,
-            Some(&completion_authorization),
+            Some(&settled_closure(&completion_authorization, None)),
         )
         .await
         .expect("apply completion gate decision")
@@ -1240,7 +1712,10 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&after_step));
     commit.interrupted_turn_cancel_intent = Some(stale);
     commit.release_session_execution_lease = Some(lease.completion());
-    commit.turn_cancel_closure_authorization = Some(closure_authorization);
+    commit.turn_cancel_closure_settlement = Some(settled_closure(
+        &closure_authorization,
+        Some(cancel_evidence(&after_step)),
+    ));
 
     let immediate =
         crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:immediate", None)
@@ -1287,6 +1762,12 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
             .expect("refresh cancellation predicate"),
     );
     commit.interrupted_turn_input_cancellation = Some(cancel_evidence(&immediate));
+    commit.turn_cancel_closure_settlement =
+        Some(crate::TurnCancelClosureSettlement::settled_for_test(
+            closure_authorization.clone(),
+            Some(cancel_evidence(&after_step)),
+            Some(cancel_evidence(&immediate)),
+        ));
     let receipt = store
         .commit_runtime_state(commit.clone())
         .await
@@ -1300,7 +1781,32 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         receipt.turn_cancel_input_outcome.affected_inputs[0].disposition,
         crate::TurnCancelDisposition::Drop
     );
-    let replay = store
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .expect("read committed base acceptor")
+            .expect("base acceptor remains projected")
+            .request,
+        after_step,
+        "final settlement keeps the immutable base request while applying the escalation"
+    );
+    drop(store);
+    let reopened = factory
+        .open_existing_store(&request)
+        .await
+        .expect("reopen final settlement store")
+        .expect("final settlement store remains present");
+    assert_eq!(
+        reopened
+            .turn_cancel_request(&address)
+            .await
+            .expect("read reopened base acceptor")
+            .expect("reopened base acceptor remains projected")
+            .request,
+        after_step,
+    );
+    let replay = reopened
         .commit_runtime_state(commit)
         .await
         .expect("replay refreshed final commit");

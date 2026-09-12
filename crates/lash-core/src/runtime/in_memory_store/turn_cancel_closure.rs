@@ -5,7 +5,7 @@ pub(super) fn verify_pre_replay_fence(
     commit: &crate::store::RuntimeCommit,
     transaction_now: u64,
 ) -> Result<(), crate::StoreError> {
-    if commit.turn_cancel_closure_authorization.is_none()
+    if commit.turn_cancel_closure_settlement.is_none()
         && let Some(fence) = commit.session_execution_lease_fence.as_ref()
     {
         // This check-then-act read is atomic under the coarse write lock;
@@ -21,7 +21,7 @@ pub(super) fn validate_after_receipt_miss(
     transaction_now: u64,
 ) -> Result<(), crate::StoreError> {
     if commit.interrupted_turn_cancel_intent.is_some()
-        && commit.turn_cancel_closure_authorization.is_none()
+        && commit.turn_cancel_closure_settlement.is_none()
     {
         return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
             session_id: commit.session_id.clone(),
@@ -31,9 +31,16 @@ pub(super) fn validate_after_receipt_miss(
                 .unwrap_or_else(|| crate::TurnId::from("missing-turn-id")),
         });
     }
-    let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() else {
+    let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() else {
         return Ok(());
     };
+    let closure = settlement.authorization();
+    if commit.interrupted_turn_input_cancellation.as_ref() != settlement.effective_cancellation() {
+        return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+            session_id: commit.session_id.clone(),
+            turn_id: closure.turn_id().clone(),
+        });
+    }
     let current_fence = commit
         .session_execution_lease_fence
         .as_ref()
@@ -64,7 +71,8 @@ pub(super) fn validate_after_receipt_miss(
 }
 
 pub(super) fn consume(store: &InMemorySessionStore, commit: &crate::store::RuntimeCommit) {
-    if let Some(closure) = commit.turn_cancel_closure_authorization.as_ref() {
+    if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
+        let closure = settlement.authorization();
         store
             .turn_cancel_closure_authorizations
             .lock_recover()

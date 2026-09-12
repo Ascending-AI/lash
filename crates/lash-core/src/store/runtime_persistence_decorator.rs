@@ -174,9 +174,15 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), StoreError> {
         self.inner()
-            .validate_turn_cancellation_binding(session_id, session_execution_lease, binding_id)
+            .validate_turn_cancellation_binding(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
             .await
     }
 
@@ -195,9 +201,15 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
         self.inner()
-            .pending_turn_cancel_closures(session_id, session_execution_lease, binding_id)
+            .pending_turn_cancel_closures(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
             .await
     }
 
@@ -326,8 +338,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
-        decision: TurnCancelRepairDecision,
-        closure: Option<&crate::TurnCancelClosureAuthorization>,
+        settlement: Option<&crate::TurnCancelClosureSettlement>,
     ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
         self.inner()
             .repair_orphaned_active_turn_inputs(
@@ -335,8 +346,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
                 session_execution_lease,
                 turn_id,
                 observed,
-                decision,
-                closure,
+                settlement,
             )
             .await
     }
@@ -735,12 +745,14 @@ where
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), StoreError> {
         RuntimePersistenceDecorator::validate_turn_cancellation_binding(
             self,
             session_id,
             session_execution_lease,
             binding_id,
+            admitted_scope,
         )
         .await
     }
@@ -763,12 +775,14 @@ where
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
         RuntimePersistenceDecorator::pending_turn_cancel_closures(
             self,
             session_id,
             session_execution_lease,
             binding_id,
+            admitted_scope,
         )
         .await
     }
@@ -898,8 +912,7 @@ where
         session_execution_lease: &SessionExecutionLeaseAuthority,
         turn_id: &crate::TurnId,
         observed: &crate::TurnCancelIntentSnapshot,
-        decision: TurnCancelRepairDecision,
-        closure: Option<&crate::TurnCancelClosureAuthorization>,
+        settlement: Option<&crate::TurnCancelClosureSettlement>,
     ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
         RuntimePersistenceDecorator::repair_orphaned_active_turn_inputs(
             self,
@@ -907,8 +920,7 @@ where
             session_execution_lease,
             turn_id,
             observed,
-            decision,
-            closure,
+            settlement,
         )
         .await
     }

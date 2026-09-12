@@ -259,7 +259,8 @@ CREATE TABLE IF NOT EXISTS turn_cancel_requests (
 
 CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (
     session_id TEXT PRIMARY KEY,
-    binding_id TEXT NOT NULL CHECK (length(binding_id) > 0)
+    binding_id TEXT NOT NULL CHECK (length(binding_id) > 0),
+    admitted_scope_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS turn_cancel_closure_authorizations (
@@ -267,6 +268,10 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_authorizations (
     turn_id TEXT NOT NULL,
     authorization_json TEXT NOT NULL,
     PRIMARY KEY (session_id, turn_id)
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancel_retired_scopes (
+    scope_id TEXT PRIMARY KEY
 );
 
 CREATE TABLE IF NOT EXISTS session_execution_leases (
@@ -601,7 +606,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 /// sessions without importing the unrelated effect journal.
 /// Version 59 persists the selected authority binding and exact pending closure
 /// authorization so lease takeover cannot forget or replace promise work.
-pub(crate) const SCHEMA_VERSION: i32 = 59;
+/// Version 60 persists retired physical scopes so cancellation authorization
+/// and Process-journal retirement remain serialized across owner restarts.
+pub(crate) const SCHEMA_VERSION: i32 = 60;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

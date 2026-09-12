@@ -518,7 +518,7 @@ impl RuntimeCommit {
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
             interrupted_turn_cancel_intent,
-            turn_cancel_closure_authorization,
+            turn_cancel_closure_settlement,
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
@@ -529,7 +529,7 @@ impl RuntimeCommit {
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
                 && interrupted_turn_cancel_intent.is_none()
-                && turn_cancel_closure_authorization.is_none()
+                && turn_cancel_closure_settlement.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && committed_attachment_ids.is_empty(),
@@ -703,7 +703,7 @@ impl RuntimeCommit {
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
             interrupted_turn_cancel_intent: None,
-            turn_cancel_closure_authorization: None,
+            turn_cancel_closure_settlement: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         })
@@ -1041,13 +1041,17 @@ pub trait TurnInputStore: Send + Sync {
     }
 
     /// Persist or validate the one cancellation authority selected for this
-    /// session. The check occurs under the current execution fence before any
-    /// session work and never replaces a different existing binding.
+    /// session and, for a Process or runtime-operation controller, its physical
+    /// journal scope. Session-bound turns keep their exact canonical address in
+    /// each closure authorization, so distinct turns may share this authority.
+    /// The check occurs under the current execution fence before any session
+    /// work and never replaces the original selection.
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), StoreError>;
 
     /// Authorize exact closure of one cancellation gate pair under the current
@@ -1060,12 +1064,14 @@ pub trait TurnInputStore: Send + Sync {
     ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
 
     /// Load every unconsumed closure obligation for the bound session after
-    /// validating the current execution fence and selected binding.
+    /// validating the current execution fence, selected binding, and any
+    /// original non-session physical scope.
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
 
     /// Read unconsumed closure pins for lifecycle coordination without
@@ -1286,8 +1292,7 @@ pub trait TurnInputStore: Send + Sync {
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _turn_id: &crate::TurnId,
         _observed: &crate::TurnCancelIntentSnapshot,
-        _decision: TurnCancelRepairDecision,
-        _closure: Option<&crate::TurnCancelClosureAuthorization>,
+        _settlement: Option<&crate::TurnCancelClosureSettlement>,
     ) -> Result<TurnCancelRepairResult, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "repair_orphaned_active_turn_inputs",

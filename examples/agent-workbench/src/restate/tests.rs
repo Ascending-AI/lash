@@ -580,9 +580,10 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     let native_host: Arc<dyn lash::durability::EffectHost> =
         Arc::new(lash::durability::NativeEffectHost::default());
     let durable_host: Arc<dyn lash::durability::EffectHost> =
-        lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::new(
-            "http://127.0.0.1:8080",
-        ))
+        lash_restate::RestateTurnDeployment::new(
+            lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
+            lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+        )
         .effect_host();
     let scope = lash::runtime::ExecutionScope::turn("routing-session", "routing-turn");
     let native_scoped = native_host.scoped(scope.clone()).expect("inline scope");

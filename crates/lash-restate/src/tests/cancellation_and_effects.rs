@@ -268,13 +268,19 @@ pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
         "session:turn:1:0:process:worker:sleep:1",
     );
     assert!(
-        restate_timer_turn_cancel_wait_request(&process_scoped_sleep, false, None)
-            .expect("process sleep classification")
-            .is_none(),
+        restate_timer_turn_cancel_wait_request(
+            &test_restate_authority_id(),
+            &process_scoped_sleep,
+            false,
+            None
+        )
+        .expect("process sleep classification")
+        .is_none(),
         "background process sleep must outlive its originating turn"
     );
     assert!(
         restate_timer_turn_cancel_wait_request(
+            &test_restate_authority_id(),
             &process_scoped_sleep,
             true,
             Some(&ExecutionScope::process("worker")),
@@ -286,6 +292,7 @@ pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
 
     assert!(
         restate_await_event_turn_cancel_wait_request(
+            &test_restate_authority_id(),
             &runtime_invocation(RuntimeEffectKind::AwaitEvent, "process-wait"),
             false,
             None,
@@ -297,6 +304,7 @@ pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
 
     assert!(
         restate_timer_turn_cancel_wait_request(
+            &test_restate_authority_id(),
             &runtime_invocation(RuntimeEffectKind::Sleep, "turn-sleep"),
             true,
             Some(&turn_scope),
@@ -308,6 +316,7 @@ pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
 
     assert!(
         restate_await_event_turn_cancel_wait_request(
+            &test_restate_authority_id(),
             &runtime_invocation(RuntimeEffectKind::AwaitEvent, "turn-process-wait"),
             true,
             Some(&turn_scope),
@@ -321,7 +330,7 @@ pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
 #[tokio::test]
 pub(super) async fn restate_controller_executes_atomic_effect_inside_run() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let err = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
@@ -352,7 +361,7 @@ pub(super) async fn restate_controller_executes_atomic_effect_inside_run() {
 #[tokio::test]
 pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_command() {
     let context = Arc::new(PositionalReplayContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let call = prepared_tool_call_with("call-fast", "fast_tool");
     let envelope = RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-attempt"),
@@ -436,7 +445,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
 #[tokio::test]
 pub(super) async fn restate_controller_routes_sleep_only_through_timer() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let outcome = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
@@ -456,7 +465,7 @@ pub(super) async fn restate_controller_routes_sleep_only_through_timer() {
 #[tokio::test]
 pub(super) async fn restate_turn_wait_rejects_missing_cancel_scope() {
     let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::new(context);
+    let controller = RestateRuntimeEffectController::new_for_test(context);
     let error = controller
         .execute_effect(
             RuntimeEffectEnvelope::new(
@@ -474,7 +483,7 @@ pub(super) async fn restate_turn_wait_rejects_missing_cancel_scope() {
 pub(super) async fn restate_timer_stops_when_its_fresh_attempt_is_cancelled() {
     let context = Arc::new(RecordingContext::default());
     context.block_sleeps.store(true, Ordering::SeqCst);
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let cancellation = tokio_util::sync::CancellationToken::new();
     cancellation.cancel();
 
@@ -507,7 +516,7 @@ pub(super) async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_
     let task_context = Arc::clone(&context);
     let task_cancellation = cancellation.clone();
     let sleep = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context)
+        RestateRuntimeEffectController::new_for_test(task_context)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::Sleep, "suspended-sleep"),
@@ -568,7 +577,7 @@ pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_c
     let task_context = Arc::clone(&context);
     let task_cancellation = cancellation.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context)
+        RestateRuntimeEffectController::new_for_test(task_context)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "suspended-await-event"),
@@ -621,7 +630,7 @@ pub(super) async fn restate_suspended_await_event_is_woken_by_the_durable_turn_c
 #[tokio::test]
 pub(super) async fn restate_routes_every_execution_scope_to_an_exact_durable_wait_address() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let scopes = [
         durable_turn_scope("session", "turn"),
         ExecutionScope::process("process"),
@@ -674,7 +683,7 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
     let task_key = key.clone();
     let task_cancellation = cancellation.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context)
+        RestateRuntimeEffectController::new_for_test(task_context)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "cancel-wait"),
@@ -702,7 +711,7 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
         }
     ));
 
-    let host = RestateRuntimeEffectController::new(context);
+    let host = RestateRuntimeEffectController::new_for_test(context);
     assert_eq!(
         host.resolve_await_event(&key, Resolution::Ok(serde_json::json!("late")))
             .await
@@ -716,7 +725,7 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
 #[tokio::test]
 pub(super) async fn restate_deadline_durably_terminalizes_timeout() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let key = restate_await_event_key(
         &ExecutionScope::runtime_operation("deadline-operation"),
         AwaitEventWaitIdentity::Custom {
@@ -756,13 +765,13 @@ pub(super) async fn restate_session_cancel_cancels_current_waits_but_allows_new_
     let task_context = context.clone();
     let task_key = first_key.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context)
+        RestateRuntimeEffectController::new_for_test(task_context)
             .await_await_event(&task_key, tokio_util::sync::CancellationToken::new(), None)
             .await
     });
     tokio::task::yield_now().await;
     assert!(!wait.is_finished());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     host.cancel_await_events_for_session(&SessionId::from("cancel-session"))
         .await
         .expect("cancel session waits");
@@ -795,7 +804,7 @@ pub(super) async fn restate_session_cancel_cancels_current_waits_but_allows_new_
 #[tokio::test]
 pub(super) async fn restate_session_delete_revokes_current_and_future_waits() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let key = restate_await_event_key(
         &ExecutionScope::session_delete("deleted-session"),
         AwaitEventWaitIdentity::Custom {
@@ -806,7 +815,7 @@ pub(super) async fn restate_session_delete_revokes_current_and_future_waits() {
     let task_context = context.clone();
     let task_key = key.clone();
     let wait = tokio::spawn(async move {
-        RestateRuntimeEffectController::new(task_context)
+        RestateRuntimeEffectController::new_for_test(task_context)
             .await_await_event(&task_key, tokio_util::sync::CancellationToken::new(), None)
             .await
     });
@@ -863,7 +872,7 @@ pub(super) async fn restate_effect_host_checks_revocation_then_awaits_resolution
             ),
         },
     ]));
-    let host = RestateEffectHost::new(RestateConnection::with_transport(
+    let host = RestateEffectHost::new_for_test(RestateConnection::with_transport(
         "https://restate.example",
         scripted.clone(),
     ));
@@ -949,7 +958,7 @@ pub(super) async fn restate_effect_host_cancellation_records_and_returns_the_dur
             requests: Mutex::new(Vec::new()),
             resolve_outcome,
         });
-        let host = RestateEffectHost::new(RestateConnection::with_transport(
+        let host = RestateEffectHost::new_for_test(RestateConnection::with_transport(
             "https://restate.example",
             transport.clone(),
         ));
@@ -1564,7 +1573,7 @@ pub(super) async fn run_restate_replay_turn(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> lash_core::facade_support::AssembledTurn {
-    let controller = RestateRuntimeEffectController::new(context);
+    let controller = RestateRuntimeEffectController::new_for_test(context);
     let scoped_effect_controller = controller
         .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
         .expect("scoped restate controller");
@@ -1589,7 +1598,7 @@ pub(super) async fn run_restate_replay_turn_with_parent_end_fault(
 ) -> lash_core::facade_support::AssembledTurn {
     let scope = durable_turn_scope(session_id, turn_id);
     let inner: RestateRuntimeEffectController<'static, Arc<ReplayableRecordingContext>> =
-        RestateRuntimeEffectController::new(context);
+        RestateRuntimeEffectController::new_for_test(context);
     let scoped_effect_controller = ScopedEffectController::shared(
         Arc::new(RestateParentEndFaultController { inner, state }),
         scope,

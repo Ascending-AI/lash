@@ -20,6 +20,7 @@ fi
 source "$repo/scripts/worktree-gate-env.sh"
 
 compose_project="${LASH_RESTATE_WORKERS_COMPOSE_PROJECT:-lash-restate-workers-${LASH_GATE_WORKTREE_SLUG}}"
+export RESTATE_AUTHORITY_ID="${RESTATE_AUTHORITY_ID:-restate-workers:${compose_project}}"
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/restate-postgres-workers/docker-compose.yml")
 minio_port="${LASH_E2E_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
 export LASH_E2E_MINIO_PORT="$minio_port"

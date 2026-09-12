@@ -2,6 +2,13 @@ use super::*;
 use lash::SessionId;
 use lash::TurnId;
 
+pub(super) fn configured_restate_authority_id()
+-> Result<lash_restate::RestateAuthorityId, TerminalError> {
+    let value = std::env::var("RESTATE_AUTHORITY_ID")
+        .map_err(|_| TerminalError::new("RESTATE_AUTHORITY_ID is required"))?;
+    lash_restate::RestateAuthorityId::new(value).map_err(TerminalError::from_error)
+}
+
 pub(super) fn record_turn_failure(
     state: &AppState,
     session_id: &SessionId,

@@ -329,7 +329,7 @@ impl TurnBoundary {
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
-        turn_cancel_closure_authorization: Option<crate::TurnCancelClosureAuthorization>,
+        turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
         turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
@@ -377,7 +377,7 @@ impl TurnBoundary {
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
-                turn_cancel_closure_authorization,
+                turn_cancel_closure_settlement,
                 turn_control_resolver,
                 recorded_attachment_intent_ids,
                 session_execution_lease_completion,
@@ -459,7 +459,7 @@ impl TurnBoundary {
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
             interrupted_turn_cancel_intent,
-            turn_cancel_closure_authorization,
+            turn_cancel_closure_settlement,
             turn_control_resolver,
             recorded_attachment_intent_ids,
             session_execution_lease_completion,
@@ -526,7 +526,7 @@ impl TurnBoundary {
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
-                turn_cancel_closure_authorization,
+                turn_cancel_closure_settlement,
                 turn_control_resolver,
                 committed_attachment_ids,
                 adopted_intent_rows,
@@ -562,7 +562,7 @@ impl TurnBoundary {
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
-        turn_cancel_closure_authorization: Option<crate::TurnCancelClosureAuthorization>,
+        turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
         turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
@@ -617,7 +617,7 @@ impl TurnBoundary {
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
         commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
         commit.interrupted_turn_cancel_intent = interrupted_turn_cancel_intent;
-        commit.turn_cancel_closure_authorization = turn_cancel_closure_authorization;
+        commit.turn_cancel_closure_settlement = turn_cancel_closure_settlement;
         let can_retry_recovered_settlement =
             claim_settlement.has_recovered(current_session_lease_generation);
         // Recovered settlement retries are bounded by their original rows.

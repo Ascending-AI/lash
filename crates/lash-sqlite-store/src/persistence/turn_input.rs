@@ -1,5 +1,18 @@
 use super::*;
 
+fn decode_binding_scope(
+    encoded: Option<&str>,
+) -> Result<Option<lash_core::ExecutionScope>, StoreError> {
+    encoded
+        .map(|encoded| {
+            serde_json::from_str(encoded).map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "TurnCancellationBinding",
+                message: error.to_string(),
+            })
+        })
+        .transpose()
+}
+
 #[async_trait::async_trait]
 impl TurnInputStore for Store {
     fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
@@ -11,10 +24,25 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &lash_core::ExecutionScope,
     ) -> Result<(), StoreError> {
+        admitted_scope
+            .validate()
+            .map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "TurnCancellationBinding",
+                message: error.to_string(),
+            })?;
         let session_id = session_id.clone();
         let fence = session_execution_lease.clone();
         let binding_id = binding_id.to_string();
+        let admitted_physical_scope = admitted_scope
+            .session_id()
+            .is_none()
+            .then(|| admitted_scope.clone());
+        let admitted_scope_json = admitted_physical_scope
+            .as_ref()
+            .map(encode_json)
+            .transpose()?;
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -23,14 +51,17 @@ impl TurnInputStore for Store {
                     ensure_session_execution_lease_conn(tx, &session_id, &fence, now)?;
                     let existing = tx
                     .query_row(
-                        "SELECT binding_id FROM turn_cancellation_bindings WHERE session_id = ?1",
+                        "SELECT binding_id, admitted_scope_json FROM turn_cancellation_bindings WHERE session_id = ?1",
                         params![session_id.as_str()],
-                        |row| row.get::<_, String>(0),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                     )
                     .optional()
                     .map_err(sqlite_error)?;
                     match existing {
-                        Some(expected) if expected != binding_id => {
+                        Some((expected, encoded_scope))
+                            if expected != binding_id
+                                || decode_binding_scope(encoded_scope.as_deref())?
+                                    != admitted_physical_scope => {
                             Err(StoreError::TurnCancelBindingMismatch {
                                 session_id,
                                 expected,
@@ -40,8 +71,8 @@ impl TurnInputStore for Store {
                         Some(_) => Ok(()),
                         None => {
                             tx.execute(
-                                "INSERT INTO turn_cancellation_bindings (session_id, binding_id) VALUES (?1, ?2)",
-                                params![session_id.as_str(), binding_id],
+                                "INSERT INTO turn_cancellation_bindings (session_id, binding_id, admitted_scope_json) VALUES (?1, ?2, ?3)",
+                                params![session_id.as_str(), binding_id, admitted_scope_json],
                             )
                             .map_err(sqlite_error)?;
                             Ok(())
@@ -81,18 +112,46 @@ impl TurnInputStore for Store {
                             session_id: authorization.session_id().clone(),
                         });
                     }
+                    if authorization.admitted_scope().session_id().is_none() {
+                        let scope_id = authorization
+                            .admitted_scope()
+                            .journal_identity()
+                            .map_err(|error| StoreError::Backend(error.to_string()))?
+                            .key()
+                            .to_string();
+                        let retired = tx
+                            .query_row(
+                                "SELECT EXISTS(SELECT 1 FROM turn_cancel_retired_scopes WHERE scope_id = ?1)",
+                                params![scope_id],
+                                |row| row.get::<_, bool>(0),
+                            )
+                            .map_err(sqlite_error)?;
+                        if retired {
+                            return Err(StoreError::TurnCancelClosureScopeRetired { scope_id });
+                        }
+                    }
                     let selected = tx
                         .query_row(
-                            "SELECT binding_id FROM turn_cancellation_bindings WHERE session_id = ?1",
+                            "SELECT binding_id, admitted_scope_json FROM turn_cancellation_bindings WHERE session_id = ?1",
                             params![authorization.session_id().as_str()],
-                            |row| row.get::<_, String>(0),
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                         )
                         .optional()
                         .map_err(sqlite_error)?;
-                    if selected.as_deref() != Some(authorization.binding_id()) {
+                    let admitted_physical_scope = authorization
+                        .admitted_scope()
+                        .session_id()
+                        .is_none()
+                        .then(|| authorization.admitted_scope().clone());
+                    let selected_matches = selected.as_ref().is_some_and(|(binding, encoded_scope)| {
+                        binding == authorization.binding_id()
+                            && decode_binding_scope(encoded_scope.as_deref())
+                            .is_ok_and(|scope| scope == admitted_physical_scope)
+                    });
+                    if !selected_matches {
                         return Err(StoreError::TurnCancelBindingMismatch {
                             session_id: authorization.session_id().clone(),
-                            expected: selected.unwrap_or_default(),
+                            expected: selected.map(|(binding, scope)| format!("{binding} at {scope:?}")).unwrap_or_default(),
                             presented: authorization.binding_id().to_string(),
                         });
                     }
@@ -148,9 +207,15 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
+        admitted_scope: &lash_core::ExecutionScope,
     ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
-        self.validate_turn_cancellation_binding(session_id, session_execution_lease, binding_id)
-            .await?;
+        self.validate_turn_cancellation_binding(
+            session_id,
+            session_execution_lease,
+            binding_id,
+            admitted_scope,
+        )
+        .await?;
         let session_id = session_id.clone();
         let encoded = self.conn
             .call(move |conn| {
@@ -257,10 +322,10 @@ impl TurnInputStore for Store {
                             outcome: None,
                         });
                     }
-                    // First writer wins, except that a stronger mode escalates
-                    // the durable request; the repair outcome accumulated so
-                    // far stays attached.
-                    if let Some(mut existing) =
+                    // The first policy acceptor is immutable. A stronger
+                    // same-policy request advances only the closure-CAS
+                    // revision; effective timing is recorded by the gate.
+                    if let Some(existing) =
                         load_turn_cancel_request_conn(tx, &session_id, &turn_id)?
                     {
                         if request.mode.is_stronger_than(existing.request.mode) {
@@ -287,15 +352,12 @@ impl TurnInputStore for Store {
                                     "turn cancel intent revision exceeds SQLite range".to_string(),
                                 )
                             })?;
-                            existing.request = request;
                             tx.execute(
-                                "UPDATE turn_cancel_requests SET record_json = ?3,
-                                     intent_revision = ?4
+                                "UPDATE turn_cancel_requests SET intent_revision = ?3
                                  WHERE session_id = ?1 AND turn_id = ?2",
                                 params![
                                     session_id.as_str(),
                                     turn_id.as_str(),
-                                    encode_json(&existing)?,
                                     revision,
                                 ],
                             )
@@ -788,14 +850,13 @@ impl TurnInputStore for Store {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         turn_id: &lash_core::TurnId,
         observed: &lash_core::TurnCancelIntentSnapshot,
-        decision: lash_core::TurnCancelRepairDecision,
-        closure: Option<&lash_core::TurnCancelClosureAuthorization>,
+        settlement: Option<&lash_core::TurnCancelClosureSettlement>,
     ) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
         let session_id = session_id.clone();
         let session_execution_lease = session_execution_lease.clone();
         let turn_id = turn_id.clone();
         let observed = observed.clone();
-        let closure = closure.cloned();
+        let settlement = settlement.cloned();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -806,15 +867,19 @@ impl TurnInputStore for Store {
                         &session_execution_lease,
                         now,
                     )?;
-                    let closure_required = !matches!(
-                        observed,
-                        lash_core::TurnCancelIntentSnapshot::Absent
-                    ) || !matches!(
-                        decision,
-                        lash_core::TurnCancelRepairDecision::NoCancellationIntent
-                    );
-                    if closure_required != closure.is_some()
-                        || closure.as_ref().is_some_and(|authorization| {
+                    let closure = settlement.as_ref().map(lash_core::TurnCancelClosureSettlement::authorization);
+                    let stored = tx
+                        .query_row(
+                            "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                            params![session_id.as_str(), turn_id.as_str()],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?;
+                    let closure_required = stored.is_some()
+                        || !matches!(observed, lash_core::TurnCancelIntentSnapshot::Absent);
+                    if closure_required != settlement.is_some()
+                        || closure.is_some_and(|authorization| {
                             authorization.session_id() != &session_id
                                 || authorization.turn_id() != &turn_id
                         })
@@ -824,15 +889,7 @@ impl TurnInputStore for Store {
                             turn_id: turn_id.clone(),
                         });
                     }
-                    if let Some(closure) = closure.as_ref() {
-                        let stored = tx
-                            .query_row(
-                                "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
-                                params![session_id.as_str(), turn_id.as_str()],
-                                |row| row.get::<_, String>(0),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
+                    if let Some(closure) = closure {
                         if stored.as_deref() != Some(encode_json(closure)?.as_str()) {
                             return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                                 session_id: session_id.clone(),
@@ -846,9 +903,9 @@ impl TurnInputStore for Store {
                         session_execution_lease.fencing_token,
                         &turn_id,
                         &observed,
-                        &decision,
+                        settlement.as_ref(),
                     )?;
-                    if closure.is_some()
+                    if settlement.is_some()
                         && matches!(repaired, lash_core::TurnCancelRepairResult::Applied(_))
                     {
                         tx.execute(

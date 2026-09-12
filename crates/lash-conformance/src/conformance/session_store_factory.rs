@@ -55,9 +55,12 @@ pub async fn session_store_factory<F>(
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
-    turn_cancel::turn_cancel_closure_authorization_is_fenced_and_non_overwritable(make()).await;
+    turn_cancel::turn_cancel_closure_settlement_is_fenced_and_non_overwritable(make()).await;
+    turn_cancel::turn_cancel_scope_retirement_serializes_with_authorization(make()).await;
     turn_cancel::turn_cancel_disposition_crash_matrix(make()).await;
-    turn_cancel::turn_cancel_request_escalation_upgrades_the_durable_record(make()).await;
+    turn_cancel::turn_cancel_request_escalation_advances_intent_without_replacing_base(make())
+        .await;
+    turn_cancel::turn_cancel_repair_preserves_base_across_escalation_and_reopen(make()).await;
     turn_cancel::turn_cancel_repair_orders_intent_and_ordinary_redefer(make()).await;
     turn_cancel::turn_cancel_final_commit_intent_cas_is_atomic(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
@@ -798,11 +801,16 @@ pub async fn process_prune_deletes_owned_session_stores(
     let authority = pinned_store
         .turn_cancellation_authority()
         .expect("persistent process-owned store exposes cancellation authority");
+    let physical_scope = crate::ExecutionScope::process(PROCESS_ID);
+    let binding_id =
+        crate::turn_control_binding_id_for_scope(authority.binding_id(), &physical_scope)
+            .expect("bind process cancellation scope");
     pinned_store
         .validate_turn_cancellation_binding(
             &pinned_request.session_id,
             &lease.fence(),
-            authority.binding_id(),
+            &binding_id,
+            &physical_scope,
         )
         .await
         .expect("bind process-owned cancellation authority");
@@ -813,8 +821,8 @@ pub async fn process_prune_deletes_owned_session_stores(
     let resolver = authority.resolver();
     let authorization = crate::TurnCancelClosureAuthorization::new(
         address.clone(),
-        authority.binding_id(),
-        crate::ExecutionScope::process(PROCESS_ID),
+        binding_id,
+        physical_scope,
         resolver
             .await_event_key(
                 &address.execution_scope(),
@@ -878,14 +886,17 @@ pub async fn process_prune_deletes_owned_session_stores(
             .is_some(),
         "the refused prune must retain the terminal process"
     );
+    let settlement = authority
+        .settle_authorized_closure(&authorization)
+        .await
+        .expect("settle process-owned closure before consumption");
     pinned_store
         .repair_orphaned_active_turn_inputs(
             &pinned_request.session_id,
             &lease.fence(),
             &address.turn_id,
             &crate::TurnCancelIntentSnapshot::Absent,
-            crate::TurnCancelRepairDecision::CancellationDidNotWin,
-            Some(&authorization),
+            Some(&settlement),
         )
         .await
         .expect("consume process-owned closure authorization")

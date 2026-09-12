@@ -237,7 +237,8 @@ impl LiveConformanceHarness {
     ) -> Box<dyn Fn() -> Arc<dyn lash_core::EffectHost> + Send + Sync> {
         let ingress_url = self.ingress_url.clone();
         Box::new(move || {
-            Arc::new(RestateEffectHost::new(ingress_url.clone())) as Arc<dyn lash_core::EffectHost>
+            Arc::new(RestateEffectHost::new_for_test(ingress_url.clone()))
+                as Arc<dyn lash_core::EffectHost>
         })
     }
 
@@ -247,7 +248,7 @@ impl LiveConformanceHarness {
         Box::new(move |resolver| match resolver {
             Some(resolver) => {
                 executors.install(resolver);
-                Arc::new(RestateEffectHost::new(ingress_url.clone()))
+                Arc::new(RestateEffectHost::new_for_test(ingress_url.clone()))
                     as Arc<dyn lash_core::EffectHost>
             }
             None => Arc::new(lash_core::facade_support::NativeEffectHost::default())
@@ -535,7 +536,7 @@ impl ScopeLivenessProbe for ScopeLivenessProbeImpl {
         ctx: WorkflowContext<'_>,
         Json(scope_id): Json<String>,
     ) -> HandlerResult<Json<bool>> {
-        let controller = crate::RestateRuntimeEffectController::new(ctx);
+        let controller = crate::RestateRuntimeEffectController::new_for_test(ctx);
         let scoped = controller
             .scoped_effect_controller(ExecutionScope::runtime_operation(scope_id.clone()))
             .map_err(TerminalError::from_error)?;

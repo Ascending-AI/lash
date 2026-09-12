@@ -187,6 +187,10 @@ pub enum StoreError {
         session_id: SessionId,
         pending_count: usize,
     },
+    /// The non-session physical owner was retired before this closure could be
+    /// admitted. The retirement tombstone is permanent for that scope.
+    #[error("turn cancellation closure scope `{scope_id}` is retired")]
+    TurnCancelClosureScopeRetired { scope_id: String },
     /// Stored-reference adoption found the durable byte-absence fact left by a
     /// completed attachment GC delete. The boundary commit publishes nothing;
     /// the caller may re-put the digest and retry.
@@ -626,6 +630,7 @@ impl StoreError {
                 "TurnCancelClosureAuthorizationMismatch"
             }
             Self::TurnCancelClosureLifecyclePinned { .. } => "TurnCancelClosureLifecyclePinned",
+            Self::TurnCancelClosureScopeRetired { .. } => "TurnCancelClosureScopeRetired",
             Self::AttachmentBytesReclaimed { .. } => "AttachmentBytesReclaimed",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
             Self::RuntimeCommitLeaseAuthorityConflict { .. } => {

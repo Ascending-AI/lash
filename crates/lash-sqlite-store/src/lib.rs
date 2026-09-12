@@ -923,6 +923,61 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         store.pending_turn_cancel_closure_pins().await
     }
 
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        let scope = scope.clone();
+        let scope_id = scope
+            .journal_identity()
+            .map_err(|error| StoreError::Backend(error.to_string()))?
+            .key()
+            .to_string();
+        let store = self
+            .open_catalog_for_maintenance("turn cancellation scope retirement")
+            .await?;
+        store
+            .conn
+            .write_flow(move |tx| {
+                let outcome: Result<(), StoreError> = (|| {
+                    let mut statement = tx
+                        .prepare("SELECT session_id, authorization_json FROM turn_cancel_closure_authorizations ORDER BY session_id, turn_id")
+                        .map_err(sqlite_error)?;
+                    let rows = statement
+                        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                        .map_err(sqlite_error)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(sqlite_error)?;
+                    drop(statement);
+                    for (session_id, encoded) in rows {
+                        let authorization: lash_core::TurnCancelClosureAuthorization =
+                            serde_json::from_str(&encoded).map_err(|error| StoreError::StoredDataCorrupt {
+                                record_kind: "TurnCancelClosureAuthorization",
+                                message: error.to_string(),
+                            })?;
+                        if authorization.admitted_scope() == &scope {
+                            return Err(StoreError::TurnCancelClosureLifecyclePinned {
+                                session_id: SessionId::from(session_id),
+                                pending_count: 1,
+                            });
+                        }
+                    }
+                    tx.execute(
+                        "INSERT OR IGNORE INTO turn_cancel_retired_scopes (scope_id) VALUES (?1)",
+                        params![scope_id],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
+                })();
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,

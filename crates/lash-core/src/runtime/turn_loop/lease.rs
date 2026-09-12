@@ -389,7 +389,12 @@ impl LashRuntime {
         // A reopened host with a different physical authority is refused before
         // commands, input acceptance, model calls, or other session work.
         let pending = store
-            .pending_turn_cancel_closures(&self.state.session_id, fence, binding_id)
+            .pending_turn_cancel_closures(
+                &self.state.session_id,
+                fence,
+                binding_id,
+                scoped_effect_controller.execution_scope(),
+            )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         let mut repaired_count = 0;
@@ -400,7 +405,7 @@ impl LashRuntime {
                 address.clone(),
             )
             .await?;
-            let cancellation = control
+            let settlement = control
                 .settle_authorized(turn_control_resolver, &authorization)
                 .await?;
             loop {
@@ -408,18 +413,13 @@ impl LashRuntime {
                     .turn_cancel_request_intent(&address)
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-                let decision = cancellation.clone().map_or(
-                    crate::TurnCancelRepairDecision::CancellationDidNotWin,
-                    crate::TurnCancelRepairDecision::CancellationWon,
-                );
                 match store
                     .repair_orphaned_active_turn_inputs(
                         &self.state.session_id,
                         fence,
                         authorization.turn_id(),
                         &observed,
-                        decision,
-                        Some(&authorization),
+                        Some(&settlement),
                     )
                     .await
                     .map_err(super::runtime_error_from_store_commit)?
@@ -450,7 +450,7 @@ impl LashRuntime {
                     .turn_cancel_request_intent(&address)
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-                let (decision, authorization) = match observed.request() {
+                let settlement = match observed.request() {
                     Some(request) => {
                         let control = crate::runtime::turn_control::ActiveTurnControl::new(
                             turn_control_resolver,
@@ -459,7 +459,10 @@ impl LashRuntime {
                         .await?;
                         let authorization = control.closure_authorization(
                             binding_id,
-                            scoped_effect_controller.execution_scope().clone(),
+                            crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                                &address,
+                                scoped_effect_controller.execution_scope(),
+                            ),
                             fence,
                             observed.clone(),
                             true,
@@ -475,18 +478,12 @@ impl LashRuntime {
                                 return Err(super::runtime_error_from_store_commit(error));
                             }
                         }
-                        let cancellation = control
+                        let settlement = control
                             .settle_authorized(turn_control_resolver, &authorization)
                             .await?;
-                        (
-                            cancellation.map_or(
-                                crate::TurnCancelRepairDecision::CancellationDidNotWin,
-                                crate::TurnCancelRepairDecision::CancellationWon,
-                            ),
-                            Some(authorization),
-                        )
+                        Some(settlement)
                     }
-                    None => (crate::TurnCancelRepairDecision::NoCancellationIntent, None),
+                    None => None,
                 };
                 let mut repair_observed = observed;
                 loop {
@@ -496,8 +493,7 @@ impl LashRuntime {
                             fence,
                             &turn_id,
                             &repair_observed,
-                            decision.clone(),
-                            authorization.as_ref(),
+                            settlement.as_ref(),
                         )
                         .await
                     {
@@ -506,7 +502,7 @@ impl LashRuntime {
                             break 'discover;
                         }
                         Ok(crate::TurnCancelRepairResult::IntentChanged)
-                            if authorization.is_some() =>
+                            if settlement.is_some() =>
                         {
                             // The exact promise operation is already pinned and
                             // may not be overwritten. Refresh only the store CAS
@@ -608,7 +604,6 @@ impl LashRuntime {
                         fence,
                         trace_turn_id,
                         &observed,
-                        crate::TurnCancelRepairDecision::NoCancellationIntent,
                         None,
                     )
                     .await
@@ -670,7 +665,10 @@ impl LashRuntime {
             };
             let authorization = match control.closure_authorization(
                 binding_id,
-                scoped_effect_controller.execution_scope().clone(),
+                crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                    &address,
+                    scoped_effect_controller.execution_scope(),
+                ),
                 fence,
                 observed.clone(),
                 cancelled,
@@ -693,12 +691,11 @@ impl LashRuntime {
                     return;
                 }
             }
-            let decision = match control
+            let settlement = match control
                 .settle_authorized(turn_control_resolver, &authorization)
                 .await
             {
-                Ok(Some(evidence)) => crate::TurnCancelRepairDecision::CancellationWon(evidence),
-                Ok(None) => crate::TurnCancelRepairDecision::CancellationDidNotWin,
+                Ok(settlement) => settlement,
                 Err(err) => {
                     tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_gate_settlement_failed");
                     return;
@@ -712,8 +709,7 @@ impl LashRuntime {
                         fence,
                         trace_turn_id,
                         &repair_observed,
-                        decision.clone(),
-                        Some(&authorization),
+                        Some(&settlement),
                     )
                     .await
                 {

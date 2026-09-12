@@ -1059,7 +1059,6 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             &lease.fence(),
             &TurnId::from(dead_turn_id),
             &crate::TurnCancelIntentSnapshot::Absent,
-            crate::TurnCancelRepairDecision::NoCancellationIntent,
             None,
         )
         .await
@@ -1098,7 +1097,6 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &lease.fence(),
                 &TurnId::from(dead_turn_id),
                 &crate::TurnCancelIntentSnapshot::Absent,
-                crate::TurnCancelRepairDecision::NoCancellationIntent,
                 None,
             )
             .await
@@ -1193,7 +1191,6 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &lease.fence(),
                 &turn_id,
                 &crate::TurnCancelIntentSnapshot::Absent,
-                crate::TurnCancelRepairDecision::NoCancellationIntent,
                 None,
             )
             .await
@@ -1265,7 +1262,6 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
             &stale_fence,
             &TurnId::from("fig1573-superseded-turn"),
             &crate::TurnCancelIntentSnapshot::Absent,
-            crate::TurnCancelRepairDecision::NoCancellationIntent,
             None,
         )
         .await
@@ -1296,7 +1292,6 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 &successor.fence(),
                 &TurnId::from("fig1573-superseded-turn"),
                 &crate::TurnCancelIntentSnapshot::Absent,
-                crate::TurnCancelRepairDecision::NoCancellationIntent,
                 None,
             )
             .await

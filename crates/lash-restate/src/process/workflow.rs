@@ -74,6 +74,7 @@ pub struct LashProcessWorkflowImpl<R> {
     segment_duration_cap: Option<Duration>,
     segment_effect_budget: Arc<dyn Fn(&ProcessRegistration) -> u64 + Send + Sync>,
     cancel_ingress: Option<RestateIngressClient>,
+    authority_id: crate::RestateAuthorityId,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_context: lash_trace::TraceContext,
     #[cfg(test)]
@@ -88,8 +89,15 @@ impl<R> LashProcessWorkflowImpl<R> {
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: RestateIngressClient,
+        authority_id: crate::RestateAuthorityId,
     ) -> Self {
-        Self::new_inner(runner, registry, continuations, Some(cancel_ingress))
+        Self::new_inner(
+            runner,
+            registry,
+            continuations,
+            Some(cancel_ingress),
+            authority_id,
+        )
     }
 
     #[cfg(test)]
@@ -98,7 +106,13 @@ impl<R> LashProcessWorkflowImpl<R> {
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     ) -> Self {
-        Self::new_inner(runner, registry, continuations, None)
+        Self::new_inner(
+            runner,
+            registry,
+            continuations,
+            None,
+            crate::RestateAuthorityId::new("restate-test-authority").expect("valid test authority"),
+        )
     }
 
     fn new_inner(
@@ -106,6 +120,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: Option<RestateIngressClient>,
+        authority_id: crate::RestateAuthorityId,
     ) -> Self {
         Self {
             runner,
@@ -114,6 +129,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             segment_duration_cap: None,
             segment_effect_budget: Arc::new(|_| 10_000),
             cancel_ingress,
+            authority_id,
             trace_sink: None,
             trace_context: lash_trace::TraceContext::default(),
             #[cfg(test)]
@@ -613,7 +629,8 @@ where
         if let Some(cap) = self.segment_duration_cap {
             options = options.segment_duration_cap(cap);
         }
-        let controller = RestateRuntimeEffectController::with_options(ctx, options);
+        let controller =
+            RestateRuntimeEffectController::with_options(ctx, self.authority_id.clone(), options);
         let controller = if let Some(sink) = self.trace_sink.as_ref() {
             controller.with_trace_sink_and_context(Arc::clone(sink), self.trace_context.clone())
         } else {
@@ -658,7 +675,12 @@ where
             lash_core::ProcessRunOutcome::Terminal { output, .. } => {
                 let output = *output;
                 if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
-                    resolve_process_terminal_promise(controller.context(), &process_id, &output)?;
+                    resolve_process_terminal_promise(
+                        controller.context(),
+                        &self.authority_id,
+                        &process_id,
+                        &output,
+                    )?;
                 } else {
                     let request = controller
                         .context()
@@ -734,7 +756,12 @@ where
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<RestateProcessCompleteRequest>,
     ) -> HandlerResult<Json<()>> {
-        resolve_process_terminal_promise(&ctx, &request.process_id, &request.output)?;
+        resolve_process_terminal_promise(
+            &ctx,
+            &self.authority_id,
+            &request.process_id,
+            &request.output,
+        )?;
         Ok(Json(()))
     }
 
@@ -795,7 +822,7 @@ where
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<RestateProcessAwaitRequest>,
     ) -> HandlerResult<Json<ProcessAwaitOutput>> {
-        let key = restate_process_terminal_await_key(&request.process_id)
+        let key = restate_process_terminal_await_key(&self.authority_id, &request.process_id)
             .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
         let promise_key = key.promise_key();
         let payload = ctx.promise::<String>(&promise_key).await?;

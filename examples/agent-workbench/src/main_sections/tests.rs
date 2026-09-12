@@ -1931,15 +1931,18 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let model = with_workbench_model_capability(model);
     let process_deployment = lash_restate::RestateProcessDeployment::new(
         restate_ingress_url.clone(),
+        lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
         Arc::clone(&process_registry),
         process_continuations,
     );
     let restate_http = reqwest::Client::new();
-    let turn_deployment =
-        lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::with_client(
+    let turn_deployment = lash_restate::RestateTurnDeployment::new(
+        lash_restate::RestateConnection::with_client(
             restate_ingress_url.clone(),
             restate_http.clone(),
-        ));
+        ),
+        lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+    );
     let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
         sessions: sessions.clone(),
         store_factory: Arc::clone(&core_store_factory),

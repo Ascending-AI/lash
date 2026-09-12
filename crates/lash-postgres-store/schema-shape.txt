@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 87
+version 88
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -398,7 +398,56 @@ table lash_turn_cancel_requests
   column session_id text not-null
   column turn_id text not-null
   primary-key (session_id, turn_id)
+table lash_turn_cancel_retired_scopes
+  column scope_id text not-null
+  primary-key (scope_id)
 table lash_turn_cancellation_bindings
+  column admitted_scope_json text nullable
+  payload-shape lash_turn_cancellation_bindings.admitted_scope_json ExecutionScope
+    shape /oneOf/tag:type=string:%22process%22/branch schema
+    shape /oneOf/tag:type=string:%22process%22/properties/process_id/type string
+    shape /oneOf/tag:type=string:%22process%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22process%22/properties/type/enum-values ["process"]
+    shape /oneOf/tag:type=string:%22process%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22process%22/required/process_id field
+    shape /oneOf/tag:type=string:%22process%22/required/type field
+    shape /oneOf/tag:type=string:%22process%22/type object
+    shape /oneOf/tag:type=string:%22queue_drain%22/branch schema
+    shape /oneOf/tag:type=string:%22queue_drain%22/properties/drain_id/type string
+    shape /oneOf/tag:type=string:%22queue_drain%22/properties/session_id/type string
+    shape /oneOf/tag:type=string:%22queue_drain%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22queue_drain%22/properties/type/enum-values ["queue_drain"]
+    shape /oneOf/tag:type=string:%22queue_drain%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22queue_drain%22/required/drain_id field
+    shape /oneOf/tag:type=string:%22queue_drain%22/required/session_id field
+    shape /oneOf/tag:type=string:%22queue_drain%22/required/type field
+    shape /oneOf/tag:type=string:%22queue_drain%22/type object
+    shape /oneOf/tag:type=string:%22runtime_operation%22/branch schema
+    shape /oneOf/tag:type=string:%22runtime_operation%22/properties/operation_id/type string
+    shape /oneOf/tag:type=string:%22runtime_operation%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22runtime_operation%22/properties/type/enum-values ["runtime_operation"]
+    shape /oneOf/tag:type=string:%22runtime_operation%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22runtime_operation%22/required/operation_id field
+    shape /oneOf/tag:type=string:%22runtime_operation%22/required/type field
+    shape /oneOf/tag:type=string:%22runtime_operation%22/type object
+    shape /oneOf/tag:type=string:%22session_delete%22/branch schema
+    shape /oneOf/tag:type=string:%22session_delete%22/properties/session_id/type string
+    shape /oneOf/tag:type=string:%22session_delete%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22session_delete%22/properties/type/enum-values ["session_delete"]
+    shape /oneOf/tag:type=string:%22session_delete%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22session_delete%22/required/session_id field
+    shape /oneOf/tag:type=string:%22session_delete%22/required/type field
+    shape /oneOf/tag:type=string:%22session_delete%22/type object
+    shape /oneOf/tag:type=string:%22turn%22/branch schema
+    shape /oneOf/tag:type=string:%22turn%22/properties/session_id/type string
+    shape /oneOf/tag:type=string:%22turn%22/properties/turn_id/type string
+    shape /oneOf/tag:type=string:%22turn%22/properties/type/enum-types string
+    shape /oneOf/tag:type=string:%22turn%22/properties/type/enum-values ["turn"]
+    shape /oneOf/tag:type=string:%22turn%22/properties/type/type string
+    shape /oneOf/tag:type=string:%22turn%22/required/session_id field
+    shape /oneOf/tag:type=string:%22turn%22/required/turn_id field
+    shape /oneOf/tag:type=string:%22turn%22/required/type field
+    shape /oneOf/tag:type=string:%22turn%22/type object
   column binding_id text not-null
   column session_id text not-null
   primary-key (session_id)
