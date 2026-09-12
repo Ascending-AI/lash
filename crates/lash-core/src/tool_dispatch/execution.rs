@@ -146,7 +146,9 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let started = context.clock.now();
-    let tool_name = prepared.tool_name.clone();
+    let tool_name = super::preparation::resolve_callable_manifest_by_id(context, &prepared.tool_id)
+        .expect("orchestrating tool must have an admitted callable manifest")
+        .name;
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let orchestration_context =
@@ -212,7 +214,9 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let started = context.clock.now();
-    let tool_name = prepared.tool_name.clone();
+    let tool_name = super::preparation::resolve_internal_manifest_by_id(context, &prepared.tool_id)
+        .expect("internal process tool must have an admitted internal manifest")
+        .name;
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let internal_context = crate::InternalProcessContext::new(tool_context);

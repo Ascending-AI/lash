@@ -200,10 +200,10 @@ async fn prepare_authorized_tool_call_with_context(
     };
     let prepared = context.tools.prepare_tool_call(prepare_call).await;
     match prepared {
-        Ok(prepared) if prepared.tool_id == manifest.id => {
+        Ok(prepared) if prepared.tool_id == manifest.id && prepared.tool_name == manifest.name => {
             ToolPreparationOutcome::Prepared(Box::new(prepared))
         }
-        Ok(prepared) => completed_preparation(outcome(
+        Ok(prepared) if prepared.tool_id != manifest.id => completed_preparation(outcome(
             tool_name,
             args,
             runtime_failure(
@@ -212,6 +212,19 @@ async fn prepare_authorized_tool_call_with_context(
                 format!(
                     "Tool provider prepared id `{}` for tool `{}`, expected `{}`",
                     prepared.tool_id, prepared.tool_name, manifest.id
+                ),
+            ),
+            0,
+        )),
+        Ok(prepared) => completed_preparation(outcome(
+            tool_name,
+            args,
+            runtime_failure(
+                ToolFailureClass::Internal,
+                "prepared_tool_name_mismatch",
+                format!(
+                    "Tool provider prepared name `{}` for tool `{}`, expected `{}`",
+                    prepared.tool_name, prepared.tool_id, manifest.name
                 ),
             ),
             0,
