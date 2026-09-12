@@ -21,7 +21,7 @@ use async_trait::async_trait;
 
 use crate::{
     LashlangHostEnvironment, LashlangSurface, ToolBindingError, lashlang_tool_contract_types,
-    required_tool_lashlang_executable, tool_catalog_provides_call_path,
+    required_tool_lashlang_executable,
 };
 
 /// A host-authorized tool capability resolved for a deferred call-path. It
@@ -325,16 +325,19 @@ pub async fn resolve_and_fold_deferred(
         .cloned()
         .collect();
     let outcomes =
-        journal_deferred_outcomes(referenced, ambient_paths, resolver, record, ctx).await?;
+        journal_deferred_outcomes(referenced, move || Ok(ambient_paths), resolver, record, ctx)
+            .await?;
     apply_deferred_outcomes(&mut host_environment, &outcomes, resolver, ctx)?;
     record.resolutions = outcomes;
 
     Ok(host_environment)
 }
 
-/// Production deferred-link path. The journal is consulted before the ambient
-/// Tool Catalog is folded, so a committed decision can mask every later
-/// claimant for its exact path before catalog collision validation runs.
+/// Production deferred-link path. Live resolution classifies availability from
+/// the complete unmasked environment, including runtime-supplied built-ins.
+/// Journal replay skips that live build, so a committed decision can still
+/// mask every later claimant for its exact path before catalog collision
+/// validation runs.
 pub async fn resolve_and_build_deferred_environment(
     program: &lashlang::Program,
     surface: &LashlangSurface,
@@ -349,21 +352,22 @@ pub async fn resolve_and_build_deferred_environment(
             .host_environment(catalog)
             .map_err(DeferredResolutionError::Ambient);
     }
-    let ambient_paths = referenced
-        .iter()
-        .filter(|path| {
-            let Some((module_path, operation)) = path.rsplit_once('.') else {
-                return false;
-            };
-            surface
-                .resources
-                .provides_module_operation(module_path, operation)
-                || tool_catalog_provides_call_path(catalog, path)
-        })
-        .cloned()
-        .collect();
-    let outcomes =
-        journal_deferred_outcomes(referenced, ambient_paths, resolver, record, ctx).await?;
+    let referenced_for_ambient = referenced.clone();
+    let outcomes = journal_deferred_outcomes(
+        referenced,
+        move || {
+            let host_environment = surface.host_environment(catalog)?;
+            Ok(referenced_for_ambient
+                .iter()
+                .filter(|path| already_provided(&host_environment, path))
+                .cloned()
+                .collect())
+        },
+        resolver,
+        record,
+        ctx,
+    )
+    .await?;
     let masked_paths = outcomes.keys().cloned().collect::<BTreeSet<_>>();
     let mut host_environment = surface
         .host_environment_masking(catalog, &masked_paths)
@@ -374,13 +378,16 @@ pub async fn resolve_and_build_deferred_environment(
     Ok(host_environment)
 }
 
-async fn journal_deferred_outcomes(
+async fn journal_deferred_outcomes<F>(
     referenced: BTreeSet<String>,
-    ambient_paths: BTreeSet<String>,
+    ambient_paths: F,
     resolver: Option<&SharedDeferredToolResolver>,
     record: &DeferredResolutionRecord,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-) -> Result<BTreeMap<String, Resolution>, DeferredResolutionError> {
+) -> Result<BTreeMap<String, Resolution>, DeferredResolutionError>
+where
+    F: FnOnce() -> Result<BTreeSet<String>, ToolBindingError> + Send,
+{
     let link_key = record
         .link_key
         .as_ref()
@@ -402,8 +409,21 @@ async fn journal_deferred_outcomes(
     let phase_context = ctx.clone();
     let resolver_for_resolution = resolver.cloned();
     let referenced_for_resolution = referenced.clone();
+    let ambient_error = Arc::new(tokio::sync::Mutex::new(None));
+    let ambient_error_for_resolution = Arc::clone(&ambient_error);
     let journaled = ctx
         .journaled_deferred_resolution_with(effect_id, operation, move || async move {
+            let ambient_paths = match ambient_paths() {
+                Ok(paths) => paths,
+                Err(error) => {
+                    let message = error.to_string();
+                    *ambient_error_for_resolution.lock().await = Some(error);
+                    return Err(lash_core::RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed,
+                        message,
+                    ));
+                }
+            };
             let mut outcomes = BTreeMap::new();
             let mut unknown = Vec::new();
             for path in &referenced_for_resolution {
@@ -433,8 +453,11 @@ async fn journal_deferred_outcomes(
                 )
             })
         })
-        .await
-        .map_err(DeferredResolutionError::Journal)?;
+        .await;
+    if let Some(error) = ambient_error.lock().await.take() {
+        return Err(DeferredResolutionError::Ambient(error));
+    }
+    let journaled = journaled.map_err(DeferredResolutionError::Journal)?;
     {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve.after_durable_record");
     }
@@ -510,6 +533,8 @@ mod tests {
     use lash_sansio::sync::MutexExt;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    mod runtime_built_in;
 
     #[derive(Clone, Copy)]
     enum JournalFault {

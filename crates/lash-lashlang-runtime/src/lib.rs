@@ -432,22 +432,6 @@ fn filtered_tool_catalog(
     filtered
 }
 
-pub(crate) fn tool_catalog_provides_call_path(
-    catalog: &lash_core::ToolCatalog,
-    call_path: &str,
-) -> bool {
-    catalog.tools.iter().any(|entry| {
-        if entry.manifest.activation == lash_core::ToolActivation::Internal {
-            return false;
-        }
-        required_tool_lashlang_executable(&entry.manifest)
-            .ok()
-            .is_some_and(|binding| {
-                format!("{}.{}", binding.module_path.join("."), binding.operation) == call_path
-            })
-    })
-}
-
 pub fn lashlang_host_environment_from_tool_catalog(
     catalog: &lash_core::ToolCatalog,
     abilities: LashlangAbilities,
