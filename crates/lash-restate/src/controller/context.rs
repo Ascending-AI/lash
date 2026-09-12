@@ -570,6 +570,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
+        idempotency_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run;
@@ -944,6 +945,7 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     registration: ProcessRegistration,
                     execution_context: ProcessExecutionContext,
+                    idempotency_key: String,
                 ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
                 where
                     'ctx: 'run,
@@ -956,7 +958,8 @@ macro_rules! impl_restate_controller_context {
                             execution_context,
                             segment_ordinal: 0,
                             execution_id: None,
-                        }));
+                        }))
+                        .idempotency_key(idempotency_key);
                     let handle = request.send();
                     Box::pin(async move {
                         let handle = handle.await?;

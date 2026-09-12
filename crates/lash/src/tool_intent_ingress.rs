@@ -344,10 +344,11 @@ impl ToolIntentIngress {
     /// realization. On a
     /// controller-owned key-addressed tier, reuse of an identity returns the
     /// first writer's outcome with `replayed: true`; the later payload is not
-    /// realized. Runtime-owned tiers report process-store identity collisions as
-    /// [`ToolIntentIngressRefusal::DuplicateIdentity`]. Ordinal-addressed tiers
-    /// do not key-replay submissions, so the host must avoid resubmitting an
-    /// identity as a new invocation.
+    /// realized. On controller-owned ordinal-addressed tiers, the derived
+    /// submission key fences process starts at the engine ingress, so a retry
+    /// attaches to the original workflow invocation. Runtime-owned tiers report
+    /// process-store identity collisions as
+    /// [`ToolIntentIngressRefusal::DuplicateIdentity`].
     ///
     /// A `StartProcess` submission does not retain the host-chosen
     /// `request.id`: Lash replaces it with the derived intent replay key, and

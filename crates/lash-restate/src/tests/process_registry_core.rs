@@ -1722,6 +1722,11 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
             .collect::<Vec<_>>(),
         vec!["task-1"]
     );
+    assert_eq!(
+        context.started_idempotency_keys.lock_recover().as_slice(),
+        &["session:turn:1:0:process:background-start"],
+        "the process effect replay key must become the workflow ingress idempotency key"
+    );
     assert!(
         context.runs.lock_recover().is_empty(),
         "process workflow scheduling must not call Restate context from inside ctx.run"

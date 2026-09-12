@@ -530,6 +530,7 @@ pub(super) struct RecordingContext {
     pub(super) runs: Mutex<Vec<String>>,
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
+    pub(super) started_idempotency_keys: Mutex<Vec<String>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
@@ -729,6 +730,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
+        idempotency_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -742,6 +744,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         self.started_execution_contexts
             .lock_recover()
             .push(execution_context.clone());
+        self.started_idempotency_keys
+            .lock_recover()
+            .push(idempotency_key);
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
                 let complete_runs =
@@ -1664,6 +1669,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         &'run self,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
+        _idempotency_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -1875,6 +1881,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         &'run self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
+        _idempotency_key: String,
     ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,

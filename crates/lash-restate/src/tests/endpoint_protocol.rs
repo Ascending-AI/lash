@@ -126,6 +126,11 @@ fn restate_message_frames(input: &[u8], expected_type: u16) -> Option<Vec<&[u8]>
     Some(frames)
 }
 
+pub(super) fn restate_one_way_call_idempotency_key(input: &[u8]) -> Option<String> {
+    let frame = restate_message_frame(input, 0x040E)?;
+    String::from_utf8(protobuf_len_field(frame.get(8..)?, 7)?.to_vec()).ok()
+}
+
 pub(super) fn restate_error_message(input: &[u8]) -> Option<String> {
     let frame = restate_message_frame(input, 0x0002)?;
     String::from_utf8(protobuf_len_field(frame.get(8..)?, 2)?.to_vec()).ok()

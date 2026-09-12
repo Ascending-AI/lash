@@ -1291,6 +1291,7 @@ async fn schedule_restate_process<'ctx, C>(
     registration: lash_core::ProcessRegistration,
     observers: Vec<SessionId>,
     execution_context: lash_core::ProcessExecutionContext,
+    idempotency_key: String,
     context: &C,
 ) -> Result<ProcessRecord, PluginError>
 where
@@ -1301,7 +1302,7 @@ where
         .register_process_with_observers(registration.clone(), &observers)
         .await?;
     let invocation_id = context
-        .start_process_workflow(registration, execution_context)
+        .start_process_workflow(registration, execution_context, idempotency_key)
         .await
         .map_err(|err| {
             PluginError::Runtime(RuntimeError::new(

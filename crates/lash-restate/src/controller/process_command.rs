@@ -24,6 +24,15 @@ where
             env_spec,
             execution_context,
         } => {
+            let idempotency_key = invocation
+                .replay_key()
+                .ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RuntimeEffectReplayRequired,
+                        "runtime effect envelope requires replay.key",
+                    )
+                })?
+                .to_string();
             if let Some(env_spec) = env_spec.as_ref() {
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
@@ -41,6 +50,7 @@ where
                 registration,
                 observers,
                 *execution_context,
+                idempotency_key,
                 context,
             )
             .await?;
