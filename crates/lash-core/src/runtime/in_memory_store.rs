@@ -260,7 +260,7 @@ impl InMemorySessionStore {
         warnings::process_owner_death_degraded("InMemorySessionStore::with_clock");
         Self::with_shared_history(
             clock,
-            None,
+            Some(factory::turn_cancellation_authority()),
             Arc::new(Mutex::new(())),
             Arc::new(Mutex::new(crate::SessionGraph::default())),
             Arc::new(Mutex::new(HashMap::new())),

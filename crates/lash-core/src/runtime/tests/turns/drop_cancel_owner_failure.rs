@@ -1,12 +1,12 @@
 use super::*;
 use crate::store::{RuntimePersistenceDecorator, TurnInputStore as _};
 
-struct FailSecondCancelRecordStore {
+struct FailCancelClosureAuthorizationStore {
     inner: Arc<RecordingStore>,
     calls: AtomicUsize,
 }
 
-impl FailSecondCancelRecordStore {
+impl FailCancelClosureAuthorizationStore {
     fn new(inner: Arc<RecordingStore>) -> Self {
         Self {
             inner,
@@ -20,22 +20,24 @@ impl FailSecondCancelRecordStore {
 }
 
 #[async_trait::async_trait]
-impl RuntimePersistenceDecorator for FailSecondCancelRecordStore {
+impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
     fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
         self.inner.as_ref()
     }
 
-    async fn record_turn_cancel_request(
+    async fn authorize_turn_cancel_closure(
         &self,
-        request: crate::TurnCancelRequest,
-    ) -> Result<crate::TurnCancelRequestRecord, crate::StoreError> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if call == 2 {
+        lease: &crate::SessionExecutionLeaseAuthority,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, crate::StoreError> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
             return Err(crate::StoreError::Backend(
-                "injected finish-time cancellation record failure".to_string(),
+                "injected finish-time cancellation authorization failure".to_string(),
             ));
         }
-        self.inner.record_turn_cancel_request(request).await
+        self.inner
+            .authorize_turn_cancel_closure(lease, authorization)
+            .await
     }
 }
 
@@ -45,7 +47,9 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     const TURN_ID: &str = "turn-that-cannot-finish";
 
     let inner_store = Arc::new(RecordingStore::default());
-    let store = Arc::new(FailSecondCancelRecordStore::new(Arc::clone(&inner_store)));
+    let store = Arc::new(FailCancelClosureAuthorizationStore::new(Arc::clone(
+        &inner_store,
+    )));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
@@ -85,7 +89,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let persisted_state = runtime.export_persistence_state();
     let turn_scope = native_scope(persisted_state.turn_scope(TURN_ID));
     let turn_address = crate::TurnAddress::new(SESSION_ID, TURN_ID);
-    let turn = crate::task::spawn(async move {
+    let mut turn = crate::task::spawn(async move {
         runtime
             .run_turn_assembled(
                 TurnInput::text("cancel before the owner loses its finish commit"),
@@ -128,25 +132,31 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
             if evidence.undelivered == crate::TurnCancelDisposition::Drop
     ));
 
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !effect_loop_ended.load(Ordering::SeqCst) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("turn should seal cancellation before finish-time recording");
+    tokio::select! {
+        result = &mut turn => panic!("owner ended before the finish-time failure seam: {result:?}"),
+        result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !effect_loop_ended.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        }) => result.expect("turn should seal cancellation before finish-time authorization"),
+    }
     release_effect_loop.store(true, Ordering::SeqCst);
 
     let error = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
         .await
         .expect("failed owner turn should return")
         .expect("turn task")
-        .expect_err("injected owner failure must reject finish-time recording");
-    assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeStore);
+        .expect_err("injected owner failure must reject finish-time authorization");
+    assert_eq!(error.code, crate::RuntimeErrorCode::StoreCommitFailed);
+    assert!(
+        error
+            .message
+            .contains("injected finish-time cancellation authorization failure")
+    );
     assert_eq!(
         store.calls(),
         2,
-        "the injected failure must follow the ingress record and precede the turn commit"
+        "finish authorization fails once, then teardown authorizes the durable Drop repair"
     );
 
     let raw = inner_store.raw_pending_turn_inputs_for_testing();

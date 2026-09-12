@@ -1747,6 +1747,10 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::TurnInputStore for CommitRetryStore {
+    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+        self.inner.turn_cancellation_authority()
+    }
+
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
@@ -1788,6 +1792,51 @@ impl lash_core::TurnInputStore for CommitRetryStore {
                 binding_id,
                 admitted_scope,
             )
+            .await
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
+        self.inner.pending_turn_cancel_closure_pins().await
+    }
+
+    async fn turn_is_committed(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner.turn_is_committed(address).await
+    }
+
+    async fn record_turn_cancel_request(
+        &self,
+        request: lash_core::runtime::TurnCancelRequest,
+    ) -> Result<lash_core::TurnCancelRequestRecord, lash_core::StoreError> {
+        self.inner.record_turn_cancel_request(request).await
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, lash_core::StoreError> {
+        self.inner.turn_cancel_request(address).await
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<lash_core::TurnCancelIntentSnapshot, lash_core::StoreError> {
+        self.inner.turn_cancel_request_intent(address).await
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+        observed: &lash_core::TurnCancelIntentSnapshot,
+        evidence: &lash_core::runtime::TurnCancellationEvidence,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner
+            .reconcile_turn_cancel_winner(address, observed, evidence)
             .await
     }
 

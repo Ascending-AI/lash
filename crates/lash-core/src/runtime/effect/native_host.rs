@@ -379,6 +379,10 @@ impl FencedNativeController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for FencedNativeController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.host.controller.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,

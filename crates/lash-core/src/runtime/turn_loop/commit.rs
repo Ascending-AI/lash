@@ -35,6 +35,37 @@ fn unreported_usage_attempts(
         .collect()
 }
 
+/// Select the exact closure operation a recovered turn must finish.
+///
+/// A successor lease may settle and consume this persisted operation, but may
+/// not replace it with an authorization carrying its new fencing token. The
+/// binding and admitted physical scope remain part of the authorization being
+/// adopted, so recovery cannot broaden the original authority.
+pub(super) fn recovered_turn_cancel_closure(
+    pending: Vec<crate::TurnCancelClosureAuthorization>,
+    address: &crate::TurnAddress,
+    binding_id: &str,
+    admitted_scope: &crate::ExecutionScope,
+) -> Result<Option<crate::TurnCancelClosureAuthorization>, RuntimeError> {
+    let Some(authorization) = pending
+        .into_iter()
+        .find(|authorization| authorization.address() == *address)
+    else {
+        return Ok(None);
+    };
+    authorization.validate()?;
+    if authorization.binding_id() != binding_id || authorization.admitted_scope() != admitted_scope
+    {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::InvalidTurnCancelRequest,
+            format!(
+                "pending turn cancellation closure for `{address:?}` does not match the admitted binding and scope"
+            ),
+        ));
+    }
+    Ok(Some(authorization))
+}
+
 pub(super) struct TurnFinishInput {
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) assembler: TurnAssembler,
@@ -379,38 +410,55 @@ impl LashRuntime {
             interrupted_turn_cancel_intent.clone(),
         ) {
             (Some(store), Some(lease), Some(observed)) => {
-                let mut observed = observed;
-                loop {
-                    let authorization = turn_control.closure_authorization(
-                        &turn_control_binding_id,
-                        crate::runtime::effect::executor::admitted_turn_cancel_scope(
-                            &crate::TurnAddress::new(&self.state.session_id, &trace_turn_id),
-                            scoped_effect_controller.execution_scope(),
-                        ),
-                        &lease.fence(),
-                        observed.clone(),
-                        assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
-                        assembled_cancellation.clone(),
-                    )?;
-                    match store
-                        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+                let address = crate::TurnAddress::new(&self.state.session_id, &trace_turn_id);
+                let admitted_scope = crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                    &address,
+                    scoped_effect_controller.execution_scope(),
+                    &turn_control_binding_id,
+                );
+                if let Some(authorization) = recovered_turn_cancel_closure(
+                    store
+                        .pending_turn_cancel_closures(
+                            &self.state.session_id,
+                            &lease.fence(),
+                            &turn_control_binding_id,
+                            &admitted_scope,
+                        )
                         .await
-                    {
-                        Ok(_) => {
-                            interrupted_turn_cancel_intent =
-                                Some(authorization.observed_intent().clone());
-                            break Some(authorization);
+                        .map_err(runtime_error_from_store_commit)?,
+                    &address,
+                    &turn_control_binding_id,
+                    &admitted_scope,
+                )? {
+                    Some(authorization)
+                } else {
+                    let mut observed = observed;
+                    loop {
+                        let authorization = turn_control.closure_authorization(
+                            &turn_control_binding_id,
+                            admitted_scope.clone(),
+                            &lease.fence(),
+                            observed.clone(),
+                            assembled_cancelled || (cancel_state.is_cancelled() && !lease_was_lost),
+                            assembled_cancellation.clone(),
+                        )?;
+                        match store
+                            .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+                            .await
+                        {
+                            Ok(_) => {
+                                interrupted_turn_cancel_intent =
+                                    Some(authorization.observed_intent().clone());
+                                break Some(authorization);
+                            }
+                            Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
+                                observed = store
+                                    .turn_cancel_request_intent(&address)
+                                    .await
+                                    .map_err(runtime_error_from_store_commit)?;
+                            }
+                            Err(error) => return Err(runtime_error_from_store_commit(error)),
                         }
-                        Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
-                            observed = store
-                                .turn_cancel_request_intent(&crate::TurnAddress::new(
-                                    &self.state.session_id,
-                                    &trace_turn_id,
-                                ))
-                                .await
-                                .map_err(runtime_error_from_store_commit)?;
-                        }
-                        Err(error) => return Err(runtime_error_from_store_commit(error)),
                     }
                 }
             }

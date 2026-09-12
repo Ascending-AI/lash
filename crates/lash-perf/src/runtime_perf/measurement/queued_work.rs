@@ -649,21 +649,25 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
             anyhow::bail!("turn-input ingress active claim lost attachment bytes");
         }
 
-        let (_, phase) = measure_runtime_perf_async_phase(
-            "turn_input_ingress.complete_active_and_defer",
-            async {
-                let result = store
+        let (_, phase) =
+            Box::pin(measure_runtime_perf_async_phase(
+                "turn_input_ingress.complete_active_and_defer",
+                async {
+                    let result = store
                     .commit_runtime_state(
-                        RuntimeCommit::persisted_state_for_test(&commit_state, &[])
-                            .completing_turn_input_claim(active_claim.completion())
-                            .deferring_interrupted_turn_inputs(turn_id.clone(), None),
+                        lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
+                            store.as_ref(), &lease.fence(),
+                            RuntimeCommit::persisted_state_for_test(&commit_state, &[])
+                                .completing_turn_input_claim(active_claim.completion())
+                                .deferring_interrupted_turn_inputs(turn_id.clone(), None),
+                        ).await?,
                     )
                     .await?;
-                commit_state.apply_persisted_commit_result(result);
-                Ok::<(), anyhow::Error>(())
-            },
-        )
-        .await?;
+                    commit_state.apply_persisted_commit_result(result);
+                    Ok::<(), anyhow::Error>(())
+                },
+            ))
+            .await?;
         phase_profile.insert(phase.0, phase.1);
         completed_inputs += TURN_INPUT_INGRESS_ACCEPTED_PER_TURN;
         deferred_inputs +=

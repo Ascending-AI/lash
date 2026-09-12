@@ -1075,6 +1075,8 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
             .with_controller_owned_replay()
             .with_engine_paced_lane(),
     );
+    runtime.host.core.control.effect_host =
+        super::effect::controller_effect_host(controller.clone());
     let scope = crate::ScopedEffectController::shared(
         controller,
         crate::ExecutionScope::turn("root", "queued-failover-wake"),

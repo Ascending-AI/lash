@@ -206,6 +206,15 @@ impl LashRuntime {
             ));
         }
         let mut host = host;
+        if let Some(store) = services.store.as_deref() {
+            host.core.control.effect_host =
+                crate::runtime::effect::bind_store_turn_control_authority(
+                    Arc::clone(&host.core.control.effect_host),
+                    store,
+                )
+                .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        }
+
         // When a persistent backend is wired in, wrap the attachment
         // store so every `put` records a write-ahead intent row first.
         // Crashes between put and the next turn commit then surface as

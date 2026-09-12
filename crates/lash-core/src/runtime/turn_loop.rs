@@ -836,3 +836,7 @@ mod tests {
 #[cfg(test)]
 #[path = "turn_loop/panic_tests.rs"]
 mod panic_tests;
+
+#[cfg(test)]
+#[path = "turn_loop/recovery_tests.rs"]
+mod recovery_tests;

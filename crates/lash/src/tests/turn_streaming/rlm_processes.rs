@@ -418,6 +418,10 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         dir.path().join("sessions"),
     ));
     let controller = Arc::new(RecordingDurableEffectController::default());
+    let effect_host = Arc::new(DurableNoopEffectHost {
+        controller: Arc::clone(&controller),
+        ..Default::default()
+    });
     let scoped_effect_controller = ScopedEffectController::borrowed(
         controller.as_ref(),
         lash_core::ExecutionScope::turn(session_id, root_turn_id),
@@ -432,9 +436,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
             dir.path().join("attachments"),
         )))
-        .effect_host(Arc::new(
-            lash_core::facade_support::NativeEffectHost::default(),
-        ))
+        .effect_host(effect_host)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))

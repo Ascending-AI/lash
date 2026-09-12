@@ -111,7 +111,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             registry,
             continuations,
             None,
-            crate::RestateAuthorityId::new("restate-test-authority").expect("valid test authority"),
+            crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
         )
     }
 

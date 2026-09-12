@@ -14,10 +14,12 @@ mod fig1416;
 mod fig2471;
 mod recording_authority;
 mod response_settlement;
+mod source_lint_support;
 mod turn_cancel_modes;
 pub(super) use recording_authority::{
-    host_with_effect_recorder, runtime_host_config_with_native_controller,
+    controller_effect_host, host_with_effect_recorder, runtime_host_config_with_native_controller,
 };
+use source_lint_support::{effect_module_sources, turn_loop_module_sources, unique_trace_path};
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
@@ -1105,6 +1107,13 @@ impl CapturingRuntimeReplayController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!(
+            "capturing-runtime-replay-controller:{:p}",
+            Arc::as_ptr(&self.tool_outcomes)
+        ))
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -2406,45 +2415,6 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
     assert!(envelope.contains(&expected_attachment_id));
 }
 
-fn effect_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
-    rust_sources_in(manifest_dir.join("src/runtime/effect"))
-}
-
-/// The turn loop's phase modules, so the cutover lint keeps inspecting the
-/// implementation after FIG-1028 moved it out of the single `turn_loop.rs`.
-fn turn_loop_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
-    rust_sources_in(manifest_dir.join("src/runtime/turn_loop"))
-}
-
-fn rust_sources_in(dir: PathBuf) -> Vec<PathBuf> {
-    let mut pending = vec![dir];
-    let mut paths = Vec::new();
-
-    while let Some(dir) = pending.pop() {
-        for entry in std::fs::read_dir(&dir).expect("read module directory") {
-            let entry = entry.expect("read module directory entry");
-            let file_type = entry.file_type().expect("read module entry type");
-            let path = entry.path();
-
-            assert!(
-                !file_type.is_symlink(),
-                "module source traversal does not follow symlink {}",
-                path.display()
-            );
-            if file_type.is_dir() {
-                pending.push(path);
-            } else if file_type.is_file()
-                && path.extension().and_then(|ext| ext.to_str()) == Some("rs")
-            {
-                paths.push(path);
-            }
-        }
-    }
-
-    paths.sort();
-    paths
-}
-
 #[test]
 fn lint_runtime_effect_executor_has_no_legacy_future_api() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2511,17 +2481,6 @@ fn lint_runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback
             );
         }
     }
-}
-
-fn unique_trace_path(prefix: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "lash-{prefix}-{}-{}.jsonl",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
-    ))
 }
 
 #[cfg(test)]

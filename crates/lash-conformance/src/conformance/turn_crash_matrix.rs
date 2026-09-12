@@ -146,7 +146,7 @@ impl TurnSeamOperation {
                     | StoreOperation::ApplyTurnCancelEffectsAndConsume
                     | StoreOperation::RenewSessionExecutionLease
                     | StoreOperation::ReleaseSessionExecutionLease
-            )
+            ) | Self::TurnControl(_)
         )
     }
 }
@@ -187,6 +187,18 @@ enum StoreOperation {
 enum TurnControlOperation {
     ResolveBase,
     ResolveEscalation,
+}
+
+fn turn_control_resolution_operation(key: &crate::AwaitEventKey) -> Option<TurnSeamOperation> {
+    match key.wait {
+        crate::AwaitEventWaitIdentity::TurnCancelGate => Some(TurnSeamOperation::TurnControl(
+            TurnControlOperation::ResolveBase,
+        )),
+        crate::AwaitEventWaitIdentity::TurnCancelEscalation => Some(
+            TurnSeamOperation::TurnControl(TurnControlOperation::ResolveEscalation),
+        ),
+        _ => None,
+    }
 }
 
 /// Provider calls are identified from their semantic request content.
@@ -575,16 +587,7 @@ impl crate::AwaitEventResolver for SeamTurnControlResolver {
         key: &crate::AwaitEventKey,
         resolution: crate::Resolution,
     ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        let operation = match key.wait {
-            crate::AwaitEventWaitIdentity::TurnCancelGate => Some(TurnSeamOperation::TurnControl(
-                TurnControlOperation::ResolveBase,
-            )),
-            crate::AwaitEventWaitIdentity::TurnCancelEscalation => Some(
-                TurnSeamOperation::TurnControl(TurnControlOperation::ResolveEscalation),
-            ),
-            _ => None,
-        };
-        match operation {
+        match turn_control_resolution_operation(key) {
             Some(operation) => {
                 self.control
                     .around(operation, self.inner.resolve_await_event(key, resolution))
@@ -1134,6 +1137,10 @@ struct SeamEffectController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for SeamEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &crate::ExecutionScope,
@@ -1158,7 +1165,14 @@ impl crate::AwaitEventResolver for SeamEffectController {
         key: &crate::AwaitEventKey,
         resolution: crate::Resolution,
     ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
+        match turn_control_resolution_operation(key) {
+            Some(operation) => {
+                self.control
+                    .around(operation, self.inner.resolve_await_event(key, resolution))
+                    .await
+            }
+            None => self.inner.resolve_await_event(key, resolution).await,
+        }
     }
 
     async fn peek_await_event(
@@ -1351,6 +1365,10 @@ impl RuntimeEffectController for StoreOwnedTurnControlController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &crate::ExecutionScope,
@@ -1596,22 +1614,14 @@ fn scoped_controller(
     .expect("valid reference turn scope")
 }
 
-/// Test host that keeps ordinary effects on the backend controller while the
-/// persistent session store owns the reserved turn-control promises.
-struct PersistentTurnControlHost {
-    effects: crate::NativeEffectHost,
-    binding_id: String,
-    resolver: Arc<dyn crate::AwaitEventResolver>,
+struct InvocationEffectHost {
+    inner: Arc<dyn RuntimeEffectController>,
 }
 
 #[async_trait::async_trait]
-impl crate::AwaitEventResolver for PersistentTurnControlHost {
-    async fn acquire_queued_lane(
-        &self,
-        lane: Arc<dyn crate::QueuedLaneProbe>,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::QueuedLaneAcquisition, crate::RuntimeError> {
-        self.resolver.acquire_queued_lane(lane, cancel).await
+impl crate::AwaitEventResolver for InvocationEffectHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
     }
 
     async fn prepare_completion_key(
@@ -1620,7 +1630,7 @@ impl crate::AwaitEventResolver for PersistentTurnControlHost {
         wait: crate::AwaitEventWaitIdentity,
         may_defer: bool,
     ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
-        self.resolver
+        self.inner
             .prepare_completion_key(scope, wait, may_defer)
             .await
     }
@@ -1630,7 +1640,7 @@ impl crate::AwaitEventResolver for PersistentTurnControlHost {
         scope: &crate::ExecutionScope,
         wait: crate::AwaitEventWaitIdentity,
     ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.resolver.await_event_key(scope, wait).await
+        self.inner.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -1638,14 +1648,14 @@ impl crate::AwaitEventResolver for PersistentTurnControlHost {
         key: &crate::AwaitEventKey,
         resolution: crate::Resolution,
     ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        self.resolver.resolve_await_event(key, resolution).await
+        self.inner.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &crate::AwaitEventKey,
     ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
-        self.resolver.peek_await_event(key).await
+        self.inner.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -1654,50 +1664,39 @@ impl crate::AwaitEventResolver for PersistentTurnControlHost {
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.resolver.await_await_event(key, cancel, deadline).await
+        self.inner.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(
         &self,
         session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
-        self.resolver
-            .revoke_await_events_for_session(session_id)
-            .await
+        self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
         session_id: &SessionId,
     ) -> Result<(), crate::RuntimeError> {
-        self.resolver
-            .cancel_await_events_for_session(session_id)
-            .await
+        self.inner.cancel_await_events_for_session(session_id).await
     }
 }
 
 #[async_trait::async_trait]
-impl crate::EffectHost for PersistentTurnControlHost {
+impl crate::EffectHost for InvocationEffectHost {
     fn turn_control_binding_id(&self) -> String {
-        self.binding_id.clone()
+        self.inner
+            .await_event_authority_binding_id()
+            .expect("invocation authority")
     }
-
+    fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
+        self
+    }
     fn scoped<'run>(
         &'run self,
         scope: crate::ExecutionScope,
     ) -> Result<crate::ScopedEffectController<'run>, crate::RuntimeError> {
-        self.effects.scoped(scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: crate::ExecutionScope,
-    ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
-        self.effects.scoped_static(scope)
-    }
-
-    fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
-        self
+        crate::ScopedEffectController::shared(Arc::clone(&self.inner), scope)
     }
 }
 
@@ -1729,17 +1728,30 @@ async fn build_runtime_with_lease_timings(
 ) -> crate::LashRuntime {
     super::bind_conformance_session(&store, &identity.session_id).await;
     // The live host watcher must share the turn controller's await-event registry.
-    let native_effect_host = crate::NativeEffectHost::new(Arc::clone(&effect_controller));
-    let effect_host: Arc<dyn crate::EffectHost> =
-        if let Some(authority) = store.turn_cancellation_authority() {
-            Arc::new(PersistentTurnControlHost {
-                effects: native_effect_host,
-                binding_id: authority.binding_id().to_string(),
-                resolver: authority.resolver(),
+    let effect_host: Arc<dyn crate::EffectHost> = match effect_controller
+        .turn_control_participation()
+        .await
+        .expect("fixture turn control participation")
+    {
+        crate::TurnControlParticipation::Local => {
+            lash_core::facade_support::bind_store_turn_control_authority(
+                Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller))),
+                store.as_ref(),
+            )
+            .expect("bind crash fixture cancellation authority")
+        }
+        crate::TurnControlParticipation::DurableJournaled => {
+            assert!(
+                effect_controller
+                    .await_event_authority_binding_id()
+                    .is_some(),
+                "durable crash fixture identifies its promise authority"
+            );
+            Arc::new(InvocationEffectHost {
+                inner: Arc::clone(&effect_controller),
             })
-        } else {
-            Arc::new(native_effect_host)
-        };
+        }
+    };
     let mut host = crate::RuntimeHostConfig::new(
         effect_host,
         Arc::new(crate::InMemoryAttachmentStore::new()),
@@ -2292,6 +2304,9 @@ async fn run_crash_matrix_case<F, I>(
                 releases_lease: true,
                 ..
             }),
+            CrashPlacement::InsideCall
+        ) | (
+            TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume),
             CrashPlacement::InsideCall
         )
     );

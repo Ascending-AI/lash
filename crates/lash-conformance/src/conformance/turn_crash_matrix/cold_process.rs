@@ -93,19 +93,15 @@ impl ColdProcessTurnAction {
                 placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
             }),
             Self::FinalCommitBoundary | Self::RecoverFinalCommitBoundary => Some(TurnCrashPoint {
-                operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                    settles_queue: true,
-                    settles_turn_input: true,
-                    releases_lease: true,
-                }),
+                operation: TurnSeamOperation::Store(
+                    StoreOperation::ApplyTurnCancelEffectsAndConsume,
+                ),
                 placement: CrashPlacement::Boundary,
             }),
             Self::FinalCommitInsideCall => Some(TurnCrashPoint {
-                operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                    settles_queue: true,
-                    settles_turn_input: true,
-                    releases_lease: true,
-                }),
+                operation: TurnSeamOperation::Store(
+                    StoreOperation::ApplyTurnCancelEffectsAndConsume,
+                ),
                 placement: CrashPlacement::InsideCall,
             }),
             Self::CheckpointAfterExecuteBeforeOutcome | Self::PeerReclaim | Self::Recover => None,

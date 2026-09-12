@@ -8,6 +8,8 @@ pub mod group_drain;
 mod group_journal;
 mod identity_types;
 mod native_host;
+mod store_turn_control;
+pub use store_turn_control::bind_store_turn_control_authority;
 mod outcome;
 pub mod promise_semantics;
 mod validation;
@@ -73,9 +75,15 @@ mod tests {
     };
     use std::sync::Arc;
 
-    struct ControllerOwnedReplay;
+    struct ControllerOwnedReplay {
+        authority_id: std::sync::OnceLock<String>,
+    }
 
-    impl AwaitEventResolver for ControllerOwnedReplay {}
+    impl AwaitEventResolver for ControllerOwnedReplay {
+        fn await_event_authority_binding_id(&self) -> Option<String> {
+            self.authority_id.get().cloned()
+        }
+    }
 
     #[async_trait::async_trait]
     impl RuntimeEffectController for ControllerOwnedReplay {
@@ -103,7 +111,14 @@ mod tests {
 
     #[tokio::test]
     async fn native_host_forwards_tagged_controller_operations_without_inferring_key_lifetime() {
-        let host = NativeEffectHost::new(Arc::new(ControllerOwnedReplay));
+        let controller = Arc::new(ControllerOwnedReplay {
+            authority_id: std::sync::OnceLock::new(),
+        });
+        let host = NativeEffectHost::new(controller.clone());
+        controller
+            .authority_id
+            .set(host.turn_control_binding_id())
+            .unwrap();
         assert_eq!(
             host.runtime_effect_failure_disposition(crate::RuntimeErrorCode::Plugin)
                 .await

@@ -754,11 +754,12 @@ pub mod durability {
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
-        EffectHost, WorkerProcessWork, facade_support::DurableProcessWorker,
-        facade_support::DurableProcessWorkerConfig, facade_support::LeaseTimings,
-        facade_support::LeaseTimingsError, facade_support::NativeEffectHost,
-        facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
-        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
+        EffectHost, TurnCancellationAuthority, WorkerProcessWork,
+        facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
+        facade_support::LeaseTimings, facade_support::LeaseTimingsError,
+        facade_support::NativeEffectHost, facade_support::ProcessDrainReport,
+        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
+        facade_support::TerminationPolicy,
     };
 }
 

@@ -451,6 +451,8 @@ trait WorkbenchCronJob {
 
 pub(crate) struct WorkbenchCronJobImpl {
     state: AppState,
+    #[cfg(test)]
+    authority_id: Option<lash_restate::RestateAuthorityId>,
 }
 
 mod cron;
@@ -458,7 +460,11 @@ use cron::*;
 
 impl WorkbenchCronJobImpl {
     pub(crate) fn new(state: AppState) -> Self {
-        Self { state }
+        Self {
+            state,
+            #[cfg(test)]
+            authority_id: None,
+        }
     }
 }
 
@@ -534,10 +540,8 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
                 .await?;
             CronTickBasis::from_journal_value(&journal_value)?
         };
-        let controller = lash_restate::RestateRuntimeEffectController::new(
-            ctx,
-            configured_restate_authority_id()?,
-        );
+        let controller =
+            lash_restate::RestateRuntimeEffectController::new(ctx, self.authority_id()?);
         let decision = cron_tick_decision(basis, &state, controller.context().key());
         let cancel_surface = RestateCronTickCancelSurface::new(self.state.clone(), &controller);
         if Box::pin(handle_observed_cron_tick(&cancel_surface, &state, decision)).await?

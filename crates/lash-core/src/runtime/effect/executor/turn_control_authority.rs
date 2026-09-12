@@ -38,13 +38,17 @@ pub(crate) fn binding_id_admits_scope(binding_id: &str, scope: &crate::Execution
 /// Session-bound controllers may be driving a queue drain or another turn when
 /// they discover an orphan. The durable input row's turn address is the
 /// canonical admission identity in that case. Process and runtime-operation
-/// controllers instead carry the physical journal identity selected before
-/// session work began, so recovery must preserve it exactly.
+/// controllers with a journal-bound cancellation authority instead carry the physical identity selected before
+/// session work began, so recovery must preserve it exactly. Store-owned Native
+/// promises use the turn address even when ordinary effects run in an operation scope.
 pub(crate) fn admitted_turn_cancel_scope(
     address: &crate::TurnAddress,
     controller_scope: &crate::ExecutionScope,
+    binding_id: &str,
 ) -> crate::ExecutionScope {
-    if controller_scope.session_id().is_some() {
+    if controller_scope.session_id().is_some()
+        || !binding_id.contains(PHYSICAL_SCOPE_BINDING_SEPARATOR)
+    {
         address.execution_scope()
     } else {
         controller_scope.clone()
@@ -239,7 +243,7 @@ impl TurnCancellationAuthority {
 
 #[cfg(test)]
 mod tests {
-    use super::admitted_turn_cancel_scope;
+    use super::{admitted_turn_cancel_scope, turn_control_binding_id_for_scope};
 
     #[test]
     fn orphan_recovery_uses_persisted_turn_address_for_session_scopes() {
@@ -247,7 +251,7 @@ mod tests {
         let successor_drain = crate::ExecutionScope::queue_drain("session", "successor-drain");
 
         assert_eq!(
-            admitted_turn_cancel_scope(&address, &successor_drain),
+            admitted_turn_cancel_scope(&address, &successor_drain, "test-authority"),
             address.execution_scope()
         );
     }
@@ -258,7 +262,11 @@ mod tests {
         let process_scope = crate::ExecutionScope::process("original-process");
 
         assert_eq!(
-            admitted_turn_cancel_scope(&address, &process_scope),
+            admitted_turn_cancel_scope(
+                &address,
+                &process_scope,
+                &turn_control_binding_id_for_scope("test-authority", &process_scope).unwrap()
+            ),
             process_scope
         );
     }

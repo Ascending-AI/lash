@@ -72,6 +72,13 @@ fn test_restate_authority_id() -> RestateAuthorityId {
     RestateAuthorityId::new("lash-restate-tests").expect("valid test Restate authority id")
 }
 
+fn test_restate_await_event_key(
+    scope: &ExecutionScope,
+    wait: AwaitEventWaitIdentity,
+) -> Result<AwaitEventKey, lash_core::RuntimeError> {
+    restate_await_event_key_for_authority(&test_restate_authority_id(), scope, wait)
+}
+
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod effect_group_shape;
@@ -1245,7 +1252,7 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
             )
             .await
             .map_err(TerminalError::from_error)?;
-        let key = restate_await_event_key(
+        let key = test_restate_await_event_key(
             &durable_turn_scope("fig793-session", "fig793-turn"),
             AwaitEventWaitIdentity::TurnCancelGate,
         )
@@ -1291,7 +1298,7 @@ impl Fig1126RevokedAwaitBoundary for Fig1126RevokedAwaitBoundaryImpl {
         Json(_input): Json<Fig1126PendingToolRedriveInput>,
     ) -> HandlerResult<Json<Resolution>> {
         let scope = durable_turn_scope("fig1126-revoked-session", "fig1126-revoked-turn");
-        let key = restate_await_event_key(
+        let key = test_restate_await_event_key(
             &scope,
             AwaitEventWaitIdentity::tool_completion("fig1126-revoked-call"),
         )

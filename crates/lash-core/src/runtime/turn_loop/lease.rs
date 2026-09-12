@@ -8,6 +8,22 @@
 use super::*;
 use crate::TurnId;
 
+/// Whether `candidate` is part of the logical execution recovered under
+/// `resumable_turn_id`.
+///
+/// Keep this aligned with the active-input exclusion in
+/// `store_backend_support::orphaned_active_turn_input_is_repairable`: closure
+/// pins and the input they protect must make the same recovery decision.
+pub(super) fn is_resumable_turn_or_follow_on(
+    candidate: &TurnId,
+    resumable_turn_id: &TurnId,
+) -> bool {
+    candidate
+        .as_str()
+        .strip_prefix(resumable_turn_id.as_str())
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
+}
+
 struct SessionExecutionLaneProbe {
     store: Arc<dyn crate::store::RuntimePersistence>,
     session_id: SessionId,
@@ -382,6 +398,10 @@ impl LashRuntime {
         let turn_control_binding = turn_control_host
             .turn_control_binding(scoped_effect_controller)
             .await?;
+        let settle_resumable_before_runtime_work = matches!(
+            &turn_control_binding,
+            crate::TurnControlBinding::HostOwned { .. }
+        );
         let turn_control_resolver = turn_control_binding.resolver();
         let binding_id = turn_control_binding.binding_id();
 
@@ -393,12 +413,25 @@ impl LashRuntime {
                 &self.state.session_id,
                 fence,
                 binding_id,
-                scoped_effect_controller.execution_scope(),
+                &crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                    &crate::TurnAddress::new(&self.state.session_id, resumable_turn_id),
+                    scoped_effect_controller.execution_scope(),
+                    binding_id,
+                ),
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         let mut repaired_count = 0;
         for authorization in pending {
+            let resumes_here =
+                is_resumable_turn_or_follow_on(authorization.turn_id(), resumable_turn_id);
+            if resumes_here && !settle_resumable_before_runtime_work {
+                // The interrupted logical turn must replay to the original
+                // closure position before issuing any of this authorization's
+                // promise operations. Retain both its input and exact durable
+                // authorization; final commit adopts and settles it there.
+                continue;
+            }
             let address = authorization.address();
             let control = crate::runtime::turn_control::ActiveTurnControl::new(
                 turn_control_resolver,
@@ -408,6 +441,13 @@ impl LashRuntime {
             let settlement = control
                 .settle_authorized(turn_control_resolver, &authorization)
                 .await?;
+            if resumes_here {
+                // Host-owned turn control has no invocation journal whose
+                // prefix can replay this decision. Settle the predecessor's
+                // exact proposal before fresh provider or tool work, while
+                // retaining its input and pin for atomic final consumption.
+                continue;
+            }
             loop {
                 let observed = store
                     .turn_cancel_request_intent(&address)
@@ -462,6 +502,7 @@ impl LashRuntime {
                             crate::runtime::effect::executor::admitted_turn_cancel_scope(
                                 &address,
                                 scoped_effect_controller.execution_scope(),
+                                binding_id,
                             ),
                             fence,
                             observed.clone(),
@@ -668,6 +709,7 @@ impl LashRuntime {
                 crate::runtime::effect::executor::admitted_turn_cancel_scope(
                     &address,
                     scoped_effect_controller.execution_scope(),
+                    binding_id,
                 ),
                 fence,
                 observed.clone(),

@@ -829,11 +829,15 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         *self
             .turn_cancel_closure_owner
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            Some(lash_core::TurnCancelClosureOwnerBinding::new(
-                format!("sqlite-catalog:{}", catalog.display()),
-                Arc::clone(effect_host),
-            ));
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = (effect_host
+            .turn_control_authority_owner()
+            == lash_core::TurnControlAuthorityOwner::EffectHost)
+            .then(|| {
+                lash_core::TurnCancelClosureOwnerBinding::new(
+                    format!("sqlite-catalog:{}", catalog.display()),
+                    Arc::clone(effect_host),
+                )
+            });
         if let Some(path) = effect_host.effect_scope_fence_database() {
             *self
                 .effect_journal_path

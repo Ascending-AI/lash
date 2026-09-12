@@ -582,6 +582,26 @@ impl LashRuntime {
     ) -> Result<AssembledTurn, RuntimeError> {
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         let mut session_execution_lease = self.claim_session_execution_lease().await?;
+        if let Some(store) = self.session.as_ref().and_then(Session::history_store) {
+            let fence = session_execution_lease
+                .as_ref()
+                .map(SessionExecutionLeaseGuard::fence)
+                .expect("a store-backed prepared turn acquires its execution lease");
+            if let Err(error) = self
+                .defer_orphaned_turn_inputs_before_drain(
+                    &store,
+                    &fence,
+                    &trace_turn_id,
+                    &scoped_effect_controller,
+                )
+                .await
+            {
+                if let Some(lease) = session_execution_lease.as_ref() {
+                    let _ = lease.release_if_live().await;
+                }
+                return Err(error);
+            }
+        }
         let result = Box::pin(
             self.drive_logical_turn(
                 LogicalTurnStart::Prepared(PreparedLogicalTurn {

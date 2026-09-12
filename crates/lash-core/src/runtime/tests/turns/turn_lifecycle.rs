@@ -1727,6 +1727,10 @@ pub(super) struct JournalReplayEffectController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for JournalReplayEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!("journal-replay-controller:{:p}", self))
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &crate::ExecutionScope,
@@ -1812,7 +1816,7 @@ pub(super) fn journal_replay_host(
     controller: Arc<dyn crate::RuntimeEffectController>,
 ) -> crate::EmbeddedRuntimeHost {
     let mut host = test_host_config();
-    host.core.control.effect_host = Arc::new(crate::NativeEffectHost::new(controller));
+    host.core.control.effect_host = super::effect::controller_effect_host(controller);
     host
 }
 

@@ -1,31 +1,34 @@
 use super::*;
 
 async fn authorize_restate_completion_closure(
-    host: &Arc<dyn lash_core::EffectHost>,
+    host: &Arc<dyn lash::durability::EffectHost>,
     factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session: &str,
-    physical_scope: &lash_core::ExecutionScope,
+    physical_scope: &lash::runtime::ExecutionScope,
 ) -> (
-    Arc<dyn lash_core::RuntimePersistence>,
-    lash_core::SessionExecutionLease,
-    lash_core::TurnCancelClosureAuthorization,
+    Arc<dyn lash::persistence::RuntimePersistence>,
+    lash::persistence::SessionExecutionLease,
+    lash::TurnCancelClosureAuthorization,
 ) {
-    use lash_core::SessionStoreFactory as _;
+    use lash::persistence::SessionStoreFactory as _;
 
-    let address = lash_core::runtime::TurnAddress::new(session, "turn");
+    let address = lash::TurnAddress::new(session, "turn");
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash::persistence::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash::persistence::SessionRelation::Root,
+            policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
         })
         .await
         .expect("create live Restate catalog session");
     let lease = store
         .try_claim_session_execution_lease(
             &address.session_id,
-            &lash_core::LeaseOwnerIdentity::opaque(session, format!("{session}:incarnation")),
+            &lash::persistence::LeaseOwnerIdentity::opaque(
+                session,
+                format!("{session}:incarnation"),
+            ),
             &format!("{session}:executor"),
             60_000,
         )
@@ -50,33 +53,33 @@ async fn authorize_restate_completion_closure(
         .await
         .expect("persist live Restate admitted scope");
     let resolver = binding.resolver();
-    let authorization = lash_core::TurnCancelClosureAuthorization::new(
+    let authorization = lash::TurnCancelClosureAuthorization::new(
         address.clone(),
         binding.binding_id(),
         physical_scope.clone(),
         resolver
             .await_event_key(
                 &address.execution_scope(),
-                lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+                lash::AwaitEventWaitIdentity::TurnCancelGate,
             )
             .await
             .expect("base key"),
         resolver
             .await_event_key(
                 &address.execution_scope(),
-                lash_core::AwaitEventWaitIdentity::TurnCancelEscalation,
+                lash::AwaitEventWaitIdentity::TurnCancelEscalation,
             )
             .await
             .expect("escalation key"),
         resolver
             .await_event_key(
                 &address.execution_scope(),
-                lash_core::AwaitEventWaitIdentity::TurnTerminal,
+                lash::AwaitEventWaitIdentity::TurnTerminal,
             )
             .await
             .expect("terminal key"),
-        lash_core::TurnCancelClosureProposal::CompletionSealed,
-        lash_core::TurnCancelIntentSnapshot::Absent,
+        lash::TurnCancelClosureProposal::CompletionSealed,
+        lash::TurnCancelIntentSnapshot::Absent,
         &lease.fence(),
     )
     .expect("materialize live Restate closure authorization");
@@ -88,16 +91,16 @@ async fn authorize_restate_completion_closure(
 }
 
 async fn settle_and_release_restate_completion_closure(
-    effect_host: Arc<dyn lash_core::EffectHost>,
+    effect_host: Arc<dyn lash::durability::EffectHost>,
     factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    scope: &lash_core::ExecutionScope,
-    store: Arc<dyn lash_core::RuntimePersistence>,
-    lease: lash_core::SessionExecutionLease,
-    authorization: lash_core::TurnCancelClosureAuthorization,
+    scope: &lash::runtime::ExecutionScope,
+    store: Arc<dyn lash::persistence::RuntimePersistence>,
+    lease: lash::persistence::SessionExecutionLease,
+    authorization: lash::TurnCancelClosureAuthorization,
 ) {
-    use lash_core::SessionStoreFactory as _;
+    use lash::persistence::SessionStoreFactory as _;
 
-    let authority = lash_core::TurnCancellationAuthority::new(
+    let authority = lash::durability::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
         effect_host,
     );
@@ -144,41 +147,42 @@ impl RestateParticipantCrashHost {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for RestateParticipantCrashHost {
+impl lash::runtime::AwaitEventResolver for RestateParticipantCrashHost {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         self.inner.await_event_authority_binding_id()
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core::EffectHost for RestateParticipantCrashHost {
+impl lash::durability::EffectHost for RestateParticipantCrashHost {
     fn turn_control_binding_id(&self) -> String {
         self.inner.turn_control_binding_id()
     }
 
     fn scoped<'run>(
         &'run self,
-        scope: lash_core::ExecutionScope,
-    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        scope: lash::runtime::ExecutionScope,
+    ) -> Result<lash::runtime::ScopedEffectController<'run>, lash::runtime::RuntimeError> {
         self.inner.scoped(scope)
     }
 
     fn scoped_static(
         &self,
-        scope: lash_core::ExecutionScope,
-    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        scope: lash::runtime::ExecutionScope,
+    ) -> Result<Option<lash::runtime::ScopedEffectController<'static>>, lash::runtime::RuntimeError>
+    {
         self.inner.scoped_static(scope)
     }
 
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+    fn await_event_resolver(&self) -> &dyn lash::runtime::AwaitEventResolver {
         self.inner.await_event_resolver()
     }
 
     async fn register_turn_cancel_closure_participant(
         &self,
         participant_id: &str,
-        scope: &lash_core::ExecutionScope,
-    ) -> Result<(), lash_core::RuntimeError> {
+        scope: &lash::runtime::ExecutionScope,
+    ) -> Result<(), lash::runtime::RuntimeError> {
         self.inner
             .register_turn_cancel_closure_participant(participant_id, scope)
             .await?;
@@ -191,8 +195,8 @@ impl lash_core::EffectHost for RestateParticipantCrashHost {
     async fn release_turn_cancel_closure_participant(
         &self,
         participant_id: &str,
-        scope: &lash_core::ExecutionScope,
-    ) -> Result<(), lash_core::RuntimeError> {
+        scope: &lash::runtime::ExecutionScope,
+    ) -> Result<(), lash::runtime::RuntimeError> {
         if self.boundary == RestateParticipantCrashBoundary::BeforeOwnerRelease {
             self.stop_at_boundary().await;
         }
@@ -214,7 +218,7 @@ fn live_restate_participant_host(ingress_url: String) -> Arc<lash_restate::Resta
 #[ignore = "spawned and killed by the live Restate participant lifecycle law"]
 fn live_restate_participant_protocol_crash_child() {
     run_async_test_on_stack_budget_multi_thread("workbench-participant-crash-child", 2, || async {
-        use lash_core::SessionStoreFactory as _;
+        use lash::persistence::SessionStoreFactory as _;
 
         let ingress_url = std::env::var("RESTATE_INGRESS_URL").expect("child Restate ingress");
         let catalog =
@@ -233,14 +237,14 @@ fn live_restate_participant_protocol_crash_child() {
             boundary => panic!("unknown Restate participant crash boundary {boundary}"),
         };
         let inner = live_restate_participant_host(ingress_url);
-        let host: Arc<dyn lash_core::EffectHost> = Arc::new(RestateParticipantCrashHost {
+        let host: Arc<dyn lash::durability::EffectHost> = Arc::new(RestateParticipantCrashHost {
             inner,
             boundary,
             marker,
         });
         let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(catalog);
         factory.bind_effect_host(&host);
-        let scope = lash_core::ExecutionScope::process(format!(
+        let scope = lash::runtime::ExecutionScope::process(format!(
             "live-restate-participant-crash-{scenario}"
         ));
         if boundary == RestateParticipantCrashBoundary::AfterOwnerRegister {
@@ -310,16 +314,16 @@ fn kill_live_restate_participant_child(
 
 async fn prove_live_restate_participant_crash_windows(
     host: &Arc<lash_restate::RestateEffectHost>,
-    effect_host: &Arc<dyn lash_core::EffectHost>,
+    effect_host: &Arc<dyn lash::durability::EffectHost>,
     data_dir: &std::path::Path,
 ) {
-    use lash_core::{EffectHost as _, SessionStoreFactory as _};
+    use lash::{durability::EffectHost as _, persistence::SessionStoreFactory as _};
 
     let register_scenario = "register";
     let register_catalog = data_dir.join("participant-crash-register-catalog");
     let register_marker = data_dir.join("participant-crash-after-register");
     let register_scope =
-        lash_core::ExecutionScope::process("live-restate-participant-crash-register");
+        lash::runtime::ExecutionScope::process("live-restate-participant-crash-register");
     kill_live_restate_participant_child(
         &register_catalog,
         register_scenario,
@@ -328,7 +332,7 @@ async fn prove_live_restate_participant_crash_windows(
     );
     let register_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&register_catalog);
     register_factory.bind_effect_host(effect_host);
-    let register_session = lash_core::SessionId::from("live-restate-participant-crash-register");
+    let register_session = lash::SessionId::from("live-restate-participant-crash-register");
     assert!(
         register_factory
             .pending_turn_cancel_closure_pins(&register_session)
@@ -339,7 +343,7 @@ async fn prove_live_restate_participant_crash_windows(
     );
     assert!(
         host.retire_effect_journal(
-            lash_core::EffectJournalRetirement::for_scope(&register_scope).unwrap()
+            lash::durability::EffectJournalRetirement::for_scope(&register_scope).unwrap()
         )
         .await
         .is_err(),
@@ -354,7 +358,7 @@ async fn prove_live_restate_participant_crash_windows(
         .await
         .expect("Restate orphan release is idempotent");
     host.retire_effect_journal(
-        lash_core::EffectJournalRetirement::for_scope(&register_scope).unwrap(),
+        lash::durability::EffectJournalRetirement::for_scope(&register_scope).unwrap(),
     )
     .await
     .expect("Restate scope retires after orphan recovery");
@@ -364,7 +368,7 @@ async fn prove_live_restate_participant_crash_windows(
     let release_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&release_catalog);
     release_factory.bind_effect_host(effect_host);
     let release_scope =
-        lash_core::ExecutionScope::process("live-restate-participant-crash-release");
+        lash::runtime::ExecutionScope::process("live-restate-participant-crash-release");
     let (store, lease, authorization) = authorize_restate_completion_closure(
         effect_host,
         &release_factory,
@@ -372,7 +376,7 @@ async fn prove_live_restate_participant_crash_windows(
         &release_scope,
     )
     .await;
-    let authority = lash_core::TurnCancellationAuthority::new(
+    let authority = lash::durability::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
         effect_host.clone(),
     );
@@ -406,7 +410,7 @@ async fn prove_live_restate_participant_crash_windows(
     release_factory.bind_effect_host(effect_host);
     assert!(
         host.retire_effect_journal(
-            lash_core::EffectJournalRetirement::for_scope(&release_scope).unwrap()
+            lash::durability::EffectJournalRetirement::for_scope(&release_scope).unwrap()
         )
         .await
         .is_err(),
@@ -421,7 +425,7 @@ async fn prove_live_restate_participant_crash_windows(
         .await
         .expect("post-crash Restate release is idempotent");
     host.retire_effect_journal(
-        lash_core::EffectJournalRetirement::for_scope(&release_scope).unwrap(),
+        lash::durability::EffectJournalRetirement::for_scope(&release_scope).unwrap(),
     )
     .await
     .expect("Restate owner retirement succeeds after release recovery");
@@ -434,7 +438,7 @@ async fn prove_live_restate_participant_crash_windows(
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_closure_participants_serialize_direct_index_retirement() {
     run_async_test_on_stack_budget_multi_thread("workbench-closure-lifecycle-e2e", 4, || async {
-        use lash_core::{EffectHost as _, SessionStoreFactory as _};
+        use lash::{durability::EffectHost as _, persistence::SessionStoreFactory as _};
 
         let ingress_url = std::env::var("RESTATE_INGRESS_URL")
             .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
@@ -470,7 +474,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             lash_restate::RestateAuthorityId::new("agent-workbench-tests")
                 .expect("valid live Restate authority"),
         ));
-        let effect_host: Arc<dyn lash_core::EffectHost> = host.clone();
+        let effect_host: Arc<dyn lash::durability::EffectHost> = host.clone();
         let factory_a =
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("closure-catalog-a"));
         let factory_b =
@@ -478,7 +482,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
         factory_a.bind_effect_host(&effect_host);
         factory_b.bind_effect_host(&effect_host);
 
-        let scope = lash_core::ExecutionScope::process("live-restate-shared-owner");
+        let scope = lash::runtime::ExecutionScope::process("live-restate-shared-owner");
         let (store_a, lease_a, authorization_a) = authorize_restate_completion_closure(
             &effect_host,
             &factory_a,
@@ -493,14 +497,14 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             &scope,
         )
         .await;
-        let retirement = || lash_core::EffectJournalRetirement::for_scope(&scope).unwrap();
+        let retirement = || lash::durability::EffectJournalRetirement::for_scope(&scope).unwrap();
         let blocked = host
             .retire_effect_journal(retirement())
             .await
             .expect_err("actual Restate index retirement observes both catalogs");
         assert_eq!(
             blocked.code,
-            lash_core::RuntimeErrorCode::EffectScopeNotQuiescent
+            lash::runtime::RuntimeErrorCode::EffectScopeNotQuiescent
         );
 
         settle_and_release_restate_completion_closure(
@@ -529,22 +533,21 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             .await
             .expect("live Restate index retires after every participant releases");
 
-        let late_scope = lash_core::ExecutionScope::process("live-restate-retire-first");
-        let late_address =
-            lash_core::runtime::TurnAddress::new("live-restate-late-catalog", "turn");
+        let late_scope = lash::runtime::ExecutionScope::process("live-restate-retire-first");
+        let late_address = lash::TurnAddress::new("live-restate-late-catalog", "turn");
         let late_store = factory_a
-            .create_store(&lash_core::SessionStoreCreateRequest {
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: late_address.session_id.clone(),
-                relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                relation: lash::persistence::SessionRelation::Root,
+                policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
             })
             .await
             .expect("create late live Restate catalog session");
         let late_lease = late_store
             .try_claim_session_execution_lease(
                 &late_address.session_id,
-                &lash_core::LeaseOwnerIdentity::opaque("late", "late:incarnation"),
+                &lash::persistence::LeaseOwnerIdentity::opaque("late", "late:incarnation"),
                 "late:executor",
                 60_000,
             )
@@ -567,38 +570,38 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             .await
             .expect("persist late original scope before owner retirement");
         let late_resolver = late_binding.resolver();
-        let late_authorization = lash_core::TurnCancelClosureAuthorization::new(
+        let late_authorization = lash::TurnCancelClosureAuthorization::new(
             late_address.clone(),
             late_binding.binding_id(),
             late_scope.clone(),
             late_resolver
                 .await_event_key(
                     &late_address.execution_scope(),
-                    lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+                    lash::AwaitEventWaitIdentity::TurnCancelGate,
                 )
                 .await
                 .expect("late base key"),
             late_resolver
                 .await_event_key(
                     &late_address.execution_scope(),
-                    lash_core::AwaitEventWaitIdentity::TurnCancelEscalation,
+                    lash::AwaitEventWaitIdentity::TurnCancelEscalation,
                 )
                 .await
                 .expect("late escalation key"),
             late_resolver
                 .await_event_key(
                     &late_address.execution_scope(),
-                    lash_core::AwaitEventWaitIdentity::TurnTerminal,
+                    lash::AwaitEventWaitIdentity::TurnTerminal,
                 )
                 .await
                 .expect("late terminal key"),
-            lash_core::TurnCancelClosureProposal::CompletionSealed,
-            lash_core::TurnCancelIntentSnapshot::Absent,
+            lash::TurnCancelClosureProposal::CompletionSealed,
+            lash::TurnCancelIntentSnapshot::Absent,
             &late_lease.fence(),
         )
         .expect("materialize late live Restate authorization");
         host.retire_effect_journal(
-            lash_core::EffectJournalRetirement::for_scope(&late_scope).unwrap(),
+            lash::durability::EffectJournalRetirement::for_scope(&late_scope).unwrap(),
         )
         .await
         .expect("retire live Restate index before catalog authorization");

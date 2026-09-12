@@ -575,7 +575,7 @@ pub(super) async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_
     wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
     assert!(!sleep.is_finished(), "timer must genuinely remain pending");
 
-    let cancel_key = restate_await_event_key(
+    let cancel_key = test_restate_await_event_key(
         &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::TurnCancelGate,
     )
@@ -688,7 +688,7 @@ pub(super) async fn restate_routes_every_execution_scope_to_an_exact_durable_wai
     let mut addresses = HashSet::new();
 
     for (index, scope) in scopes.into_iter().enumerate() {
-        let key = restate_await_event_key(
+        let key = test_restate_await_event_key(
             &scope,
             AwaitEventWaitIdentity::Custom {
                 key: format!("scope-{index}"),
@@ -776,7 +776,7 @@ pub(super) async fn restate_execute_effect_honors_cancellation_and_terminalizes_
 pub(super) async fn restate_deadline_durably_terminalizes_timeout() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
-    let key = restate_await_event_key(
+    let key = test_restate_await_event_key(
         &ExecutionScope::runtime_operation("deadline-operation"),
         AwaitEventWaitIdentity::Custom {
             key: "deadline".to_string(),
@@ -805,7 +805,7 @@ pub(super) async fn restate_deadline_durably_terminalizes_timeout() {
 #[tokio::test]
 pub(super) async fn restate_session_cancel_cancels_current_waits_but_allows_new_waits() {
     let context = Arc::new(RecordingContext::default());
-    let first_key = restate_await_event_key(
+    let first_key = test_restate_await_event_key(
         &ExecutionScope::queue_drain("cancel-session", "drain-one"),
         AwaitEventWaitIdentity::Custom {
             key: "first".to_string(),
@@ -832,7 +832,7 @@ pub(super) async fn restate_session_cancel_cancels_current_waits_but_allows_new_
         Resolution::Cancelled
     );
 
-    let next_key = restate_await_event_key(
+    let next_key = test_restate_await_event_key(
         &durable_turn_scope("cancel-session", "turn-two"),
         AwaitEventWaitIdentity::Custom {
             key: "next".to_string(),
@@ -855,7 +855,7 @@ pub(super) async fn restate_session_cancel_cancels_current_waits_but_allows_new_
 pub(super) async fn restate_session_delete_revokes_current_and_future_waits() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
-    let key = restate_await_event_key(
+    let key = test_restate_await_event_key(
         &ExecutionScope::session_delete("deleted-session"),
         AwaitEventWaitIdentity::Custom {
             key: "delete".to_string(),
@@ -881,7 +881,7 @@ pub(super) async fn restate_session_delete_revokes_current_and_future_waits() {
         Resolution::Cancelled
     );
 
-    let future_key = restate_await_event_key(
+    let future_key = test_restate_await_event_key(
         &durable_turn_scope("deleted-session", "future-turn"),
         AwaitEventWaitIdentity::Custom {
             key: "future".to_string(),
@@ -926,7 +926,7 @@ pub(super) async fn restate_effect_host_checks_revocation_then_awaits_resolution
         "https://restate.example",
         scripted.clone(),
     ));
-    let key = restate_await_event_key(
+    let key = test_restate_await_event_key(
         &durable_turn_scope("single-call-session", "single-call-turn"),
         AwaitEventWaitIdentity::Custom {
             key: "single-call-wait".to_string(),
@@ -1012,7 +1012,7 @@ pub(super) async fn restate_effect_host_cancellation_records_and_returns_the_dur
             "https://restate.example",
             transport.clone(),
         ));
-        let key = restate_await_event_key(
+        let key = test_restate_await_event_key(
             &durable_turn_scope("cancel-session", "cancel-turn"),
             AwaitEventWaitIdentity::Custom {
                 key: "cancel-wait".to_string(),
@@ -1353,6 +1353,10 @@ pub(super) struct RestateParentEndFaultController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateParentEndFaultController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -1520,6 +1524,15 @@ pub(super) async fn replay_test_runtime(
         lash_core::testing::test_standard_protocol_factories(),
     ))
     .await
+}
+
+pub(super) fn bind_restate_test_effect_host(
+    host: &mut lash_core::facade_support::RuntimeHostConfig,
+    context: &Arc<ReplayableRecordingContext>,
+) {
+    host.control.effect_host = Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+        context,
+    )));
 }
 
 pub(super) async fn replay_test_runtime_with_plugins(

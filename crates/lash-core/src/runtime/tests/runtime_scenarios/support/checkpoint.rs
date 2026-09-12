@@ -16,6 +16,13 @@ impl RuntimeScenarioContext {
             .completing_queue_claims(self.command_claim.iter().map(QueuedWorkClaim::completion));
         if let Some(turn_id) = phase.defer_interrupted_turn_id {
             commit = commit.deferring_interrupted_turn_inputs(TurnId::from(turn_id), None);
+            commit = crate::testing::store_fixtures::authorize_completion_deferral_for_test(
+                self.store(),
+                &self.owner_and_lease().1.fence(),
+                commit,
+            )
+            .await
+            .expect("authorize scenario deferral");
         }
         let result = self
             .store()

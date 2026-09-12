@@ -945,7 +945,7 @@ impl Fig1631AwaitEventGate for Fig1631AwaitEventGateImpl {
         Json(_input): Json<Fig1126PendingToolRedriveInput>,
     ) -> HandlerResult<Json<String>> {
         let scope = durable_turn_scope(FIG1631_AWAIT_SESSION, "turn");
-        let key = restate_await_event_key(
+        let key = test_restate_await_event_key(
             &scope,
             AwaitEventWaitIdentity::tool_completion("fig1631-await-call"),
         )

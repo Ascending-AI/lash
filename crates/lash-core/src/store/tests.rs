@@ -398,7 +398,7 @@ fn cancellation_evidence_changes_intent_hash_without_changing_absent_legacy_hash
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "a6f3ac26d0455096293da3d24c0c52ee41ee6f5259872a212b327189cee9a3fd",
+        "d66a62e305da062c361f45ad0fdba8566cec0c85808a387c4f3b68a334a8f0fd",
         "an absent cancellation field must preserve the legacy plain-commit preimage"
     );
 

@@ -229,6 +229,7 @@ pub mod store_backend_support {
 
 #[doc(hidden)]
 pub mod facade_support {
+    pub use crate::runtime::effect::bind_store_turn_control_authority;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.

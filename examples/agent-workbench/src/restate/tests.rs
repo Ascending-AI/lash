@@ -10,6 +10,18 @@ use lash::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+impl super::WorkbenchCronJobImpl {
+    pub(crate) fn new_for_test(
+        state: crate::AppState,
+        authority_id: lash_restate::RestateAuthorityId,
+    ) -> Self {
+        Self {
+            state,
+            authority_id: Some(authority_id),
+        }
+    }
+}
+
 #[derive(Default)]
 struct CountingProcessEffectController {
     process_starts: AtomicUsize,

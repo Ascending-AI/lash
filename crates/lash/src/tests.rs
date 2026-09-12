@@ -86,6 +86,7 @@ fn session_completion_matches(
 
 #[derive(Default)]
 struct SnapshotStore {
+    turn_cancellation_authority: std::sync::OnceLock<lash_core::TurnCancellationAuthority>,
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     runtime_turn_commits: std::sync::Mutex<
@@ -147,6 +148,7 @@ impl SnapshotStore {
             );
         }
         Self {
+            turn_cancellation_authority: Default::default(),
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
                 head_revision: 7,
@@ -726,6 +728,28 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
 /// this double records without inspecting.
 #[async_trait]
 impl lash_core::TurnInputStore for SnapshotStore {
+    async fn turn_cancel_request_intent(
+        &self,
+        _address: &lash_core::facade_support::TurnAddress,
+    ) -> std::result::Result<lash_core::TurnCancelIntentSnapshot, lash_core::StoreError> {
+        Ok(lash_core::TurnCancelIntentSnapshot::Absent)
+    }
+
+    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+        Some(
+            self.turn_cancellation_authority
+                .get_or_init(|| {
+                    lash_core::TurnCancellationAuthority::new(
+                        format!("snapshot-store:{}", uuid::Uuid::new_v4()),
+                        Arc::new(
+                            lash_core::facade_support::NativeRuntimeEffectController::default(),
+                        ),
+                    )
+                })
+                .clone(),
+        )
+    }
+
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
@@ -981,6 +1005,14 @@ impl lash_core::AttachmentRootSet for ReusableStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for ReusableStoreFactory {
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn create_store(
         &self,
         _request: &lash_core::SessionStoreCreateRequest,
@@ -1005,6 +1037,7 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
 }
 
 struct BoundSessionStore {
+    turn_cancellation_authority: std::sync::OnceLock<lash_core::TurnCancellationAuthority>,
     session_id: SessionId,
 }
 
@@ -1136,6 +1169,21 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 // pending turn input nor queued work.
 #[async_trait]
 impl lash_core::TurnInputStore for BoundSessionStore {
+    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+        Some(
+            self.turn_cancellation_authority
+                .get_or_init(|| {
+                    lash_core::TurnCancellationAuthority::new(
+                        format!("bound-store:{}", uuid::Uuid::new_v4()),
+                        Arc::new(
+                            lash_core::facade_support::NativeRuntimeEffectController::default(),
+                        ),
+                    )
+                })
+                .clone(),
+        )
+    }
+
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
@@ -1435,6 +1483,14 @@ impl lash_core::AttachmentRootSet for RecordingStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for RecordingStoreFactory {
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
@@ -1502,6 +1558,14 @@ impl lash_core::AttachmentRootSet for DeletingStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for DeletingStoreFactory {
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
@@ -2406,56 +2470,10 @@ fn rlm_core_builder() -> crate::core::LashCoreBuilder {
     LashCore::rlm_builder(crate::TurnBudget::Unbounded, rlm_factory())
 }
 
-fn native_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectController<'static> {
-    lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        scope,
-    )
-    .expect("native execution scope")
-}
-
-fn turn_scope(session_id: &SessionId) -> lash_core::ScopedEffectController<'static> {
-    native_scope(lash_core::ExecutionScope::turn(
-        session_id,
-        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-            .0
-            .to_string(),
-    ))
-}
-
-fn runtime_operation_scope(
-    core: &LashCore,
-    scope_id: impl Into<String>,
-) -> lash_core::ScopedEffectController<'static> {
-    core.effect_host()
-        .scoped_static(lash_core::ExecutionScope::runtime_operation(scope_id))
-        .expect("runtime operation scope")
-        .expect("effect host supplies an owned runtime operation scope")
-}
-
-async fn delete_bound_session(
-    core: &LashCore,
-    session_id: impl AsRef<str>,
-) -> Result<crate::SessionDeleteReport> {
-    let administration = core.session_administration().await?;
-    let context = administration.delete_context(session_id.as_ref())?;
-    LashCore::delete_session(context).await
-}
-
-fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message {
-    let id = "stored-message".to_string();
-    lash_core::Message {
-        id: id.clone(),
-        role,
-        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::text(
-            format!("{id}.p0"),
-            text.to_string(),
-            None,
-        )]),
-        origin: None,
-    }
-}
-
+mod scope_support;
+use scope_support::{
+    delete_bound_session, native_scope, runtime_operation_scope, text_message, turn_scope,
+};
 mod control_admin;
 mod core_session_builder;
 mod deployment_and_testing_facade;

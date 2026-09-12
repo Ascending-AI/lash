@@ -9,6 +9,7 @@ struct RecordedProjectionLlm {
 
 struct ProjectionReplayController {
     native: lash_core::facade_support::NativeRuntimeEffectController,
+    authority_id: std::sync::OnceLock<String>,
     first_llm: StdMutex<Option<RecordedProjectionLlm>>,
     replay_next_llm: std::sync::atomic::AtomicBool,
     new_llm_calls: AtomicUsize,
@@ -21,6 +22,7 @@ impl ProjectionReplayController {
     fn failing_on_new_llm_call(ordinal: usize) -> Self {
         Self {
             native: Default::default(),
+            authority_id: Default::default(),
             first_llm: Default::default(),
             replay_next_llm: Default::default(),
             new_llm_calls: Default::default(),
@@ -42,6 +44,10 @@ impl ProjectionReplayController {
 
 #[async_trait]
 impl lash_core::AwaitEventResolver for ProjectionReplayController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.authority_id.get().cloned()
+    }
+
     async fn await_event_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -445,6 +451,10 @@ async fn rolling_history_projection_usage_is_pinned_across_a_cold_mid_turn_redri
         crate::durability::NativeEffectHost::new(Arc::clone(&controller) as Arc<_>)
             .allow_process_lifetime_completion_keys(),
     );
+    controller
+        .authority_id
+        .set(effect_host.turn_control_binding_id())
+        .expect("projection controller authority is initialized once");
 
     let build_core = |store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>| {
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))

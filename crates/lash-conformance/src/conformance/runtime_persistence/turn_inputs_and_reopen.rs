@@ -789,8 +789,14 @@ pub(super) async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     };
     store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .deferring_interrupted_turn_inputs(turn_id, None),
+            lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
+                store.as_ref(),
+                &lease.fence(),
+                RuntimeCommit::persisted_state_for_test(&state, &[])
+                    .deferring_interrupted_turn_inputs(turn_id, None),
+            )
+            .await
+            .expect("authorize interrupt deferral"),
         )
         .await
         .expect("interrupt commit defers uncancelled active input");
@@ -924,9 +930,15 @@ pub(super) async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrup
     };
     let interrupt_result = store
         .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_turn_input_claim(claim.completion())
-                .deferring_interrupted_turn_inputs(turn_id, None),
+            lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
+                store.as_ref(),
+                &lease.fence(),
+                RuntimeCommit::persisted_state_for_test(&state, &[])
+                    .completing_turn_input_claim(claim.completion())
+                    .deferring_interrupted_turn_inputs(turn_id, None),
+            )
+            .await
+            .expect("authorize active input deferral"),
         )
         .await
         .expect("interrupt commit completes accepted inputs and defers unaccepted inputs");

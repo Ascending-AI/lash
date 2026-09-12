@@ -90,6 +90,10 @@ impl SerialOnlyEffectController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for SerialOnlyEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -200,6 +204,10 @@ impl RejectingEffectController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for RejectingEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!("rejecting-controller:{:p}", self))
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -306,6 +314,10 @@ pub(super) struct WrongOutcomeEffectController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for WrongOutcomeEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!("wrong-outcome-controller:{:p}", self))
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,

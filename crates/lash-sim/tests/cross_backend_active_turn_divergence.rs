@@ -617,14 +617,12 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
     let session_id = "turn-cancel-sqlite-reopen";
     let turn_id = "cancelled-before-reopen";
 
-    let (first_core, first_transport) = build_sqlite_with_effect_host(
-        &sqlite_dir,
-        1,
-        Arc::new(YieldBeforeCancelWatchController {
-            inner: NativeRuntimeEffectController::default(),
-        }),
-    )
-    .await;
+    // This witness reopens the session database within one effect deployment.
+    let effect_host: Arc<dyn EffectHost> = Arc::new(YieldBeforeCancelWatchController {
+        inner: NativeRuntimeEffectController::default(),
+    });
+    let (first_core, first_transport) =
+        build_sqlite_with_effect_host(&sqlite_dir, 1, Arc::clone(&effect_host)).await;
     let first_session = first_core
         .session(session_id)
         .open()
@@ -688,7 +686,8 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
     drop(first_session);
     drop(first_core);
 
-    let (reopened_core, reopened_transport) = build_sqlite(&sqlite_dir, 1).await;
+    let (reopened_core, reopened_transport) =
+        build_sqlite_with_effect_host(&sqlite_dir, 1, effect_host).await;
     let reopened = reopened_core
         .session(session_id)
         .open()

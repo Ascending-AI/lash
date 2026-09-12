@@ -3,7 +3,7 @@ use crate::SessionId;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::sync::MutexExt;
 
-fn turn_cancellation_authority() -> crate::TurnCancellationAuthority {
+pub(super) fn turn_cancellation_authority() -> crate::TurnCancellationAuthority {
     let resolver: Arc<dyn crate::AwaitEventResolver> =
         Arc::new(crate::NativeRuntimeEffectController::default());
     crate::TurnCancellationAuthority::new(

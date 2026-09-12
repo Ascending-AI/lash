@@ -17,7 +17,7 @@ const SESSION: &str = "session";
 const TURN: &str = "turn";
 
 fn cancel_mode_authority_id() -> RestateAuthorityId {
-    RestateAuthorityId::new("restate-test-authority").expect("authority used by new_for_test")
+    RestateAuthorityId::new("lash-restate-tests").expect("authority used by new_for_test")
 }
 
 fn cancel_request(request_id: &str, mode: TurnCancelMode) -> TurnCancelRequest {

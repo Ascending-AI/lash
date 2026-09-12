@@ -2106,33 +2106,50 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                 return Err(TerminalError::new("process workflow start is unsupported"));
             };
             let process_id = registration.id.clone();
-            let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-            let scoped_effect_controller = controller
-                .scoped_effect_controller(ExecutionScope::process(&process_id))
-                .map_err(TerminalError::from_error)?;
-            let cancellation = tokio_util::sync::CancellationToken::new();
-            let mut handover = None;
-            let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-                &process_id,
-                format!("test-workflow:{process_id}"),
-            );
-            let output = loop {
-                match worker
-                    .run_process_segment_with_scoped_effect_controller(
-                        registration.clone(),
-                        execution_context.clone(),
-                        execution_write_authority.clone(),
-                        scoped_effect_controller.clone(),
-                        cancellation.clone(),
-                        handover,
-                    )
-                    .await
-                    .map_err(TerminalError::from_error)?
-                {
-                    lash_core::ProcessRunOutcome::Terminal { output, .. } => {
-                        break *output;
+            let process_task_context = Arc::clone(&context);
+            let process_task_id = process_id.clone();
+            let process_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                let controller = RestateRuntimeEffectController::new_for_test(process_task_context);
+                let scoped_effect_controller = controller
+                    .scoped_effect_controller(ExecutionScope::process(&process_task_id))
+                    .map_err(TerminalError::from_error)?;
+                let cancellation = tokio_util::sync::CancellationToken::new();
+                let execution_write_authority =
+                    lash_core::ProcessExecutionWriteAuthority::invocation(
+                        &process_task_id,
+                        format!("test-workflow:{process_task_id}"),
+                    );
+                let mut handover = None;
+                loop {
+                    match worker
+                        .run_process_segment_with_scoped_effect_controller(
+                            registration.clone(),
+                            execution_context.clone(),
+                            execution_write_authority.clone(),
+                            scoped_effect_controller.clone(),
+                            cancellation.clone(),
+                            handover,
+                        )
+                        .await
+                    {
+                        Ok(lash_core::ProcessRunOutcome::Terminal { output, .. }) => {
+                            break Ok(*output);
+                        }
+                        Ok(lash_core::ProcessRunOutcome::SegmentBoundary(next)) => {
+                            handover = Some(next);
+                        }
+                        Err(error) => break Err(TerminalError::from_error(error)),
                     }
-                    lash_core::ProcessRunOutcome::SegmentBoundary(next) => handover = Some(next),
+                }
+            }));
+            let output = match process_task.await {
+                Ok(Ok(output)) => output,
+                Ok(Err(error)) => return Err(error),
+                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+                Err(error) => {
+                    return Err(TerminalError::new(format!(
+                        "test process workflow task failed: {error}"
+                    )));
                 }
             };
             context

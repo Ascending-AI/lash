@@ -90,6 +90,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
     let process_registry = process_registry();
     fig1293_seed_control_target(&process_registry, &SessionId::from(session_id)).await;
     let plugin_factories = fig1293_migrated_tool_factories();
@@ -338,6 +339,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
 
     let mut first = replay_test_runtime(
         &SessionId::from(session_id),
@@ -458,7 +460,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
-    let host = host.with_process_engine(Arc::new(RestateParentEndLawEngine));
+    let mut host = host.with_process_engine(Arc::new(RestateParentEndLawEngine));
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
             .await
@@ -468,6 +470,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
     context.defer_process_workflows();
     let process_registry = process_registry();
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
@@ -963,6 +966,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
 
     let mut suspended = replay_test_runtime(
         &SessionId::from(session_id),
@@ -1279,6 +1283,7 @@ finish (await handle)?
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
     let process_registry = process_registry()
         .with_runtime_clock(corpus_clock)
         .expect("SQLite process registry accepts the fixed corpus clock");

@@ -122,12 +122,22 @@ fn request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {
     TurnCancelRequest::new(address, request_id, Some("user".to_string())).with_reason("stop button")
 }
 
-fn bound_driver(host: Arc<NativeEffectHost>, address: &TurnAddress) -> TurnWorkDriver {
-    TurnWorkDriver::for_session(
-        host,
-        address.session_id.clone(),
-        Arc::new(InMemorySessionStore::default()),
+fn native_fixture_store(host: &Arc<NativeEffectHost>) -> Arc<InMemorySessionStore> {
+    Arc::new(
+        InMemorySessionStore::default().with_turn_cancellation_authority_for_testing(
+            crate::TurnCancellationAuthority::new(
+                host.turn_control_binding_id(),
+                Arc::clone(host) as Arc<dyn crate::AwaitEventResolver>,
+            ),
+        ),
     )
+}
+
+fn bound_driver(address: &TurnAddress) -> (Arc<NativeEffectHost>, TurnWorkDriver) {
+    let host = Arc::new(NativeEffectHost::default());
+    let store = native_fixture_store(&host);
+    let driver = TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store);
+    (host, driver)
 }
 
 fn scoped_turn_controller<'a>(
@@ -499,7 +509,7 @@ async fn durable_commit_makes_later_cancel_a_noop_before_terminal_publication() 
 
     let host = Arc::new(NativeEffectHost::default());
     let address = address("durably-ended");
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = native_fixture_store(&host);
     store
         .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
         .await
@@ -695,9 +705,9 @@ async fn exact_driver_rejects_foreign_terminal_attach_before_touching_the_host()
         .await
         .expect("publish foreign terminal after both refusals");
     let attached = TurnWorkDriver::for_session(
-        host,
+        host.clone(),
         foreign.session_id.clone(),
-        Arc::new(InMemorySessionStore::default()),
+        native_fixture_store(&host),
     )
     .await_terminal(&foreign)
     .await
@@ -765,9 +775,8 @@ fn legacy_cancel_request_without_disposition_defaults_to_defer() {
 
 #[tokio::test]
 async fn cancel_before_start_duplicate_and_terminal_attach() {
-    let host = Arc::new(NativeEffectHost::default());
     let address = address("before-start");
-    let driver = bound_driver(host.clone(), &address);
+    let (host, driver) = bound_driver(&address);
 
     let first = driver
         .request_cancel(request(address.clone(), "request-1"))
@@ -826,9 +835,8 @@ async fn settle_seals_the_assembled_evidence_instead_of_minting_a_second_id() {
     // value is what keeps one cancellation to one request id: minting
     // `internal:{turn_id}` here would hand the host a second identity for
     // the same fact.
-    let host = Arc::new(NativeEffectHost::default());
     let address = address("assembled");
-    let driver = bound_driver(host.clone(), &address);
+    let (host, driver) = bound_driver(&address);
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");
@@ -856,9 +864,8 @@ async fn settle_seals_the_assembled_evidence_instead_of_minting_a_second_id() {
 
 #[tokio::test]
 async fn concurrent_completion_seal_vs_cancel_is_first_writer_wins() {
-    let host = Arc::new(NativeEffectHost::default());
     let address = address("race");
-    let driver = bound_driver(host.clone(), &address);
+    let (host, driver) = bound_driver(&address);
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");
@@ -880,7 +887,7 @@ async fn concurrent_completion_seal_vs_cancel_is_first_writer_wins() {
 async fn authorized_completion_adopts_a_legitimate_different_cancel_winner() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("authorized-different-winner");
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = native_fixture_store(&host);
     store
         .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
         .await
@@ -967,7 +974,7 @@ async fn authorized_completion_adopts_a_legitimate_different_cancel_winner() {
 async fn repair_projects_authenticated_gate_winner_over_provisional_memory_row() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("authenticated-winner-repair");
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = native_fixture_store(&host);
     store
         .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
         .await
@@ -1016,7 +1023,7 @@ async fn repair_projects_authenticated_gate_winner_over_provisional_memory_row()
     // Resolve the real promise through the public cancellation path while the
     // catalog under repair still holds its distinct provisional row A. This
     // models a gate owner and a recovering catalog observing the same turn.
-    let gate_store = Arc::new(InMemorySessionStore::default());
+    let gate_store = native_fixture_store(&host);
     gate_store
         .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
         .await
@@ -1268,9 +1275,8 @@ async fn authorized_settlement_refuses_base_loss_after_effective_resolution_and_
 
 #[tokio::test]
 async fn recovered_owner_observes_pending_cancel_after_control_recreation() {
-    let host = Arc::new(NativeEffectHost::default());
     let address = address("replay");
-    let driver = bound_driver(host.clone(), &address);
+    let (host, driver) = bound_driver(&address);
     let requested = driver
         .request_cancel(request(address.clone(), "request-before-replay"))
         .await
@@ -1302,9 +1308,8 @@ async fn recovered_owner_observes_pending_cancel_after_control_recreation() {
 
 #[tokio::test]
 async fn turn_control_is_exact_scope_and_excluded_from_wait_cancel_sweep() {
-    let host = Arc::new(NativeEffectHost::default());
     let address_a = address("scope");
-    let driver = bound_driver(host.clone(), &address_a);
+    let (host, driver) = bound_driver(&address_a);
     let address_b = TurnAddress::new(&address_a.session_id, "turn-b");
     let address_future = TurnAddress::new(&address_a.session_id, "turn-future");
 
@@ -1368,7 +1373,7 @@ async fn turn_control_is_exact_scope_and_excluded_from_wait_cancel_sweep() {
 async fn session_deletion_revokes_control_promises() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("revoke");
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = native_fixture_store(&host);
     let driver =
         TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
     host.revoke_await_events_for_session(&address.session_id)
@@ -1443,9 +1448,8 @@ async fn catalog_driver_resolves_the_target_store_once_per_request() {
 
 #[tokio::test]
 async fn terminal_attachment_timeout_does_not_poison_later_publication() {
-    let host = Arc::new(NativeEffectHost::default());
     let address = address("terminal-timeout");
-    let driver = bound_driver(host.clone(), &address);
+    let (host, driver) = bound_driver(&address);
     let error = driver
         .await_terminal_with_timeout(&address, Duration::from_millis(1))
         .await
@@ -1635,9 +1639,8 @@ fn peek_identities_are_replay_deterministic_and_name_their_escalation() {
 
 #[tokio::test]
 async fn after_step_request_is_deferred_until_immediate_escalates_it() {
-    let host = Arc::new(NativeEffectHost::default());
     let address = address("escalate");
-    let driver = bound_driver(host.clone(), &address);
+    let (host, driver) = bound_driver(&address);
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");
@@ -1719,7 +1722,7 @@ async fn after_step_request_is_deferred_until_immediate_escalates_it() {
 async fn weaker_repeat_and_recovery_preserve_the_accepted_escalation() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("effective-escalation");
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = native_fixture_store(&host);
     let driver =
         TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
 
@@ -1788,7 +1791,7 @@ async fn weaker_repeat_and_recovery_preserve_the_accepted_escalation() {
 async fn final_settlement_refreshes_cached_base_to_an_already_projected_escalation() {
     let host = Arc::new(NativeEffectHost::default());
     let address = address("settlement-refreshes-cached-base");
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = native_fixture_store(&host);
     let driver =
         TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
@@ -1849,7 +1852,7 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
 
     let host = Arc::new(NativeEffectHost::default());
     let address = address("same-header-delayed-escalation");
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = native_fixture_store(&host);
     store
         .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
         .await
@@ -2008,9 +2011,8 @@ async fn final_settlement_observes_same_header_escalation_accepted_after_snapsho
 
 #[tokio::test]
 async fn after_step_request_is_honoured_at_the_step_boundary_with_its_iteration() {
-    let host = Arc::new(NativeEffectHost::default());
     let address = address("boundary");
-    let driver = bound_driver(host.clone(), &address);
+    let (host, driver) = bound_driver(&address);
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");

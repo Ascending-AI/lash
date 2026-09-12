@@ -164,7 +164,12 @@ fn frame_request(frame_key: FrameKey, reason: AgentFrameReason) -> OpenAgentFram
 
 #[tokio::test]
 async fn final_commit_retry_preserves_honoured_after_step_settlement() {
-    let store = Arc::new(RecordingStore::default());
+    let host = Arc::new(crate::NativeEffectHost::default());
+    let store = Arc::new(
+        RecordingStore::default().with_turn_cancellation_authority_for_testing(
+            crate::TurnCancellationAuthority::new(host.turn_control_binding_id(), host.clone()),
+        ),
+    );
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
     state.session_id = SessionId::from("final-cancel-cas");
     state.ensure_agent_frame_initialized();
@@ -185,7 +190,6 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:base", None)
             .mode(crate::TurnCancelMode::AfterStep)
             .undelivered(crate::TurnCancelDisposition::Drop);
-    let host = Arc::new(crate::NativeEffectHost::default());
     let driver =
         crate::TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
     driver

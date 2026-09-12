@@ -7,7 +7,7 @@ pub(super) async fn restate_controller_replays_parent_shaped_start_await_suspend
     let registry = process_registry();
     let process_id = "task-parent-flow-replay";
     let terminal = process_success(serde_json::json!({ "done": true }));
-    let suspend_key = restate_await_event_key(
+    let suspend_key = test_restate_await_event_key(
         &ExecutionScope::process(process_id),
         AwaitEventWaitIdentity::Custom {
             key: "parent-resume-input".to_string(),
@@ -344,7 +344,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     {
         let resolved = context.resolved_events.lock_recover();
         assert_eq!(resolved.len(), 1);
-        let expected_key = restate_await_event_key(
+        let expected_key = test_restate_await_event_key(
             &ExecutionScope::process("task-signal"),
             AwaitEventWaitIdentity::process_signal("task-signal", "notify", 1),
         )
@@ -383,7 +383,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     };
     let resolved = context.resolved_events.lock_recover();
     assert_eq!(resolved.len(), 2);
-    let expected_key = restate_await_event_key(
+    let expected_key = test_restate_await_event_key(
         &ExecutionScope::process("task-signal"),
         AwaitEventWaitIdentity::process_signal("task-signal", "notify", 2),
     )

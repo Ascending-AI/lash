@@ -25,10 +25,20 @@ fn request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {
         .with_reason("stop button")
 }
 
-async fn driver_for_session(host: Arc<dyn EffectHost>, address: &TurnAddress) -> TurnWorkDriver {
-    let store = Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>;
+async fn driver_for_session(
+    host: Arc<dyn EffectHost>,
+    address: &TurnAddress,
+) -> (Arc<dyn EffectHost>, TurnWorkDriver) {
+    let authority = crate::TurnCancellationAuthority::new(
+        host.turn_control_binding_id(),
+        Arc::clone(&host) as Arc<dyn crate::AwaitEventResolver>,
+    );
+    let store = Arc::new(
+        crate::InMemorySessionStore::new().with_turn_cancellation_authority_for_testing(authority),
+    ) as Arc<dyn crate::RuntimePersistence>;
     super::bind_conformance_session(&store, &address.session_id).await;
-    TurnWorkDriver::for_session(host, address.session_id.clone(), store)
+    let driver = TurnWorkDriver::for_session(Arc::clone(&host), address.session_id.clone(), store);
+    (host, driver)
 }
 
 /// Run the exact-address, replay, terminal, sweep, and revocation contract for
@@ -48,7 +58,7 @@ pub async fn turn_work_driver(host: Arc<dyn EffectHost>) {
 /// observes the abort at its next peek, before any boundary.
 async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn EffectHost>) {
     let address = address("escalation");
-    let driver = driver_for_session(Arc::clone(&host), &address).await;
+    let (host, driver) = driver_for_session(host, &address).await;
     let peek = host
         .scoped(address.execution_scope())
         .expect("scoped peek controller");
@@ -161,7 +171,7 @@ async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn Ef
 /// identity.
 async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn EffectHost>) {
     let address = address("boundary");
-    let driver = driver_for_session(Arc::clone(&host), &address).await;
+    let (host, driver) = driver_for_session(host, &address).await;
     let peek = host
         .scoped(address.execution_scope())
         .expect("scoped peek controller");
@@ -253,7 +263,7 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
 
 async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn EffectHost>) {
     let address = address("before-start");
-    let driver = driver_for_session(Arc::clone(&host), &address).await;
+    let (host, driver) = driver_for_session(host, &address).await;
     let first = driver
         .request_cancel(request(address.clone(), "request-1"))
         .await
@@ -349,7 +359,7 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
 
 async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost>) {
     let address = address("race");
-    let driver = driver_for_session(Arc::clone(&host), &address).await;
+    let (host, driver) = driver_for_session(host, &address).await;
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("active control");
@@ -407,7 +417,7 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
 
 async fn exact_scope_and_session_sweep_isolation(host: Arc<dyn EffectHost>) {
     let address_a = address("scope");
-    let driver = driver_for_session(Arc::clone(&host), &address_a).await;
+    let (host, driver) = driver_for_session(host, &address_a).await;
     let address_b = TurnAddress::new(&address_a.session_id, "turn-b");
     let address_future = TurnAddress::new(&address_a.session_id, "turn-future");
 
@@ -489,7 +499,7 @@ async fn exact_scope_and_session_sweep_isolation(host: Arc<dyn EffectHost>) {
 
 async fn session_deletion_revokes_control_promises(host: Arc<dyn EffectHost>) {
     let address = address("revoke");
-    let driver = driver_for_session(Arc::clone(&host), &address).await;
+    let (host, driver) = driver_for_session(host, &address).await;
     let active = ActiveTurnControl::new(host.as_ref(), address.clone())
         .await
         .expect("create reserved control promises");

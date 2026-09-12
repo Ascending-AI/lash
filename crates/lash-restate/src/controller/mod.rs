@@ -314,7 +314,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     pub(crate) fn new_for_test(context: C) -> Self {
         Self::new(
             context,
-            RestateAuthorityId::new("restate-test-authority").expect("valid test authority"),
+            RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
         )
     }
 
@@ -325,7 +325,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
     ) -> Self {
         Self::with_options(
             context,
-            RestateAuthorityId::new("restate-test-authority").expect("valid test authority"),
+            RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
             options,
         )
     }

@@ -340,6 +340,7 @@ struct Backend {
     label: &'static str,
     factory: Arc<dyn SessionStoreFactory>,
     _tempdir: Option<tempfile::TempDir>,
+    _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
 }
 
 impl Backend {
@@ -348,6 +349,7 @@ impl Backend {
             label: "memory",
             factory: Arc::new(InMemorySessionStoreFactory::new()),
             _tempdir: None,
+            _database: None,
         }
     }
 
@@ -359,6 +361,7 @@ impl Backend {
                 dir.path(),
             )),
             _tempdir: Some(dir),
+            _database: None,
         }
     }
 
@@ -375,24 +378,15 @@ impl Backend {
                 return None;
             }
         };
-        // Concurrent first connections contend for the migration lock; a
-        // contended connect is retried unchanged, bounded.
-        let mut attempt = 0u32;
-        let storage = loop {
-            match lash_postgres_store::PostgresStorage::connect(&database_url).await {
-                Ok(storage) => break storage,
-                Err(StoreError::Contended) if attempt < 5 => {
-                    attempt += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(250 * u64::from(attempt)))
-                        .await;
-                }
-                Err(error) => panic!("connect PostgreSQL: {error:?}"),
-            }
-        };
+        let database = lash_postgres_store::testing::IsolatedDatabase::create(&database_url).await;
+        let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+            .await
+            .expect("connect isolated PostgreSQL");
         Some(Self {
             label: "postgres",
             factory: Arc::new(storage.session_store_factory()),
             _tempdir: None,
+            _database: Some(database),
         })
     }
 

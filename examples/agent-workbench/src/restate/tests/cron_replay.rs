@@ -309,7 +309,14 @@ fn encode_replay_body(object_key: &str, commands: &[Bytes], notifications: &[Byt
 
 fn cron_endpoint(state: crate::AppState) -> Endpoint {
     Endpoint::builder()
-        .bind(crate::restate::WorkbenchCronJobImpl::new(state).serve())
+        .bind(
+            crate::restate::WorkbenchCronJobImpl::new_for_test(
+                state,
+                lash_restate::RestateAuthorityId::new("agent-workbench-cron-replay-tests")
+                    .expect("valid cron replay test authority"),
+            )
+            .serve(),
+        )
         .build()
 }
 
