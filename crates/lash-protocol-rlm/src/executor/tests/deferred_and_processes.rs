@@ -514,7 +514,11 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
                     "#
                 .to_string(),
             },
-            lashlang::global_in_memory_lashlang_artifact_store(),
+            // A private artifact store: this test asserts on collected
+            // observations, and the process-global store is shared with every
+            // other test in the binary, which made the assertion order-dependent
+            // under the full parallel suite (FIG-1941).
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
