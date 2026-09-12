@@ -917,6 +917,28 @@ pub async fn execute_tool_intents_with_services(
     tool_call_id: &str,
     intents: &crate::ToolIntents,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook(
+        scoped_effect_controller,
+        processes,
+        session_id,
+        tool_call_id,
+        intents,
+        None,
+    )
+    .await
+}
+
+/// Execute a recorded tool-intent drain through the production process-command
+/// route and notify a test hook after a child Start has committed.
+#[doc(hidden)]
+pub async fn execute_tool_intents_with_services_and_hook(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     let parent_invocation = crate::RuntimeInvocation::effect(
         crate::EffectAddress::new(
             scoped_effect_controller.execution_scope().clone(),
@@ -938,9 +960,61 @@ pub async fn execute_tool_intents_with_services(
         dispatch.as_ref(),
         Some(tool_call_id),
         intents,
-        None,
+        child_trace_hook,
     )
     .await
+}
+
+/// Build the real engine run context used by validation-path tests that are
+/// expected to settle before constructing a nested runtime context.
+#[doc(hidden)]
+pub fn process_engine_run_context_for_validation(
+    registration: crate::ProcessRegistration,
+    tool_catalog: Arc<crate::ToolCatalog>,
+    process_registry_available: bool,
+) -> crate::ProcessEngineRunContext<'static> {
+    let process_id = registration.id.clone();
+    let registry: Arc<dyn crate::ProcessRegistry> =
+        Arc::new(crate::TestLocalProcessRegistry::default());
+    let process_work = process_work_wiring_for_registry(registry);
+    let plugins = crate::PluginHost::new(test_standard_protocol_factories())
+        .build_session("engine-validation-test")
+        .expect("test protocol session builds");
+    let effect_host = crate::facade_support::NativeEffectHost::default();
+    let scoped_effect_controller = crate::EffectHost::scoped_static(
+        &effect_host,
+        crate::ExecutionScope::process(process_id.clone()),
+    )
+    .expect("valid process scope")
+    .expect("native effect host owns a static controller");
+    let execution_context = crate::ProcessExecutionContext::default()
+        .with_execution_write_authority(crate::ProcessExecutionWriteAuthority::invocation(
+            process_id,
+            "engine-validation-test-execution",
+        ));
+    crate::ProcessEngineRunContext::new(
+        registration,
+        execution_context,
+        process_work,
+        SessionId::from("engine-validation-test"),
+        plugins,
+        tool_catalog,
+        None,
+        None,
+        Arc::new(crate::NoQueuedWork::new()),
+        crate::DeliveryPolicy::EarliestSafeBoundary,
+        Arc::new(crate::SystemClock),
+        process_registry_available,
+        tokio_util::sync::CancellationToken::new(),
+        None,
+        scoped_effect_controller,
+        None,
+        Box::new(|_| {
+            Err(crate::PluginError::Session(
+                "validation test unexpectedly entered the nested runtime".to_string(),
+            ))
+        }),
+    )
 }
 
 /// A `ProcessService` that applies the production command-runner guard, then

@@ -1540,10 +1540,33 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     let artifact_store = Arc::new(SwitchableArtifactStore::new(durable_store));
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"process main() -> str { finish "redriven" }"#,
+        r#"process main(live_validation_marker: str) -> str { finish "redriven" }"#,
         "main",
     )
     .await;
+    let live_validation_marker = dir.path().join("committed-start.marker");
+    let mut process_args = serde_json::Map::new();
+    process_args.insert(
+        "live_validation_marker".to_string(),
+        serde_json::Value::String(live_validation_marker.display().to_string()),
+    );
+    let process_input = lash_lashlang_runtime::LashlangProcessInput {
+        module_ref: process.module_ref.clone(),
+        process_ref: process.process_ref.clone(),
+        host_requirements_ref: process.host_requirements_ref.clone(),
+        process_name: process.process_name.clone(),
+        args: process_args,
+    }
+    .into_process_input()
+    .expect("durable witness input serializes");
+    let start_request = lash_core::ProcessStartRequest::new(
+        "intent-executor-replaces-this-id",
+        process_input,
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessOriginator::host(),
+    )
+    .with_env_spec(process_env_spec())
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types());
     let registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(&paths.processes, &paths.sessions)
             .await
@@ -1559,93 +1582,63 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     )
     .await?;
     let first_session = first_core.session(SESSION_ID).open().await?;
-    let first_ingress = first_core.tool_intents(
-        SESSION_ID,
-        lash_core::ExecutionScope::turn(SESSION_ID, "durable-artifact-outage-turn"),
-    )?;
-    let key = first_ingress.key("durable-artifact-outage-start", 0);
-    let process_id = ProcessId::from(key.identity().replay_key.clone());
-
-    artifact_store.set_unavailable(true);
-    let first = first_ingress
-        .submit(
-            key.clone(),
-            lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                session_id: SessionId::from(SESSION_ID),
-                request: process.start_request(&process_id),
-                on_parent_end: Default::default(),
-            })),
+    let first_effect_host = first_session.effect_host();
+    let first_scoped = first_effect_host
+        .scoped_static(lash_core::ExecutionScope::turn(
+            SESSION_ID,
+            "durable-artifact-outage-turn",
+        ))?
+        .expect("SQLite effect host owns a static scoped controller");
+    let first_processes = {
+        let writer = first_session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let intents = lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+        lash_core::StartProcessIntent {
+            session_id: SessionId::from(SESSION_ID),
+            request: start_request,
+            on_parent_end: Default::default(),
+        },
+    ))]);
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let started_tx = Arc::new(std::sync::Mutex::new(Some(started_tx)));
+    let hook = lash_core::ToolChildExecutionTraceHook::new(move |started| {
+        if let Some(sender) = started_tx.lock_recover().take() {
+            let _ = sender.send(started.process_id);
+        }
+        panic!("simulate host interruption after the durable child Start");
+    });
+    let first_intents = intents.clone();
+    let interrupted = tokio::spawn(async move {
+        lash_core::testing::execute_tool_intents_with_services_and_hook(
+            first_scoped,
+            first_processes,
+            &SessionId::from(SESSION_ID),
+            "durable-artifact-outage-start",
+            &first_intents,
+            Some(&hook),
         )
-        .await;
-    assert!(
-        matches!(
-            first,
-            crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::StartProcess,
-                    ..
-                },
-                replayed: false,
-            }
-        ),
-        "the durable Start must commit before live artifact access: {first:?}"
-    );
+        .await
+    });
+    let process_id = started_rx
+        .await
+        .expect("the hook observes Start only after the command returns");
+    std::fs::write(
+        &live_validation_marker,
+        b"live world changed after Start committed",
+    )
+    .expect("arm the forbidden live-admission mutation after Start");
+    artifact_store.set_unavailable(true);
+    let interruption = interrupted
+        .await
+        .expect_err("the host task must be interrupted");
+    assert!(interruption.is_panic());
     let committed = registry
         .get_process(&process_id)
         .await?
-        .expect("admitted Start commits a durable process row");
+        .expect("the interrupted intent already committed its durable Start row");
     assert_eq!(committed.status, lash_core::ProcessStatus::Running);
-
-    let first_replay = first_ingress
-        .submit(
-            key.clone(),
-            lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                session_id: SessionId::from(SESSION_ID),
-                request: process.start_request(&process_id),
-                on_parent_end: Default::default(),
-            })),
-        )
-        .await;
-    assert!(
-        matches!(
-            first_replay,
-            crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::StartProcess,
-                    ..
-                },
-                replayed: true,
-            }
-        ),
-        "the durable journal must contain Start success, never CommandFailed: {first_replay:?}"
-    );
-
-    let first_worker = lash_core::facade_support::DurableProcessWorker::new(
-        first_core.durable_process_worker_config()?,
-    )?;
-    let first_drive = first_worker.drive_pending_processes().await?;
-    assert_eq!(first_drive.admitted, vec![process_id.clone()]);
-    let fault = wait_for_worker_fault(&first_sink, &process_id).await;
-    assert!(
-        matches!(
-            fault,
-            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
-                ref error,
-                ..
-            } if error.contains("simulated durable artifact store outage")
-        ),
-        "the outage is a worker infrastructure fault: {fault:?}"
-    );
-    assert_eq!(artifact_store.failed_reads(), 1);
-    let retryable = registry
-        .get_process(&process_id)
-        .await?
-        .expect("failed execution leaves its durable row");
-    assert_eq!(retryable.status, lash_core::ProcessStatus::Running);
-    assert!(retryable.first_started.is_some());
-
-    drop(first_worker);
-    drop(first_ingress);
     drop(first_session);
     drop(first_core);
     drop(registry);
@@ -1663,41 +1656,77 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
             .expect("reopen durable process registry"),
     );
     let reopened_sink = CollectingProcessEventSink::default();
+    reopened_artifact_store.set_unavailable(true);
     let reopened_core = durable_admission_core(
         &paths,
-        reopened_artifact_store,
+        Arc::clone(&reopened_artifact_store),
         Arc::clone(&reopened_registry),
-        reopened_sink,
+        reopened_sink.clone(),
         "artifact-outage-restarted-host",
     )
     .await?;
     let reopened_session = reopened_core.session(SESSION_ID).open().await?;
-    let reopened_ingress = reopened_core.tool_intents(
-        SESSION_ID,
-        lash_core::ExecutionScope::turn(SESSION_ID, "durable-artifact-outage-turn"),
-    )?;
-    let reopened_replay = reopened_ingress
-        .submit(
-            key,
-            lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                session_id: SessionId::from(SESSION_ID),
-                request: process.start_request(&process_id),
-                on_parent_end: Default::default(),
-            })),
+    let reopened_effect_host = reopened_session.effect_host();
+    let reopened_processes = {
+        let writer = reopened_session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let replay_scope = || {
+        reopened_effect_host
+            .scoped(lash_core::ExecutionScope::turn(
+                SESSION_ID,
+                "durable-artifact-outage-turn",
+            ))
+            .expect("reopen the recorded intent's durable scope")
+    };
+    let reopened_replay = lash_core::testing::execute_tool_intents_with_services(
+        replay_scope(),
+        Arc::clone(&reopened_processes),
+        &SessionId::from(SESSION_ID),
+        "durable-artifact-outage-start",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    let [
+        lash_core::ToolIntentExecutionOutcome::Executed {
+            kind: lash_core::ToolIntentKind::StartProcess,
+            result,
+            ..
+        },
+    ] = reopened_replay.as_slice()
+    else {
+        panic!(
+            "cold redrive must replay Start success, never persist Refused(CommandFailed): \
+             {reopened_replay:?}"
         )
-        .await;
-    assert!(
-        matches!(
-            reopened_replay,
-            crate::tools::ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    kind: lash_core::ToolIntentKind::StartProcess,
-                    ..
-                },
-                replayed: true,
-            }
-        ),
-        "cold reopen must replay durable Start success: {reopened_replay:?}"
+    };
+    let recorded_start: lash_core::ProcessHandleView =
+        serde_json::from_value(result.clone()).expect("Start records a process handle");
+    assert_eq!(
+        recorded_start,
+        lash_core::ProcessHandleView::from_record(committed),
+        "cold redrive must return the exact Start result committed before interruption"
+    );
+    assert_eq!(
+        reopened_artifact_store.failed_reads(),
+        0,
+        "intent redrive must not consult the unavailable artifact store"
+    );
+    let replayed_again = lash_core::testing::execute_tool_intents_with_services(
+        replay_scope(),
+        Arc::clone(&reopened_processes),
+        &SessionId::from(SESSION_ID),
+        "durable-artifact-outage-start",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    assert_eq!(
+        serde_json::to_vec(&reopened_replay)?,
+        serde_json::to_vec(&replayed_again)?,
+        "the durable Start result must replay byte-for-byte"
     );
 
     let restarted_worker = lash_core::facade_support::DurableProcessWorker::new(
@@ -1705,6 +1734,28 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     )?;
     let restarted_drive = restarted_worker.drive_pending_processes().await?;
     assert_eq!(restarted_drive.admitted, vec![process_id.clone()]);
+    let fault = wait_for_worker_fault(&reopened_sink, &process_id).await;
+    assert!(
+        matches!(
+            fault,
+            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
+                ref error,
+                ..
+            } if error.contains("simulated durable artifact store outage")
+        ),
+        "the outage is a retryable worker infrastructure fault: {fault:?}"
+    );
+    assert_eq!(reopened_artifact_store.failed_reads(), 1);
+    let retryable = reopened_registry
+        .get_process(&process_id)
+        .await?
+        .expect("failed execution leaves its durable row");
+    assert_eq!(retryable.status, lash_core::ProcessStatus::Running);
+    assert!(retryable.first_started.is_some());
+
+    reopened_artifact_store.set_unavailable(false);
+    let recovered_drive = restarted_worker.drive_pending_processes().await?;
+    assert_eq!(recovered_drive.admitted, vec![process_id.clone()]);
     let completed = wait_for_process(
         &reopened_core,
         &process_id,
@@ -1714,7 +1765,6 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     .await;
     assert!(completed.terminal);
 
-    drop(reopened_ingress);
     drop(reopened_session);
     Ok(())
 }

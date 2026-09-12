@@ -854,7 +854,8 @@ impl ToolIntentIngress {
                 request.id = lash_core::ProcessId::from(identity.replay_key.clone());
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
-                let registration = self.admit_engine_start(request.into_registration(None))?;
+                let registration =
+                    self.admit_engine_start(request.into_registration(None), env_spec.as_ref())?;
                 lash_core::ProcessCommand::Start {
                     registration,
                     observers,
@@ -953,24 +954,14 @@ impl ToolIntentIngress {
             .map_err(Into::into)
     }
 
-    /// Run the catalog-free part of the engine-admission gate (see
-    /// `ProcessEngineRegistry::require`) over a host-submitted start: refuse an
-    /// engine kind this host never registered, and stamp the engine identity on
-    /// the row. Nothing here reads mutable state, so it is safe to repeat when a
-    /// redrive re-submits the same identity.
-    ///
-    /// The gate's payload-validation part is deliberately not run here. It
-    /// judges a payload against the *starting session's* resolved tool catalog,
-    /// and ingress is a front door for a session this process is not running —
-    /// the catalog it could build is the host's declared surface, not that
-    /// session's. Validating against the wrong surface would risk a durable
-    /// refusal for a start the session can in fact run, which is worse than
-    /// deferring to `ProcessEngine::run`: run re-resolves the engine and
-    /// re-reads its inputs, so an invalid payload still cannot execute — it
-    /// fails retryably instead of being refused forever.
+    /// Run the engine's pure admission gate over a host-submitted start using
+    /// the exact execution environment recorded on the request. The gate may
+    /// use that immutable environment to derive identity, but cannot inspect a
+    /// live catalog or artifact store, so replaying the same intent is safe.
     fn admit_engine_start(
         &self,
         registration: lash_core::ProcessRegistration,
+        env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
     ) -> crate::Result<lash_core::ProcessRegistration> {
         let lash_core::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
             return Ok(registration);
@@ -981,7 +972,7 @@ impl ToolIntentIngress {
         // open does, or a plugin-contributed kind would be refused here as
         // unregistered.
         let engines = self.resolved_process_engines()?;
-        let identity = engines.admit(kind, payload, None)?;
+        let identity = engines.admit(kind, payload, env_spec)?;
         Ok(registration.with_identity(identity))
     }
 
