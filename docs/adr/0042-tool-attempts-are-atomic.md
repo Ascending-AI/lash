@@ -204,9 +204,10 @@ is a deliberate replay-format cutover from the pre-emission-scoped
 its v2 successor returns the typed
 `tool_intent_replay_key_format_cutover` refusal and requires a fresh
 post-cutover invocation; it never treats that row as absent and executes the
-command again. Restate retains the legacy ordinal lookup label long enough to
-consume and validate an in-flight v1 row, while the canonical envelope and all
-newly captured corpus outcomes carry v2 identities. The law
+command again. Restate commands now use the current replay key as their name,
+so in-flight v1/v2 Restate journals encounter the SDK's opaque journal-mismatch
+refusal and must drain before this deployment. Lash's typed guard separately
+refuses the pre-incarnation bare-`process_id` payload shape. The law
 `crash_after_admission_redrives_to_exactly_one_realization` durably records the
 mock admission's canonical envelope hash before its injected crash, rejects a
 changed-payload redrive, and realizes the originally admitted command once, while

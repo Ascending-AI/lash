@@ -312,3 +312,63 @@ pub(super) fn journalable_recorded_effect(
     );
     JournaledEffectRecord::Recorded(poisoned_effect_record(effect, recorded.envelope, reason))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_core::{ProcessCommand, ProcessIncarnation, ProcessRef};
+
+    #[test]
+    fn bare_process_id_is_a_typed_process_reference_format_cutover() {
+        let mut command = serde_json::to_value(ProcessCommand::Await {
+            process_ref: ProcessRef::new(
+                "pre-incarnation-process",
+                ProcessIncarnation::from_registration_sequence(1),
+            ),
+        })
+        .expect("serialize current process command");
+        let object = command
+            .as_object_mut()
+            .expect("process command serializes as an object");
+        let process_ref = object
+            .remove("process_ref")
+            .expect("current process command carries process_ref");
+        object.insert(
+            "process_id".to_string(),
+            process_ref
+                .get("process_id")
+                .expect("process_ref carries process_id")
+                .clone(),
+        );
+
+        let command_error = serde_json::from_value::<ProcessCommand>(command.clone())
+            .expect_err("bare process_id must not deserialize as a process command");
+        assert!(
+            command_error
+                .to_string()
+                .contains("process_reference_format_cutover"),
+            "ProcessCommand must return the typed cutover message: {command_error}"
+        );
+
+        let journal = serde_json::json!({
+            "envelope": {
+                "json": serde_json::json!({
+                    "command": {
+                        "type": "process",
+                        "command": command,
+                    }
+                })
+                .to_string()
+            },
+            "outcome": null
+        });
+        let journal_error = serde_json::from_value::<JournaledEffectRecord>(journal)
+            .expect_err("bare process_id must not deserialize from a journaled effect");
+        assert!(
+            journal_error
+                .to_string()
+                .contains("process_reference_format_cutover"),
+            "JournaledEffectRecord must return the typed cutover message: {journal_error}"
+        );
+    }
+}
