@@ -2212,7 +2212,9 @@ pub(super) async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePers
         },
         &[],
     );
-    move_attempt.current_frame_node_id = old_leaf.clone().map(crate::FrameNodeId::new);
+    move_attempt.current_frame_node_id = old_leaf.clone().map(|frame_node_id| {
+        crate::FrameNodeId::new(frame_node_id).expect("test frame identity is non-empty")
+    });
     let error = store
         .commit_runtime_state(move_attempt)
         .await

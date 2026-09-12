@@ -230,7 +230,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
                 process_id,
                 input.try_into()?,
                 disposition.into(),
-                provenance.into(),
+                provenance.try_into()?,
             )
             .with_max_attempts(max_attempts)
             .with_identity(identity.into())
@@ -378,7 +378,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             lease_expires_at_ms,
             abandon_request: abandon_request.map(Into::into),
             input: input.try_into()?,
-            originator: originator.into(),
+            originator: originator.try_into()?,
             env_ref: env_ref.map(|env_ref| {
                 lash_core::ProcessExecutionEnvRef::new(env_ref.as_str().to_string())
             }),

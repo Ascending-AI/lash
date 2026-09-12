@@ -21,7 +21,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             id,
             input.try_into()?,
             disposition.into(),
-            originator.into(),
+            originator.try_into()?,
         )
         .with_max_attempts(max_attempts)
         .with_wake_session_id(wake_session_id)

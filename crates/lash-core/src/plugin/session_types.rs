@@ -165,33 +165,36 @@ impl SessionSnapshot {
 }
 
 impl SessionSnapshot {
-    pub(crate) fn read_model(&self) -> crate::session_graph::SessionReadModel {
-        self.current_frame_node_id.as_deref().map_or_else(
-            || self.session_graph.read_model(),
-            |frame_node_id| self.session_graph.read_model_for_frame(frame_node_id),
-        )
+    pub(crate) fn read_model(
+        &self,
+    ) -> Result<crate::session_graph::SessionReadModel, crate::SessionGraphScopeError> {
+        self.session_graph
+            .read_model(self.current_frame_node_id.as_ref())
     }
 
     /// Exposes read view to store and durable-substrate implementors while snapshotting or
     /// restoring durable session state.
-    pub fn read_view(&self) -> crate::SessionReadView {
+    pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
         crate::SessionReadView::from_snapshot(self)
     }
 
     /// Replaces the active frame's readable message tail for store implementors restoring a
     /// snapshot; transient messages are not inserted into the graph.
-    pub fn replace_active_read_state(&mut self, messages: &[crate::Message]) {
-        if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
-            self.session_graph
-                .rewrite_active_read_tail_for_frame(frame_node_id, messages);
-        } else {
-            self.session_graph.rewrite_active_read_tail(messages);
-        }
+    pub fn replace_active_read_state(
+        &mut self,
+        messages: &[crate::Message],
+    ) -> Result<(), crate::SessionGraphScopeError> {
+        self.session_graph
+            .rewrite_active_read_tail(self.current_frame_node_id.as_ref(), messages)?;
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
-            .map(FrameNodeId::new);
+            .map(|frame_node_id| {
+                FrameNodeId::new(frame_node_id)
+                    .expect("a graph node identity selected as a frame is non-empty")
+            });
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
+        Ok(())
     }
 
     /// Appends non-transient messages after the active leaf for store implementors applying a
@@ -201,7 +204,10 @@ impl SessionSnapshot {
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
-            .map(FrameNodeId::new);
+            .map(|frame_node_id| {
+                FrameNodeId::new(frame_node_id)
+                    .expect("a graph node identity selected as a frame is non-empty")
+            });
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 }
@@ -232,29 +238,30 @@ pub enum SessionPluginSource {
 /// Durable identity of a frame-open node in the session graph.
 ///
 /// This is distinct from [`crate::FrameKey`], the checked key used to derive
-/// this value. Its transparent representation preserves the existing serialized
-/// string bytes, including the empty no-frame sentinel.
+/// this value. An absent [`FrameNodeId`] is represented by `Option::None`; the
+/// empty string is never a frame identity.
 #[repr(transparent)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct FrameNodeId(String);
 
-#[cfg(test)]
-impl Default for FrameNodeId {
-    fn default() -> Self {
-        Self::new(String::new())
-    }
+/// Rejection produced when constructing a [`FrameNodeId`] from invalid text.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum FrameNodeIdError {
+    /// The empty string is the removed legacy sentinel for an unscoped read.
+    #[error("frame node id must not be empty; use explicit absence for an unscoped operation")]
+    Empty,
 }
 
 impl FrameNodeId {
-    /// Wraps an already-derived durable frame-node identity inside core.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_raw_for_testing(value: impl Into<String>) -> Self {
-        Self(value.into())
+    /// Validates and wraps a durable frame-node identity.
+    pub fn new(value: impl Into<String>) -> Result<Self, FrameNodeIdError> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(FrameNodeIdError::Empty);
+        }
+        Ok(Self(value))
     }
 
     /// Borrows the durable frame-node identity as text.
@@ -265,6 +272,16 @@ impl FrameNodeId {
     /// Returns the owned durable frame-node identity.
     pub fn into_inner(self) -> String {
         self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for FrameNodeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -397,19 +414,29 @@ mod agent_frame_reason_tests {
 
 #[cfg(test)]
 mod frame_node_id_tests {
-    use super::FrameNodeId;
+    use super::{FrameNodeId, FrameNodeIdError};
 
     #[test]
-    fn frame_node_id_round_trips_original_string_bytes_and_empty_sentinel() {
-        for encoded in [r#""frame-node/v2/derived""#, r#""""#] {
-            let frame_node_id: FrameNodeId =
-                serde_json::from_str(encoded).expect("deserialize frame node id");
+    fn frame_node_id_round_trips_non_empty_identity() {
+        let encoded = r#""frame-node/v3/derived""#;
+        let frame_node_id: FrameNodeId =
+            serde_json::from_str(encoded).expect("deserialize frame node id");
 
-            assert_eq!(
-                serde_json::to_string(&frame_node_id).expect("serialize frame node id"),
-                encoded
-            );
-        }
+        assert_eq!(
+            serde_json::to_string(&frame_node_id).expect("serialize frame node id"),
+            encoded
+        );
+    }
+
+    #[test]
+    fn frame_node_id_rejects_empty_api_and_serialized_values() {
+        assert_eq!(FrameNodeId::new(""), Err(FrameNodeIdError::Empty));
+        assert!(
+            serde_json::from_str::<FrameNodeId>(r#""""#)
+                .expect_err("empty serialized frame node id must be rejected")
+                .to_string()
+                .contains("frame node id must not be empty")
+        );
     }
 }
 

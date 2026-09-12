@@ -7,11 +7,21 @@ use std::collections::{HashMap, HashSet};
 
 use crate::session_graph::SessionGraph;
 
+pub(crate) fn validate_node_id(node_id: &str) -> Result<(), crate::StoreError> {
+    if node_id.is_empty() {
+        return Err(crate::StoreError::InvalidGraphNodeId {
+            node_id: node_id.to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn graph_node_indices(
     graph: &SessionGraph,
 ) -> Result<HashMap<String, usize>, crate::StoreError> {
     let mut by_id = HashMap::with_capacity(graph.nodes.len());
     for (idx, node) in graph.nodes.iter().enumerate() {
+        validate_node_id(&node.node_id)?;
         if by_id.insert(node.node_id.clone(), idx).is_some() {
             return Err(crate::StoreError::NodeIdCollision {
                 node_id: node.node_id.clone(),

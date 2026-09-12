@@ -225,7 +225,7 @@ fn probe_context_with_projector(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

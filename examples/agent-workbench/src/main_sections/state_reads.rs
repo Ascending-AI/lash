@@ -95,7 +95,8 @@ pub(crate) async fn read_state_projection(
         .collect();
     let usage = persisted.usage_report();
     Ok(StateProjectionReads {
-        read_view: lash::persistence::SessionReadView::from_persisted_state(&persisted),
+        read_view: lash::persistence::SessionReadView::from_persisted_state(&persisted)
+            .map_err(AppError::internal)?,
         cursor,
         pending_turn_inputs,
         queued_work,

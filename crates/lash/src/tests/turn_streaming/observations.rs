@@ -269,6 +269,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
             .result
             .state
             .read_view()
+            .expect("test runtime frame scope resolves")
             .active_events()
             .iter()
             .filter(|record| match record {

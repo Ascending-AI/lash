@@ -236,7 +236,9 @@ fn export_observation_state(
     // invalidated, project only the already-adopted durable snapshot; never
     // recapture live plugin/tool state before the async reload gate runs.
     let mut state = runtime.export_persistence_state();
-    let read_view = runtime.read_view();
+    let read_view = runtime
+        .read_view()
+        .expect("resident runtime state is normalized before observation publication");
     let shared_ledger = runtime.shared_token_ledger.lock_recover();
     let mut saturated = false;
     for entry in shared_ledger.iter().cloned() {
@@ -855,6 +857,21 @@ impl LashRuntime {
 mod tests {
     use super::*;
 
+    fn switch_test_frame(state: &mut crate::RuntimeSessionState, material: &str) {
+        let frame_key = crate::FrameKey::from_caller_material(material).unwrap();
+        let frame_node_id =
+            crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
+        assert!(state.session_graph.append_frame_open_with_id_at(
+            frame_node_id.clone(),
+            frame_key,
+            crate::AgentFrameReason::new("observation-test"),
+            crate::AgentFrameAssignment::from_policy(state.policy.clone()),
+            state.protocol_turn_options.clone(),
+            <crate::SystemClock as crate::ClockWallTime>::timestamp_rfc3339(&crate::SystemClock,),
+        ));
+        state.refresh_current_frame_projection();
+    }
+
     struct PanicLiveReplayStore;
 
     #[derive(Debug)]
@@ -1138,10 +1155,7 @@ mod tests {
         let cursor = handle.observe().cursor().clone();
         let writer = handle.writer();
         let mut runtime = writer.lock().await;
-        runtime.state.current_frame_node_id = Some(crate::session_graph::frame_node_id(
-            &runtime.state.session_id,
-            "next-frame",
-        ));
+        switch_test_frame(&mut runtime.state, "next-frame");
 
         handle.publish_from(&runtime);
         let SessionResume::Replayed { events } = handle
@@ -1189,10 +1203,7 @@ mod tests {
         let writer = handle.writer();
         let mut runtime = writer.lock().await;
         runtime.state.turn_index = 1;
-        runtime.state.current_frame_node_id = Some(crate::session_graph::frame_node_id(
-            &runtime.state.session_id,
-            "next-frame",
-        ));
+        switch_test_frame(&mut runtime.state, "next-frame");
 
         handle.publish_from(&runtime);
         drop(runtime);

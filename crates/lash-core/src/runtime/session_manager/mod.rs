@@ -59,7 +59,9 @@ impl CurrentSnapshot {
                 graph_appends,
             } => {
                 let mut snapshot = meta.clone();
-                snapshot.replace_active_read_state(messages.as_slice());
+                snapshot
+                    .replace_active_read_state(messages.as_slice())
+                    .expect("managed read-model frame must resolve in its source session graph");
                 graph_appends.overlay_on_read_state(&mut snapshot);
                 snapshot
             }
@@ -235,7 +237,10 @@ impl CurrentSessionCapability {
             snapshot: match turn_graph_appends {
                 None => CurrentSnapshot::Owned(runtime.export_persistence_state()),
                 Some(graph_appends) => {
-                    let read_model = runtime.state.read_model();
+                    let read_model = runtime
+                        .state
+                        .read_model()
+                        .expect("turn-scoped runtime state is normalized before service creation");
                     CurrentSnapshot::ReadModel {
                         meta: Self::snapshot_meta_with_frame_root(runtime),
                         messages: read_model.messages,

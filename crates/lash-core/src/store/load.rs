@@ -68,15 +68,19 @@ pub async fn load_persisted_session(
 pub async fn load_persisted_session_read_view(
     store: &(dyn RuntimePersistence + '_),
 ) -> Result<Option<crate::SessionReadView>, StoreError> {
-    Ok(load_persisted_session_with_relation(store)
-        .await?
-        .map(|(loaded, relation)| {
-            crate::SessionReadView::from_persisted_state_with_relation_and_failures(
-                &loaded.state,
-                relation,
-                loaded.turn_failure_settlements,
-            )
-        }))
+    let Some((loaded, relation)) = load_persisted_session_with_relation(store).await? else {
+        return Ok(None);
+    };
+    crate::SessionReadView::from_persisted_state_with_relation_and_failures(
+        &loaded.state,
+        relation,
+        loaded.turn_failure_settlements,
+    )
+    .map(Some)
+    .map_err(|error| StoreError::StoredDataCorrupt {
+        record_kind: "SessionGraph",
+        message: error.to_string(),
+    })
 }
 
 /// Recover a session only after completing lease-fenced state admission.

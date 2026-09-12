@@ -1000,7 +1000,10 @@ impl GeneratedRuntimeWorld {
         let completed_after = turn.events.tool_completed_count().await;
         let activities = turn.events.snapshot().await;
         let assistant_message = result.assistant_message().unwrap_or_default().to_string();
-        let read_view = result.state.read_view();
+        let read_view = result
+            .state
+            .read_view()
+            .expect("runtime frame scope resolves");
         let graph_invariant = runtime_graph_invariant_facts(&result.state.session_graph);
         let usage_invariant = runtime_usage_invariant_facts(&result, &activities);
         let resumed_after_completion = completed_after > completed_before
@@ -1123,7 +1126,11 @@ async fn run_provider_turn_task(
             ))
         })?;
     let assistant_message = output.assistant_message().unwrap_or_default().to_string();
-    let read_view = output.result.state.read_view();
+    let read_view = output
+        .result
+        .state
+        .read_view()
+        .expect("runtime frame scope resolves");
     let graph_node_count = output.result.state.session_graph.nodes.len();
     let transcript_message_count = read_view.messages().len();
     let provider_exchange_count = transport_exchanges(transport.as_ref())?.len();

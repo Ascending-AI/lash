@@ -836,11 +836,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/dbb642b7a1bd5a0878e7c10f33e29dde43e89cbde2d5ddfd36cb0fd54edfa9ec"
+            "frame-key/v2/b1a9a3d625981644571d577dffb3e6f525f9965fe8e639f9334547cd54dc2750"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/dbb642b7a1bd5a0878e7c10f33e29dde43e89cbde2d5ddfd36cb0fd54edfa9ec"
+            "frame-key/v2/b1a9a3d625981644571d577dffb3e6f525f9965fe8e639f9334547cd54dc2750"
         );
     });
 }
