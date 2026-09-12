@@ -321,6 +321,7 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
     assert!(
         durable_after_append
             .read_view()
+            .expect("durable frame scope resolves")
             .messages()
             .iter()
             .any(|message| lash::message_text(message) == "append committed under head CAS"),
@@ -419,6 +420,7 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
     assert!(
         durable
             .read_view()
+            .expect("durable frame scope resolves")
             .messages()
             .iter()
             .any(|message| { lash::message_text(message) == "same-turn successor committed" })

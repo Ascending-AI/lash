@@ -297,7 +297,7 @@ fn commit_frame_derivation_uses_last_frame_boundary_inside_append() {
     let appended_frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     assert!(state.session_graph.append_frame_open_with_id_at(
-        appended_frame_node_id.to_string(),
+        appended_frame_node_id.clone(),
         frame_key,
         crate::AgentFrameReason::continue_as(),
         crate::AgentFrameAssignment::from_policy(state.policy.clone()),

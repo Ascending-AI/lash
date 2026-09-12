@@ -201,6 +201,7 @@ pub async fn direct_turn_accepts_before_driving(
     assert!(
         turn.state
             .read_view()
+            .expect("accepted turn frame scope resolves")
             .messages()
             .iter()
             .any(|message| matches!(

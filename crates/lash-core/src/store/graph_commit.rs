@@ -49,7 +49,10 @@ impl GraphAppend {
             .rev()
             .find(|node| matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }))
         {
-            return Some(crate::FrameNodeId::new(frame_node.node_id.clone()));
+            return Some(
+                crate::FrameNodeId::new(frame_node.node_id.clone())
+                    .expect("derived graph node identities are non-empty"),
+            );
         }
 
         let resident_parent_node_id = self.nodes.first().map_or_else(
@@ -58,7 +61,10 @@ impl GraphAppend {
         );
         resident_graph
             .nearest_frame_node_id(resident_parent_node_id)
-            .map(crate::FrameNodeId::new)
+            .map(|frame_node_id| {
+                crate::FrameNodeId::new(frame_node_id)
+                    .expect("resident graph node identities are non-empty")
+            })
     }
 
     pub fn validate_append_topology(&self) -> Result<(), StoreError> {

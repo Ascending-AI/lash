@@ -477,7 +477,11 @@ impl RuntimeTurnDriver<'_> {
             .apply_checkpoint(CheckpointHookContext {
                 session_id: self.session_id.clone(),
                 checkpoint,
-                state: self.checkpoint_state_view(messages, protocol_iteration),
+                state: self
+                    .checkpoint_state_view(messages, protocol_iteration)
+                    .map_err(|error| {
+                        RuntimeError::new(RuntimeErrorCode::PluginCheckpoint, error.to_string())
+                    })?,
                 sessions: self.session_services.state_service(),
                 session_lifecycle: self.session_services.lifecycle_service(),
                 session_graph: self.session_services.graph_service(),
@@ -568,7 +572,13 @@ impl RuntimeTurnDriver<'_> {
             }
         });
         let code_executor = self.session.plugins().code_executor();
-        let read_view = self.checkpoint_state_view(messages, protocol_iteration);
+        let read_view = self
+            .checkpoint_state_view(messages, protocol_iteration)
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(crate::PluginError::Session(
+                    error.to_string(),
+                ))
+            })?;
         let chronological_projection = read_view.shared_chronological_projection();
         let code_block_graph_key = foreground_exec_graph_key(&invocation);
         let context = self

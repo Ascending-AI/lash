@@ -233,7 +233,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
             parent_invocation: self.dispatch_parent_invocation,
             execution_env_spec: self.execution_env_spec.clone(),
             session_id: self.session_id,
-            agent_frame_id: crate::FrameNodeId::new(String::new()),
+            agent_frame_id: crate::FrameNodeId::new("test-frame")
+                .expect("test frame identity is non-empty"),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

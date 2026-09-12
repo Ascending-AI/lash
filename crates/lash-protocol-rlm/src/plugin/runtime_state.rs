@@ -896,7 +896,9 @@ mod tests {
         nodes: Vec<lash_core::SessionAppendNode>,
     ) -> lash_core::plugin::ProtocolSessionRestoreView {
         lash_core::plugin::ProtocolSessionRestoreView {
-            current_frame_node_id: Some(lash_core::FrameNodeId::new(frame)),
+            current_frame_node_id: Some(
+                lash_core::FrameNodeId::new(frame).expect("test frame identity is non-empty"),
+            ),
             execution_state: Ok(snapshot),
             active_events: nodes
                 .into_iter()

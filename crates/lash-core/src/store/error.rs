@@ -307,6 +307,8 @@ pub enum StoreError {
     },
     #[error("runtime commit node id `{node_id}` already exists in durable session history")]
     NodeIdCollision { node_id: String },
+    #[error("runtime commit node id must not be empty")]
+    InvalidGraphNodeId { node_id: String },
     #[error("runtime commit generation {generation} already exists for session `{session_id}`")]
     GraphGenerationCollision {
         session_id: SessionId,
@@ -647,6 +649,7 @@ impl StoreError {
             Self::AppendAncestorNotActive { .. } => "AppendAncestorNotActive",
             Self::NodeIdDerivationMismatch { .. } => "NodeIdDerivationMismatch",
             Self::NodeIdCollision { .. } => "NodeIdCollision",
+            Self::InvalidGraphNodeId { .. } => "InvalidGraphNodeId",
             Self::GraphGenerationCollision { .. } => "GraphGenerationCollision",
             Self::InvalidGraphLeaf { .. } => "InvalidGraphLeaf",
             Self::ForkPointNotRetained { .. } => "ForkPointNotRetained",

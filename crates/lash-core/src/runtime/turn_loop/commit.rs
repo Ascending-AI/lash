@@ -658,13 +658,18 @@ impl LashRuntime {
         {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = self.state.session_id.clone();
-            if let Err(err) = protocol_session
-                .restore_session(
-                    crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                    crate::plugin::ProtocolSessionRestoreView::new(&self.state),
-                )
-                .await
-            {
+            let restore_result = match crate::plugin::ProtocolSessionRestoreView::new(&self.state) {
+                Ok(view) => {
+                    protocol_session
+                        .restore_session(
+                            crate::plugin::ProtocolSessionContext::new(session, &session_id),
+                            view,
+                        )
+                        .await
+                }
+                Err(error) => Err(crate::SessionError::Protocol(error.to_string())),
+            };
+            if let Err(err) = restore_result {
                 delivery.turn.errors.push(post_commit_delivery_issue(
                     "protocol_restore_session",
                     err.to_string(),
@@ -883,7 +888,14 @@ impl LashRuntime {
         )
         .await;
 
-        let messages = crate::MessageSequence::from_base(self.state.read_model().messages);
+        let messages = crate::MessageSequence::from_base(
+            self.state
+                .read_model()
+                .map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
+                })?
+                .messages,
+        );
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),

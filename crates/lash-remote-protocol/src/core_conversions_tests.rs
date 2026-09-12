@@ -1706,7 +1706,8 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
         ))
     };
     let observation = lash_core::facade_support::SessionObservation {
-        read_view: lash_core::SessionReadView::from_snapshot(&snapshot),
+        read_view: lash_core::SessionReadView::from_snapshot(&snapshot)
+            .expect("test snapshot frame scope resolves"),
         cursor: event.cursor.clone(),
     };
 
@@ -1769,7 +1770,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
 
     let read_view = lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-    ));
+    ))
+    .expect("empty snapshot has an unscoped read view");
     let remote = RemoteSessionObservationEvent::from_core(
         8,
         event(
@@ -1787,7 +1789,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     let resident_read_view =
         lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ));
+        ))
+        .expect("empty snapshot has an unscoped read view");
     let remote = RemoteSessionObservationEvent::from_core(
         9,
         event(

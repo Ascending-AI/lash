@@ -216,10 +216,9 @@ impl TurnCommitDraft {
     ) -> Self {
         state.ensure_agent_frame_initialized_with_clock(clock.as_ref());
         let base_graph = Arc::new(std::mem::take(&mut state.session_graph));
-        let base_read_model = state.current_frame_node_id.as_deref().map_or_else(
-            || base_graph.read_model(),
-            |frame_node_id| base_graph.read_model_for_frame(frame_node_id),
-        );
+        let base_read_model = base_graph
+            .read_model(state.current_frame_node_id.as_ref())
+            .expect("runtime current frame must resolve in its validated session graph");
         let persisted_node_ids = std::mem::take(&mut state.persisted_node_ids);
         let graph = TurnGraphEditor::new(
             base_graph,
@@ -295,7 +294,7 @@ impl TurnCommitDraft {
         turn_index: usize,
         protocol_turn_options: crate::ProtocolTurnOptions,
         messages: MessageSequence,
-    ) -> SessionReadView {
+    ) -> Result<SessionReadView, crate::SessionGraphScopeError> {
         SessionReadView::derived_from_persisted_state(
             &self.state,
             policy,
@@ -355,7 +354,8 @@ impl TurnCommitDraft {
         if let Some(current) = self.state.current_frame_node_id.as_mut()
             && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
         {
-            *current = crate::FrameNodeId::new(derived.clone());
+            *current = crate::FrameNodeId::new(derived.clone())
+                .expect("derived graph node identities are non-empty");
         }
     }
 
@@ -679,7 +679,9 @@ mod tests {
                 .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
             Some(opened.frame_node_id.as_str())
         );
-        let read = state.read_model();
+        let read = state
+            .read_model()
+            .expect("test runtime frame scope resolves");
         assert_eq!(
             read.messages
                 .iter()

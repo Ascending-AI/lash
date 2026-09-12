@@ -2235,17 +2235,22 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .await
         .expect("read the admitted in-flight durable state");
     assert!(
-        in_flight
-            .as_ref()
-            .is_none_or(|state| state.read_view().messages().iter().all(|message| {
-                !matches!(
-                    message.origin.as_ref(),
-                    Some(lash::messages::MessageOrigin::TurnInput {
-                        turn_id: committed_turn_id,
-                        ..
-                    }) if committed_turn_id == turn_id
-                )
-            })),
+        in_flight.as_ref().is_none_or(|state| {
+            state
+                .read_view()
+                .expect("durable frame scope resolves")
+                .messages()
+                .iter()
+                .all(|message| {
+                    !matches!(
+                        message.origin.as_ref(),
+                        Some(lash::messages::MessageOrigin::TurnInput {
+                            turn_id: committed_turn_id,
+                            ..
+                        }) if committed_turn_id == turn_id
+                    )
+                })
+        }),
         "the initial turn input is not committed while the first provider call is in flight"
     );
 

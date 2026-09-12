@@ -132,7 +132,7 @@ impl LashRuntime {
         self.state.to_snapshot()
     }
 
-    pub fn read_view(&self) -> crate::SessionReadView {
+    pub fn read_view(&self) -> Result<crate::SessionReadView, crate::SessionGraphScopeError> {
         crate::SessionReadView::from_runtime_state(
             &self.state,
             self.state.effective_policy().clone(),
@@ -545,7 +545,9 @@ impl LashRuntime {
         };
         let ctx = crate::CompactionContext {
             session_id: self.state.session_id.clone(),
-            state: self.read_view(),
+            state: self
+                .read_view()
+                .map_err(|error| PluginOperationInvokeError::Unknown(error.to_string()))?,
             instructions,
             sessions: services.state_service(),
             session_lifecycle: services.lifecycle_service(),

@@ -388,7 +388,10 @@ impl LashRuntime {
                     &self.state,
                     turn_policy.clone(),
                     effective_protocol_turn_options.clone(),
-                ),
+                )
+                .map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
+                })?,
                 messages,
                 sessions: manager.state_service(),
                 session_lifecycle: manager.lifecycle_service(),

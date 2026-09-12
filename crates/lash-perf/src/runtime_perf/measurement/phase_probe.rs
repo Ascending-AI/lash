@@ -853,7 +853,11 @@ async fn run_once_inner(
         export_state_ms,
         total_ms: elapsed_ms(total_started),
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state.read_view().messages().len(),
+        active_path_messages: state
+            .read_view()
+            .expect("runtime frame scope resolves")
+            .messages()
+            .len(),
         extra_counters,
         metric_samples,
         metric_samples_ms: BTreeMap::new(),

@@ -2389,7 +2389,7 @@ async fn run_crash_matrix_case<F, I>(
         .await
         .expect("read recovered state")
         .expect("recovered turn commits state");
-    let read_model = state.session_graph.read_model();
+    let read_model = state.session_graph.read_model(None).unwrap();
     let part_count = |content: &str| {
         read_model
             .messages

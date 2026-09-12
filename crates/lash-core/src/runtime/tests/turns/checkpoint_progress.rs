@@ -501,6 +501,7 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
         .expect("turn");
 
     let read_model = turn.state.read_model();
+    let read_model = read_model.expect("accepted turn frame scope resolves");
     let user_message = read_model
         .messages
         .iter()

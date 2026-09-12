@@ -838,7 +838,8 @@ fn remap_optional_node_id(node_id: &mut Option<crate::FrameNodeId>, mapping: &[(
         return;
     };
     if let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str()) {
-        *current = crate::FrameNodeId::new(derived.clone());
+        *current = crate::FrameNodeId::new(derived.clone())
+            .expect("derived graph node identities are non-empty");
     }
 }
 
