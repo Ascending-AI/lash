@@ -234,6 +234,7 @@ lash_rust_integration_test(
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin",
     ],
+    test_env = {"CARGO_BIN_EXE_slack-clone-mcp-server": "$(rootpath :slack-clone-mcp-server__bin)"},
     library = ":slack-clone",
     library_crate_name = "slack_clone",
     manifest_dir = "examples/slack-clone",

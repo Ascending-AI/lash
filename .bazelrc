@@ -18,6 +18,7 @@ build:shared --remote_default_exec_properties=memory_kb=2097152
 build:shared --remote_local_fallback=false
 build:shared --remote_upload_local_results=true
 test:shared --test_output=errors
+test --cache_test_results=yes
 
 # Local execution remains available for CI, bootstrap, and reproduction.
 build:local --spawn_strategy=local

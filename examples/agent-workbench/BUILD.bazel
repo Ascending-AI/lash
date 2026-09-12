@@ -53,7 +53,10 @@ lash_rust_unit_test(
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
     package_name = "agent-workbench",
-    tags = [],
+    tags = [
+        "cargo-frontend-assets",
+        "manual",
+    ],
     version = "0.0.0-dev",
 )
 

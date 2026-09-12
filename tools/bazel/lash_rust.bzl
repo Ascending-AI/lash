@@ -52,6 +52,13 @@ def _cargo_check_cfg(declared_features):
         "--check-cfg=cfg(feature,values({}))".format(feature_values),
     ]
 
+def _test_env(extra):
+    # Insta otherwise shells out to Cargo to discover the workspace and then
+    # resolves snapshots from the package path twice inside Bazel runfiles.
+    result = {"INSTA_WORKSPACE_ROOT": "."}
+    result.update(extra)
+    return result
+
 def _aliases_for(deps, library = None, library_crate_name = None):
     result = {
         label: crate_name
@@ -179,6 +186,7 @@ def lash_rust_unit_test(
         extra_compile_data = [],
         library = None,
         library_crate_name = None,
+        test_env = {},
         tags = []):
     deps = all_crate_deps(normal = True, normal_dev = True)
     if build_script:
@@ -195,6 +203,7 @@ def lash_rust_unit_test(
         data = _all_package_files() + extra_compile_data,
         deps = deps,
         edition = "2024",
+        env = _test_env(test_env),
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
@@ -218,6 +227,7 @@ def lash_rust_integration_test(
         library = None,
         library_crate_name = None,
         extra_compile_data = [],
+        extra_data = [],
         rustc_env = {},
         test_env = {},
         tags = []):
@@ -231,10 +241,10 @@ def lash_rust_integration_test(
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = crate_root,
-        data = _all_package_files() + extra_compile_data,
+        data = _all_package_files() + extra_compile_data + extra_data,
         deps = deps,
         edition = "2024",
-        env = test_env,
+        env = _test_env(test_env),
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version, rustc_env),
         rustc_flags = _cargo_check_cfg(declared_features),
