@@ -1444,15 +1444,15 @@ jobs:
           # Pull both images up front with retries so a transient Docker Hub
           # error fails the pull instead of leaving `docker run` to report
           # "No such image" and take the whole trunk run red.
-          bash scripts/docker-pull-with-retry.sh minio/minio:RELEASE.2025-04-22T22-12-26Z
-          bash scripts/docker-pull-with-retry.sh minio/mc:RELEASE.2025-04-16T18-13-26Z
+          bash scripts/docker-pull-with-retry.sh quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+          bash scripts/docker-pull-with-retry.sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
           docker run -d --name lash-ci-minio \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
             -p 9000:9000 \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
           for attempt in $(seq 1 60); do
-            if docker run --rm --network host minio/mc:RELEASE.2025-04-16T18-13-26Z \
+            if docker run --rm --network host quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z \
               alias set ci http://127.0.0.1:9000 minioadmin minioadmin; then
               break
             fi
@@ -1462,7 +1462,7 @@ jobs:
             fi
             sleep 1
           done
-          docker run --rm --network host --entrypoint /bin/sh minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
+          docker run --rm --network host --entrypoint /bin/sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
             'mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin >/dev/null && mc mb --ignore-existing ci/lash-attachments'
 
       - name: Test S3 store conformance

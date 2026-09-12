@@ -364,20 +364,20 @@ run_minio_conformance() {
   step "MinIO/S3 conformance"
   minio_container="lash-minio-push-gate-${LASH_GATE_WORKTREE_SLUG}"
   local port="${LASH_PUSH_GATE_MINIO_PORT:-$((port_base + 11))}"
-  bash scripts/docker-pull-with-retry.sh minio/minio:RELEASE.2025-04-22T22-12-26Z
-  bash scripts/docker-pull-with-retry.sh minio/mc:RELEASE.2025-04-16T18-13-26Z
+  bash scripts/docker-pull-with-retry.sh quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+  bash scripts/docker-pull-with-retry.sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
   docker run -d --name "$minio_container" \
     --label "$LASH_GATE_LABEL" \
     --network "$LASH_E2E_NETWORK" \
     -e MINIO_ROOT_USER=minioadmin \
     -e MINIO_ROOT_PASSWORD=minioadmin \
     -p "127.0.0.1:${port}:9000" \
-    minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+    quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
 
   local endpoint="http://127.0.0.1:${port}"
   local deadline=$((SECONDS + 60))
   until docker run --rm --name "lash-minio-probe-${LASH_GATE_WORKTREE_SLUG}-$$" \
-    --label "$LASH_GATE_LABEL" --network host minio/mc:RELEASE.2025-04-16T18-13-26Z \
+    --label "$LASH_GATE_LABEL" --network host quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z \
     alias set fig831 "$endpoint" minioadmin minioadmin >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
       docker logs "$minio_container" >&2 || true
@@ -388,7 +388,7 @@ run_minio_conformance() {
   done
   docker run --rm --name "lash-minio-setup-${LASH_GATE_WORKTREE_SLUG}-$$" \
     --label "$LASH_GATE_LABEL" --network host --entrypoint /bin/sh \
-    minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
+    quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
     "mc alias set fig831 '$endpoint' minioadmin minioadmin >/dev/null && mc mb --ignore-existing fig831/lash-attachments >/dev/null"
 
   LASH_MINIO_ENDPOINT="$endpoint" \

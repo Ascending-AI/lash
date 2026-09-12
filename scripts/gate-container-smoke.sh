@@ -24,7 +24,7 @@ cleanup() {
 trap cleanup EXIT
 
 bash scripts/docker-pull-with-retry.sh postgres:16-alpine
-bash scripts/docker-pull-with-retry.sh minio/minio:RELEASE.2025-04-22T22-12-26Z
+bash scripts/docker-pull-with-retry.sh quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
 bash scripts/docker-pull-with-retry.sh restatedev/restate:1.7.0
 
 docker run -d --name "$postgres_container" \
@@ -41,7 +41,7 @@ docker run -d --name "$minio_container" \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=minioadmin \
   -p "127.0.0.1:${minio_port}:9000" \
-  minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+  quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
 docker run -d --name "$restate_container" \
   --label "$LASH_GATE_LABEL" \
   --network host \
