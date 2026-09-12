@@ -154,8 +154,10 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
     event_tx: &mpsc::Sender<RuntimeStreamEvent>,
     response: &LlmResponse,
     prose_projector: Option<&dyn crate::plugin::AssistantProseProjectorPlugin>,
+    reasoning_publication: &ReasoningPublicationState,
 ) {
     let visible_parts = crate::visible_response_parts(response.parts.clone());
+    let published_reasoning = reasoning_publication.published_response_part_indices(&visible_parts);
     let has_text_correlation_ids = visible_parts.iter().any(|part| {
         matches!(
             part,
@@ -166,7 +168,7 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
         )
     });
     let mut emitted_text = false;
-    for part in &visible_parts {
+    for (part_index, part) in visible_parts.iter().enumerate() {
         match part {
             LlmOutputPart::Text {
                 text,
@@ -189,7 +191,9 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
                 )
                 .await;
             }
-            LlmOutputPart::Reasoning { text, replay } if !text.is_empty() => {
+            LlmOutputPart::Reasoning { text, replay }
+                if !published_reasoning.contains(&part_index) && !text.is_empty() =>
+            {
                 let correlation_id = replay
                     .as_ref()
                     .and_then(|meta| meta.item_id.clone())

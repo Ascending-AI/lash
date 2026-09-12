@@ -14,8 +14,8 @@ use lash_core::{
 use lash_lashlang_runtime::{
     LASHLANG_ENGINE_KIND, TraceLanguageChildExecution, TraceLanguageExecution,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lashlang_value_to_json,
-    prepare_lashlang_process_start, protocol_tool_output_to_lashlang_value,
-    resolve_lashlang_module_operation, sleep_duration_ms,
+    prepare_lashlang_process_start, process_sleep, protocol_tool_output_to_lashlang_value,
+    resolve_lashlang_module_operation,
 };
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ProcessSignal, ProcessStart,
@@ -656,10 +656,10 @@ impl HostBridge<'_> {
     }
 
     async fn sleep(&self, sleep: Sleep) -> Result<FlowValue, ExecutionHostError> {
-        let duration_ms = sleep_duration_ms(sleep.kind, &sleep.value)?;
+        let sleep = process_sleep(sleep.kind, &sleep.value)?;
         let sequence = self.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         self.ctx
-            .sleep_process("foreground", sequence, duration_ms)
+            .sleep_process("foreground", sequence, sleep)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         Ok(FlowValue::Null)

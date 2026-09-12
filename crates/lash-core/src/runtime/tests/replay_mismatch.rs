@@ -55,7 +55,9 @@ impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::Sleep {
-                duration_ms: u64::MAX
+                spec: crate::SleepSpec::For {
+                    duration_ms: u64::MAX
+                }
             }
         ) {
             return std::future::pending().await;
@@ -138,7 +140,9 @@ async fn proxied_controller_owned_replay_mismatch_aborts_with_structured_summary
                         "proxy-pump",
                     ),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: u64::MAX,
+                        spec: crate::SleepSpec::For {
+                            duration_ms: u64::MAX,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::unavailable(),

@@ -356,7 +356,9 @@ fn effect_group(
                     format!("sleep-{position}"),
                 ),
                 RuntimeEffectCommand::Sleep {
-                    duration_ms: *duration_ms,
+                    spec: lash::runtime::SleepSpec::For {
+                        duration_ms: *duration_ms,
+                    },
                 },
             )
         })

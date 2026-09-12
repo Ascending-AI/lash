@@ -102,7 +102,7 @@ impl GroupFixture {
             owner_id: owner.to_string(),
             lease_token: format!("token-{owner}"),
             lease_ttl_ms: 30_000,
-            sleep_duration_ms: None,
+            sleep: None,
             group_key: Some(self.group_key.clone()),
             strict_replay: false,
         }

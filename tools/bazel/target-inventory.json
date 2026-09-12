@@ -1,0 +1,1773 @@
+{
+  "cargo_only_target_count": 1,
+  "cargo_package_count": 39,
+  "cargo_target_count": 117,
+  "generated_label_count": 206,
+  "packages": [
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-conformance/Cargo.toml",
+      "package": "lash-internal-conformance",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_conformance",
+          "kind": "lib",
+          "label": "//crates/lash-conformance:lash-conformance"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-conformance:lash-conformance__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-conformance:lash-conformance__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing"
+      ],
+      "manifest": "crates/lash-core/Cargo.toml",
+      "package": "lash-internal-core",
+      "resolved_features": [
+        "default",
+        "perf-witness",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_core",
+          "kind": "lib",
+          "label": "//crates/lash-core:lash-core"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-core:lash-core__unit_test",
+          "tags": [
+            "cargo-nested-suite",
+            "manual"
+          ]
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-core:lash-core__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "integration_boundary",
+          "kind": "test",
+          "label": "//crates/lash-core:integration_boundary__test",
+          "tags": [
+            "cargo-nested-suite",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "panic_containment",
+          "kind": "test",
+          "label": "//crates/lash-core:panic_containment__test",
+          "tags": []
+        },
+        {
+          "cargo": "tool_execution_grant_layout",
+          "kind": "test",
+          "label": "//crates/lash-core:tool_execution_grant_layout__test",
+          "tags": []
+        },
+        {
+          "cargo": "turn_event_schema",
+          "kind": "test",
+          "label": "//crates/lash-core:turn_event_schema__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-http-transport/Cargo.toml",
+      "package": "lash-internal-http-transport",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_http_transport",
+          "kind": "lib",
+          "label": "//crates/lash-http-transport:lash-http-transport"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-http-transport:lash-http-transport__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-http-transport:lash-http-transport__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "testing"
+      ],
+      "manifest": "crates/lash-lashlang-runtime/Cargo.toml",
+      "package": "lash-internal-lashlang-runtime",
+      "resolved_features": [
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_lashlang_runtime",
+          "kind": "lib",
+          "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "lashlang"
+      ],
+      "manifest": "crates/lash-llm-tools/Cargo.toml",
+      "package": "lash-internal-llm-tools",
+      "resolved_features": [
+        "default",
+        "lashlang"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_llm_tools",
+          "kind": "lib",
+          "label": "//crates/lash-llm-tools:lash-llm-tools"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-llm-tools:lash-llm-tools__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-llm-tools:lash-llm-tools__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "proptest-support",
+        "testing"
+      ],
+      "manifest": "crates/lash-llm-transport/Cargo.toml",
+      "package": "lash-internal-llm-transport",
+      "resolved_features": [
+        "proptest-support",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_llm_transport",
+          "kind": "lib",
+          "label": "//crates/lash-llm-transport:lash-llm-transport"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-llm-transport:lash-llm-transport__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-llm-transport:lash-llm-transport__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "property",
+          "kind": "test",
+          "label": "//crates/lash-llm-transport:property__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "dhat-heap"
+      ],
+      "manifest": "crates/lash-perf/Cargo.toml",
+      "package": "lash-perf",
+      "resolved_features": [
+        "default"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_perf",
+          "kind": "lib",
+          "label": "//crates/lash-perf:lash-perf"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-perf:lash-perf__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-perf:lash-perf__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "lash-perf",
+          "kind": "bin",
+          "label": "//crates/lash-perf:lash-perf__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//crates/lash-perf:lash-perf__bin__unit_test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "lashlang"
+      ],
+      "manifest": "crates/lash-plugin-mcp/Cargo.toml",
+      "package": "lash-internal-plugin-mcp",
+      "resolved_features": [
+        "default",
+        "lashlang"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_plugin_mcp",
+          "kind": "lib",
+          "label": "//crates/lash-plugin-mcp:lash-plugin-mcp"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "lashlang"
+      ],
+      "manifest": "crates/lash-plugin-process-controls/Cargo.toml",
+      "package": "lash-internal-plugin-process-controls",
+      "resolved_features": [
+        "default",
+        "lashlang"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_plugin_process_controls",
+          "kind": "lib",
+          "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-plugin-rolling-history/Cargo.toml",
+      "package": "lash-internal-plugin-rolling-history",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_plugin_rolling_history",
+          "kind": "lib",
+          "label": "//crates/lash-plugin-rolling-history:lash-plugin-rolling-history"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-plugin-rolling-history:lash-plugin-rolling-history__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-plugin-rolling-history:lash-plugin-rolling-history__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-plugin-tool-output-budget/Cargo.toml",
+      "package": "lash-internal-plugin-tool-output-budget",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_plugin_tool_output_budget",
+          "kind": "lib",
+          "label": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "lashlang",
+        "perf-witness",
+        "testing"
+      ],
+      "manifest": "crates/lash-postgres-store/Cargo.toml",
+      "package": "lash-internal-postgres-store",
+      "resolved_features": [
+        "default",
+        "lashlang",
+        "perf-witness",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_postgres_store",
+          "kind": "lib",
+          "label": "//crates/lash-postgres-store:lash-postgres-store"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-postgres-store:lash-postgres-store__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "postgres-await-event-helper",
+          "kind": "example",
+          "label": "//crates/lash-postgres-store:postgres-await-event-helper__example",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "integration",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:integration__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "conformance",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:conformance__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "durable_read_fixture",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:durable_read_fixture__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "preflight_durable_walk",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:preflight_durable_walk__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "preflight_schema_status",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:preflight_schema_status__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "schema_drift",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:schema_drift__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "schema_constraints",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:schema_constraints__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "testing"
+      ],
+      "manifest": "crates/lash-protocol-rlm/Cargo.toml",
+      "package": "lash-internal-protocol-rlm",
+      "resolved_features": [
+        "default",
+        "testing"
+      ],
+      "targets": [
+        {
+          "kind": "custom-build",
+          "label": "//crates/lash-protocol-rlm:build_script"
+        },
+        {
+          "cargo": "lash_protocol_rlm",
+          "kind": "lib",
+          "label": "//crates/lash-protocol-rlm:lash-protocol-rlm"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "protocol_drivers",
+          "kind": "test",
+          "label": "//crates/lash-protocol-rlm:protocol_drivers__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "lashlang"
+      ],
+      "manifest": "crates/lash-protocol-standard/Cargo.toml",
+      "package": "lash-internal-protocol-standard",
+      "resolved_features": [
+        "default",
+        "lashlang"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_protocol_standard",
+          "kind": "lib",
+          "label": "//crates/lash-protocol-standard:lash-protocol-standard"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-protocol-standard:lash-protocol-standard__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-protocol-standard:lash-protocol-standard__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "embedded_builder",
+          "kind": "test",
+          "label": "//crates/lash-protocol-standard:embedded_builder__test",
+          "tags": []
+        },
+        {
+          "cargo": "native_tools",
+          "kind": "test",
+          "label": "//crates/lash-protocol-standard:native_tools__test",
+          "tags": []
+        },
+        {
+          "cargo": "protocol_scenarios",
+          "kind": "test",
+          "label": "//crates/lash-protocol-standard:protocol_scenarios__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "testing"
+      ],
+      "manifest": "crates/lash-provider-anthropic/Cargo.toml",
+      "package": "lash-internal-provider-anthropic",
+      "resolved_features": [
+        "default",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_provider_anthropic",
+          "kind": "lib",
+          "label": "//crates/lash-provider-anthropic:lash-provider-anthropic"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-provider-anthropic:lash-provider-anthropic__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "charge_safety",
+          "kind": "test",
+          "label": "//crates/lash-provider-anthropic:charge_safety__test",
+          "tags": []
+        },
+        {
+          "cargo": "property",
+          "kind": "test",
+          "label": "//crates/lash-provider-anthropic:property__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-provider-auth/Cargo.toml",
+      "package": "lash-internal-provider-auth",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_provider_auth",
+          "kind": "lib",
+          "label": "//crates/lash-provider-auth:lash-provider-auth"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-provider-auth:lash-provider-auth__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-provider-auth:lash-provider-auth__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "testing"
+      ],
+      "manifest": "crates/lash-provider-google/Cargo.toml",
+      "package": "lash-internal-provider-google",
+      "resolved_features": [
+        "default",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_provider_google",
+          "kind": "lib",
+          "label": "//crates/lash-provider-google:lash-provider-google"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-provider-google:lash-provider-google__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-provider-google:lash-provider-google__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "charge_safety",
+          "kind": "test",
+          "label": "//crates/lash-provider-google:charge_safety__test",
+          "tags": []
+        },
+        {
+          "cargo": "property",
+          "kind": "test",
+          "label": "//crates/lash-provider-google:property__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "testing"
+      ],
+      "manifest": "crates/lash-provider-openai/Cargo.toml",
+      "package": "lash-internal-provider-openai",
+      "resolved_features": [
+        "default",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_provider_openai",
+          "kind": "lib",
+          "label": "//crates/lash-provider-openai:lash-provider-openai"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-provider-openai:lash-provider-openai__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-provider-openai:lash-provider-openai__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "codex_websocket_runtime",
+          "kind": "test",
+          "label": "//crates/lash-provider-openai:codex_websocket_runtime__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16"
+      ],
+      "manifest": "crates/lash-regress/Cargo.toml",
+      "package": "lash-regress",
+      "resolved_features": [
+        "backend-pikevm",
+        "default",
+        "std",
+        "utf16"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_regress",
+          "kind": "lib",
+          "label": "//crates/lash-regress:lash-regress"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-regress:lash-regress__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-regress:lash-regress__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "integration",
+          "kind": "test",
+          "label": "//crates/lash-regress:integration__test",
+          "tags": []
+        },
+        {
+          "cargo": "unicode_property_escapes",
+          "kind": "test",
+          "label": "//crates/lash-regress:unicode_property_escapes__test",
+          "tags": []
+        },
+        {
+          "cargo": "unicodesets",
+          "kind": "test",
+          "label": "//crates/lash-regress:unicodesets__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "core-conversions",
+        "default"
+      ],
+      "manifest": "crates/lash-remote-protocol/Cargo.toml",
+      "package": "lash-internal-remote-protocol",
+      "resolved_features": [
+        "core-conversions",
+        "default"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_remote_protocol",
+          "kind": "lib",
+          "label": "//crates/lash-remote-protocol:lash-remote-protocol"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-remote-protocol:lash-remote-protocol__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-remote-protocol:lash-remote-protocol__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-restate/Cargo.toml",
+      "package": "lash-internal-restate",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_restate",
+          "kind": "lib",
+          "label": "//crates/lash-restate:lash-restate"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-restate:lash-restate__unit_test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-restate:lash-restate__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-rlm-types/Cargo.toml",
+      "package": "lash-internal-rlm-types",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_rlm_types",
+          "kind": "lib",
+          "label": "//crates/lash-rlm-types:lash-rlm-types"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-rlm-types:lash-rlm-types__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-rlm-types:lash-rlm-types__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "testing"
+      ],
+      "manifest": "crates/lash-s3-store/Cargo.toml",
+      "package": "lash-internal-s3-store",
+      "resolved_features": [
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_s3_store",
+          "kind": "lib",
+          "label": "//crates/lash-s3-store:lash-s3-store"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-s3-store:lash-s3-store__unit_test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-s3-store:lash-s3-store__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "schema-validation"
+      ],
+      "manifest": "crates/lash-sansio/Cargo.toml",
+      "package": "lash-internal-sansio",
+      "resolved_features": [
+        "default",
+        "schema-validation"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_sansio",
+          "kind": "lib",
+          "label": "//crates/lash-sansio:lash-sansio"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-sansio:lash-sansio__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-sansio:lash-sansio__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-sim/Cargo.toml",
+      "package": "lash-sim",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_sim",
+          "kind": "lib",
+          "label": "//crates/lash-sim:lash-sim"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-sim:lash-sim__unit_test",
+          "tags": [
+            "cargo-heavy-suite",
+            "manual"
+          ]
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-sim:lash-sim__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "lash-sim",
+          "kind": "bin",
+          "label": "//crates/lash-sim:lash-sim__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//crates/lash-sim:lash-sim__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "cross_backend_active_turn_divergence",
+          "kind": "test",
+          "label": "//crates/lash-sim:cross_backend_active_turn_divergence__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "cross_backend_store_differential",
+          "kind": "test",
+          "label": "//crates/lash-sim:cross_backend_store_differential__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "logical_turn",
+          "kind": "test",
+          "label": "//crates/lash-sim:logical_turn__test",
+          "tags": []
+        },
+        {
+          "cargo": "retention_classification",
+          "kind": "test",
+          "label": "//crates/lash-sim:retention_classification__test",
+          "tags": []
+        },
+        {
+          "cargo": "schema_congruence",
+          "kind": "test",
+          "label": "//crates/lash-sim:schema_congruence__test",
+          "tags": []
+        },
+        {
+          "cargo": "stack_policy",
+          "kind": "test",
+          "label": "//crates/lash-sim:stack_policy__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "lashlang",
+        "perf-witness",
+        "testing"
+      ],
+      "manifest": "crates/lash-sqlite-store/Cargo.toml",
+      "package": "lash-internal-sqlite-store",
+      "resolved_features": [
+        "default",
+        "lashlang",
+        "perf-witness",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_sqlite_store",
+          "kind": "lib",
+          "label": "//crates/lash-sqlite-store:lash-sqlite-store"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-sqlite-store:lash-sqlite-store__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "sqlite-await-event-helper",
+          "kind": "example",
+          "label": "//crates/lash-sqlite-store:sqlite-await-event-helper__example",
+          "tags": []
+        },
+        {
+          "cargo": "integration",
+          "kind": "test",
+          "label": "//crates/lash-sqlite-store:integration__test",
+          "tags": []
+        },
+        {
+          "cargo": "conformance",
+          "kind": "test",
+          "label": "//crates/lash-sqlite-store:conformance__test",
+          "tags": []
+        },
+        {
+          "cargo": "process_change_horizon",
+          "kind": "test",
+          "label": "//crates/lash-sqlite-store:process_change_horizon__test",
+          "tags": []
+        },
+        {
+          "cargo": "durable_read_fixture",
+          "kind": "test",
+          "label": "//crates/lash-sqlite-store:durable_read_fixture__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "crates/lash-subagents/Cargo.toml",
+      "package": "lash-internal-subagents",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_subagents",
+          "kind": "lib",
+          "label": "//crates/lash-subagents:lash-subagents"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-subagents:lash-subagents__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-subagents:lash-subagents__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "lashlang"
+      ],
+      "manifest": "crates/lash-tool-support/Cargo.toml",
+      "package": "lash-internal-tool-support",
+      "resolved_features": [
+        "default",
+        "lashlang"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_tool_support",
+          "kind": "lib",
+          "label": "//crates/lash-tool-support:lash-tool-support"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-tool-support:lash-tool-support__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-tool-support:lash-tool-support__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "otel"
+      ],
+      "manifest": "crates/lash-trace/Cargo.toml",
+      "package": "lash-internal-trace",
+      "resolved_features": [
+        "default"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_trace",
+          "kind": "lib",
+          "label": "//crates/lash-trace:lash-trace"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-trace:lash-trace__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-trace:lash-trace__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "schema",
+          "kind": "test",
+          "label": "//crates/lash-trace:schema__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "testing"
+      ],
+      "manifest": "crates/lash-typescript/Cargo.toml",
+      "package": "lash-internal-typescript",
+      "resolved_features": [
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_typescript",
+          "kind": "lib",
+          "label": "//crates/lash-typescript:lash-typescript"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash-typescript:lash-typescript__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash-typescript:lash-typescript__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "integration",
+          "kind": "test",
+          "label": "//crates/lash-typescript:integration__test",
+          "tags": [
+            "cargo-path-assets",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "otel-trace",
+        "rlm",
+        "testing"
+      ],
+      "manifest": "crates/lash/Cargo.toml",
+      "package": "lash-runtime",
+      "resolved_features": [
+        "default",
+        "rlm",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash",
+          "kind": "lib",
+          "label": "//crates/lash:lash"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lash:lash__unit_test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lash:lash__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "embed_plugins",
+          "kind": "test",
+          "label": "//crates/lash:embed_plugins__test",
+          "tags": []
+        },
+        {
+          "cargo": "integrator_facade",
+          "kind": "test",
+          "label": "//crates/lash:integrator_facade__test",
+          "tags": []
+        },
+        {
+          "cargo": "one_home",
+          "kind": "test",
+          "label": "//crates/lash:one_home__test",
+          "tags": []
+        },
+        {
+          "cargo": "process_scope_fence",
+          "kind": "test",
+          "label": "//crates/lash:process_scope_fence__test",
+          "tags": []
+        },
+        {
+          "cargo": "runtime_operation_retirement",
+          "kind": "test",
+          "label": "//crates/lash:runtime_operation_retirement__test",
+          "tags": []
+        },
+        {
+          "cargo": "stores_evidence",
+          "kind": "test",
+          "label": "//crates/lash:stores_evidence__test",
+          "tags": []
+        },
+        {
+          "cargo": "testing_conformance",
+          "kind": "test",
+          "label": "//crates/lash:testing_conformance__test",
+          "tags": []
+        },
+        {
+          "cargo": "tool_intent_ingress_observability",
+          "kind": "test",
+          "label": "//crates/lash:tool_intent_ingress_observability__test",
+          "tags": []
+        },
+        {
+          "cargo": "ui",
+          "kind": "test",
+          "label": "//crates/lash:ui__test",
+          "tags": [
+            "cargo-trybuild",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "testing"
+      ],
+      "manifest": "crates/lashlang/Cargo.toml",
+      "package": "lash-internal-lashlang",
+      "resolved_features": [
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lashlang",
+          "kind": "lib",
+          "label": "//crates/lashlang:lashlang"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//crates/lashlang:lashlang__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//crates/lashlang:lashlang__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "function_perf",
+          "kind": "example",
+          "label": "//crates/lashlang:function_perf__example",
+          "tags": []
+        },
+        {
+          "cargo": "perf",
+          "kind": "example",
+          "label": "//crates/lashlang:perf__example",
+          "tags": []
+        },
+        {
+          "cargo": "profile",
+          "kind": "example",
+          "label": "//crates/lashlang:profile__example",
+          "tags": []
+        },
+        {
+          "cargo": "integration",
+          "kind": "test",
+          "label": "//crates/lashlang:integration__test",
+          "tags": []
+        },
+        {
+          "cargo": "benchmark_contract",
+          "kind": "test",
+          "label": "//crates/lashlang:benchmark_contract__test",
+          "tags": []
+        },
+        {
+          "cargo": "stack_budget",
+          "kind": "test",
+          "label": "//crates/lashlang:stack_budget__test",
+          "tags": []
+        },
+        {
+          "cargo": "property",
+          "kind": "test",
+          "label": "//crates/lashlang:property__test",
+          "tags": []
+        },
+        {
+          "cargo": "benchmark",
+          "kind": "bench",
+          "label": "//crates/lashlang:benchmark__bench",
+          "tags": [
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "restate"
+      ],
+      "manifest": "examples/agent-service/Cargo.toml",
+      "package": "agent-service",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "agent-service",
+          "kind": "bin",
+          "label": "//examples/agent-service:agent-service",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/agent-service:agent-service__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "fresh_boot",
+          "kind": "test",
+          "label": "//examples/agent-service:fresh_boot__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "provider-wire-fixtures"
+      ],
+      "manifest": "examples/agent-workbench/Cargo.toml",
+      "package": "agent-workbench",
+      "resolved_features": [
+        "default"
+      ],
+      "targets": [
+        {
+          "cargo": "agent-workbench",
+          "kind": "bin",
+          "label": "//examples/agent-workbench:agent-workbench",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/agent-workbench:agent-workbench__unit_test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "e2e",
+        "live-e2e"
+      ],
+      "manifest": "examples/slack-clone/Cargo.toml",
+      "package": "slack-clone",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "slack_clone",
+          "kind": "lib",
+          "label": "//examples/slack-clone:slack-clone"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//examples/slack-clone:slack-clone__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//examples/slack-clone:slack-clone__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "slack-clone-bot",
+          "kind": "bin",
+          "label": "//examples/slack-clone:slack-clone-bot__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/slack-clone:slack-clone-bot__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "slack-clone-live-e2e",
+          "cargo_only": "required features are outside the resolved default workspace graph",
+          "kind": "bin",
+          "label": null,
+          "required_features": [
+            "live-e2e"
+          ],
+          "tags": [
+            "cargo-feature-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "slack-clone-mcp-http-server",
+          "kind": "bin",
+          "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "slack-clone-mcp-server",
+          "kind": "bin",
+          "label": "//examples/slack-clone:slack-clone-mcp-server__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/slack-clone:slack-clone-mcp-server__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "slack-clone-platform",
+          "kind": "bin",
+          "label": "//examples/slack-clone:slack-clone-platform__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/slack-clone:slack-clone-platform__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "mcp",
+          "kind": "test",
+          "label": "//examples/slack-clone:mcp__test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "examples/toolbench/Cargo.toml",
+      "package": "toolbench",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "toolbench",
+          "kind": "bin",
+          "label": "//examples/toolbench:toolbench",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/toolbench:toolbench__unit_test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "examples/workflow-graph-roundtrip/Cargo.toml",
+      "package": "workflow-graph-roundtrip",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "workflow_graph_roundtrip",
+          "kind": "lib",
+          "label": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "workflow-graph-roundtrip",
+          "kind": "bin",
+          "label": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "authoring",
+          "kind": "test",
+          "label": "//examples/workflow-graph-roundtrip:authoring__test",
+          "tags": [
+            "cargo-frontend-assets",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "roundtrip",
+          "kind": "test",
+          "label": "//examples/workflow-graph-roundtrip:roundtrip__test",
+          "tags": [
+            "cargo-frontend-assets",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "type_facets",
+          "kind": "test",
+          "label": "//examples/workflow-graph-roundtrip:type_facets__test",
+          "tags": [
+            "cargo-frontend-assets",
+            "manual"
+          ]
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "runbooks/restate-postgres-workers/Cargo.toml",
+      "package": "lash-restate-postgres-workers-e2e",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "lash_restate_postgres_workers_e2e",
+          "kind": "lib",
+          "label": "//runbooks/restate-postgres-workers:restate-postgres-workers"
+        },
+        {
+          "kind": "unit-test",
+          "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
+          "tags": []
+        },
+        {
+          "kind": "doc-test",
+          "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__doc_test",
+          "tags": [
+            "cargo-authoritative-doctest",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "lash-e2e-await-event-helper",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-await-event-helper__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-await-event-helper__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-frame-crash",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-frame-crash__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-frame-crash__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-mock-provider",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-process-operations-worker",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operations-worker__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operations-worker__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-process-operator-flow",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operator-flow__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-process-operator-flow__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-runner",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-session-lease-triage",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-session-lease-triage__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-session-lease-triage__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-version-bump",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-version-bump__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-version-bump__bin__unit_test",
+          "tags": []
+        },
+        {
+          "cargo": "lash-e2e-worker",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__unit_test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [],
+      "manifest": "runbooks/rlm-smoke/Cargo.toml",
+      "package": "rlm-smoke-host",
+      "resolved_features": [],
+      "targets": [
+        {
+          "cargo": "rlm-smoke-host",
+          "kind": "bin",
+          "label": "//runbooks/rlm-smoke:rlm-smoke",
+          "tags": []
+        },
+        {
+          "kind": "bin-unit-test",
+          "label": "//runbooks/rlm-smoke:rlm-smoke__unit_test",
+          "tags": []
+        }
+      ]
+    }
+  ]
+}

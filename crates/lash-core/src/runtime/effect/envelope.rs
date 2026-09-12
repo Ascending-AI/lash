@@ -465,6 +465,20 @@ fn validate_effect_command(
     Ok(())
 }
 
+/// A sleep's durable intent: relative duration or absolute wall-clock deadline.
+///
+/// One shape for the whole path — guest bridge, effect envelope, and claim
+/// derivation — so adding a sleep shape is a compile error at every consumer
+/// instead of a silent fall-through. `Until` carries epoch milliseconds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SleepSpec {
+    /// Sleep for `duration_ms` from the claim instant.
+    For { duration_ms: u64 },
+    /// Sleep until the wall-clock instant `deadline_ms`.
+    Until { deadline_ms: u64 },
+}
+
 /// Serializable command emitted at Lash's nondeterministic runtime boundary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -516,8 +530,13 @@ pub enum RuntimeEffectCommand {
     SyncExecutionEnvironment {
         update_machine_config: bool,
     },
+    /// Sleep for a relative duration or until an absolute wall-clock deadline.
+    ///
+    /// The intent is the journaled parameter, never a duration derived from the
+    /// clock at execution time, so a deadline-bearing sleep replays against the
+    /// same envelope (FIG-2968).
     Sleep {
-        duration_ms: u64,
+        spec: SleepSpec,
     },
     AwaitEvent {
         key: crate::AwaitEventKey,
@@ -1509,7 +1528,9 @@ mod rejection_tests {
         empty_address.address.replay_key.clear();
         assert_rejected(
             empty_address,
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
+            RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 1 },
+            },
             "runtime_effect_replay_required",
         );
     }

@@ -1303,18 +1303,12 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     );
 }
 
-lash_conformance::runtime_persistence_reopenable_tests!(
-    sqlite_store_satisfies_runtime_persistence_conformance
-);
-
-async fn sqlite_store_satisfies_runtime_persistence_conformance(
-    law: lash_conformance::RuntimePersistenceLaw,
-) {
+lash_conformance::runtime_persistence_reopenable_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
-    lash_conformance::runtime_persistence_reopenable(
-        move |session_id| {
+    (
+        move |session_id: &str| {
             let dir = tempfile::tempdir().expect("runtime-persistence conformance tempdir");
             let factory_dir = dir.path().to_path_buf();
             let session_id = SessionId::from(session_id.to_string());
@@ -1346,10 +1340,8 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance(
             let clock = Arc::clone(&clock);
             move |duration_ms| clock.advance(duration_ms)
         }),
-        law,
     )
-    .await;
-}
+});
 
 #[tokio::test]
 async fn sqlite_unbound_session_reads_resolve_the_same_session() {

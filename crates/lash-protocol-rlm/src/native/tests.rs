@@ -124,6 +124,25 @@ fn text(text: &str) -> LlmOutputPart {
         response_meta: None,
     }
 }
+fn phased_text(phase: &str, text: &str) -> LlmOutputPart {
+    LlmOutputPart::Text {
+        text: text.to_string(),
+        response_meta: Some(lash_core::llm::types::ResponseTextMeta {
+            phase: Some(phase.to_string()),
+            ..Default::default()
+        }),
+    }
+}
+fn typescript_cell_config(termination: RlmTermination) -> TurnMachineConfig {
+    let mut config = config(false, termination);
+    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::for_language("typescript"));
+    config
+}
+fn lashlang_cell_config(termination: RlmTermination) -> TurnMachineConfig {
+    let mut config = config(false, termination);
+    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::for_language("lashlang"));
+    config
+}
 fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
     LlmOutputPart::ToolCall {
         call_id: id.to_string(),
@@ -734,6 +753,142 @@ fn configured_prompt_is_instructions_on_both_channels() {
             );
         }
     }
+}
+
+#[test]
+fn multipart_response_preserves_executable_cell() {
+    let mut machine = TurnMachine::new(
+        typescript_cell_config(RlmTermination::Natural),
+        Vec::new(),
+        Arc::new(Vec::new()),
+        0,
+    );
+    let initial = drain(&mut machine);
+
+    let effects = reply(
+        &mut machine,
+        &initial,
+        vec![
+            phased_text(
+                "commentary",
+                "Creating the artifact.\n<typescript>\nfinish(\"created\");\n</typescript>",
+            ),
+            phased_text("final_answer", "The artifact is ready."),
+        ],
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::ExecCode { language, code, .. }
+            if language == "typescript" && code.trim() == "finish(\"created\");"
+    )));
+}
+
+#[test]
+fn multipart_response_preserves_lashlang_executable_cell() {
+    let mut machine = TurnMachine::new(
+        lashlang_cell_config(RlmTermination::Natural),
+        Vec::new(),
+        Arc::new(Vec::new()),
+        0,
+    );
+    let initial = drain(&mut machine);
+
+    let effects = reply(
+        &mut machine,
+        &initial,
+        vec![
+            phased_text(
+                "commentary",
+                "Creating the artifact.\n<lashlang>\nfinish \"created\"\n</lashlang>",
+            ),
+            phased_text("final_answer", "The artifact is ready."),
+        ],
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::ExecCode { language, code, .. }
+            if language == "lashlang" && code.trim() == "finish \"created\""
+    )));
+}
+
+#[test]
+fn commentary_only_cell_still_executes() {
+    let mut machine = TurnMachine::new(
+        typescript_cell_config(RlmTermination::Natural),
+        Vec::new(),
+        Arc::new(Vec::new()),
+        0,
+    );
+    let initial = drain(&mut machine);
+
+    let effects = reply(
+        &mut machine,
+        &initial,
+        vec![phased_text(
+            "commentary",
+            "Creating the artifact.\n<typescript>\nfinish(\"created\");\n</typescript>",
+        )],
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::ExecCode { language, code, .. }
+            if language == "typescript" && code.trim() == "finish(\"created\");"
+    )));
+}
+
+#[test]
+fn no_cell_multipart_response_finishes_with_final_answer_prose() {
+    let mut machine = TurnMachine::new(
+        typescript_cell_config(RlmTermination::Natural),
+        Vec::new(),
+        Arc::new(Vec::new()),
+        0,
+    );
+    let initial = drain(&mut machine);
+
+    let effects = reply(
+        &mut machine,
+        &initial,
+        vec![
+            phased_text("commentary", "Internal progress."),
+            phased_text("final_answer", "Visible answer."),
+        ],
+    );
+
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(lash_core::session_model::SessionStreamEvent::LlmResponse { content, .. })
+            if content == "Visible answer."
+    )));
+
+    let checkpoint_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Checkpoint { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("prose-only response reaches completion checkpoint");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: Default::default(),
+    });
+    let completed = drain(&mut machine);
+    assert!(completed.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+            outcome: lash_core::facade_support::TurnOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage { text }
+            )
+        }) if text == "Visible answer."
+    )));
 }
 
 #[test]

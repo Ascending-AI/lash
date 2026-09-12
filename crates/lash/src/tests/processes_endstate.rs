@@ -1965,6 +1965,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         }
         panic!("simulate host interruption after the durable child Start");
     });
+    artifact_store.set_unavailable(true);
     let first_intents = intents.clone();
     let interrupted = tokio::spawn(async move {
         lash_core::testing::execute_tool_intents_with_services_and_hook(
@@ -1980,11 +1981,36 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     let process_id = started_rx
         .await
         .expect("the hook observes Start only after the command returns");
-    artifact_store.set_unavailable(true);
     let interruption = interrupted
         .await
         .expect_err("the host task must be interrupted");
     assert!(interruption.is_panic());
+    let first_fault = wait_for_worker_fault(&first_sink, &process_id).await;
+    assert!(
+        matches!(
+            first_fault,
+            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
+                ref error,
+                ..
+            } if error.contains("simulated durable artifact store outage")
+        ),
+        "the interrupted host's first execution must fail on the injected outage: {first_fault:?}"
+    );
+    let first_retryable = wait_for_process(
+        &first_core,
+        &process_id,
+        "claimable retry before restart",
+        |process| {
+            process.lifecycle == lash_core::ProcessStatus::Running
+                && process.first_started.is_some()
+                && process.lease_holder.is_none()
+        },
+    )
+    .await;
+    assert_eq!(first_retryable.lifecycle, lash_core::ProcessStatus::Running);
+    assert!(first_retryable.first_started.is_some());
+    assert!(first_retryable.lease_holder.is_none());
+    assert_eq!(artifact_store.failed_reads(), 1);
     let committed = registry
         .get_process(&process_id)
         .await?
@@ -2016,6 +2042,67 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         "artifact-outage-restarted-host",
     )
     .await?;
+    let restarted_worker = lash_core::facade_support::DurableProcessWorker::new(
+        reopened_core.durable_process_worker_config()?,
+    )?;
+    let restarted_drive = restarted_worker.drive_pending_processes().await?;
+    assert_eq!(restarted_drive.admitted, vec![process_id.clone()]);
+    let fault = wait_for_worker_fault(&reopened_sink, &process_id).await;
+    assert!(
+        matches!(
+            fault,
+            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
+                ref error,
+                ..
+            } if error.contains("simulated durable artifact store outage")
+        ),
+        "the outage is a retryable worker infrastructure fault: {fault:?}"
+    );
+    assert_eq!(reopened_artifact_store.failed_reads(), 1);
+    let retryable = wait_for_process(
+        &reopened_core,
+        &process_id,
+        "claimable retry after worker fault",
+        |process| {
+            process.lifecycle == lash_core::ProcessStatus::Running
+                && process.first_started.is_some()
+                && process.lease_holder.is_none()
+        },
+    )
+    .await;
+    assert_eq!(retryable.lifecycle, lash_core::ProcessStatus::Running);
+    assert!(retryable.first_started.is_some());
+    assert!(retryable.lease_holder.is_none());
+
+    reopened_artifact_store.set_unavailable(false);
+    let recovered_drive = restarted_worker.drive_pending_processes().await?;
+    assert_eq!(
+        recovered_drive.intake,
+        lash_core::facade_support::ProcessAdmissionIntake::Scanned
+    );
+    let admitted_retry =
+        recovered_drive.admitted == vec![process_id.clone()] && recovered_drive.deferred.is_empty();
+    let coalesced_retry = recovered_drive.admitted.is_empty()
+        && recovered_drive.deferred
+            == vec![lash_core::facade_support::ProcessAdmissionDeferred {
+                process_id: process_id.clone(),
+                disposition: lash_core::facade_support::ProcessRecoveryAttemptOutcome::Busy,
+            }];
+    assert!(
+        admitted_retry || coalesced_retry,
+        "the retry drive must either admit the claimable row or coalesce it onto the retiring attempt: {recovered_drive:?}"
+    );
+    let completed = wait_for_process(
+        &reopened_core,
+        &process_id,
+        "redriven completion",
+        |process| process.lifecycle == lash_core::ProcessStatus::Completed,
+    )
+    .await;
+    assert!(completed.terminal);
+
+    reopened_artifact_store.set_unavailable(true);
+    let failed_reads_before_replay = reopened_artifact_store.failed_reads();
     let reopened_session = reopened_core.session(SESSION_ID).open().await?;
     let reopened_effect_host = reopened_session.effect_host();
     let reopened_processes = {
@@ -2062,7 +2149,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     );
     assert_eq!(
         reopened_artifact_store.failed_reads(),
-        0,
+        failed_reads_before_replay,
         "intent redrive must not consult the unavailable artifact store"
     );
     let replayed_again = lash_core::testing::execute_tool_intents_with_services(
@@ -2079,42 +2166,11 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         serde_json::to_vec(&replayed_again)?,
         "the durable Start result must replay byte-for-byte"
     );
-
-    let restarted_worker = lash_core::facade_support::DurableProcessWorker::new(
-        reopened_core.durable_process_worker_config()?,
-    )?;
-    let restarted_drive = restarted_worker.drive_pending_processes().await?;
-    assert_eq!(restarted_drive.admitted, vec![process_id.clone()]);
-    let fault = wait_for_worker_fault(&reopened_sink, &process_id).await;
-    assert!(
-        matches!(
-            fault,
-            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
-                ref error,
-                ..
-            } if error.contains("simulated durable artifact store outage")
-        ),
-        "the outage is a retryable worker infrastructure fault: {fault:?}"
+    assert_eq!(
+        reopened_artifact_store.failed_reads(),
+        failed_reads_before_replay,
+        "repeated intent redrive must not consult the unavailable artifact store"
     );
-    assert_eq!(reopened_artifact_store.failed_reads(), 1);
-    let retryable = reopened_registry
-        .get_process(&process_id)
-        .await?
-        .expect("failed execution leaves its durable row");
-    assert_eq!(retryable.status, lash_core::ProcessStatus::Running);
-    assert!(retryable.first_started.is_some());
-
-    reopened_artifact_store.set_unavailable(false);
-    let recovered_drive = restarted_worker.drive_pending_processes().await?;
-    assert_eq!(recovered_drive.admitted, vec![process_id.clone()]);
-    let completed = wait_for_process(
-        &reopened_core,
-        &process_id,
-        "redriven completion",
-        |process| process.lifecycle == lash_core::ProcessStatus::Completed,
-    )
-    .await;
-    assert!(completed.terminal);
 
     drop(reopened_session);
     Ok(())

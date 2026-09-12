@@ -54,5 +54,16 @@ pub(crate) struct SseTextPartSink<'a> {
     pub execution_evidence: &'a mut Option<ExecutionEvidence>,
     pub tool_call_parts: Option<&'a mut Vec<LlmOutputPart>>,
     pub output_parts: Option<&'a mut Vec<LlmOutputPart>>,
+    pub reasoning_stream: Option<ReasoningStreamSink<'a>>,
     pub finish_event: &'a mut Option<Value>,
+}
+
+#[derive(Default)]
+pub(crate) struct ReasoningStreamState {
+    pub open_output_part_index: Option<usize>,
+}
+
+pub(crate) struct ReasoningStreamSink<'a> {
+    pub state: &'a mut ReasoningStreamState,
+    pub events: &'a mut Vec<LlmStreamEvent>,
 }

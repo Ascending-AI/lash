@@ -33,7 +33,9 @@ fn child(key: &str, position: usize) -> RuntimeEffectEnvelope {
             RuntimeAttribution::none(),
             "effect",
         ),
-        RuntimeEffectCommand::Sleep { duration_ms: 0 },
+        RuntimeEffectCommand::Sleep {
+            spec: lash_core::SleepSpec::For { duration_ms: 0 },
+        },
     )
 }
 

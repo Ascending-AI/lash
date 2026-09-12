@@ -39,6 +39,12 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// from a later call in the same turn.
     pub(super) latest_prompt_usage: Option<crate::PromptUsage>,
     pub(super) llm_stream_summaries: HashMap<usize, LlmStreamSummary>,
+    /// Reasoning parts published by the current live LLM effect.
+    ///
+    /// This is deliberately local execution state rather than part of the
+    /// durable effect outcome: a replay that did not re-run the provider did
+    /// not publish its live deltas and must use the completed-response fallback.
+    pub(super) reasoning_publication: ReasoningPublicationState,
     /// Parent-session calls only. Child runtimes assemble their own ledgers.
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     /// Non-transcript evidence from charge-safety-refused generations, with

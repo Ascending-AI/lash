@@ -1,3 +1,4 @@
+use crate::ClockWallTime;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
@@ -69,6 +70,10 @@ pub struct RuntimeSleepOptions {
     pub cancellation: CancellationToken,
     pub observe_turn_cancel: bool,
     pub turn_cancel_scope: Option<crate::ExecutionScope>,
+    /// The clock the sleep was dispatched under. A deadline-bearing sleep is
+    /// resolved against this authority, never an ambient system clock, so the
+    /// injected clock stays the single time source on the runtime path.
+    pub clock: Arc<dyn crate::Clock>,
 }
 
 // =============================================================================
@@ -194,6 +199,7 @@ pub struct ProcessLocalExecution {
 pub(crate) struct TurnEffectStateUpdate {
     pub(crate) policy: crate::RuntimeSessionPolicy,
     pub(crate) llm_stream_summaries: HashMap<usize, crate::runtime::LlmStreamSummary>,
+    pub(crate) reasoning_publication: crate::runtime::ReasoningPublicationState,
     pub(crate) next_llm_ordinal: usize,
     pub(crate) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(crate) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
@@ -617,6 +623,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             ),
             latest_prompt_usage: driver.latest_prompt_usage.clone(),
             llm_stream_summaries: driver.llm_stream_summaries.clone(),
+            reasoning_publication: driver.reasoning_publication.clone(),
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
             next_llm_ordinal: driver.next_llm_ordinal,
@@ -1028,16 +1035,18 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                         observe_turn_cancel,
                         turn_cancel_scope,
                     },
-                ..
+                clock,
             }) => RuntimeSleepOptions {
                 cancellation,
                 observe_turn_cancel,
                 turn_cancel_scope,
+                clock,
             },
             _ => RuntimeSleepOptions {
                 cancellation: CancellationToken::new(),
                 observe_turn_cancel: false,
                 turn_cancel_scope: None,
+                clock: Arc::new(crate::SystemClock),
             },
         }
     }
@@ -1257,13 +1266,10 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .await
                     .map_err(|err| err.to_string()),
             }),
-            RuntimeEffectCommand::Sleep { duration_ms } => {
-                sleep_with_cancellation(
-                    duration_ms,
-                    &runner.cancellation,
-                    runner.driver.host.core.clock.as_ref(),
-                )
-                .await?;
+            RuntimeEffectCommand::Sleep { spec } => {
+                let clock = runner.driver.host.core.clock.as_ref();
+                let duration_ms = sleep_duration(spec, clock.timestamp_ms());
+                sleep_with_cancellation(duration_ms, &runner.cancellation, clock).await?;
                 Ok(RuntimeEffectOutcome::Sleep)
             }
             command => Err(RuntimeEffectControllerError::new(
@@ -1277,6 +1283,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         *runner.update.lock_recover() = Some(TurnEffectStateUpdate {
             policy: runner.driver.policy,
             llm_stream_summaries: runner.driver.llm_stream_summaries,
+            reasoning_publication: runner.driver.reasoning_publication,
             next_llm_ordinal: runner.driver.next_llm_ordinal,
             pending_queue_claims: runner.driver.pending_queue_claims,
             pending_turn_input_claims: runner.driver.pending_turn_input_claims,
@@ -1309,7 +1316,8 @@ impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
                     call_record,
                 })
             }
-            RuntimeEffectCommand::Sleep { duration_ms } => {
+            RuntimeEffectCommand::Sleep { spec } => {
+                let duration_ms = sleep_duration(spec, crate::SystemClock.timestamp_ms());
                 sleep_with_cancellation(
                     duration_ms,
                     &CancellationToken::new(),
@@ -1398,7 +1406,8 @@ async fn execute_local_sleep(
     clock: &dyn crate::Clock,
 ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
     match envelope.command {
-        RuntimeEffectCommand::Sleep { duration_ms } => {
+        RuntimeEffectCommand::Sleep { spec } => {
+            let duration_ms = sleep_duration(spec, clock.timestamp_ms());
             sleep_with_cancellation(duration_ms, &cancellation, clock).await?;
             Ok(RuntimeEffectOutcome::Sleep)
         }
@@ -1409,6 +1418,13 @@ async fn execute_local_sleep(
                 command.kind().as_str()
             ),
         )),
+    }
+}
+
+fn sleep_duration(spec: crate::SleepSpec, now_ms: u64) -> u64 {
+    match spec {
+        crate::SleepSpec::For { duration_ms } => duration_ms,
+        crate::SleepSpec::Until { deadline_ms } => deadline_ms.saturating_sub(now_ms),
     }
 }
 
@@ -1561,7 +1577,9 @@ mod task_boundary_tests {
                 crate::RuntimeAttribution::none(),
                 "sleep",
             ),
-            RuntimeEffectCommand::Sleep { duration_ms: 0 },
+            RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 0 },
+            },
         );
         let invoke = proxy.controller().execute_effect(envelope, local_executor);
         let service = async {

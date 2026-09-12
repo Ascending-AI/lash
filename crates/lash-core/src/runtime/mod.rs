@@ -122,7 +122,8 @@ pub use lash_sansio::PromptUsage;
 pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
-    LlmStreamState, LlmStreamSummary, TurnAssembler, fold_llm_stream_event,
+    LlmStreamState, LlmStreamSummary, ReasoningPublicationState, TurnAssembler,
+    fold_llm_stream_event,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -170,7 +171,7 @@ pub use effect::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
     RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, SleepSpec,
     StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,
     ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TriggerLocalExecution, TurnControlBinding, TurnControlParticipation,

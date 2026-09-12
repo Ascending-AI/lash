@@ -40,6 +40,171 @@ async fn unsuccessful_http_response_emits_no_response_establishment_marker() {
     );
 }
 
+const CHAT_REASONING_AND_TEXT_STREAM: &str = concat!(
+    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"private chain\"}}]}\n\n",
+    "data: {\"choices\":[{\"delta\":{\"content\":\"public answer\"}}]}\n\n",
+    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    "data: [DONE]\n\n"
+);
+
+const BUFFERED_RESPONSES_WITH_TWO_REASONING_PARTS: &str = r#"{
+    "id":"resp_reasoning_parts",
+    "status":"completed",
+    "output":[
+        {
+            "type":"reasoning",
+            "id":"reasoning-a",
+            "summary":[{"type":"summary_text","text":"same reasoning"}],
+            "encrypted_content":"opaque-a"
+        },
+        {
+            "type":"reasoning",
+            "id":"reasoning-b",
+            "summary":[{"type":"summary_text","text":"same reasoning"}],
+            "encrypted_content":"opaque-b"
+        }
+    ]
+}"#;
+
+fn reasoning_visibility_core(expose_thinking: bool) -> lash::LashCore {
+    let provider = openrouter_provider()
+        .with_options(ProviderOptions {
+            expose_thinking,
+            ..ProviderOptions::default()
+        })
+        .with_transport(single_stream_transport(CHAT_REASONING_AND_TEXT_STREAM));
+    lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .provider(ProviderHandle::new(provider.into_components()))
+        .model(
+            lash::ModelSpec::builder("provider/model")
+                .context_window_tokens(16_000)
+                .build()
+                .expect("valid model spec"),
+        )
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "openai-reasoning-visibility-test",
+            "openai-reasoning-visibility-test-boot",
+        ))
+        .expect("core")
+}
+
+#[tokio::test]
+async fn openai_chat_runtime_respects_expose_thinking() {
+    for (expose_thinking, expected_reasoning) in
+        [(false, Vec::new()), (true, vec!["private chain"])]
+    {
+        let core = reasoning_visibility_core(expose_thinking);
+        let session = core
+            .session(format!("openai-reasoning-visible-{expose_thinking}"))
+            .open()
+            .await
+            .expect("session");
+        let output = session
+            .turn(lash::TurnInput::text("answer privately"))
+            .run()
+            .await
+            .expect("turn");
+        let reasoning = output
+            .activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                lash::TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(reasoning, expected_reasoning);
+        assert_eq!(output.assistant_message(), Some("public answer"));
+    }
+}
+
+#[tokio::test]
+async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries() {
+    let transport = Arc::new(ScriptedHttpTransport {
+        responses: std::sync::Mutex::new(VecDeque::from([(
+            200,
+            vec![("content-type".to_string(), "application/json".to_string())],
+            BUFFERED_RESPONSES_WITH_TWO_REASONING_PARTS,
+        )])),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            expose_thinking: true,
+            ..ProviderOptions::default()
+        })
+        .with_transport(transport);
+    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .provider(ProviderHandle::new(provider.into_components()))
+        .model(
+            lash::ModelSpec::builder("gpt-5.4")
+                .context_window_tokens(16_000)
+                .build()
+                .expect("valid model spec"),
+        )
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "openai-buffered-reasoning-boundaries-test",
+            "openai-buffered-reasoning-boundaries-test-boot",
+        ))
+        .expect("core");
+    let session = core
+        .session("openai-buffered-reasoning-boundaries")
+        .open()
+        .await
+        .expect("session");
+
+    let output = session
+        .turn(lash::TurnInput::text("reason in two parts"))
+        .run()
+        .await
+        .expect("turn");
+    let activities = output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            lash::TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let read_view = output
+        .result
+        .state
+        .read_view()
+        .expect("test runtime frame scope resolves");
+    let durable = read_view
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| part.kind == lash_core::PartKind::Reasoning)
+        .map(|part| part.content.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(activities, ["same reasoning", "same reasoning"]);
+    assert_eq!(durable, ["same reasoning", "same reasoning"]);
+}
+
 /// One scripted step of a response body: either bytes, or the transport-level
 /// failure that models a server hanging up mid-stream.
 #[derive(Debug)]

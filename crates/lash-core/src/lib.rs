@@ -1197,7 +1197,7 @@ pub use runtime::{
     SessionDeleteExecution, SessionDrainOutcome, SessionId, SessionListFilter,
     SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
     SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
     StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
     TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,

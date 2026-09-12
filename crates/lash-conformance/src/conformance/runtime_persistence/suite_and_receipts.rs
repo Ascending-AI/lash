@@ -1,68 +1,24 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// Run the [`RuntimePersistence`] durability conformance suite against the
-/// backend produced by `make`. `make` must return a fresh, empty,
-/// single-session store on each call.
-///
-/// Covers the durability crown jewels owned by the store, grouped by
-/// capability segment: optimistic head CAS, session binding, checkpoint/usage
-/// hydration, session metadata, attachment manifest intent/commit/GC
-/// reconciliation, and idempotent final turn commit stamps
-/// ([`SessionCommitStore`](crate::SessionCommitStore)); execution-lane fencing
-/// ([`SessionExecutionLeaseStore`](crate::SessionExecutionLeaseStore));
-/// queued-work ingress and claim fencing
-/// ([`QueuedWorkStore`](crate::QueuedWorkStore)); the pending turn-input
-/// lifecycle ([`TurnInputStore`](crate::TurnInputStore)); and tombstone/GC
-/// behavior ([`StoreMaintenance`](crate::StoreMaintenance)).
-/// Effect-host workflow history is deliberately outside this suite.
-pub async fn runtime_persistence<F>(
-    make: F,
-    lease_timing: RuntimePersistenceLeaseTiming,
-    law: RuntimePersistenceLaw,
-) where
+/// Prove that a plain runtime-persistence fixture returns distinct stores.
+pub async fn fresh_instances<F>(make: F, label: &str)
+where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
-    if matches!(law, RuntimePersistenceLaw::fresh_instances) {
-        let first = make("fresh-instance-probe");
-        let second = make("fresh-instance-probe");
-        assert_fresh_instances(&first, &second, "runtime_persistence");
-    } else {
-        runtime_persistence_suite(make, &lease_timing, law).await;
-    }
+    let first = make(label);
+    let second = make(label);
+    assert_fresh_instances(&first, &second, "runtime_persistence");
 }
 
-/// Run one independent durable reopen or runtime persistence vector.
-pub async fn runtime_persistence_reopenable<F>(
-    make: F,
-    lease_timing: RuntimePersistenceLeaseTiming,
-    law: RuntimePersistenceLaw,
-) where
-    F: Fn(&str) -> ReopenableRuntimePersistence,
-{
-    match law {
-        RuntimePersistenceLaw::reopen_mint_identity => {
-            let probe = make("pending-turn-input-multi-store-mint");
-            assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");
-            pending_turn_input_mint_is_unique_across_store_instances(
-                probe.open.as_ref(),
-                probe.reopen.as_ref(),
-            )
-            .await;
-        }
-        RuntimePersistenceLaw::gc_blobs => {
-            gc_reclaims_unreachable_checkpoint_blobs_and_preserves_live(make("gc-blobs").open).await
-        }
-        RuntimePersistenceLaw::append_receipt_reopen => {
-            append_receipt_survives_reopen(make("root")).await
-        }
-        RuntimePersistenceLaw::runtime_reopen => {
-            runtime_persistence_survives_reopen(make("root")).await
-        }
-        _ => {
-            runtime_persistence_suite(|session_id| make(session_id).open, &lease_timing, law).await
-        }
-    }
+/// Prove that independently opened handles mint distinct pending-input identities.
+pub async fn reopen_mint_identity(probe: ReopenableRuntimePersistence) {
+    assert_fresh_instances(&probe.open, &probe.reopen, "runtime_persistence_reopenable");
+    pending_turn_input_mint_is_unique_across_store_instances(
+        probe.open.as_ref(),
+        probe.reopen.as_ref(),
+    )
+    .await;
 }
 
 pub(super) fn assert_two_session_resolution_errors(
@@ -453,290 +409,7 @@ pub async fn runtime_persistence_clock_expiry(
     assert_eq!(stale_input_claim.inputs[0].input_id, input.input_id);
 }
 
-/// Independently runnable runtime persistence contract vectors.
-#[allow(non_camel_case_types)]
-#[derive(Clone, Copy, Debug)]
-pub enum RuntimePersistenceLaw {
-    plugin_state_boundary,
-    commit_increments_head_and_round_trips_agent_frames,
-    concurrent_head_revision_cas_applies_exactly_once,
-    commit_rejects_a_different_session_id,
-    commit_rejects_carried_nondefault_node_budget,
-    commit_rejects_carried_nondefault_byte_budget,
-    commit_rejects_queue_batch_bytes_over_budget,
-    commit_rejects_agent_frame_bytes_over_budget,
-    commit_rejects_usage_delta_bytes_over_budget,
-    commit_rejects_turn_result_bytes_over_budget,
-    commit_with_every_payload_family_inside_budget_succeeds,
-    load_hydrates_checkpoint_and_usage,
-    load_retains_reasoning_only_usage,
-    load_retains_usage_dispositions_and_rebuilds_outstanding_attempts,
-    checkpoint_restore_rejects_turn_index_without_increment_headroom,
-    checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows,
-    load_rejects_token_usage_overflow,
-    usage_delta_identity_is_idempotent_across_commits,
-    usage_ordinal_reuse_with_different_payload_survives_receipt_replay,
-    execution_state_replace_then_clear_removes_the_live_checkpoint_ref,
-    checkpoint_rejects_unknown_component_ref,
-    session_read_loads_persisted_history,
-    session_prompt_layer_round_trips_through_the_committed_head,
-    session_protocol_turn_options_round_trip_through_the_committed_head,
-    session_metadata_round_trips,
-    attachment_manifest_records_intent_and_commit_stamps,
-    attachment_manifest_keeps_same_content_ownership_per_session,
-    attachment_manifest_reference_tracking_and_gc_root_set,
-    final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash,
-    append_request_receipt_replays_after_head_advance,
-    append_request_receipt_rejects_changed_content,
-    append_request_exact_hash_rejects_changed_ancestor,
-    append_request_receipt_rejects_corrupt_node_count,
-    semantic_boundary_receipt_replays_after_head_advance,
-    semantic_boundary_receipt_rejects_changed_content,
-    semantic_boundary_receipt_rejects_mislabeled_identity,
-    concurrent_same_append_operation_applies_exactly_once,
-    legacy_append_receipt_keeps_exact_hash_semantics,
-    append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics,
-    append_receipt_and_graph_append_are_atomic,
-    fresh_append_receipt_enforces_ancestor_precondition,
-    store_computed_hash_rejects_mutated_commit,
-    commit_rejects_non_derived_append_node_ids,
-    append_rejects_duplicate_batch_node_ids,
-    append_rejects_existing_node_id_collision,
-    head_retirement_gate_distinguishes_leaf_change_from_same_leaf,
-    commit_rejects_unresolvable_leaf,
-    commit_rejects_missing_leaf,
-    empty_append_cannot_move_the_head,
-    commit_rejects_leaf_without_frame_open_ancestor,
-    session_execution_lease_contract,
-    borrowed_session_execution_lease_commit_contract,
-    same_incarnation_rotation_gates_claims_not_commits,
-    same_host_distinct_executors_are_lane_less_without_revoking_holder,
-    session_execution_lease_fence_authority,
-    concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable,
-    session_execution_lease_expires_by_ttl_contract,
-    durable_queued_drain_wait_store_laws,
-    session_execution_lease_diagnostic_read_contract,
-    session_execution_lease_displacement_contract,
-    queued_work_source_keys_are_idempotent_and_list_ordered,
-    concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing,
-    decorated_queued_work_source_key_replay_reports_absorbed,
-    pending_session_work_ordering_agrees_across_ingress_families,
-    concurrent_queue_and_turn_input_claims_have_one_owner,
-    checkpoint_work_claims_both_families_once,
-    checkpoint_budget_refusal_preserves_active_turn_input,
-    checkpoint_claims_honor_min_boundary_at_every_checkpoint,
-    queued_work_cancel_removes_only_unclaimed_batches,
-    queued_work_exact_claim_uses_selected_batch_ids,
-    queued_work_classes_gate_command_and_turn_claims,
-    queued_work_claims_respect_boundaries_abandon_and_stale_completion,
-    queued_work_claims_supersede_across_session_lease_generations_with_timing,
-    claim_liveness_for_lease_less_paths_tracks_session_generations,
-    same_generation_claim_scans_reach_rows_beyond_the_scan_surplus,
-    queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions,
-    queued_work_join_groups_by_delivery_policy_and_merge_key,
-    abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations,
-    queued_work_redrive_preserves_interrupted_batch_composition,
-    queued_work_names_a_deferred_lane_apart_from_an_exhausted_one,
-    queued_work_redrive_selects_claim_identity_across_ready_gap,
-    queued_work_redrive_obeys_delivery_boundary_before_identity,
-    queued_work_redrive_ignores_successor_row_limit,
-    queued_work_redrive_ignores_a_changed_drain_policy,
-    queued_work_selected_multi_identity_validation_and_abandon_restore,
-    queued_work_exact_claim_preserves_physical_order_and_key_breaks,
-    process_wakes_batch_by_default,
-    queued_work_completion_is_lease_guarded,
-    queued_wake_delivery_is_source_key_idempotent_and_claimed_once,
-    queue_completion_and_turn_commit_stamp_are_atomic,
-    pending_turn_inputs_source_keys_order_cancel_and_cross_session,
-    pending_turn_input_bulk_and_suffix_cancellation,
-    pending_turn_input_claims_reclaim_complete_and_fence,
-    turn_input_application_identity_survives_pending_tombstone_vacuum,
-    turn_input_claims_supersede_across_session_lease_generations_with_timing,
-    active_turn_input_claim_reacquires_after_unrecorded_checkpoint,
-    pending_turn_input_cancel_covers_active_and_deferred_states,
-    pending_active_turn_inputs_defer_unaccepted_once_on_interrupt,
-    a_turn_that_cannot_commit_leaves_no_input_pinned_to_it,
-    fresh_instances,
-    reopen_mint_identity,
-    gc_blobs,
-    append_receipt_reopen,
-    runtime_reopen,
-}
-
-pub(super) async fn runtime_persistence_suite<F>(
-    make: F,
-    lease_timing: &RuntimePersistenceLeaseTiming,
-    law: RuntimePersistenceLaw,
-) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-{
-    match law {
-        RuntimePersistenceLaw::plugin_state_boundary => { super::plugin_state::plugin_state_boundary_law(make).await; },
-        RuntimePersistenceLaw::commit_increments_head_and_round_trips_agent_frames => { commit_increments_head_and_round_trips_agent_frames(make("root")).await; },
-        RuntimePersistenceLaw::concurrent_head_revision_cas_applies_exactly_once => { concurrent_head_revision_cas_applies_exactly_once(make("concurrent-head-cas")).await; },
-        RuntimePersistenceLaw::commit_rejects_a_different_session_id => { commit_rejects_a_different_session_id(make("alpha")).await; },
-        RuntimePersistenceLaw::commit_rejects_carried_nondefault_node_budget => { commit_rejects_carried_nondefault_node_budget(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_carried_nondefault_byte_budget => { commit_rejects_carried_nondefault_byte_budget(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_queue_batch_bytes_over_budget => { commit_rejects_queue_batch_bytes_over_budget(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_agent_frame_bytes_over_budget => { commit_rejects_agent_frame_bytes_over_budget(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_usage_delta_bytes_over_budget => { commit_rejects_usage_delta_bytes_over_budget(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_turn_result_bytes_over_budget => { commit_rejects_turn_result_bytes_over_budget(make("root")).await; },
-        RuntimePersistenceLaw::commit_with_every_payload_family_inside_budget_succeeds => { commit_with_every_payload_family_inside_budget_succeeds(make("root")).await; },
-        RuntimePersistenceLaw::load_hydrates_checkpoint_and_usage => { load_hydrates_checkpoint_and_usage(make("hydrated")).await; },
-        RuntimePersistenceLaw::load_retains_reasoning_only_usage => { load_retains_reasoning_only_usage(make("root")).await; },
-        RuntimePersistenceLaw::load_retains_usage_dispositions_and_rebuilds_outstanding_attempts => { load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(make("root")).await; },
-        RuntimePersistenceLaw::checkpoint_restore_rejects_turn_index_without_increment_headroom => { checkpoint_restore_rejects_turn_index_without_increment_headroom(make("root")).await; },
-        RuntimePersistenceLaw::checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows => { checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(make("root")).await; },
-        RuntimePersistenceLaw::load_rejects_token_usage_overflow => { load_rejects_token_usage_overflow(make("root")).await; },
-        RuntimePersistenceLaw::usage_delta_identity_is_idempotent_across_commits => { usage_delta_identity_is_idempotent_across_commits(make("root")).await; },
-        RuntimePersistenceLaw::usage_ordinal_reuse_with_different_payload_survives_receipt_replay => { usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make("root")).await; },
-        RuntimePersistenceLaw::execution_state_replace_then_clear_removes_the_live_checkpoint_ref => { execution_state_replace_then_clear_removes_the_live_checkpoint_ref(make(
-        "execution-state-replace-then-clear",
-    ))
-    .await; },
-        RuntimePersistenceLaw::checkpoint_rejects_unknown_component_ref => { checkpoint_rejects_unknown_component_ref(make("checkpoint-unknown-ref")).await; },
-        RuntimePersistenceLaw::session_read_loads_persisted_history => { session_read_loads_persisted_history(make("branchy")).await; },
-        RuntimePersistenceLaw::session_prompt_layer_round_trips_through_the_committed_head => { session_prompt_layer_round_trips_through_the_committed_head(make("session-prompt-layer")).await; },
-        RuntimePersistenceLaw::session_protocol_turn_options_round_trip_through_the_committed_head => { session_protocol_turn_options_round_trip_through_the_committed_head(make("session-protocol-turn-options")).await; },
-        RuntimePersistenceLaw::session_metadata_round_trips => { session_metadata_round_trips(make("root")).await; },
-        RuntimePersistenceLaw::attachment_manifest_records_intent_and_commit_stamps => { attachment_manifest_records_intent_and_commit_stamps(make("root")).await; },
-        RuntimePersistenceLaw::attachment_manifest_keeps_same_content_ownership_per_session => { attachment_manifest_keeps_same_content_ownership_per_session(make("root")).await; },
-        RuntimePersistenceLaw::attachment_manifest_reference_tracking_and_gc_root_set => { attachment_manifest_reference_tracking_and_gc_root_set(make("root")).await; },
-        RuntimePersistenceLaw::final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash => { final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(make("root")).await; },
-        RuntimePersistenceLaw::append_request_receipt_replays_after_head_advance => { append_request_receipt_replays_after_head_advance(make("root")).await; },
-        RuntimePersistenceLaw::append_request_receipt_rejects_changed_content => { append_request_receipt_rejects_changed_content(make("root")).await; },
-        RuntimePersistenceLaw::append_request_exact_hash_rejects_changed_ancestor => { append_request_exact_hash_rejects_changed_ancestor(make("root")).await; },
-        RuntimePersistenceLaw::append_request_receipt_rejects_corrupt_node_count => { append_request_receipt_rejects_corrupt_node_count(make("root")).await; },
-        RuntimePersistenceLaw::semantic_boundary_receipt_replays_after_head_advance => { semantic_boundary_receipt_replays_after_head_advance(make("root")).await; },
-        RuntimePersistenceLaw::semantic_boundary_receipt_rejects_changed_content => { semantic_boundary_receipt_rejects_changed_content(make("root")).await; },
-        RuntimePersistenceLaw::semantic_boundary_receipt_rejects_mislabeled_identity => { semantic_boundary_receipt_rejects_mislabeled_identity(make("root")).await; },
-        RuntimePersistenceLaw::concurrent_same_append_operation_applies_exactly_once => { concurrent_same_append_operation_applies_exactly_once(make("root")).await; },
-        RuntimePersistenceLaw::legacy_append_receipt_keeps_exact_hash_semantics => { legacy_append_receipt_keeps_exact_hash_semantics(make("root")).await; },
-        RuntimePersistenceLaw::append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics => { append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(make("root")).await; },
-        RuntimePersistenceLaw::append_receipt_and_graph_append_are_atomic => { append_receipt_and_graph_append_are_atomic(make("root")).await; },
-        RuntimePersistenceLaw::fresh_append_receipt_enforces_ancestor_precondition => { fresh_append_receipt_enforces_ancestor_precondition(make("root")).await; },
-        RuntimePersistenceLaw::store_computed_hash_rejects_mutated_commit => { store_computed_hash_rejects_mutated_commit(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_non_derived_append_node_ids => { commit_rejects_non_derived_append_node_ids(make("root")).await; },
-        RuntimePersistenceLaw::append_rejects_duplicate_batch_node_ids => { append_rejects_duplicate_batch_node_ids(make("root")).await; },
-        RuntimePersistenceLaw::append_rejects_existing_node_id_collision => { append_rejects_existing_node_id_collision(make("root")).await; },
-        RuntimePersistenceLaw::head_retirement_gate_distinguishes_leaf_change_from_same_leaf => { head_retirement_gate_distinguishes_leaf_change_from_same_leaf(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_unresolvable_leaf => { commit_rejects_unresolvable_leaf(make("root")).await; },
-        RuntimePersistenceLaw::commit_rejects_missing_leaf => { commit_rejects_missing_leaf(make("root")).await; },
-        RuntimePersistenceLaw::empty_append_cannot_move_the_head => { empty_append_cannot_move_the_head(make("empty-append-head-move")).await; },
-        RuntimePersistenceLaw::commit_rejects_leaf_without_frame_open_ancestor => { commit_rejects_leaf_without_frame_open_ancestor(make("missing-frame-root")).await; },
-        RuntimePersistenceLaw::session_execution_lease_contract => { session_execution_lease_contract(make("root")).await; },
-        RuntimePersistenceLaw::borrowed_session_execution_lease_commit_contract => { crate::conformance::borrowed_session_execution_lease_commit_contract(make(
-        "borrowed-commit-fence",
-    ))
-    .await; },
-        RuntimePersistenceLaw::same_incarnation_rotation_gates_claims_not_commits => { same_incarnation_rotation_gates_claims_not_commits(make("root")).await; },
-        RuntimePersistenceLaw::same_host_distinct_executors_are_lane_less_without_revoking_holder => { crate::conformance::same_host_distinct_executors_are_lane_less_without_revoking_holder(
-        make("fig1133-same-host-session"),
-    )
-    .await; },
-        RuntimePersistenceLaw::session_execution_lease_fence_authority => { session_execution_lease_fence_authority(make("lease-fence-authority").as_ref()).await; },
-        RuntimePersistenceLaw::concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable => { concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make(
-        "concurrent-rotation-renewal",
-    ))
-    .await; },
-        RuntimePersistenceLaw::session_execution_lease_expires_by_ttl_contract => { session_execution_lease_expires_by_ttl_contract(&|| make("ttl-expiry"), lease_timing).await; },
-        RuntimePersistenceLaw::durable_queued_drain_wait_store_laws => { super::durable_queued_drain_wait::durable_queued_drain_wait_store_laws(
-        make("durable-queued-drain"),
-        lease_timing,
-    )
-    .await; },
-        RuntimePersistenceLaw::session_execution_lease_diagnostic_read_contract => { session_execution_lease_diagnostic_read_contract(make("lease-diagnostic")).await; },
-        RuntimePersistenceLaw::session_execution_lease_displacement_contract => { session_execution_lease_displacement_contract(make("lease-displacement")).await; },
-        RuntimePersistenceLaw::queued_work_source_keys_are_idempotent_and_list_ordered => { queued_work_source_keys_are_idempotent_and_list_ordered(make("queued-work-source-keys")).await; },
-        RuntimePersistenceLaw::concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing => { concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing(make(
-        "concurrent-queued-work-source-key",
-    ))
-    .await; },
-        RuntimePersistenceLaw::decorated_queued_work_source_key_replay_reports_absorbed => { decorated_queued_work_source_key_replay_reports_absorbed(make(
-        "decorated-queued-work-source-key",
-    ))
-    .await; },
-        RuntimePersistenceLaw::pending_session_work_ordering_agrees_across_ingress_families => { pending_session_work_ordering_agrees_across_ingress_families(make("pending-work-ordering"))
-        .await; },
-        RuntimePersistenceLaw::concurrent_queue_and_turn_input_claims_have_one_owner => { concurrent_queue_and_turn_input_claims_have_one_owner(make("concurrent-queue-input")).await; },
-        RuntimePersistenceLaw::checkpoint_work_claims_both_families_once => { checkpoint_work_claims_both_families_once(make("checkpoint-work")).await; },
-        RuntimePersistenceLaw::checkpoint_budget_refusal_preserves_active_turn_input => { checkpoint_budget_refusal_preserves_active_turn_input(make("checkpoint-budget-refusal")).await; },
-        RuntimePersistenceLaw::checkpoint_claims_honor_min_boundary_at_every_checkpoint => { checkpoint_claims_honor_min_boundary_at_every_checkpoint(make("checkpoint-min-boundary")).await; },
-        RuntimePersistenceLaw::queued_work_cancel_removes_only_unclaimed_batches => { queued_work_cancel_removes_only_unclaimed_batches(make("queued-work-cancel")).await; },
-        RuntimePersistenceLaw::queued_work_exact_claim_uses_selected_batch_ids => { queued_work_exact_claim_uses_selected_batch_ids(make("root")).await; },
-        RuntimePersistenceLaw::queued_work_classes_gate_command_and_turn_claims => { queued_work_classes_gate_command_and_turn_claims(make("root")).await; },
-        RuntimePersistenceLaw::queued_work_claims_respect_boundaries_abandon_and_stale_completion => { queued_work_claims_respect_boundaries_abandon_and_stale_completion(make("root")).await; },
-        RuntimePersistenceLaw::queued_work_claims_supersede_across_session_lease_generations_with_timing => { queued_work_claims_supersede_across_session_lease_generations_with_timing(
-        make("root"),
-        lease_timing,
-    )
-    .await; },
-        RuntimePersistenceLaw::claim_liveness_for_lease_less_paths_tracks_session_generations => { claim_liveness_for_lease_less_paths_tracks_session_generations(
-        make("claim-liveness"),
-        lease_timing,
-    )
-    .await; },
-        RuntimePersistenceLaw::same_generation_claim_scans_reach_rows_beyond_the_scan_surplus => { same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(make("claim-scan")).await; },
-        RuntimePersistenceLaw::queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions => { queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(make(
-        "queued-membership",
-    ))
-    .await; },
-        RuntimePersistenceLaw::queued_work_join_groups_by_delivery_policy_and_merge_key => { queued_work_join_groups_by_delivery_policy_and_merge_key(make("queued-join")).await; },
-        RuntimePersistenceLaw::abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations => { abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations(make(
-        "abandoned-predecessor-generation",
-    ))
-    .await; },
-        RuntimePersistenceLaw::queued_work_redrive_preserves_interrupted_batch_composition => { queued_work_redrive_preserves_interrupted_batch_composition(make("redrive-composition")).await; },
-        RuntimePersistenceLaw::queued_work_names_a_deferred_lane_apart_from_an_exhausted_one => { queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
-        make("deferred-versus-exhausted"),
-        lease_timing,
-    )
-    .await; },
-        RuntimePersistenceLaw::queued_work_redrive_selects_claim_identity_across_ready_gap => { queued_work_redrive_selects_claim_identity_across_ready_gap(
-        make("redrive-ready-gap"),
-        lease_timing,
-    )
-    .await; },
-        RuntimePersistenceLaw::queued_work_redrive_obeys_delivery_boundary_before_identity => { queued_work_redrive_obeys_delivery_boundary_before_identity(make("redrive-boundary")).await; },
-        RuntimePersistenceLaw::queued_work_redrive_ignores_successor_row_limit => { queued_work_redrive_ignores_successor_row_limit(make("redrive-row-limit")).await; },
-        RuntimePersistenceLaw::queued_work_redrive_ignores_a_changed_drain_policy => { queued_work_redrive_ignores_a_changed_drain_policy(make("redrive-drain-policy")).await; },
-        RuntimePersistenceLaw::queued_work_selected_multi_identity_validation_and_abandon_restore => { queued_work_selected_multi_identity_validation_and_abandon_restore(make(
-        "selected-multi-identity",
-    ))
-    .await; },
-        RuntimePersistenceLaw::queued_work_exact_claim_preserves_physical_order_and_key_breaks => { crate::conformance::queued_work_exact_claim_preserves_physical_order_and_key_breaks(
-        make("physical-order"),
-    )
-    .await; },
-        RuntimePersistenceLaw::process_wakes_batch_by_default => { process_wakes_batch_by_default(make("wake-default-batch")).await; },
-        RuntimePersistenceLaw::queued_work_completion_is_lease_guarded => { queued_work_completion_is_lease_guarded(make("root")).await; },
-        RuntimePersistenceLaw::queued_wake_delivery_is_source_key_idempotent_and_claimed_once => { queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make("root")).await; },
-        RuntimePersistenceLaw::queue_completion_and_turn_commit_stamp_are_atomic => { queue_completion_and_turn_commit_stamp_are_atomic(make("root")).await; },
-        RuntimePersistenceLaw::pending_turn_inputs_source_keys_order_cancel_and_cross_session => { pending_turn_inputs_source_keys_order_cancel_and_cross_session(make("root")).await; },
-        RuntimePersistenceLaw::pending_turn_input_bulk_and_suffix_cancellation => { pending_turn_input_bulk_and_suffix_cancellation(make("pending-bulk-cancel")).await; },
-        RuntimePersistenceLaw::pending_turn_input_claims_reclaim_complete_and_fence => { pending_turn_input_claims_reclaim_complete_and_fence(make("root")).await; },
-        RuntimePersistenceLaw::turn_input_application_identity_survives_pending_tombstone_vacuum => { turn_input_application_identity_survives_pending_tombstone_vacuum(make(
-        "turn-input-application",
-    ))
-    .await; },
-        RuntimePersistenceLaw::turn_input_claims_supersede_across_session_lease_generations_with_timing => { turn_input_claims_supersede_across_session_lease_generations_with_timing(
-        make("root"),
-        lease_timing,
-    )
-    .await; },
-        RuntimePersistenceLaw::active_turn_input_claim_reacquires_after_unrecorded_checkpoint => { active_turn_input_claim_reacquires_after_unrecorded_checkpoint(make("fig905-active-reacquire"))
-        .await; },
-        RuntimePersistenceLaw::pending_turn_input_cancel_covers_active_and_deferred_states => { pending_turn_input_cancel_covers_active_and_deferred_states(make("root")).await; },
-        RuntimePersistenceLaw::pending_active_turn_inputs_defer_unaccepted_once_on_interrupt => { pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make("root")).await; },
-        RuntimePersistenceLaw::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it => { crate::conformance::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(make(
-        "root",
-    ))
-    .await; },
-        _ => unreachable!("reopen vector requires the reopenable runner"),
-    }
-}
-
-pub(super) async fn session_prompt_layer_round_trips_through_the_committed_head(
+pub async fn session_prompt_layer_round_trips_through_the_committed_head(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let expected_prompt =
@@ -776,7 +449,7 @@ pub(super) async fn session_prompt_layer_round_trips_through_the_committed_head(
 /// FIG-2479: the commanded protocol-turn-options fact round-trips resident
 /// state → committed head row (SESSION_HEAD_META v6) → cold load, and the head
 /// value is what the loaded state carries.
-pub(super) async fn session_protocol_turn_options_round_trip_through_the_committed_head(
+pub async fn session_protocol_turn_options_round_trip_through_the_committed_head(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let expected = crate::ProtocolTurnOptions {
@@ -819,7 +492,7 @@ pub(super) async fn session_protocol_turn_options_round_trip_through_the_committ
     );
 }
 
-pub(super) async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
+pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let mut state =
@@ -882,9 +555,7 @@ pub(super) async fn execution_state_replace_then_clear_removes_the_live_checkpoi
     );
 }
 
-pub(super) async fn commit_rejects_carried_nondefault_node_budget(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn RuntimePersistence>) {
     const CONFIGURED_NODE_LIMIT: usize = 1;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -919,9 +590,7 @@ pub(super) async fn commit_rejects_carried_nondefault_node_budget(
     ));
 }
 
-pub(super) async fn commit_rejects_carried_nondefault_byte_budget(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn RuntimePersistence>) {
     const CONFIGURED_BYTE_LIMIT: usize = 64;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -965,9 +634,7 @@ pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCom
     )
 }
 
-pub(super) async fn commit_rejects_queue_batch_bytes_over_budget(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_rejects_queue_batch_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -997,9 +664,7 @@ pub(super) async fn commit_rejects_queue_batch_bytes_over_budget(
     ));
 }
 
-pub(super) async fn commit_rejects_agent_frame_bytes_over_budget(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -1024,9 +689,7 @@ pub(super) async fn commit_rejects_agent_frame_bytes_over_budget(
     ));
 }
 
-pub(super) async fn commit_rejects_usage_delta_bytes_over_budget(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -1057,9 +720,7 @@ pub(super) async fn commit_rejects_usage_delta_bytes_over_budget(
     ));
 }
 
-pub(super) async fn commit_rejects_turn_result_bytes_over_budget(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -1084,7 +745,7 @@ pub(super) async fn commit_rejects_turn_result_bytes_over_budget(
     ));
 }
 
-pub(super) async fn commit_with_every_payload_family_inside_budget_succeeds(
+pub async fn commit_with_every_payload_family_inside_budget_succeeds(
     store: Arc<dyn RuntimePersistence>,
 ) {
     const BYTE_LIMIT: usize = 64 * 1024;
@@ -1129,7 +790,7 @@ pub(super) async fn commit_with_every_payload_family_inside_budget_succeeds(
         .expect("a commit with every payload family inside the limit must succeed");
 }
 
-pub(super) async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
+pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let state = seed_append_receipt_state(&store).await;
@@ -1211,7 +872,7 @@ pub(super) async fn head_retirement_gate_distinguishes_leaf_change_from_same_lea
         .expect("leaf-changing commit");
 }
 
-pub(super) async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
+pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1248,7 +909,7 @@ pub(super) async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePers
 /// an explicit zero-valued correction — must survive a store round trip with its
 /// hole identities intact, and the outstanding set must be rebuildable from the
 /// rows alone.
-pub(super) async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
+pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let state = RuntimeSessionState {
@@ -1354,7 +1015,7 @@ pub(super) async fn load_retains_usage_dispositions_and_rebuilds_outstanding_att
     assert_eq!(report.usage.reconciled_attempts, 2);
 }
 
-pub(super) async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
+pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1401,7 +1062,7 @@ pub(super) async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePers
     ));
 }
 
-pub(super) async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
+pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let turn_index = usize::MAX - 16;
@@ -1435,7 +1096,7 @@ pub(super) async fn checkpoint_restore_rejects_turn_index_without_increment_head
 /// while the prompt-side counters alone overflow. Restore must reject that
 /// checkpoint rather than hand a poisoned base to the next turn's merge and to
 /// the bare `total()`/`input_total()` policy readers.
-pub(super) async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(
+pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let token_usage = crate::TokenUsage {
@@ -1473,9 +1134,7 @@ pub(super) async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal
     ));
 }
 
-pub(super) async fn usage_delta_identity_is_idempotent_across_commits(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn RuntimePersistence>) {
     let usage = TokenLedgerEntry {
         source: "idempotent-republish".to_string(),
         model: "usage-model".to_string(),
