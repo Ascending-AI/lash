@@ -162,16 +162,15 @@ it as a separate admission fact. The laws
 journal-first boundary: environment state is written only after admission, and
 a failed environment write cannot leave a registered process behind.
 
-`EmitTrigger` realization replaces the caller-supplied occurrence key with the
-declaration replay key at the shared router boundary used by recorded attempts
-and direct host ingress. The caller key remains part of the declaration's
-first-writer payload hash, so changing it still conflicts with the recorded
-submission. A redrive also compares any recorded executed occurrence id with
-the reconstructed replay-key occurrence id before store ingress. A predecessor
-execution recorded under caller-key addressing is therefore refused as
-`tool_intent_incompatible_recording` instead of creating a second occurrence
-and delivery. This is an outcome-compatibility check within the existing
-protocol and identity versions, not another replay-format cutover.
+Protocol v2 makes the declaration replay key the store-side idempotency key for
+an `EmitTrigger` occurrence. The caller-supplied key remains recorded payload,
+but it cannot collapse two distinct declarations; redriving one declaration
+reuses its replay-derived key. Protocol-v1 attempt batches, predecessor host
+keys, and predecessor runtime-owned submission rows are refused before
+realization because resuming them after the cutover could create a second
+occurrence beside one committed under the old caller-key rule. An unversioned
+host key or submission row is classified explicitly as v1 only to produce that
+refusal; it is never upgraded to current behavior.
 
 After the enclosing turn or process reaches its end, recorded start intents are
 handled by a deterministic parent-end step. Version 1 deliberately exposes only

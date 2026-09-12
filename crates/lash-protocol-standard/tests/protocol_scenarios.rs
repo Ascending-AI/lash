@@ -825,7 +825,7 @@ impl lash_core::ToolProvider for StandardIntentProvider {
         let session_id = call.context.session_id().to_string();
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
-            lash_core::ToolIntents::v1(vec![
+            lash_core::ToolIntents::v2(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                     session_id: lash_core::SessionId::from(session_id.clone()),
                     request: lash_core::ProcessStartRequest::external(

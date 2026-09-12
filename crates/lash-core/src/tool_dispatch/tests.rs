@@ -172,7 +172,7 @@ impl ToolProvider for OrderedBatchIntentTools {
             .expect("ordered batch calls carry ids");
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(json!({"completed": call.name})),
-            crate::ToolIntents::v1(
+            crate::ToolIntents::v2(
                 [0, 1]
                     .into_iter()
                     .map(|intent_index| {
@@ -484,7 +484,7 @@ impl ToolProvider for RetryingIntentTools {
 
     async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+        let intents = crate::ToolIntents::v2(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
                 session_id: SessionId::from("session"),
                 process_id: ProcessId::from("retry-intent-target"),
@@ -599,7 +599,7 @@ impl ToolProvider for AttemptIntentTools {
         );
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(json!({"provider": "done"})),
-            crate::ToolIntents::v1(vec![
+            crate::ToolIntents::v2(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     session_id: SessionId::from("session"),
                     request: crate::ProcessStartRequest::external(
@@ -2330,11 +2330,11 @@ async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
     );
 }
 
-/// The v1 provider seam law: an opted-in leaf is called through the public
+/// The v2 provider seam law: an opted-in leaf is called through the public
 /// coordinator path and every declared intent kind is realized after its final
 /// attempt is committed, in declaration order.
 #[tokio::test]
-async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinator() {
+async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinator() {
     let definition = named_beta_tool("attempt_intents");
     let calls = Arc::new(AtomicUsize::new(0));
     let provider: Arc<dyn ToolProvider> = Arc::new(AttemptIntentTools {
@@ -2449,9 +2449,9 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
 }
 
 #[tokio::test]
-async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
+async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_protocol_refusal() {
     let context = dispatch_context();
-    for recorded in [0, 2] {
+    for recorded in [0, 1, 3] {
         let outcomes = execute_final_tool_intents(
             &context,
             Some("empty-version-call"),

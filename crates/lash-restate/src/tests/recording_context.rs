@@ -1142,7 +1142,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                                 "tool-intent-corpus-call",
                                 "tool_intent_corpus",
                             )),
-                            intents: lash_core::ToolIntents::v1(vec![
+                            intents: lash_core::ToolIntents::v2(vec![
                                 lash_core::ToolIntent::SignalProcess(
                                     lash_core::SignalProcessIntent {
                                         session_id: SessionId::from(
@@ -1295,11 +1295,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        // The mid-drain prefix ends before the durable-wait index call, so
-        // its v2 capture is unchanged by the scope-keyed index cutover.
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v2-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1348,6 +1346,16 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
         (
             "v2-full-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v2-full-drain.json")
+                .as_slice(),
+        ),
+        (
+            "v3-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json")
+                .as_slice(),
+        ),
+        (
+            "v3-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json")
                 .as_slice(),
         ),
     ] {
@@ -1705,16 +1713,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v2-mid-drain",
+            "v4-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v3-mid-intent",
+            "v4-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v3-full-drain", "full_drain", full),
+        ("v4-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {

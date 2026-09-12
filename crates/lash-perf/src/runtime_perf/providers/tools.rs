@@ -363,7 +363,7 @@ fn execute_benchmark_mail_send(
             "account": account,
             "id": message_id,
         })),
-        lash_core::ToolIntents::v1(vec![intent]),
+        lash_core::ToolIntents::v2(vec![intent]),
     )
 }
 

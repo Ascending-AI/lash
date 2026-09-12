@@ -44,7 +44,7 @@ fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffe
                     }),
                 duration_ms: 4,
             }),
-            intents: lash_core::ToolIntents::v1(Vec::new()),
+            intents: lash_core::ToolIntents::v2(Vec::new()),
         }),
         triggers: Vec::new(),
     };

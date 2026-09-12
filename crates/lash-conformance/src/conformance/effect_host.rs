@@ -2447,7 +2447,7 @@ fn replay_conformance_tool_attempt_outcome(
                 })),
                 duration_ms: 0,
             }),
-            intents: crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
+            intents: crate::ToolIntents::v2(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
                     session_id: SessionId::from("replay-session"),
                     request: crate::ProcessStartRequest::external(
