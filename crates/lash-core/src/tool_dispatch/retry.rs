@@ -35,39 +35,64 @@ pub(super) async fn execute_leaf_tool_attempt<'run>(
     max_attempts: u32,
 ) -> crate::ToolAttemptOutcome {
     let tool_name = authority.manifest().name.as_str();
-    execute_once(
+    execute_once_with_authority(
         context,
+        authority,
         prepared,
         tool_context.with_retry_context(tool_name, attempt, max_attempts),
-        authority.grant(),
     )
     .await
 }
 
 /// Runs a leaf tool body exactly once, with no retry ladder around it.
 ///
-/// The grant selects the source route and the attachment producer name;
+/// The authority selects the source route and attachment producer name;
 /// everything else — the attempt context, panic containment, attachment
-/// normalization — is identical on both routes.
+/// normalization — is identical on both routes. This compatibility entry
+/// point resolves the authority before entering the shared implementation so
+/// its attachment policy cannot fall back to provider-controlled identity.
+#[cfg(test)]
 pub(crate) async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
     grant: Option<&crate::ToolExecutionGrant>,
 ) -> crate::ToolAttemptOutcome {
+    let Some(authority) = AttemptAuthority::resolve(context, &prepared.tool_id, grant) else {
+        return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::failure(
+            crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Unavailable,
+                "tool_unavailable",
+                "Tool is unavailable in this session",
+            ),
+        ));
+    };
+    Box::pin(execute_once_with_authority(
+        context,
+        &authority,
+        prepared,
+        tool_context,
+    ))
+    .await
+}
+
+async fn execute_once_with_authority<'run>(
+    context: &ToolDispatchContext<'run>,
+    authority: &AttemptAuthority<'_>,
+    prepared: &PreparedToolCall,
+    tool_context: ToolContext<'run>,
+) -> crate::ToolAttemptOutcome {
     let mut attempt_result =
-        match build_attempt_context(context, prepared, &tool_context, grant).await {
+        match build_attempt_context(context, prepared, &tool_context, authority.grant()).await {
             Ok(attempt_context) => execute_attempt_body(context, prepared, &attempt_context).await,
             Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
         };
-    // A granted attempt is keyed on the grant name, never on whatever name the
-    // provider's prepared call carries: the grant is the authority that
-    // admitted the call, so it is the producer the attachment policy judges.
-    let producer_name = match grant {
-        Some(grant) => grant.manifest().name.as_str(),
-        None => prepared.tool_name.as_str(),
-    };
-    normalize_attempt_result_attachments(context, producer_name, &mut attempt_result).await;
+    normalize_attempt_result_attachments(
+        context,
+        authority.manifest().name.as_str(),
+        &mut attempt_result,
+    )
+    .await;
     attempt_result
 }
 

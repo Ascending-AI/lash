@@ -19,6 +19,7 @@ use tokio::time::{Duration, timeout};
 mod directives;
 mod intent_drain;
 mod internal_activation;
+mod orchestrating;
 mod retry_effect_controllers;
 mod retry_turn_cancel_gate;
 mod settlement_order;
@@ -895,6 +896,15 @@ async fn dispatch_orchestrating_tool_call(
     tool_name: &str,
     args: serde_json::Value,
 ) -> ToolDispatchOutcome {
+    dispatch_orchestrating_tool_call_with_prepared_name(context, tool_name, tool_name, args).await
+}
+
+async fn dispatch_orchestrating_tool_call_with_prepared_name(
+    context: &ToolDispatchContext<'_>,
+    tool_name: &str,
+    prepared_tool_name: &str,
+    args: serde_json::Value,
+) -> ToolDispatchOutcome {
     // The orchestration lane resolves its registration through the tool
     // registry, which the plain leaf-dispatch fixture leaves unset.
     let mut context = context.clone();
@@ -906,7 +916,7 @@ async fn dispatch_orchestrating_tool_call(
         manifest.id,
         crate::sansio::PendingToolCall {
             call_id: format!("orchestrating:{tool_name}"),
-            tool_name: tool_name.to_string(),
+            tool_name: prepared_tool_name.to_string(),
             args,
             replay: None,
         },
@@ -2218,6 +2228,24 @@ async fn batch_returns_explicit_errors_without_runtime_execution_context() {
             .and_then(|value| value.as_str()),
         Some("tool batch orchestration is unavailable outside process replay")
     );
+}
+
+#[tokio::test]
+async fn frameless_orchestrating_record_uses_manifest_name_when_prepared_call_is_renamed() {
+    let outcome = dispatch_orchestrating_tool_call_with_prepared_name(
+        &dispatch_context(),
+        "batch",
+        "provider_controlled_name",
+        json!({
+            "tool_calls": [
+                {"tool": "alpha", "parameters": {}}
+            ]
+        }),
+    )
+    .await;
+
+    assert!(outcome.record.output.is_success());
+    assert_eq!(outcome.record.tool, "batch");
 }
 
 #[tokio::test]

@@ -146,7 +146,12 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let started = context.clock.now();
-    let tool_name = prepared.tool_name.clone();
+    let Some(tool_name) =
+        super::preparation::resolve_callable_manifest_by_id(context, &prepared.tool_id)
+            .map(|manifest| manifest.name)
+    else {
+        return unavailable_prepared_tool_outcome(prepared);
+    };
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let orchestration_context =
@@ -212,7 +217,12 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let started = context.clock.now();
-    let tool_name = prepared.tool_name.clone();
+    let Some(tool_name) =
+        super::preparation::resolve_internal_manifest_by_id(context, &prepared.tool_id)
+            .map(|manifest| manifest.name)
+    else {
+        return unavailable_prepared_tool_outcome(prepared);
+    };
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let internal_context = crate::InternalProcessContext::new(tool_context);
@@ -261,6 +271,21 @@ pub(crate) async fn execute_internal_process_tool<'run>(
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
     }
+}
+
+fn unavailable_prepared_tool_outcome(prepared: PreparedToolCall) -> ToolDispatchOutcome {
+    let mut unavailable = outcome(
+        prepared.tool_name,
+        prepared.args,
+        runtime_failure(
+            ToolFailureClass::Unavailable,
+            "tool_unavailable",
+            "Tool is unavailable in this session",
+        ),
+        0,
+    );
+    unavailable.record.call_id = Some(prepared.call_id);
+    unavailable
 }
 
 #[cfg(test)]
