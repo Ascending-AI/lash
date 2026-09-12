@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::llm::transport::ProviderFailureKind;
 
 pub(super) fn request_with_instructions(
     instructions: &str,
@@ -208,4 +209,26 @@ fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
     assert!(parts[0].get("cache_control").is_none());
     assert_eq!(parts[1]["text"], "<runtime_feedback>F</runtime_feedback>");
     assert_eq!(parts[1]["cache_control"], json!({"type":"ephemeral"}));
+}
+
+#[test]
+fn malformed_tool_call_input_json_fails_the_anthropic_request() {
+    let provider = AnthropicProvider::new("key");
+    let req = request(vec![LlmMessage::new(
+        LlmRole::Assistant,
+        vec![LlmContentBlock::ToolCall {
+            call_id: "call1".into(),
+            tool_name: "lookup".into(),
+            input_json: "{".into(),
+            replay: None,
+        }],
+    )]);
+
+    let error = provider
+        .build_request_body(&req)
+        .expect_err("malformed tool input must not become {}");
+    assert_eq!(error.kind, ProviderFailureKind::Validation);
+    assert_eq!(error.code.as_deref(), Some("invalid_tool_call_input_json"));
+    assert!(error.message.contains("lookup"));
+    assert_eq!(error.raw.as_deref().map(String::as_str), Some("{"));
 }
