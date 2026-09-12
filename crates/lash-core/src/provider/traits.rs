@@ -109,14 +109,14 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
 }
 
 pub trait ProviderFailureClassifier: Send + Sync + std::fmt::Debug {
-    fn classify(&self, failure: ProviderFailure) -> ProviderFailure;
+    fn classify(&self, failure: LlmTransportError) -> LlmTransportError;
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct DefaultProviderFailureClassifier;
 
 impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
-    fn classify(&self, mut failure: ProviderFailure) -> ProviderFailure {
+    fn classify(&self, mut failure: LlmTransportError) -> LlmTransportError {
         // Driver-owned semantic evidence is conclusive. `Http`, a bare status,
         // and its mirrored numeric code are the generic wire envelope, not a
         // provider classification, so text fallbacks remain available there.

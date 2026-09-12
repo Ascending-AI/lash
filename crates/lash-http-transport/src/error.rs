@@ -49,11 +49,11 @@ pub enum HttpFailureContext {
 
 /// Failure crossing the host-configurable HTTP transport boundary.
 ///
-/// The provider-oriented aliases retain the richer diagnostic fields because
-/// the HTTP seam is also the wire boundary for LLM providers.
+/// The richer diagnostic fields cross the HTTP seam that is also the wire
+/// boundary for LLM providers.
 #[derive(Debug, thiserror::Error, Clone)]
 #[error("{message}")]
-pub struct HttpTransportError {
+pub struct LlmTransportError {
     pub kind: ProviderFailureKind,
     /// Structured operation evidence used by higher-level adapters.
     pub context: Box<HttpFailureContext>,
@@ -78,7 +78,7 @@ pub struct HttpTransportError {
     pub partial_response: Option<Box<LlmResponse>>,
 }
 
-impl HttpTransportError {
+impl LlmTransportError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             kind: ProviderFailureKind::Unknown,
@@ -226,7 +226,7 @@ pub fn retry_after_from_headers(headers: &[(String, String)]) -> Option<std::tim
 #[cfg(test)]
 mod tests {
     use super::{
-        HttpTransportError, TransportRetryVerdict, retry_after_from_headers,
+        LlmTransportError, TransportRetryVerdict, retry_after_from_headers,
         retry_verdict_for_status,
     };
     use std::time::Duration;
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn header_enrichment_preserves_adapter_supplied_retry_after() {
-        let error = HttpTransportError::new("throttled")
+        let error = LlmTransportError::new("throttled")
             .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
                 retry_after: Some(Duration::from_secs(7)),
             })

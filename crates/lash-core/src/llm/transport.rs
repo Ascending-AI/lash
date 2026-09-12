@@ -1,10 +1,8 @@
 //! Transport-level failure types and attachment capability diagnostics shared
 //! by provider adapters.
 
-pub use lash_http_transport::{TransportRetryVerdict, retry_after_from_headers};
+pub use lash_http_transport::{LlmTransportError, TransportRetryVerdict, retry_after_from_headers};
 pub use lash_sansio::llm::types::ProviderFailureKind;
-pub type ProviderFailure = lash_http_transport::HttpTransportError;
-pub type LlmTransportError = lash_http_transport::HttpTransportError;
 
 use lash_sansio::llm::types::AttachmentSource;
 
@@ -50,7 +48,7 @@ pub fn unsupported_attachment_capability(
             )
         }
     };
-    ProviderFailure::new(message)
+    LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Validation)
         .with_code("unsupported_attachment_capability")
 }
