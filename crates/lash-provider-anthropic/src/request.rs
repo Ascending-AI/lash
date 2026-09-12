@@ -12,6 +12,8 @@ pub(crate) struct BreakpointAddress {
     pub(crate) block_index: usize,
 }
 
+type BuiltMessages = (Option<String>, Vec<Value>, Option<BreakpointAddress>);
+
 impl AnthropicProvider {
     fn role_name(role: &LlmRole) -> &'static str {
         match role {
@@ -167,7 +169,7 @@ impl AnthropicProvider {
     pub(crate) fn build_messages(
         &self,
         req: &LlmRequest,
-    ) -> Result<(Option<String>, Vec<Value>, Option<BreakpointAddress>), LlmTransportError> {
+    ) -> Result<BuiltMessages, LlmTransportError> {
         let system_prompt = req.instructions.as_deref().map(str::to_owned);
         let mut out: Vec<Value> = Vec::new();
         let mut breakpoint = None;
