@@ -34,14 +34,13 @@ impl InMemorySessionStore {
             .get(&session_id)
             .cloned()
             .flatten();
-        let mut active_path = self.global_session_graph.lock_recover().clone();
-        active_path.set_leaf_node_id(leaf_node_id);
-        let active_path = active_path.try_trim_to_active_path().map_err(|error| {
-            crate::StoreError::StoredDataCorrupt {
+        let global_graph = self.global_session_graph.lock_recover();
+        let active_path = crate::SessionGraph::from_nodes(global_graph.nodes.clone(), leaf_node_id)
+            .and_then(|graph| graph.try_trim_to_active_path())
+            .map_err(|error| crate::StoreError::StoredDataCorrupt {
                 record_kind: "SessionGraph",
                 message: error.to_string(),
-            }
-        })?;
+            })?;
         let Some(candidate_index) = active_path
             .nodes
             .iter()

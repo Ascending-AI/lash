@@ -664,9 +664,9 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .ok_or_else(|| crate::StoreError::MissingFrameOpenAncestor {
                 leaf_node_id: request.node_id.clone(),
             })?;
-        let mut resident_path = graph.clone();
-        resident_path.set_leaf_node_id(Some(request.node_id.clone()));
-        resident_path = resident_path.trim_to_active_path();
+        let resident_path =
+            crate::SessionGraph::from_nodes(graph.nodes.clone(), Some(request.node_id.clone()))?
+                .trim_to_active_path();
         let owners = self.global_node_owners.lock_recover();
         let mut edge_path = Vec::with_capacity(resident_path.nodes.len());
         for (generation, node) in resident_path.nodes.iter().enumerate() {

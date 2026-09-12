@@ -675,16 +675,7 @@ impl RuntimeCommit {
         operation: OperationId,
         commit_budget: CommitBudget,
     ) -> Result<Self, StoreError> {
-        let mut projected_graph = state.session_graph.clone();
-        for node in &graph.nodes {
-            if projected_graph.find_node(&node.node_id).is_none() {
-                projected_graph.extend_node_records(std::iter::once(node.clone()));
-            }
-        }
-        projected_graph.set_leaf_node_id(graph.leaf_node_id().cloned());
-        let current_frame_node_id = projected_graph
-            .nearest_frame_node_id(projected_graph.leaf_node_id.as_deref())
-            .map(crate::FrameNodeId::new);
+        let current_frame_node_id = graph.derive_current_frame_node_id(&state.session_graph);
         Ok(Self {
             commit_budget,
             session_id: state.session_id.clone(),

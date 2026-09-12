@@ -42,8 +42,13 @@ pub fn append_conformance_event_node(
             ),
         },
     };
-    state.session_graph.push_node_record(node);
-    state.session_graph.set_leaf_node_id(Some(id.to_string()));
+    state
+        .session_graph
+        .apply_append(&crate::GraphAppend {
+            nodes: vec![node],
+            leaf_node_id: Some(id.to_string()),
+        })
+        .expect("append conformance event node");
 }
 
 pub async fn commit_conformance_state(

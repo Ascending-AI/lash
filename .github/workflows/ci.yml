@@ -29,6 +29,17 @@ on:
   # its own `gh-readonly-queue/...` ref. Without this trigger a queue entry gets
   # no checks at all and the queue stalls.
   merge_group:
+  # Trunk breadth, not a second copy of the queue run (FIG-2789). The queue
+  # validates the required core board on its merge-group commit and merges main
+  # by fast-forwarding to that same commit, so this push carries an identical
+  # tree. It runs again because the breadth families — Test heavy suites, Test
+  # S3 store, Functional E2E, Restate workers E2E, Fuzz smoke, Confidence fast —
+  # are deliberately off the merge-queue critical path and are gated to
+  # `push`/`workflow_dispatch` only. Those jobs consume this run's checkout and
+  # build, so the core board re-runs alongside them instead of in a separate
+  # pipeline; that overlap is the accepted cost of keeping breadth off the
+  # queue. Do not remove this trigger without first giving the breadth families
+  # another home.
   push:
     branches:
       - main

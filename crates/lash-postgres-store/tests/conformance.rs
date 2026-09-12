@@ -1367,11 +1367,17 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 90, "Postgres component schema pin");
+    // Derive the expected version from the compiled store instead of pinning a
+    // literal. `check_version_bumps.py` already forces the component bump when
+    // the guarded schema shape moves, so a literal here only adds a second,
+    // staler copy of the number that reds trunk on every schema bump that
+    // reaches main before the pin is advanced. This assertion keeps the real
+    // invariant: the live database must record the version the compiled store
+    // expects.
     assert_eq!(
-        current_version - 1,
-        89,
-        "immediate predecessor adjacency pin"
+        current_version,
+        PostgresStorage::schema_version(),
+        "live component version must match the compiled store schema version"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
