@@ -7,6 +7,19 @@ fn sqlite_sidecar(path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("{}-{suffix}", path.display()))
 }
 
+fn wait_for_sqlite_connections_to_close(path: &std::path::Path) {
+    let wal_path = sqlite_sidecar(path, "wal");
+    let shm_path = sqlite_sidecar(path, "shm");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while wal_path.exists() || shm_path.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "SQLite fixture connections did not close"
+        );
+        std::thread::yield_now();
+    }
+}
+
 #[tokio::test]
 async fn fig2837_sqlite_missing_database_is_an_error_and_is_not_created() {
     let directory = tempfile::tempdir().expect("tempdir");
@@ -55,15 +68,35 @@ fn fig2837_every_sqlite_registry_entry_names_an_inspectable_component() {
 async fn sqlite_inspection_is_read_only_and_tolerates_unrelated_additions() {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("store.db");
-    drop(Store::open(&path).await.expect("provision durable core"));
-    rusqlite::Connection::open(&path)
-        .expect("open mutation fixture")
+    let store = Store::open(&path).await.expect("provision durable core");
+    let fixture = rusqlite::Connection::open(&path).expect("open mutation fixture");
+    fixture
         .execute_batch(
             "CREATE TABLE host_owned_extra (
                 value TEXT CONSTRAINT ck_host_extra CHECK (value <> 'literal ) -- kept')
             );",
         )
         .expect("add unrelated table and check");
+    let (busy, wal_frames, checkpointed_frames) = fixture
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .expect("checkpoint mutation fixture");
+    assert_eq!(busy, 0, "fixture checkpoint must not be blocked");
+    assert_eq!(
+        wal_frames, checkpointed_frames,
+        "fixture checkpoint must copy every WAL frame"
+    );
+    drop(fixture);
+    drop(store);
+    // `tokio-rusqlite` drops its connection on a worker thread after the
+    // handle is dropped. SQLite removes WAL sidecars when the final connection
+    // closes, so their removal is the completion signal rather than a sleep.
+    wait_for_sqlite_connections_to_close(&path);
     let before = std::fs::read(&path).expect("read database before inspection");
 
     let report = inspect_required_constraints_at(&path, SqliteDatabase::DurableCore)
