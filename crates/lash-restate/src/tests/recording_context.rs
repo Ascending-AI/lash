@@ -852,7 +852,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                     context.settle_session_wait(&request.key);
                     return Ok(resolution);
                 }
-                if let Some(timeout_ms) = request.timeout_ms {
+                if let Some(deadline) = request.deadline {
+                    let timeout = deadline.remaining(lash_core::ClockWallTime::timestamp_ms(
+                        &lash_core::facade_support::SystemClock,
+                    ))?;
                     tokio::select! {
                         _ = notify.notified() => {}
                         _ = cancellation.cancelled() => {
@@ -861,7 +864,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                                 resolution: Resolution::Cancelled,
                             });
                         }
-                        _ = tokio::time::sleep(Duration::from_millis(timeout_ms)) => {
+                        _ = tokio::time::sleep(timeout) => {
                             context.resolve_durable_event(RestateDurableWaitResolveRequest {
                                 key: request.key.clone(),
                                 resolution: Resolution::Timeout,
@@ -2377,6 +2380,6 @@ pub(super) fn test_turn_cancel_wait_request(
     .expect("test turn cancellation gate key");
     RestateDurableWaitAwaitRequest {
         key,
-        timeout_ms: None,
+        deadline: None,
     }
 }

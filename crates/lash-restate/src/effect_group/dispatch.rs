@@ -208,7 +208,7 @@ impl EffectGroupDispatch {
                     .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
                     .await_resolution(Json(RestateDurableWaitAwaitRequest {
                         key,
-                        timeout_ms: None,
+                        deadline: None,
                     }))
                     .call()
                     .await?;
@@ -273,7 +273,7 @@ impl EffectGroupDispatch {
         let cancel_address = RestateDurableWaitAddress::for_key(&cancel_key);
         let cancel_request = RestateDurableWaitAwaitRequest {
             key: cancel_key,
-            timeout_ms: None,
+            deadline: None,
         };
         let cancel_watch = self.ingress.call_workflow_json::<_, Resolution>(
             "LashDurableWaitWorkflow",

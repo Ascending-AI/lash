@@ -33,10 +33,11 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
     LashDurableWaitIndexClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitEffectRequest,
+    RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
     RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
-    register_turn_cancel_gate, restate_await_event_key, retire_turn_cancel_gate,
+    register_turn_cancel_gate, restate_await_event_key, restate_durable_wait_request,
+    retire_turn_cancel_gate,
 };
 use crate::effect_group::{
     EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupDispatchClient,
@@ -808,6 +809,39 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
             ))
         })
     }
+}
+
+/// Freeze a deadline-bearing durable wait in the invoking handler's journal.
+///
+/// A process replacement reconstructs Lash's monotonic `Instant` deadline and
+/// can observe a different wall clock or setup delay. Restate compares nested
+/// call payloads structurally, so the absolute deadline must become a journal
+/// fact before the `LashDurableWaitWorkflow/await_resolution` call is emitted.
+/// No-deadline waits retain their deployed command shape and emit no extra run.
+pub(crate) async fn journaled_restate_durable_wait_request<'ctx, C>(
+    context: &C,
+    key: &lash_core::AwaitEventKey,
+    deadline: Option<std::time::Instant>,
+    clock: &dyn lash_core::Clock,
+) -> Result<RestateDurableWaitAwaitRequest, TerminalError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+{
+    let proposed = restate_durable_wait_request(key, deadline, clock);
+    let Some(proposed_deadline) = proposed.deadline else {
+        return Ok(proposed);
+    };
+    let Json(deadline): Json<RestateDurableWaitDeadline> = context
+        .run_json_send(
+            format!("lash:durable-wait-deadline:v2:{}", key.key_id),
+            None,
+            async move { proposed_deadline },
+        )
+        .await?;
+    Ok(RestateDurableWaitAwaitRequest {
+        key: key.clone(),
+        deadline: Some(deadline),
+    })
 }
 macro_rules! impl_restate_controller_context {
     ($($context:ident),+ $(,)?) => {

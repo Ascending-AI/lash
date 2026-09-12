@@ -36,7 +36,7 @@ use lash_core::ProcessWorkSubstrate as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
 use lash_core::{
-    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectAddress,
+    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress,
     EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
     ProcessEffectOutcome, ProcessExecutionContext, ProcessExternalRef, ProcessRegistry,
     QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome,
@@ -64,7 +64,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
@@ -1282,6 +1282,97 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 struct Fig1126PendingToolRedriveInput;
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig1128DeadlineRedriveInput;
+
+#[derive(Debug)]
+struct Fig1128DeadlineClock {
+    anchor: std::time::Instant,
+    wall_ms: AtomicU64,
+    monotonic_gap_ms: AtomicU64,
+    monotonic_reads: AtomicUsize,
+}
+
+impl Fig1128DeadlineClock {
+    fn new(wall_ms: u64, monotonic_gap_ms: u64) -> Self {
+        Self {
+            anchor: std::time::Instant::now(),
+            wall_ms: AtomicU64::new(wall_ms),
+            monotonic_gap_ms: AtomicU64::new(monotonic_gap_ms),
+            monotonic_reads: AtomicUsize::new(0),
+        }
+    }
+
+    fn begin_attempt(&self, wall_ms: u64, monotonic_gap_ms: u64) {
+        self.wall_ms.store(wall_ms, Ordering::SeqCst);
+        self.monotonic_gap_ms
+            .store(monotonic_gap_ms, Ordering::SeqCst);
+        self.monotonic_reads.store(0, Ordering::SeqCst);
+    }
+}
+
+#[async_trait::async_trait]
+impl Clock for Fig1128DeadlineClock {
+    fn now(&self) -> std::time::Instant {
+        let read = self.monotonic_reads.fetch_add(1, Ordering::SeqCst);
+        self.anchor
+            + Duration::from_millis(if read == 0 {
+                0
+            } else {
+                self.monotonic_gap_ms.load(Ordering::SeqCst)
+            })
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + Duration::from_millis(self.wall_ms.load(Ordering::SeqCst)),
+        )
+    }
+
+    async fn sleep(&self, _duration: Duration) {}
+
+    async fn sleep_until(&self, _deadline: std::time::Instant) {}
+}
+
+#[restate_sdk::workflow]
+trait Fig1128DeadlineRedrive {
+    async fn run(input: Json<Fig1128DeadlineRedriveInput>) -> HandlerResult<Json<Resolution>>;
+}
+
+struct Fig1128DeadlineRedriveImpl {
+    clock: Arc<Fig1128DeadlineClock>,
+}
+
+impl Fig1128DeadlineRedrive for Fig1128DeadlineRedriveImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(_input): Json<Fig1128DeadlineRedriveInput>,
+    ) -> HandlerResult<Json<Resolution>> {
+        let key = restate_await_event_key(
+            &durable_turn_scope("fig1128-session", "fig1128-turn"),
+            AwaitEventWaitIdentity::tool_completion("fig1128-deadline"),
+        )
+        .map_err(TerminalError::from_error)?;
+        let deadline = self.clock.now() + Duration::from_secs(60);
+        let request = crate::controller::context::journaled_restate_durable_wait_request(
+            &ctx,
+            &key,
+            Some(deadline),
+            self.clock.as_ref(),
+        )
+        .await?;
+        let Json(resolution) = ctx
+            .workflow_client::<crate::durable_wait::LashDurableWaitWorkflowClient>(
+                crate::durable_wait::RestateDurableWaitAddress::for_key(&key).workflow_key,
+            )
+            .await_resolution(Json(request))
+            .call()
+            .await?;
+        Ok(Json(resolution))
+    }
+}
 
 #[restate_sdk::workflow]
 trait Fig1126RevokedAwaitBoundary {

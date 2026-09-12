@@ -142,6 +142,12 @@ payload put returns `Retired`.
 The wait workflow owns Restate promises and durable deadline timers for every
 Lash execution scope. The virtual-object index serializes wait registration,
 session-wide cancellation, and permanent revocation during session deletion.
+Deadline-bearing waits journal their absolute deadline once in the invoking
+handler, then send deadline wire version 2 to the wait workflow. This preserves
+one total time budget across worker replacement and keeps the replay-compared
+nested call payload stable. The former unversioned `timeout_ms` request is
+refused; drain deadline-bearing waits before upgrading. Requests without a
+deadline retain their prior wire bytes and journal shape.
 At turn start, Lash reads the cancellation gate through the handler-scoped
 controller, so Restate journals the observation before any turn effect. A
 pre-registered cancellation is therefore still observed before execution, and

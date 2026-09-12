@@ -66,6 +66,11 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-1128: the v2 Restate durable-wait request enrolls an explicit
+    # absolute-deadline wire after retiring the unversioned relative timeout.
+    "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REQUEST_VERSION": (
+        "sha256:57132ba7af1d2309662351b26b2a007dbd0ce074b362df6bad442da7ca79396d"
+    ),
     # FIG-2945: the public serialized sans-IO turn checkpoint is enrolled at
     # v2 when completed pre-dispatch reporting joins its pending effect vocabulary.
     "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
