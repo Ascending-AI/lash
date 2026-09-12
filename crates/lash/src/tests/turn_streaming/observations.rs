@@ -213,6 +213,48 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
 }
 
 #[tokio::test]
+async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reasoning() -> Result<()>
+{
+    let streamed = reasoning_output_part("streamed A", "reasoning-a");
+    let completed = reasoning_output_part("completed-only B", "reasoning-b");
+    let provider = crate::testing::TestProvider::builder()
+        .kind("mixed-reasoning-publication")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let streamed = streamed.clone();
+            let completed = completed.clone();
+            async move {
+                let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::ReasoningDelta("streamed A".to_string()));
+                stream.send(LlmStreamEvent::Part(streamed.clone()));
+                Ok(LlmResponse {
+                    parts: vec![streamed, completed],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("mixed-reasoning-publication").open().await?;
+
+    let output = session
+        .turn(TurnInput::text("keep every distinct reasoning item"))
+        .run()
+        .await?;
+
+    assert_eq!(
+        reasoning_activities(&output),
+        vec!["streamed A", "completed-only B"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Result<()> {
     let reasoning = reasoning_output_part("reasoning once", "reasoning-before-text");
     let provider = crate::testing::TestProvider::builder()
@@ -253,44 +295,6 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
     assert_eq!(reasoning_activities(&output), vec!["reasoning once"]);
     assert_eq!(assistant_prose(&output.activities), "buffered answer");
     assert_eq!(output.assistant_message(), Some("buffered answer"));
-    Ok(())
-}
-
-#[tokio::test]
-async fn semantic_publication_streamed_text_keeps_nonstreamed_reasoning() -> Result<()> {
-    let provider = crate::testing::TestProvider::builder()
-        .kind("text-then-buffered-reasoning")
-        .requires_streaming(true)
-        .complete(move |request| async move {
-            let stream = request.stream_events.expect("stream events");
-            stream.send(LlmStreamEvent::Delta("streamed answer".to_string()));
-            Ok(LlmResponse {
-                parts: vec![
-                    reasoning_output_part("buffered reasoning", "reasoning-after-text"),
-                    LlmOutputPart::Text {
-                        text: "streamed answer".to_string(),
-                        response_meta: None,
-                    },
-                ],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            })
-        })
-        .build()
-        .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("text-buffered-reasoning").open().await?;
-
-    let output = session
-        .turn(TurnInput::text("reason after prose"))
-        .run()
-        .await?;
-
-    assert_eq!(assistant_prose(&output.activities), "streamed answer");
-    assert_eq!(reasoning_activities(&output), vec!["buffered reasoning"]);
     Ok(())
 }
 
