@@ -89,11 +89,12 @@ pub(crate) use services::NoopSessionManager;
 pub use services::{PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices};
 pub use session_obj::PluginSession;
 pub use session_types::{
-    AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, OpenAgentFrameRequest,
-    OpenAgentFrameResult, PluginOwned, SessionContextOverlay, SessionCreateRequest, SessionHandle,
-    SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
-    SessionObserverIntentAttribution, SessionPluginSource, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
+    OpenAgentFrameRequest, OpenAgentFrameResult, PluginOwned, SessionContextOverlay,
+    SessionCreateRequest, SessionHandle, SessionObservedProcessOutcome,
+    SessionObservedProcessReceipt, SessionObserverIntent, SessionObserverIntentAttribution,
+    SessionPluginSource, SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess,
+    SessionToolAccessError, SubagentSessionContext,
 };
 pub use state::{
     KeyRejection, PluginNamespaceState, PluginState, PluginStateEdit, PluginStateError,

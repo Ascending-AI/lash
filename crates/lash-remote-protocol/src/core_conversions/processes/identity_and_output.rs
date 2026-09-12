@@ -1,8 +1,8 @@
 use super::*;
 
 fn restore_frame_node_id(value: String) -> lash_core::FrameNodeId {
-    serde_json::from_value(serde_json::Value::String(value))
-        .expect("a serialized frame node id is a transparent string")
+    lash_core::FrameNodeId::new(value)
+        .expect("remote frame ids are validated before conversion to core")
 }
 
 impl From<lash_core::ProcessRef> for RemoteProcessRef {

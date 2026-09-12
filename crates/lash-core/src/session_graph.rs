@@ -121,6 +121,7 @@ pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNod
         "frame-node/v3/{}",
         crate::stable_hash::blake3_hex("lash-frame-node/v3", preimage.as_bytes())
     ))
+    .expect("derived frame node ids are non-empty")
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -475,6 +476,18 @@ pub struct SessionReadModel {
     pub(crate) prompt_render_cache: Arc<BaseRenderCache>,
 }
 
+/// Failure to resolve an explicitly requested frame on the active session path.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SessionGraphScopeError {
+    /// The requested identity does not name a frame on the active path.
+    #[error("frame `{frame_node_id}` was not found on the active session path")]
+    FrameNotFound {
+        /// Requested durable frame identity.
+        frame_node_id: crate::FrameNodeId,
+    },
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SessionGraphAppendBuilder {
     existing_ids: HashSet<String>,
@@ -612,7 +625,7 @@ struct SessionGraphCache {
     /// Replaced (not invalidated in-place) whenever `active_messages`
     /// changes — the `Arc` identity tracks the cache's validity.
     prompt_render_cache: Arc<BaseRenderCache>,
-    /// Memoized `read_model_for_frame` answer, keyed by the frame it was
+    /// Memoized scoped read-model answer, keyed by the frame it was
     /// projected for.
     ///
     /// Identity is the point, not the saved work: the turn projection decides
@@ -664,30 +677,34 @@ impl SessionGraphCache {
         self.frame_read_model = OnceLock::new();
     }
 
-    fn read_model_for_frame(&self, graph: &SessionGraph, frame_node_id: &str) -> SessionReadModel {
+    fn scoped_read_model(
+        &self,
+        graph: &SessionGraph,
+        frame_node_id: &crate::FrameNodeId,
+    ) -> SessionReadModel {
         if let Some((memoized_frame_node_id, read_model)) = self.frame_read_model.get()
-            && memoized_frame_node_id == frame_node_id
+            && memoized_frame_node_id == frame_node_id.as_str()
         {
             return read_model.clone();
         }
-        let read_model = self.project_read_model_for_frame(graph, frame_node_id);
+        let read_model = self.project_scoped_read_model(graph, frame_node_id);
         let _ = self
             .frame_read_model
             .set((frame_node_id.to_string(), read_model.clone()));
         read_model
     }
 
-    fn project_read_model_for_frame(
+    fn project_scoped_read_model(
         &self,
         graph: &SessionGraph,
-        frame_node_id: &str,
+        frame_node_id: &crate::FrameNodeId,
     ) -> SessionReadModel {
         let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
         let mut active_events = Vec::with_capacity(self.active_path_indices.len());
         let mut in_frame = false;
         for idx in &self.active_path_indices {
             let node = &graph.nodes[*idx];
-            if node.node_id == frame_node_id {
+            if node.node_id == frame_node_id.as_str() {
                 in_frame = true;
             } else if in_frame && matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
                 break;
@@ -1119,20 +1136,33 @@ impl SessionGraph {
             .collect())
     }
 
-    pub fn read_model(&self) -> SessionReadModel {
+    /// Reads either the whole active history or one explicitly requested frame.
+    ///
+    /// `None` is the only unscoped representation. A requested frame must name
+    /// a `FrameOpen` node on the active path.
+    pub fn read_model(
+        &self,
+        frame_node_id: Option<&crate::FrameNodeId>,
+    ) -> Result<SessionReadModel, SessionGraphScopeError> {
         let cache = self.cache();
-        SessionReadModel {
-            active_events: Arc::clone(&cache.active_events),
-            messages: Arc::clone(&cache.active_messages),
-            prompt_render_cache: Arc::clone(&cache.prompt_render_cache),
+        let Some(frame_node_id) = frame_node_id else {
+            return Ok(SessionReadModel {
+                active_events: Arc::clone(&cache.active_events),
+                messages: Arc::clone(&cache.active_messages),
+                prompt_render_cache: Arc::clone(&cache.prompt_render_cache),
+            });
+        };
+        let frame_exists_on_active_path = cache.active_path_indices.iter().any(|index| {
+            let node = &self.nodes[*index];
+            node.node_id == frame_node_id.as_str()
+                && matches!(node.payload, SessionNodePayload::FrameOpen { .. })
+        });
+        if !frame_exists_on_active_path {
+            return Err(SessionGraphScopeError::FrameNotFound {
+                frame_node_id: frame_node_id.clone(),
+            });
         }
-    }
-
-    pub(crate) fn read_model_for_frame(&self, frame_node_id: &str) -> SessionReadModel {
-        if frame_node_id.is_empty() {
-            return self.read_model();
-        }
-        self.cache().read_model_for_frame(self, frame_node_id)
+        Ok(cache.scoped_read_model(self, frame_node_id))
     }
 
     /// Resolve the canonical current frame for `leaf_node_id`.
@@ -1193,7 +1223,8 @@ impl SessionGraph {
             let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
                 continue;
             };
-            let frame_node_id = crate::FrameNodeId::new(node.node_id.clone());
+            let frame_node_id = crate::FrameNodeId::new(node.node_id.clone())
+                .expect("validated graph node identities are non-empty");
             frames.push(crate::AgentFrameRecord::new_at(
                 frame_node_id.clone(),
                 session_id.to_string(),
@@ -1368,29 +1399,31 @@ impl SessionGraph {
     ///
     /// The resulting graph is a read projection. It must never be committed against an existing
     /// session head because the rewritten tail is not parented from that durable head.
-    pub fn rewrite_active_read_tail(&mut self, messages: &[Message]) {
-        self.rewrite_active_read_tail_from(None, messages);
-    }
-
-    pub(crate) fn rewrite_active_read_tail_for_frame(
+    /// Rewrites either the whole active readable tail or one requested frame.
+    ///
+    /// Resolution happens before mutation, so a missing requested frame leaves
+    /// the graph unchanged.
+    pub fn rewrite_active_read_tail(
         &mut self,
-        frame_node_id: &str,
+        frame_node_id: Option<&crate::FrameNodeId>,
         messages: &[Message],
-    ) {
-        self.rewrite_active_read_tail_from(Some(frame_node_id), messages);
-    }
-
-    fn rewrite_active_read_tail_from(&mut self, frame_node_id: Option<&str>, messages: &[Message]) {
+    ) -> Result<(), SessionGraphScopeError> {
         let active_path = self.active_path_nodes();
-        let current_nodes = frame_node_id.map_or(active_path.as_slice(), |frame_node_id| {
-            active_path
-                .iter()
-                .position(|node| node.node_id == frame_node_id)
-                .map_or(&[][..], |index| &active_path[index..])
-        });
-        if frame_node_id.is_some() && current_nodes.is_empty() {
-            return;
-        }
+        let current_nodes = match frame_node_id {
+            None => active_path.as_slice(),
+            Some(frame_node_id) => {
+                let index = active_path
+                    .iter()
+                    .position(|node| {
+                        node.node_id == frame_node_id.as_str()
+                            && matches!(node.payload, SessionNodePayload::FrameOpen { .. })
+                    })
+                    .ok_or_else(|| SessionGraphScopeError::FrameNotFound {
+                        frame_node_id: frame_node_id.clone(),
+                    })?;
+                &active_path[index..]
+            }
+        };
         let replacement = build_active_read_replacement(
             current_nodes.iter().copied(),
             self.append_builder_in_namespace(format!(
@@ -1403,13 +1436,16 @@ impl SessionGraph {
         let data = self.data_mut();
         data.leaf_node_id = replacement.leaf_node_id;
         data.nodes.extend(replacement.new_tail_nodes);
+        Ok(())
     }
 
     /// Builds a `SessionGraph` from active read state data for store, effect-host, and protocol
     /// implementors while materializing, executing, or persisting a session turn.
     pub fn from_active_read_state(messages: &[Message]) -> Self {
         let mut graph = Self::default();
-        graph.rewrite_active_read_tail(messages);
+        graph
+            .rewrite_active_read_tail(None, messages)
+            .expect("unscoped replacement cannot fail frame resolution");
         graph
     }
 

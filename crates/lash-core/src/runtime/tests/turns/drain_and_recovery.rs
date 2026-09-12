@@ -1397,7 +1397,7 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
         1,
         "child history must not retain the parent frame root"
     );
-    let read_model = graph.read_model();
+    let read_model = graph.read_model(None).unwrap();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].parts[0].content, "parent hello");

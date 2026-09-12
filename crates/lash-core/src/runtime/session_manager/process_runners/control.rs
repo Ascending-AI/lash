@@ -342,7 +342,6 @@ impl ProcessCapability {
         agent_frame_id: Option<&crate::FrameNodeId>,
     ) -> crate::SessionScope {
         agent_frame_id
-            .filter(|frame_id| !frame_id.is_empty())
             .map(|frame_id| crate::SessionScope::for_agent_frame(session_id, frame_id.clone()))
             .unwrap_or_else(|| crate::SessionScope::new(session_id))
     }

@@ -242,7 +242,9 @@ impl PluginSession {
             }
         }
         if let Some(messages) = updated_messages.as_ref() {
-            turn.state.replace_active_read_state(messages.as_slice());
+            turn.state
+                .replace_active_read_state(messages.as_slice())
+                .map_err(|error| PluginError::Session(error.to_string()))?;
         }
 
         if self.has_runtime_event_hooks()

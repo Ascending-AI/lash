@@ -408,7 +408,7 @@ fn read_model_preserves_distinct_nodes_with_identical_messages() {
     let second = graph.append_message(message);
 
     assert_ne!(first, second);
-    let read = graph.read_model();
+    let read = graph.read_model(None).unwrap();
     assert_eq!(read.messages.len(), 2);
     assert_eq!(read.messages[0].id, "same-message-id");
     assert_eq!(read.messages[1].id, "same-message-id");
@@ -748,11 +748,16 @@ fn active_read_rewrite_preserves_draft_node_id_sequence() {
     graph = SessionGraph::from_nodes(nodes, Some(leaf_node_id))
         .expect("pre-existing draft branches are structurally valid");
 
-    graph.rewrite_active_read_tail(&[
-        first,
-        text_message("m2", MessageRole::Assistant, "second"),
-        text_message("m3", MessageRole::User, "third"),
-    ]);
+    graph
+        .rewrite_active_read_tail(
+            None,
+            &[
+                first,
+                text_message("m2", MessageRole::Assistant, "second"),
+                text_message("m3", MessageRole::User, "third"),
+            ],
+        )
+        .unwrap();
 
     let emitted_ids = graph
         .nodes
@@ -885,8 +890,8 @@ fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
     ));
     graph.append_message(text_message("m1", MessageRole::User, "first"));
 
-    let first = graph.read_model_for_frame(&frame);
-    let second = graph.read_model_for_frame(&frame);
+    let first = graph.read_model(Some(&frame)).unwrap();
+    let second = graph.read_model(Some(&frame)).unwrap();
     assert!(
         Arc::ptr_eq(&first.messages, &second.messages),
         "repeated reads of one frame share the projected messages by identity"
@@ -894,10 +899,63 @@ fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
     assert!(Arc::ptr_eq(&first.active_events, &second.active_events));
 
     graph.append_message(text_message("m2", MessageRole::User, "second"));
-    let after_append = graph.read_model_for_frame(&frame);
+    let after_append = graph.read_model(Some(&frame)).unwrap();
     assert!(
         !Arc::ptr_eq(&first.messages, &after_append.messages),
         "an append to the active path retires the memoized projection"
     );
     assert_eq!(after_append.messages.len(), 2);
+}
+
+#[test]
+fn root_frame_and_unscoped_reads_are_equivalent() {
+    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+    ));
+    let mut graph = SessionGraph::default();
+    let frame_key =
+        crate::FrameKey::from_caller_material("root-frame").expect("non-empty frame material");
+    let frame = frame_node_id(&SessionId::from("session"), frame_key.as_str());
+    assert!(graph.append_frame_open_with_id_at(
+        frame.to_string(),
+        frame_key,
+        crate::AgentFrameReason::initial(),
+        assignment,
+        crate::ProtocolTurnOptions::default(),
+        "2026-09-12T00:00:00Z".to_string(),
+    ));
+    graph.append_message(text_message("m1", MessageRole::User, "first"));
+    graph.append_message(text_message("m2", MessageRole::Assistant, "second"));
+
+    let unscoped = graph.read_model(None).unwrap();
+    let root_scoped = graph.read_model(Some(&frame)).unwrap();
+    assert_eq!(
+        serde_json::to_value(root_scoped.messages.as_ref()).unwrap(),
+        serde_json::to_value(unscoped.messages.as_ref()).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(root_scoped.active_events.as_ref()).unwrap(),
+        serde_json::to_value(unscoped.active_events.as_ref()).unwrap()
+    );
+}
+
+#[test]
+fn missing_frame_read_and_rewrite_return_the_same_error_without_mutation() {
+    let mut graph =
+        SessionGraph::from_active_read_state(&[text_message("m1", MessageRole::User, "unchanged")]);
+    let missing = crate::FrameNodeId::new("frame-node/v3/missing").unwrap();
+    let before = serde_json::to_value(&graph).unwrap();
+
+    let read_error = graph
+        .read_model(Some(&missing))
+        .expect_err("a missing requested frame must fail the read");
+    let rewrite_error = graph
+        .rewrite_active_read_tail(
+            Some(&missing),
+            &[text_message("m2", MessageRole::Assistant, "replacement")],
+        )
+        .expect_err("a missing requested frame must fail the rewrite");
+
+    assert_eq!(read_error, rewrite_error);
+    assert_eq!(serde_json::to_value(&graph).unwrap(), before);
 }

@@ -207,13 +207,9 @@ impl SessionReadView {
         base_graph: Arc<crate::SessionGraph>,
         messages: crate::MessageSequence,
     ) -> Self {
-        let active_events = state
-            .current_frame_node_id
-            .as_deref()
-            .map_or_else(
-                || base_graph.read_model(),
-                |frame_node_id| base_graph.read_model_for_frame(frame_node_id),
-            )
+        let active_events = base_graph
+            .read_model(state.current_frame_node_id.as_ref())
+            .expect("persisted current frame must resolve in its validated session graph")
             .active_events;
         Self::from_graph_message_sequence_meta(
             SessionReadMeta::from_persisted_ref(state)
@@ -233,16 +229,18 @@ impl SessionReadView {
             SessionReadGraph::Owned(graph) => graph,
             SessionReadGraph::Derived { cache, base_graph } => cache.get_or_init(|| {
                 let mut graph = (**base_graph).clone();
-                if let Some(frame_node_id) =
-                    base_graph.nearest_frame_node_id(base_graph.leaf_node_id.as_deref())
-                {
-                    graph.rewrite_active_read_tail_for_frame(
-                        frame_node_id,
+                let frame_node_id = base_graph
+                    .nearest_frame_node_id(base_graph.leaf_node_id.as_deref())
+                    .map(|frame_node_id| {
+                        crate::FrameNodeId::new(frame_node_id)
+                            .expect("a graph node identity selected as a frame is non-empty")
+                    });
+                graph
+                    .rewrite_active_read_tail(
+                        frame_node_id.as_ref(),
                         self.0.read_model.messages.as_slice(),
-                    );
-                } else {
-                    graph.rewrite_active_read_tail(self.0.read_model.messages.as_slice());
-                }
+                    )
+                    .expect("derived frame must resolve in its source session graph");
                 graph
             }),
         }

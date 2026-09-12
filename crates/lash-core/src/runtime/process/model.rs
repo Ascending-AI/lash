@@ -755,10 +755,10 @@ impl SessionScope {
     /// or persisting a session turn.
     pub fn id(&self) -> SessionScopeId {
         match self.agent_frame_id.as_deref() {
-            Some(frame_id) if !frame_id.is_empty() => {
+            Some(frame_id) => {
                 SessionScopeId::new(format!("session:{}/frame:{frame_id}", self.session_id))
             }
-            _ => SessionScopeId::new(format!("session:{}", self.session_id)),
+            None => SessionScopeId::new(format!("session:{}", self.session_id)),
         }
     }
 

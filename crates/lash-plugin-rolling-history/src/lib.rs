@@ -411,22 +411,24 @@ fn prepare_compaction_request(
     state: &SessionSnapshot,
     mut prefix_messages: Vec<Message>,
     instructions: Option<&str>,
-) -> (SessionSnapshot, String) {
+) -> Result<(SessionSnapshot, String), ContextError> {
     let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
     strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
     snapshot.set_execution_state_snapshot(None);
     snapshot.last_prompt_usage = None;
     let previous_summary = extract_previous_summary(&prefix_messages);
-    snapshot.replace_active_read_state(&prefix_messages);
+    snapshot
+        .replace_active_read_state(&prefix_messages)
+        .map_err(|error| ContextError::Session(error.to_string()))?;
     let base_prompt = match previous_summary {
         Some(previous_summary) => compaction_update_prompt(&previous_summary),
         None => COMPACTION_PROMPT.to_string(),
     };
-    (
+    Ok((
         snapshot.to_snapshot(),
         with_instructions(&base_prompt, instructions),
-    )
+    ))
 }
 
 fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
@@ -458,7 +460,8 @@ async fn summarize_compaction_prefix(
         return Ok(None);
     }
 
-    let (snapshot, prompt_text) = prepare_compaction_request(state, prefix_messages, instructions);
+    let (snapshot, prompt_text) =
+        prepare_compaction_request(state, prefix_messages, instructions)?;
 
     let (compaction_session_id, turn_id) = compaction_child_ids(
         session_id,
@@ -1245,7 +1248,8 @@ mod tests {
             lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test");
         let instructions = "focus on latest request";
         let (request_snapshot, prompt_text) =
-            prepare_compaction_request(&state, messages.clone(), Some(instructions));
+            prepare_compaction_request(&state, messages.clone(), Some(instructions))
+                .expect("prepare compaction request");
         let expected_child_ids = compaction_child_ids(
             &SessionId::from("root"),
             &state,
@@ -1255,7 +1259,8 @@ mod tests {
         )
         .expect("derive compaction child identity");
         let (retry_snapshot, retry_prompt_text) =
-            prepare_compaction_request(&state, messages.clone(), Some(instructions));
+            prepare_compaction_request(&state, messages.clone(), Some(instructions))
+                .expect("prepare retry compaction request");
         assert_eq!(prompt_text, retry_prompt_text);
         assert_eq!(
             expected_child_ids,
@@ -1270,7 +1275,8 @@ mod tests {
             "retrying the same physical compaction must preserve child identity"
         );
         let (same_snapshot, changed_prompt_text) =
-            prepare_compaction_request(&state, messages.clone(), Some("different focus"));
+            prepare_compaction_request(&state, messages.clone(), Some("different focus"))
+                .expect("prepare changed-prompt compaction request");
         assert_ne!(
             expected_child_ids,
             compaction_child_ids(
@@ -1289,9 +1295,12 @@ mod tests {
             text_message("u2", MessageRole::User, "latest request"),
         ];
         let mut changed_state = state.clone();
-        changed_state.replace_active_read_state(&changed_messages);
+        changed_state
+            .replace_active_read_state(&changed_messages)
+            .expect("replace changed read state");
         let (changed_snapshot, changed_prompt_text) =
-            prepare_compaction_request(&changed_state, changed_messages, Some(instructions));
+            prepare_compaction_request(&changed_state, changed_messages, Some(instructions))
+                .expect("prepare changed-state compaction request");
         assert_eq!(prompt_text, changed_prompt_text);
         assert_ne!(
             expected_child_ids,

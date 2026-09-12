@@ -562,7 +562,8 @@ impl TurnBoundary {
                         .iter()
                         .find(|(draft, _)| draft == current.as_str())
                 {
-                    *current = crate::FrameNodeId::new(derived.clone());
+                    *current = crate::FrameNodeId::new(derived.clone())
+                        .expect("derived graph node identities are non-empty");
                 }
                 finalized.state.agent_frames = finalized
                     .state

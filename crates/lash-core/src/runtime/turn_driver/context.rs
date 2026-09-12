@@ -77,7 +77,12 @@ impl<'run> RuntimeTurnDriver<'run> {
                     .state()
                     .current_frame_node_id
                     .clone()
-                    .unwrap_or_else(|| crate::FrameNodeId::new(String::new())),
+                    .ok_or_else(|| {
+                        PluginError::Session(
+                            "runtime turn execution requires an initialized agent frame"
+                                .to_string(),
+                        )
+                    })?,
                 manager.state_service(),
                 manager.lifecycle_service(),
                 manager.graph_service(),

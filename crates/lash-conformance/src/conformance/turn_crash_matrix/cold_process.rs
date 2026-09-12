@@ -287,7 +287,8 @@ pub async fn cold_process_real_turn_driver(
                             .map(|state| {
                                 state
                                     .session_graph
-                                    .read_model()
+                                    .read_model(None)
+                                    .unwrap()
                                     .messages
                                     .iter()
                                     .flat_map(|message| message.parts.iter())
@@ -394,7 +395,8 @@ pub async fn cold_process_real_turn_driver(
         .expect("cold-process recovery committed a session head");
     let terminal_count = state
         .session_graph
-        .read_model()
+        .read_model(None)
+        .unwrap()
         .messages
         .iter()
         .flat_map(|message| message.parts.iter())

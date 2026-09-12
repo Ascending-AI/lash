@@ -1005,7 +1005,10 @@ pub(super) async fn commit_rejects_agent_frame_bytes_over_budget(
     commit
         .validate_budget()
         .expect("the commit without an agent frame must fit");
-    commit.current_frame_node_id = Some(crate::FrameNodeId::new("f".repeat(BYTE_LIMIT * 2)));
+    commit.current_frame_node_id = Some(
+        crate::FrameNodeId::new("f".repeat(BYTE_LIMIT * 2))
+            .expect("test frame identity is non-empty"),
+    );
 
     let error = store
         .commit_runtime_state(commit)

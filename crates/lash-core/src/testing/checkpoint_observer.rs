@@ -435,10 +435,10 @@ impl crate::store::RuntimePersistenceDecorator for ObservedSessionStore {
         if let Some(state) = event.state.as_mut()
             && let Some(accepted) = self.inner.load_session().await?
         {
-            let read_model = accepted.current_frame_node_id.as_deref().map_or_else(
-                || accepted.graph.read_model(),
-                |frame_node_id| accepted.graph.read_model_for_frame(frame_node_id),
-            );
+            let read_model = accepted
+                .graph
+                .read_model(accepted.current_frame_node_id.as_ref())
+                .expect("accepted current frame must resolve in its validated session graph");
             state.accepted_raw_rows = Some(serde_json::json!({
                 "graph_nodes": accepted.graph.nodes,
                 "graph_leaf_node_id": accepted.graph.leaf_node_id,

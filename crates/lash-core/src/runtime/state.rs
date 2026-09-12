@@ -847,23 +847,22 @@ impl RuntimeSessionState {
     }
 
     pub(crate) fn read_model(&self) -> crate::session_graph::SessionReadModel {
-        self.current_frame_node_id.as_deref().map_or_else(
-            || self.session_graph.read_model(),
-            |frame_node_id| self.session_graph.read_model_for_frame(frame_node_id),
-        )
+        self.session_graph
+            .read_model(self.current_frame_node_id.as_ref())
+            .expect("runtime current frame must resolve in its validated session graph")
     }
 
     /// Replaces the current frame's readable message tail for protocol implementors restoring
     /// state; transient messages are excluded and the frame projection is refreshed.
-    pub fn replace_active_read_state(&mut self, messages: &[Message]) {
+    pub fn replace_active_read_state(
+        &mut self,
+        messages: &[Message],
+    ) -> Result<(), crate::SessionGraphScopeError> {
         self.ensure_agent_frame_initialized();
-        if let Some(frame_node_id) = self.current_frame_node_id.as_deref() {
-            self.session_graph
-                .rewrite_active_read_tail_for_frame(frame_node_id, messages);
-        } else {
-            self.session_graph.rewrite_active_read_tail(messages);
-        }
+        self.session_graph
+            .rewrite_active_read_tail(self.current_frame_node_id.as_ref(), messages)?;
         self.refresh_current_frame_projection();
+        Ok(())
     }
 
     /// Appends non-transient messages in source order for protocol implementors restoring an
@@ -1131,7 +1130,10 @@ impl RuntimeSessionState {
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
-            .map(crate::FrameNodeId::new);
+            .map(|frame_node_id| {
+                crate::FrameNodeId::new(frame_node_id)
+                    .expect("a graph node identity selected as a frame is non-empty")
+            });
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
@@ -1172,7 +1174,10 @@ impl RuntimeSessionState {
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
         {
-            self.current_frame_node_id = Some(crate::FrameNodeId::new(frame_node_id));
+            self.current_frame_node_id = Some(
+                crate::FrameNodeId::new(frame_node_id)
+                    .expect("a graph node identity selected as a frame is non-empty"),
+            );
             self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
             return;
         }
@@ -1507,7 +1512,8 @@ pub(crate) fn apply_graph_commit_node_id_mapping(
     if let Some(current) = state.current_frame_node_id.as_mut()
         && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
     {
-        *current = crate::FrameNodeId::new(derived.clone());
+        *current = crate::FrameNodeId::new(derived.clone())
+            .expect("derived graph node identities are non-empty");
     }
     state.agent_frames = state
         .session_graph

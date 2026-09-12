@@ -703,7 +703,8 @@ impl<'run> ToolContext<'run> {
     ) -> ToolContextBuilder<'run> {
         ToolContextBuilder {
             session_id,
-            agent_frame_id: crate::FrameNodeId::new(String::new()),
+            agent_frame_id: crate::FrameNodeId::new("test-frame")
+                .expect("test frame identity is non-empty"),
             sessions,
             session_lifecycle,
             session_graph,

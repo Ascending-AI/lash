@@ -915,11 +915,9 @@ impl SessionGraphScenario {
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(operation.clone());
         commit.graph = malformed_graph_append(&state, &operation, shape % 4)?;
         if matches!(shape % 4, 0 | 3) {
-            commit.current_frame_node_id = commit
-                .graph
-                .leaf_node_id
-                .clone()
-                .map(crate::FrameNodeId::new);
+            commit.current_frame_node_id = commit.graph.leaf_node_id.clone().map(|frame_node_id| {
+                crate::FrameNodeId::new(frame_node_id).expect("test frame identity is non-empty")
+            });
         }
         let error = commit_runtime_state_for_property(&live.store, commit, "malformed")
             .await
