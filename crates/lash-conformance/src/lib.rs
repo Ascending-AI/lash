@@ -16,6 +16,9 @@ mod in_memory;
 /// Locate a dev-only recovery helper beside the current Cargo test profile.
 /// CI archives these example executables alongside the test binaries.
 pub fn helper_executable(name: &str) -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("LASH_CONFORMANCE_HELPER_EXE") {
+        return path.into();
+    }
     std::env::current_exe()
         .expect("locate current test executable")
         .parent()

@@ -7,12 +7,22 @@ on:
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
+      - '.cargo/**'
       - Cargo.lock
       - '**/*.bazel'
       - '**/*.bzl'
       - .bazelversion
       - .bazelrc
       - MODULE.bazel.lock
+      - rust-toolchain.toml
+      - 'crates/**'
+      - 'examples/**'
+      - 'runbooks/**'
+      - 'fixtures/**'
+      - tools/bazel/**
+      - scripts/hermetic-build.sh
+      - scripts/perf_guard_budgets.json
+      - scripts/slack-clone-live-model-ui.py
       - .github/workflows/bazel.yml
   workflow_dispatch:
 
@@ -24,7 +34,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  compile:
+  test:
     # Fork code and Dependabot never receive cache-writing credentials.
     if: github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
@@ -53,10 +63,10 @@ jobs:
           printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
           printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
           printf '%s' "$CACHE_KEY" > "$RUNNER_TEMP/build-cache/client.key"
-      - name: Compile workspace with shared cache
+      - name: Test deterministic workspace suite with shared cache
         shell: bash
         run: |
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" test \
             --repository_cache="$RUNNER_TEMP/bazel-repository" \
             --disk_cache= --spawn_strategy=local \
             --remote_cache=grpcs://51.15.75.60:8443 --remote_instance_name=orb \
@@ -67,8 +77,9 @@ jobs:
             --remote_default_exec_properties=cpu_count=1 \
             --remote_default_exec_properties=memory_kb=2097152 \
             --remote_download_outputs=toplevel --remote_timeout=120 \
+            --cache_test_results=yes --test_output=errors \
             --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
-            //:workspace_compile
+            //:workspace_tests
       - name: Remove client credentials
         if: always()
         shell: bash

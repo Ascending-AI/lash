@@ -51,6 +51,7 @@
           "label": "//crates/lash-core:lash-core"
         },
         {
+          "cargo_only": "shares a unit-test binary with nested-Cargo fault-matrix tests",
           "kind": "unit-test",
           "label": "//crates/lash-core:lash-core__unit_test",
           "tags": [
@@ -68,6 +69,7 @@
         },
         {
           "cargo": "integration_boundary",
+          "cargo_only": "invokes Cargo metadata against the workspace",
           "kind": "test",
           "label": "//crates/lash-core:integration_boundary__test",
           "tags": [
@@ -401,6 +403,7 @@
           "label": "//crates/lash-postgres-store:lash-postgres-store"
         },
         {
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "unit-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
           "tags": [
@@ -418,6 +421,7 @@
         },
         {
           "cargo": "postgres-await-event-helper",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "example",
           "label": "//crates/lash-postgres-store:postgres-await-event-helper__example",
           "tags": [
@@ -427,6 +431,7 @@
         },
         {
           "cargo": "integration",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "test",
           "label": "//crates/lash-postgres-store:integration__test",
           "tags": [
@@ -436,6 +441,7 @@
         },
         {
           "cargo": "conformance",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "test",
           "label": "//crates/lash-postgres-store:conformance__test",
           "tags": [
@@ -445,6 +451,7 @@
         },
         {
           "cargo": "durable_read_fixture",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "test",
           "label": "//crates/lash-postgres-store:durable_read_fixture__test",
           "tags": [
@@ -454,6 +461,7 @@
         },
         {
           "cargo": "preflight_durable_walk",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_durable_walk__test",
           "tags": [
@@ -463,6 +471,7 @@
         },
         {
           "cargo": "preflight_schema_status",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_schema_status__test",
           "tags": [
@@ -472,6 +481,7 @@
         },
         {
           "cargo": "schema_drift",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_drift__test",
           "tags": [
@@ -481,6 +491,7 @@
         },
         {
           "cargo": "schema_constraints",
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_constraints__test",
           "tags": [
@@ -834,6 +845,7 @@
           "label": "//crates/lash-restate:lash-restate"
         },
         {
+          "cargo_only": "shares a unit-test binary with Cargo-owned live-service tests",
           "kind": "unit-test",
           "label": "//crates/lash-restate:lash-restate__unit_test",
           "tags": [
@@ -893,6 +905,7 @@
           "label": "//crates/lash-s3-store:lash-s3-store"
         },
         {
+          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
           "kind": "unit-test",
           "label": "//crates/lash-s3-store:lash-s3-store__unit_test",
           "tags": [
@@ -954,6 +967,7 @@
           "label": "//crates/lash-sim:lash-sim"
         },
         {
+          "cargo_only": "shares a unit-test binary with specially scheduled heavy simulation tests",
           "kind": "unit-test",
           "label": "//crates/lash-sim:lash-sim__unit_test",
           "tags": [
@@ -982,6 +996,7 @@
         },
         {
           "cargo": "cross_backend_active_turn_divergence",
+          "cargo_only": "requires explicitly scheduled durable backend services",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_active_turn_divergence__test",
           "tags": [
@@ -991,6 +1006,7 @@
         },
         {
           "cargo": "cross_backend_store_differential",
+          "cargo_only": "requires explicitly scheduled durable backend services",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_store_differential__test",
           "tags": [
@@ -1215,6 +1231,7 @@
         },
         {
           "cargo": "integration",
+          "cargo_only": "uses Cargo-relative Test262 and WPT asset trees",
           "kind": "test",
           "label": "//crates/lash-typescript:integration__test",
           "tags": [
@@ -1245,6 +1262,7 @@
           "label": "//crates/lash:lash"
         },
         {
+          "cargo_only": "shares a unit-test binary with Cargo-owned live-service tests",
           "kind": "unit-test",
           "label": "//crates/lash:lash__unit_test",
           "tags": [
@@ -1310,6 +1328,7 @@
         },
         {
           "cargo": "ui",
+          "cargo_only": "uses trybuild and its Cargo-managed compiler fixture cache",
           "kind": "test",
           "label": "//crates/lash:ui__test",
           "tags": [
@@ -1444,9 +1463,13 @@
           "tags": []
         },
         {
+          "cargo_only": "shares a unit-test binary with a Node.js browser projection gate",
           "kind": "bin-unit-test",
           "label": "//examples/agent-workbench:agent-workbench__unit_test",
-          "tags": []
+          "tags": [
+            "cargo-frontend-assets",
+            "manual"
+          ]
         }
       ]
     },
@@ -1598,6 +1621,7 @@
         },
         {
           "cargo": "authoring",
+          "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
           "kind": "test",
           "label": "//examples/workflow-graph-roundtrip:authoring__test",
           "tags": [
@@ -1607,6 +1631,7 @@
         },
         {
           "cargo": "roundtrip",
+          "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
           "kind": "test",
           "label": "//examples/workflow-graph-roundtrip:roundtrip__test",
           "tags": [
@@ -1616,6 +1641,7 @@
         },
         {
           "cargo": "type_facets",
+          "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
           "kind": "test",
           "label": "//examples/workflow-graph-roundtrip:type_facets__test",
           "tags": [

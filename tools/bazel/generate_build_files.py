@@ -91,27 +91,43 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
     return env, deps
 
 
-def cargo_owned_tags(package_name: str, kind: str, target_name: str) -> list[str]:
+def cargo_test_policy(
+    package_name: str, kind: str, target_name: str
+) -> tuple[list[str], str | None]:
     tags = []
+    reasons = []
     if package_name in ("lash-internal-postgres-store", "lash-internal-s3-store"):
         tags.extend(["manual", "cargo-service-gate"])
+        reasons.append("requires the Cargo-owned PostgreSQL or MinIO service gate")
     if kind == "unit-test" and package_name in ("lash-internal-restate", "lash-runtime"):
         tags.extend(["manual", "cargo-service-gate"])
+        reasons.append("shares a unit-test binary with Cargo-owned live-service tests")
     if package_name == "lash-internal-core" and kind == "unit-test":
         tags.extend(["manual", "cargo-nested-suite"])
+        reasons.append("shares a unit-test binary with nested-Cargo fault-matrix tests")
     if package_name == "lash-sim" and kind == "unit-test":
         tags.extend(["manual", "cargo-heavy-suite"])
+        reasons.append("shares a unit-test binary with specially scheduled heavy simulation tests")
     if package_name == "lash-internal-core" and target_name == "integration_boundary":
         tags.extend(["manual", "cargo-nested-suite"])
+        reasons.append("invokes Cargo metadata against the workspace")
     if package_name == "lash-runtime" and target_name == "ui":
         tags.extend(["manual", "cargo-trybuild"])
+        reasons.append("uses trybuild and its Cargo-managed compiler fixture cache")
     if package_name == "lash-internal-typescript" and kind == "test":
         tags.extend(["manual", "cargo-path-assets"])
+        reasons.append("uses Cargo-relative Test262 and WPT asset trees")
     if package_name == "workflow-graph-roundtrip" and kind == "test":
         tags.extend(["manual", "cargo-frontend-assets"])
+        reasons.append("uses the Cargo-owned generated frontend asset workflow")
+    if package_name == "agent-workbench" and kind in ("bin-unit-test", "unit-test"):
+        tags.extend(["manual", "cargo-frontend-assets"])
+        reasons.append("shares a unit-test binary with a Node.js browser projection gate")
     if package_name == "lash-sim" and target_name.startswith("cross_backend"):
         tags.extend(["manual", "cargo-service-gate"])
-    return sorted(set(tags))
+        reasons.append("requires explicitly scheduled durable backend services")
+    reason = "; ".join(reasons) if reasons else None
+    return sorted(set(tags)), reason
 
 
 def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
@@ -188,7 +204,15 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 "lash-internal-sqlite-store",
             ):
                 unit_compile_data.append("//crates/lashlang:old_module_fixture")
-            unit_tags = cargo_owned_tags(package["name"], "unit-test", library["name"])
+            unit_tags, unit_cargo_reason = cargo_test_policy(
+                package["name"], "unit-test", library["name"]
+            )
+            unit_test_env = {}
+            if package["name"] == "lash-perf":
+                # This instrumentation binary shares process-global counters.
+                # Cargo nextest isolates cases by process; serialize libtest so
+                # Bazel observes the same one-at-a-time measurement contract.
+                unit_test_env["RUST_TEST_THREADS"] = "1"
             chunks.append(
                 "lash_rust_unit_test(\n"
                 f"    name = {quote(primary_target + '__unit_test')},\n"
@@ -200,15 +224,23 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 f"    manifest_dir = {quote(package_dir)},\n"
                 f"    package_name = {quote(package['name'])},\n"
-                f"    tags = {string_list(unit_tags)},\n"
-                f"    version = {quote(version)},\n"
-                ")\n\n"
+                + (
+                    f"    test_env = {json.dumps(unit_test_env, sort_keys=True)},\n"
+                    if unit_test_env
+                    else ""
+                )
+                + f"    tags = {string_list(unit_tags)},\n"
+                + f"    version = {quote(version)},\n"
+                + ")\n\n"
             )
-            inventory_targets.append({
+            unit_inventory = {
                 "kind": "unit-test",
                 "label": f"//{package_dir}:{primary_target}__unit_test",
                 "tags": unit_tags,
-            })
+            }
+            if unit_cargo_reason:
+                unit_inventory["cargo_only"] = unit_cargo_reason
+            inventory_targets.append(unit_inventory)
         if library.get("doctest", False):
             chunks.append(
                 "lash_rust_doc_test(\n"
@@ -244,6 +276,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         source = pathlib.Path(target["src_path"])
         rustc_env, binary_data = cargo_bin_env(source, binary_labels)
         test_env = {}
+        test_env.update(rustc_env)
+        extra_data = []
         if package["name"] == "lash-internal-sqlite-store" and target["name"] == "integration":
             # The warning-capture contract installs a scoped tracing subscriber.
             # Other tests in this libtest process must not emit concurrently.
@@ -260,6 +294,20 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "lash-internal-postgres-store",
             "lash-internal-sqlite-store",
         ):
+            if target["name"] == "conformance":
+                helper_name = (
+                    "postgres-await-event-helper"
+                    if package["name"] == "lash-internal-postgres-store"
+                    else "sqlite-await-event-helper"
+                )
+                helper_target = next(
+                    candidate for candidate in targets if candidate["name"] == helper_name
+                )
+                helper_label = f":{label_name(helper_target, False)}"
+                test_env["LASH_CONFORMANCE_HELPER_EXE"] = (
+                    f"$(rootpath {helper_label})"
+                )
+                extra_data.append(helper_label)
             if target["name"] in (
                 "postgres-await-event-helper",
                 "sqlite-await-event-helper",
@@ -287,9 +335,15 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 "//crates/lash-postgres-store:package_files",
                 "//crates/lash-sqlite-store:package_files",
             ])
-        macro = "lash_rust_binary" if kind in ("bin", "example", "bench") else "lash_rust_integration_test"
+        macro = (
+            "lash_rust_binary"
+            if kind in ("bin", "example", "bench")
+            else "lash_rust_integration_test"
+        )
         crate_name = target["name"].replace("-", "_")
-        target_tags = cargo_owned_tags(package["name"], kind, target["name"])
+        target_tags, target_cargo_reason = cargo_test_policy(
+            package["name"], kind, target["name"]
+        )
         if kind == "bench":
             target_tags.append("manual")
         args = [
@@ -302,8 +356,11 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         ]
         if kind in ("bin", "example", "bench"):
             args.append(f"    include_dev_deps = {str(kind in ('example', 'bench'))},")
-        elif test_env:
-            args.append(f"    test_env = {json.dumps(test_env, sort_keys=True)},")
+        else:
+            if extra_data:
+                args.append(f"    extra_data = {string_list(extra_data)},")
+            if test_env:
+                args.append(f"    test_env = {json.dumps(test_env, sort_keys=True)},")
         args.extend([
             f"    library = {quote(library_label) if library_label else 'None'},",
             f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},",
@@ -314,15 +371,20 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    version = {quote(version)},",
         ])
         chunks.append(macro + "(\n" + "\n".join(args) + "\n)\n\n")
-        inventory_targets.append({
+        target_inventory = {
             "cargo": target["name"],
             "kind": kind,
             "label": f"//{package_dir}:{name}",
             "tags": sorted(set(target_tags)),
-        })
+        }
+        if target_cargo_reason:
+            target_inventory["cargo_only"] = target_cargo_reason
+        inventory_targets.append(target_inventory)
 
         if kind == "bin" and target.get("test", False):
-            bin_unit_tags = cargo_owned_tags(package["name"], "bin-unit-test", target["name"])
+            bin_unit_tags, bin_unit_cargo_reason = cargo_test_policy(
+                package["name"], "bin-unit-test", target["name"]
+            )
             unit_args = [
                 "lash_rust_unit_test(\n",
                 f"    name = {quote(name + '__unit_test')},\n",
@@ -345,11 +407,14 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 ")\n\n"
             ])
             chunks.append("".join(unit_args))
-            inventory_targets.append({
+            bin_unit_inventory = {
                 "kind": "bin-unit-test",
                 "label": f"//{package_dir}:{name}__unit_test",
                 "tags": bin_unit_tags,
-            })
+            }
+            if bin_unit_cargo_reason:
+                bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
+            inventory_targets.append(bin_unit_inventory)
 
     if package["name"] == "lash-internal-core":
         chunks.append(
@@ -436,8 +501,16 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         ),
         "packages": inventory,
     }
-    outputs[ROOT / "tools/bazel/target-inventory.json"] = json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n"
+    outputs[ROOT / "tools/bazel/target-inventory.json"] = (
+        json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n"
+    )
     labels = [target for package in inventory for target in package["targets"]]
+    executable_tests = [
+        target
+        for target in labels
+        if target["label"] is not None
+        and target["kind"] in ("bin-unit-test", "test", "unit-test")
+    ]
     groups = {
         "WORKSPACE_COMPILE_TARGETS": sorted(
             target["label"]
@@ -453,11 +526,16 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             f"//{pathlib.PurePosixPath(package['manifest']).parent.as_posix()}:rust_sources"
             for package in inventory
         ),
-        "WORKSPACE_TEST_TARGETS": sorted(
+        "WORKSPACE_BAZEL_TEST_TARGETS": sorted(
             target["label"]
-            for target in labels
-            if target["label"] is not None
-            and target["kind"] in ("bin-unit-test", "test", "unit-test")
+            for target in executable_tests
+            if "manual" not in target["tags"]
+        ),
+        "WORKSPACE_CARGO_TEST_TARGETS": sorted(
+            target["label"] for target in executable_tests if "manual" in target["tags"]
+        ),
+        "WORKSPACE_TEST_TARGETS": sorted(
+            target["label"] for target in executable_tests
         ),
     }
     bzl = [GENERATED_HEADER]

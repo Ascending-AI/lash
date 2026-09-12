@@ -146,6 +146,10 @@ lash_rust_integration_test(
         "//crates/lash-core:cold_process_turn_parent",
         "//crates/lash-core:queued_claim_atomicity",
     ],
+    extra_data = [
+        ":postgres-await-event-helper__example",
+    ],
+    test_env = {"LASH_CONFORMANCE_HELPER_EXE": "$(rootpath :postgres-await-event-helper__example)"},
     library = ":lash-postgres-store",
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
