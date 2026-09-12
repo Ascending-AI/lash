@@ -22,6 +22,32 @@ pub struct Completions {
 }
 
 impl Completions {
+    /// Lists registered, unresolved completion keys for one session.
+    ///
+    /// This administrative read is scoped to exactly `session_id`. It returns
+    /// a snapshot: another resolver may settle a returned key concurrently,
+    /// so callers must handle [`lash_core::ResolveOutcome::AlreadyResolved`]
+    /// or `UnknownOrRevoked` from [`Self::resolve`]. A returned key carries the
+    /// authority needed to resolve its wait; the caller is responsible for
+    /// authorizing this read and the later resolution.
+    ///
+    /// Deployments without an enumerable await-event registry return a typed
+    /// [`lash_core::RuntimeErrorCode::AwaitEventUnsupported`] runtime error,
+    /// distinct from an empty session.
+    pub async fn outstanding(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core::AwaitEventKey>> {
+        self.core
+            .env
+            .core
+            .control
+            .effect_host
+            .list_outstanding_await_event_keys(session_id)
+            .await
+            .map_err(EmbedError::from)
+    }
+
     /// Resolves the completion request and returns its output.
     pub async fn resolve(
         &self,

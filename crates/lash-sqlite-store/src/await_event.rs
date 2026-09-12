@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use lash_core::facade_support::await_event_coordinator::{
     AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
-    PersistedPromise, TerminalCas,
+    PersistedPromise, RegisteredAwaitEvent, TerminalCas,
 };
 use lash_core::{RuntimeError, RuntimeErrorCode};
 use rusqlite::{OptionalExtension, params};
@@ -218,6 +218,39 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                     .map_or(PersistedPromise::Pending, |terminal_json| {
                         PersistedPromise::Resolved { terminal_json }
                     }))
+            })
+            .await
+            .map_err(store_error)
+    }
+
+    async fn list_pending_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<RegisteredAwaitEvent>, RuntimeError> {
+        let session_id = SessionId::from(session_id.to_string());
+        self.conn
+            .call(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT key_id, scope_json, wait_json, turn_control
+                     FROM await_event_waits
+                     WHERE session_id = ?1
+                       AND terminal_json IS NULL
+                       AND NOT EXISTS (
+                           SELECT 1 FROM await_event_revoked_sessions
+                           WHERE session_id = ?1
+                       )
+                     ORDER BY key_id",
+                )?;
+                statement
+                    .query_map(params![session_id.as_str()], |row| {
+                        Ok(RegisteredAwaitEvent {
+                            key_id: row.get(0)?,
+                            scope_json: row.get(1)?,
+                            wait_json: row.get(2)?,
+                            turn_control: row.get(3)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
             .map_err(store_error)

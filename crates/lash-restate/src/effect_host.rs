@@ -194,6 +194,32 @@ impl EffectHost for RestateEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.turn_control_binding_id.to_string()
     }
+
+    async fn list_outstanding_await_event_keys(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        if session_id.trim().is_empty() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvalidAwaitEventSessionId,
+                "await-event session id must be non-empty",
+            ));
+        }
+        let keys: Vec<AwaitEventKey> = self
+            .controller
+            .await_event_ingress
+            .ingress
+            .call_object_empty_json("LashDurableWaitIndex", session_id, "outstanding")
+            .await
+            .map_err(|err| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RestateAwaitEventPeek,
+                    format!("failed to list outstanding Restate await-events: {err}"),
+                )
+            })?;
+        Ok(outstanding_owned_by_session(session_id, keys))
+    }
+
     fn turn_attach(&self) -> Option<Arc<dyn lash_core::facade_support::TurnAttach>> {
         Some(self.turn_attach.clone())
     }
@@ -315,6 +341,15 @@ impl EffectHost for RestateEffectHost {
             .release_turn_cancel_closure_participant(participant_id, scope)
             .await
     }
+}
+
+fn outstanding_owned_by_session(
+    session_id: &SessionId,
+    keys: Vec<AwaitEventKey>,
+) -> Vec<AwaitEventKey> {
+    keys.into_iter()
+        .filter(|key| key.scope.session_id() == Some(session_id))
+        .collect()
 }
 
 impl RestateEffectHost {
@@ -1446,5 +1481,25 @@ mod tests {
         let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(503));
 
         assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
+    }
+
+    #[test]
+    fn session_administrative_read_rejects_non_session_scope_aliases() {
+        for scope in [
+            ExecutionScope::process("alias-process"),
+            ExecutionScope::runtime_operation("alias-operation"),
+        ] {
+            let alias = SessionId::from(durable_wait_index_key_for_scope(&scope));
+            let key = restate_await_event_key(
+                &scope,
+                AwaitEventWaitIdentity::tool_completion("alias-wait"),
+            )
+            .expect("derive non-session wait key");
+
+            assert!(
+                outstanding_owned_by_session(&alias, vec![key]).is_empty(),
+                "a non-session wait indexed at `{alias}` must not be advertised as session-owned"
+            );
+        }
     }
 }

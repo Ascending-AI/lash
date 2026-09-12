@@ -226,6 +226,15 @@ impl<T: StoreReplayHost> EffectHost for T {
         StoreReplayHost::turn_control_binding_id(self)
     }
 
+    async fn list_outstanding_await_event_keys(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        self.replay_driver()
+            .list_outstanding_await_event_keys(session_id)
+            .await
+    }
+
     fn await_event_resolver(&self) -> &dyn AwaitEventResolver {
         self
     }

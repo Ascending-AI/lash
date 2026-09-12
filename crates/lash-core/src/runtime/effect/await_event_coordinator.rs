@@ -154,6 +154,19 @@ pub enum TerminalCas {
     UnknownOrRevoked,
 }
 
+/// Stored identity needed to reconstruct one registered wait key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RegisteredAwaitEvent {
+    /// Stored deterministic key identifier.
+    pub key_id: String,
+    /// Canonical encoded execution scope.
+    pub scope_json: String,
+    /// Canonical encoded wait identity.
+    pub wait_json: String,
+    /// Whether the stored row identifies turn-control machinery.
+    pub turn_control: bool,
+}
+
 impl std::fmt::Debug for TerminalCas {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -231,6 +244,16 @@ pub trait AwaitEventBackend: Send + Sync {
         key_id: &str,
         identity: &AwaitEventRowIdentity,
     ) -> Result<PersistedPromise, RuntimeError>;
+
+    /// Snapshot unresolved promise identities for one session.
+    ///
+    /// The read must not create state for an unknown session. A terminal may
+    /// win immediately after the snapshot, which the public host contract
+    /// handles through the existing first-writer-wins resolution outcome.
+    async fn list_pending_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<RegisteredAwaitEvent>, RuntimeError>;
 
     /// Tombstone `session_id` and drop its promise rows in one atom.
     ///
@@ -531,6 +554,49 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         Ok(())
     }
 
+    /// Reconstruct authenticated keys for the unresolved rows of one session.
+    pub async fn outstanding_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        validate_session_id(session_id)?;
+        let registered = self.backend.list_pending_for_session(session_id).await?;
+        let mut keys = Vec::with_capacity(registered.len());
+        for row in registered {
+            let scope: ExecutionScope = self.decode_identity(&row.scope_json, "scope")?;
+            let wait: AwaitEventWaitIdentity = self.decode_identity(&row.wait_json, "wait")?;
+            if scope.session_id() != Some(session_id) {
+                return Err(self.decode_identity_error(format!(
+                    "stored await-event scope belongs to {:?}, expected session `{session_id}`",
+                    scope.session_id()
+                )));
+            }
+            let derived_key_id = promise_semantics::derive_key_id(&scope, &wait)?;
+            if !promise_semantics::constant_time_eq(
+                derived_key_id.as_bytes(),
+                row.key_id.as_bytes(),
+            ) {
+                return Err(self.decode_identity_error(
+                    "stored await-event key id does not match its scope and wait preimage",
+                ));
+            }
+            if row.turn_control != wait.is_turn_control() {
+                return Err(self.decode_identity_error(
+                    "stored await-event turn-control classification does not match its wait preimage",
+                ));
+            }
+            let signature = self.signature(&scope, &wait, &row.key_id)?;
+            keys.push(AwaitEventKey {
+                scope,
+                wait,
+                key_id: row.key_id,
+                signature,
+            });
+        }
+        keys.sort_unstable_by(|left, right| left.key_id.cmp(&right.key_id));
+        Ok(keys)
+    }
+
     /// Durably register the caller as a waiter before it starts polling, so a
     /// resolver that arrives while the waiter sleeps has a row to write.
     async fn ensure_pending(&self, key: &AwaitEventKey) -> Result<(), RuntimeError> {
@@ -593,6 +659,22 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
                 ),
             )
         })
+    }
+
+    fn decode_identity<T: serde::de::DeserializeOwned>(
+        &self,
+        encoded: &str,
+        field: &str,
+    ) -> Result<T, RuntimeError> {
+        serde_json::from_str(encoded).map_err(|err| {
+            self.decode_identity_error(format!(
+                "failed to decode stored await-event {field}: {err}"
+            ))
+        })
+    }
+
+    fn decode_identity_error(&self, message: impl Into<String>) -> RuntimeError {
+        RuntimeError::new(self.backend.vocabulary().decode, message)
     }
 
     fn encode_error(&self, err: &serde_json::Error) -> RuntimeError {
@@ -850,6 +932,30 @@ mod tests {
                         PersistedPromise::Resolved { terminal_json }
                     })),
             }
+        }
+
+        async fn list_pending_for_session(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<Vec<RegisteredAwaitEvent>, RuntimeError> {
+            if self.revoked_session(Some(session_id)) {
+                return Ok(Vec::new());
+            }
+            Ok(self
+                .rows
+                .lock_recover()
+                .iter()
+                .filter(|(_, row)| {
+                    row.identity.session_id.as_ref() == Some(session_id)
+                        && row.terminal_json.is_none()
+                })
+                .map(|(key_id, row)| RegisteredAwaitEvent {
+                    key_id: key_id.clone(),
+                    scope_json: row.identity.scope_json.clone(),
+                    wait_json: row.identity.wait_json.clone(),
+                    turn_control: row.identity.turn_control,
+                })
+                .collect())
         }
 
         async fn revoke_session(
@@ -1148,6 +1254,54 @@ mod tests {
                 .contains("failed to decode in-memory await-event terminal"),
             "unexpected decode message: {}",
             error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_refuses_inconsistent_rows_and_respects_revocation_tombstones() {
+        let coordinator = coordinator();
+        let session_id = SessionId::from("inconsistent-discovery-session");
+        let scope = ExecutionScope::turn(&session_id, "turn");
+        let key = coordinator
+            .key_for(&scope, AwaitEventWaitIdentity::tool_completion("ordinary"))
+            .await
+            .expect("mint key");
+        let mut identity = coordinator.row_identity(&key).expect("row identity");
+        identity.turn_control = true;
+        coordinator.backend.rows.lock_recover().insert(
+            key.key_id.clone(),
+            MemoryRow {
+                identity,
+                terminal_json: None,
+            },
+        );
+
+        let error = coordinator
+            .outstanding_for_session(&session_id)
+            .await
+            .expect_err("inconsistent turn-control classification must be refused");
+        assert_eq!(error.code.as_str(), "memory_await_event_decode");
+
+        coordinator.backend.rows.lock_recover().clear();
+        coordinator
+            .backend
+            .revoked
+            .lock_recover()
+            .push(session_id.to_string());
+        coordinator.backend.rows.lock_recover().insert(
+            key.key_id.clone(),
+            MemoryRow {
+                identity: coordinator.row_identity(&key).expect("row identity"),
+                terminal_json: None,
+            },
+        );
+        assert!(
+            coordinator
+                .outstanding_for_session(&session_id)
+                .await
+                .expect("revoked discovery")
+                .is_empty(),
+            "a row injected behind a revocation tombstone must stay undiscoverable"
         );
     }
 

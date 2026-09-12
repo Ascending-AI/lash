@@ -461,6 +461,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/", get(index))
         .route("/healthz", get(healthz))
         .route("/api/state", get(app_state))
+        .route("/api/sessions/{session_id}/waits", get(list_session_waits))
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{key}/approve", post(approve_wait))
         .route("/api/approvals/{key}/deny", post(deny_wait))

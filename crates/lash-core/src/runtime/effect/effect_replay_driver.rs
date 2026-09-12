@@ -1228,6 +1228,14 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         self.await_events.cancel_session(session_id).await
     }
 
+    /// List the registered, unresolved promise keys of one session.
+    pub async fn list_outstanding_await_event_keys(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        self.await_events.outstanding_for_session(session_id).await
+    }
+
     /// The promise half of scope retirement, answered from the whole: a
     /// non-session scope's promises go with its journal in one transaction
     /// (N4), so this lever is [`retire_effect_journal`](Self::retire_effect_journal)

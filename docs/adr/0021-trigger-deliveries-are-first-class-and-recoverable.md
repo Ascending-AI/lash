@@ -77,8 +77,7 @@ The receiver allocation fence is defense in depth for restoring or rewinding a s
 the receiver. A wake with no live receiver row at or below the retained floor returns
 `ProcessWakeSequenceRewound`; `WakeDeliveryDriver` terminalizes it as a typed
 `sequence_rewound` discard with sequence and floor evidence, then continues the ordering group.
-Receiver retries with a surviving live source row settle idempotently. See
-`docs/architecture/durable-background-processes.md`.
+Receiver retries with a surviving live source row settle idempotently.
 
 FIG-2502 implements `RetentionBound` for runtime commit receipts and usage
 evidence, with terminal-session gating and atomic dependent-root reconciliation

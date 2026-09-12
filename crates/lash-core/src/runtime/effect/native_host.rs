@@ -20,6 +20,10 @@ use crate::RuntimeError;
 pub struct NativeEffectHost {
     turn_control_binding_id: Arc<str>,
     controller: Arc<dyn RuntimeEffectController>,
+    /// Present for the built-in native controller. A host wrapping an
+    /// arbitrary controller cannot inspect that controller's private registry
+    /// and therefore reports the administrative read as unsupported.
+    await_event_admin: Option<Arc<super::await_events::AwaitEventRegistry>>,
     allow_process_lifetime_completion_keys: Arc<std::sync::atomic::AtomicBool>,
     /// Effects executing and groups open under each non-session scope, by
     /// journal key: the in-process twin of a journal's `in_progress` rows and
@@ -99,6 +103,7 @@ impl NativeEffectHost {
         Self {
             turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller,
+            await_event_admin: None,
             allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
@@ -117,7 +122,17 @@ impl NativeEffectHost {
 
 impl Default for NativeEffectHost {
     fn default() -> Self {
-        Self::new(Arc::new(NativeRuntimeEffectController::default()))
+        let controller = NativeRuntimeEffectController::default();
+        let await_event_admin = Some(controller.await_event_registry());
+        Self {
+            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
+            controller: Arc::new(controller),
+            await_event_admin,
+            allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
+            live: Arc::new(ScopeLiveness::default()),
+        }
     }
 }
 
@@ -236,6 +251,19 @@ impl EffectHost for NativeEffectHost {
     }
     fn turn_control_authority_owner(&self) -> super::TurnControlAuthorityOwner {
         super::TurnControlAuthorityOwner::SessionStore
+    }
+
+    async fn list_outstanding_await_event_keys(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        let Some(registry) = &self.await_event_admin else {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::AwaitEventUnsupported,
+                "this native effect host wraps a controller without an inspectable await-event registry",
+            ));
+        };
+        registry.outstanding_for_session(session_id)
     }
 
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {

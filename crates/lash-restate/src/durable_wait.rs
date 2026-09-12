@@ -619,6 +619,8 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 #[restate_sdk::object]
 pub trait LashDurableWaitIndex {
     async fn is_revoked(request: Json<()>) -> HandlerResult<Json<bool>>;
+    /// Read registered waits that have no retained terminal.
+    async fn outstanding() -> HandlerResult<Json<Vec<AwaitEventKey>>>;
     async fn register(
         request: Json<RestateDurableWaitIndexRequest>,
     ) -> HandlerResult<Json<RestateDurableWaitRegistration>>;
@@ -813,6 +815,27 @@ async fn load_durable_wait_index_metadata(
     Ok(metadata)
 }
 
+/// Read index metadata without initializing a previously unknown object.
+async fn read_durable_wait_index_metadata(
+    ctx: &ObjectContext<'_>,
+) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
+    let existing_keys = ctx.get_keys().await?;
+    let stored_epoch = ctx
+        .get::<Json<u8>>(DURABLE_WAIT_INDEX_EPOCH_KEY)
+        .await?
+        .map(|Json(epoch)| epoch);
+    validate_durable_wait_index_epoch(stored_epoch, &existing_keys).map_err(TerminalError::new)?;
+    let Some(_) = stored_epoch else {
+        return Ok(None);
+    };
+    Ok(Some(
+        ctx.get::<Json<RestateDurableWaitIndexMetadata>>(DURABLE_WAIT_INDEX_METADATA_KEY)
+            .await?
+            .map(|Json(metadata)| metadata)
+            .unwrap_or_default(),
+    ))
+}
+
 async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey>, TerminalError> {
     let mut waits = Vec::new();
     for state_key in ctx
@@ -844,6 +867,32 @@ async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey
         waits.push(key);
     }
     Ok(waits)
+}
+
+/// Read outstanding waits without initializing an unknown index object.
+async fn read_outstanding_waits(
+    ctx: &ObjectContext<'_>,
+) -> Result<Vec<AwaitEventKey>, TerminalError> {
+    let Some(metadata) = read_durable_wait_index_metadata(ctx).await? else {
+        return Ok(Vec::new());
+    };
+    if metadata.revoked {
+        return Ok(Vec::new());
+    }
+
+    let mut outstanding = Vec::new();
+    for key in load_indexed_waits(ctx).await? {
+        let address = RestateDurableWaitAddress::for_key(&key);
+        if ctx
+            .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&address))
+            .await?
+            .is_none()
+        {
+            outstanding.push(key);
+        }
+    }
+    outstanding.sort_unstable_by(|left, right| left.key_id.cmp(&right.key_id));
+    Ok(outstanding)
 }
 
 async fn resolve_indexed_waits(
@@ -978,7 +1027,15 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         ctx: ObjectContext<'_>,
         Json(()): Json<()>,
     ) -> HandlerResult<Json<bool>> {
-        Ok(Json(load_durable_wait_index_metadata(&ctx).await?.revoked))
+        Ok(Json(
+            read_durable_wait_index_metadata(&ctx)
+                .await?
+                .is_some_and(|metadata| metadata.revoked),
+        ))
+    }
+
+    async fn outstanding(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<AwaitEventKey>>> {
+        Ok(Json(read_outstanding_waits(&ctx).await?))
     }
 
     async fn register(

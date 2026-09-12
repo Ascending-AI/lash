@@ -154,6 +154,35 @@ impl AwaitEventRegistry {
         self.session_shards.read_recover().get(session_id).cloned()
     }
 
+    /// Snapshot the registered, unresolved keys of one session without
+    /// materializing a shard for an unknown session.
+    pub(super) fn outstanding_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        if session_id.trim().is_empty() {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidAwaitEventSessionId,
+                "await-event session id must be non-empty",
+            ));
+        }
+        let Some(shard) = self.existing_session_shard(session_id) else {
+            return Ok(Vec::new());
+        };
+        let state = Self::locked_state(&shard);
+        if state.revoked {
+            return Ok(Vec::new());
+        }
+        let mut keys = state
+            .entries
+            .values()
+            .filter(|entry| entry.terminal.is_none())
+            .map(|entry| entry.verified_key.clone())
+            .collect::<Vec<_>>();
+        keys.sort_unstable_by(|left, right| left.key_id.cmp(&right.key_id));
+        Ok(keys)
+    }
+
     fn shard_for_scope(&self, scope: &ExecutionScope) -> AwaitEventRegistryShard {
         match scope.session_id() {
             Some(session_id) => self.shard_for_session(&SessionId::from(session_id)),
@@ -724,7 +753,8 @@ mod tests {
     #[test]
     fn key_derivation_does_not_register_or_materialize_session_state() {
         let registry = AwaitEventRegistry::new();
-        let scope = turn_scope(&SessionId::from("pure-key"), &TurnId::from("turn"));
+        let session_id = SessionId::from("pure-key");
+        let scope = turn_scope(&session_id, &TurnId::from("turn"));
 
         registry
             .key_for(&scope, AwaitEventWaitIdentity::tool_completion("tool-call"))
@@ -735,6 +765,23 @@ mod tests {
                 .existing_session_shard(&SessionId::from("pure-key"))
                 .is_none(),
             "key derivation must remain a pure read with no registration write"
+        );
+        assert!(
+            registry
+                .outstanding_for_session(&session_id)
+                .expect("list derived-only session")
+                .is_empty()
+        );
+        assert!(
+            registry
+                .outstanding_for_session(&SessionId::from("unknown-native-session"))
+                .expect("list unknown session")
+                .is_empty()
+        );
+        assert_eq!(
+            registry.counts(),
+            (0, 0, 0),
+            "administrative reads must not materialize native state"
         );
     }
 
