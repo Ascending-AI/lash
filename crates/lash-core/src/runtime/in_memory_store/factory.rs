@@ -758,6 +758,43 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         Ok(refs)
     }
 
+    async fn list_condemnations(
+        &self,
+    ) -> Result<Vec<crate::AttachmentCondemnationRecord>, crate::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let condemnations = self.attachment_condemnations.lock_recover();
+        let mut rows = condemnations
+            .iter()
+            .map(|(digest, phase)| {
+                let (phase, write_claim) = match phase {
+                    super::AttachmentCondemnationPhase::Condemned { write_claim } => (
+                        crate::AttachmentCondemnationPhase::Condemned,
+                        write_claim.as_ref(),
+                    ),
+                    super::AttachmentCondemnationPhase::Deleting => {
+                        (crate::AttachmentCondemnationPhase::Deleting, None)
+                    }
+                    super::AttachmentCondemnationPhase::Reclaimed { write_claim } => (
+                        crate::AttachmentCondemnationPhase::Reclaimed,
+                        write_claim.as_ref(),
+                    ),
+                };
+                crate::AttachmentCondemnationRecord {
+                    digest: digest.clone(),
+                    phase,
+                    provenance: write_claim.map_or(
+                        crate::AttachmentCondemnationProvenance::SweepOwned,
+                        |claim| crate::AttachmentCondemnationProvenance::RestoringWrite {
+                            session_id: claim.session_id.clone(),
+                        },
+                    ),
+                }
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.digest.cmp(&right.digest));
+        Ok(rows)
+    }
+
     fn fence(&self) -> crate::AttachmentGcFence {
         crate::AttachmentGcFence::Fenced
     }

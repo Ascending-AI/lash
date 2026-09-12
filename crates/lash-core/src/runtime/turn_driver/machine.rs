@@ -90,8 +90,7 @@ impl RuntimeTurnDriver<'_> {
                     } = &event
                     {
                         self.turn_pipeline.state_mut().token_usage = cumulative.clone();
-                        self.turn_pipeline.state_mut().last_prompt_usage =
-                            normalize_prompt_usage(usage);
+                        self.latest_prompt_usage = normalize_prompt_usage(usage);
                     }
                     emit!(event)
                 }
@@ -144,6 +143,14 @@ impl RuntimeTurnDriver<'_> {
                 Effect::ToolCalls { id, calls } => {
                     self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx, &cancel)
                         .await?;
+                }
+                Effect::ReportToolCalls { completed } => {
+                    self.report_undispatched_turn_tool_calls(
+                        completed,
+                        machine.protocol_iteration(),
+                        &event_tx,
+                    )
+                    .await?;
                 }
                 Effect::Log { event } => self.handle_log_event(event),
                 Effect::ExecCode { id, language, code } => {

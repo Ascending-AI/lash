@@ -4,7 +4,17 @@ use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention a
 use lash_sansio::ProcessId;
 use serde_json::json;
 
-async fn registry_result(output: ProcessAwaitOutput, prune: bool) -> Result<Value, String> {
+fn successful_turn_output(turn: lash_core::facade_support::AssembledTurn) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(json!({
+        "turn": turn,
+    })))
+}
+
+async fn registry_result(
+    output: ProcessAwaitOutput,
+    prune: bool,
+    output_schema: Option<&Value>,
+) -> Result<Value, String> {
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let process_id = "subagent-outcome";
     registry
@@ -40,7 +50,7 @@ async fn registry_result(output: ProcessAwaitOutput, prune: bool) -> Result<Valu
         .await_terminal(&ProcessId::from(process_id))
         .await
         .unwrap();
-    child_task_result(output)
+    child_task_result(output, output_schema)
 }
 
 #[tokio::test]
@@ -53,7 +63,7 @@ async fn failed_child_preserves_failure_reason() {
         ),
     ));
     assert_eq!(
-        registry_result(output, false).await,
+        registry_result(output, false, None).await,
         Err("child failed precisely".into())
     );
 }
@@ -64,7 +74,7 @@ async fn cancelled_child_preserves_cancellation_reason() {
         lash_core::ToolCancellation::runtime("child cancelled precisely"),
     ));
     assert_eq!(
-        registry_result(output, false).await,
+        registry_result(output, false, None).await,
         Err("child cancelled precisely".into())
     );
 }
@@ -80,7 +90,7 @@ async fn abandoned_child_reports_missing_outcome() {
         control: None,
     };
     assert_eq!(
-        registry_result(output, false).await,
+        registry_result(output, false, None).await,
         Err("subagent process was abandoned before recording an outcome".into())
     );
 }
@@ -90,9 +100,129 @@ async fn pruned_child_reports_no_longer_retained() {
     let output =
         ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(Value::Null));
     assert_eq!(
-        registry_result(output, true).await,
+        registry_result(output, true, None).await,
         Err("subagent process outcome is no longer retained".into())
     );
+}
+
+#[tokio::test]
+async fn frame_switching_child_is_not_a_successful_task_result() {
+    let mut turn = lash_core::testing::mock_assembled_turn(
+        &lash_core::SessionId::from("frame-switching-child"),
+        "unused",
+    );
+    turn.outcome = lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
+        frame_key: lash_core::FrameKey::from_caller_material("next-frame").unwrap(),
+        task: "continue elsewhere".to_string(),
+        initial_nodes: Vec::new(),
+    };
+
+    assert_eq!(
+        registry_result(successful_turn_output(turn), false, None).await,
+        Err("subagent switched agent frames instead of producing a final task result".into())
+    );
+}
+
+#[tokio::test]
+async fn frame_switch_is_rejected_even_when_metadata_matches_output_schema() {
+    let mut turn = lash_core::testing::mock_assembled_turn(
+        &lash_core::SessionId::from("typed-frame-switching-child"),
+        "unused",
+    );
+    turn.outcome = lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
+        frame_key: lash_core::FrameKey::from_caller_material("next-frame").unwrap(),
+        task: "continue elsewhere".to_string(),
+        initial_nodes: Vec::new(),
+    };
+    let permissive_handoff_schema = json!({
+        "type": "object",
+        "properties": {
+            "frame_key": { "type": "string" },
+            "task": { "type": "string" }
+        },
+        "required": ["frame_key", "task"]
+    });
+
+    assert_eq!(
+        registry_result(
+            successful_turn_output(turn),
+            false,
+            Some(&permissive_handoff_schema)
+        )
+        .await,
+        Err("subagent switched agent frames instead of producing a final task result".into())
+    );
+}
+
+#[tokio::test]
+async fn valid_untyped_child_result_remains_successful() {
+    let turn = lash_core::testing::mock_assembled_turn(
+        &lash_core::SessionId::from("untyped-child"),
+        "  useful prose  ",
+    );
+
+    assert_eq!(
+        registry_result(successful_turn_output(turn), false, None).await,
+        Ok(json!("useful prose"))
+    );
+}
+
+#[tokio::test]
+async fn valid_typed_child_result_remains_successful() {
+    let value = json!({ "answer": 42 });
+    let mut turn = lash_core::testing::mock_assembled_turn(
+        &lash_core::SessionId::from("typed-child"),
+        "unused",
+    );
+    turn.outcome = lash_core::facade_support::TurnOutcome::Finished(
+        lash_core::facade_support::TurnFinish::FinalValue {
+            value: value.clone(),
+        },
+    );
+    let schema = json!({
+        "type": "object",
+        "properties": { "answer": { "type": "integer" } },
+        "required": ["answer"],
+        "additionalProperties": false
+    });
+
+    assert_eq!(
+        registry_result(successful_turn_output(turn), false, Some(&schema)).await,
+        Ok(value)
+    );
+}
+
+#[tokio::test]
+async fn invalid_typed_terminal_result_reaches_parent_failure_channel() {
+    let mut turn = lash_core::testing::mock_assembled_turn(
+        &lash_core::SessionId::from("invalid-typed-child"),
+        "unused",
+    );
+    turn.outcome = lash_core::facade_support::TurnOutcome::Finished(
+        lash_core::facade_support::TurnFinish::FinalValue {
+            value: json!({ "answer": "forty-two" }),
+        },
+    );
+    let schema = json!({
+        "type": "object",
+        "properties": { "answer": { "type": "integer" } },
+        "required": ["answer"],
+        "additionalProperties": false
+    });
+
+    let result = registry_result(successful_turn_output(turn), false, Some(&schema)).await;
+    let error = result.expect_err("the terminal boundary must reject a schema mismatch");
+    assert!(
+        error.starts_with("subagent task result did not match the declared output schema:"),
+        "unexpected boundary error: {error}"
+    );
+    let ToolOutcome::Done(output) = finalise_tool_result(Err(error.clone())) else {
+        panic!("terminal result rejection must finish through the parent tool channel");
+    };
+    let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+        panic!("terminal result rejection must be a parent-visible failure");
+    };
+    assert_eq!(failure.message, error);
 }
 
 #[tokio::test]

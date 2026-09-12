@@ -249,7 +249,7 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
         }
-        let latest_prompt_usage = self.turn_pipeline.state_mut().last_prompt_usage.clone();
+        let latest_prompt_usage = self.latest_prompt_usage.clone();
         self.session
             .plugins()
             .protocol_session()

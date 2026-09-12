@@ -3,13 +3,67 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_cross_owner_attachment_adoption_conformance() {
+async fn sqlite_attachment_condemnation_enumeration_conformance() {
     let dir = tempfile::tempdir().unwrap();
-    lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
+    lash_conformance::attachment_condemnation_enumeration_conformance(Arc::new(
         SqliteSessionStoreFactory::new(dir.path()),
     ))
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_attachment_condemnation_delete_crash_survives_cold_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    lash_conformance::attachment_condemnation_delete_crash_survives_cold_reopen(
+        Arc::new(SqliteSessionStoreFactory::new(&root)),
+        move || async move {
+            Arc::new(SqliteSessionStoreFactory::new(root)) as Arc<dyn SessionStoreFactory>
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory = SqliteSessionStoreFactory::new(dir.path());
+    let session_id = SessionId::from("condemnation-corruption");
+    factory
+        .create_store(&lash_core::testing::store_fixtures::session_store_request(
+            &session_id,
+            "condemnation-corruption",
+            lash_core::SessionRelation::Root,
+        ))
+        .await
+        .expect("materialize catalog");
+    let connection = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
+    connection
+        .execute_batch(
+            "PRAGMA ignore_check_constraints = ON;
+             INSERT INTO attachment_condemnations
+                 (attachment_id, phase, write_token, write_session_id)
+             VALUES ('corrupt-condemnation', 'future-phase', NULL, NULL);",
+        )
+        .expect("inject unknown persisted phase");
+    assert!(matches!(
+        lash_core::AttachmentRootSet::list_condemnations(&factory).await,
+        Err(lash_core::StoreError::StoredDataCorrupt { .. })
+    ));
+    connection
+        .execute_batch(
+            "DELETE FROM attachment_condemnations;
+             INSERT INTO attachment_condemnations
+                 (attachment_id, phase, write_token, write_session_id)
+             VALUES ('corrupt-condemnation', 'deleting', 'opaque', 'session');",
+        )
+        .expect("inject inconsistent persisted provenance");
+    assert!(matches!(
+        lash_core::AttachmentRootSet::list_condemnations(&factory).await,
+        Err(lash_core::StoreError::StoredDataCorrupt { .. })
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -30,6 +84,8 @@ async fn sqlite_abandoned_attachment_write_recovery_survives_cold_reopen() {
     }
 }
 
+#[path = "conformance/attachment_adoption.rs"]
+mod attachment_adoption;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 

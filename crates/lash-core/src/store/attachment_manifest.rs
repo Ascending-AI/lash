@@ -231,6 +231,111 @@ pub enum AttachmentCondemnation {
     Unsupported,
 }
 
+/// One durable attachment-condemnation row exposed to host maintenance code.
+///
+/// The restoring write token remains private to the store implementation. A
+/// host needs the owning session to establish quiescence before recovery, but
+/// must never be able to present or settle the write's fence token itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachmentCondemnationRecord {
+    /// Content digest whose physical bytes are fenced by this row.
+    pub digest: crate::AttachmentId,
+    /// Current public phase of the condemnation state machine.
+    pub phase: AttachmentCondemnationPhase,
+    /// Authority that currently owns the persisted phase.
+    pub provenance: AttachmentCondemnationProvenance,
+}
+
+/// Public projection of a persisted attachment-condemnation phase.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachmentCondemnationPhase {
+    /// A sweep selected the digest but has not armed physical deletion.
+    Condemned,
+    /// Physical deletion was armed and may already have completed.
+    Deleting,
+    /// Physical deletion completed and the bytes are known absent.
+    Reclaimed,
+}
+
+/// Public ownership projection for a persisted condemnation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AttachmentCondemnationProvenance {
+    /// Tokenless state owned by a reclamation sweep.
+    SweepOwned,
+    /// A restoring write owns the phase for this session.
+    RestoringWrite { session_id: SessionId },
+}
+
+/// Decode the persisted phase and token/session presence used by durable store
+/// implementations without exposing the token itself.
+#[doc(hidden)]
+pub fn decode_attachment_condemnation_record(
+    digest: crate::AttachmentId,
+    phase: &str,
+    write_token_present: bool,
+    write_session_id: Option<SessionId>,
+) -> Result<AttachmentCondemnationRecord, StoreError> {
+    let phase = match phase {
+        "condemned" => AttachmentCondemnationPhase::Condemned,
+        "deleting" => AttachmentCondemnationPhase::Deleting,
+        "reclaimed" => AttachmentCondemnationPhase::Reclaimed,
+        unknown => {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind: "attachment condemnation",
+                message: format!("attachment `{digest}` has unknown phase `{unknown}`"),
+            });
+        }
+    };
+    let provenance = match (write_token_present, write_session_id) {
+        (false, None) => AttachmentCondemnationProvenance::SweepOwned,
+        (true, Some(session_id)) if phase != AttachmentCondemnationPhase::Deleting => {
+            super::validate_session_id(&session_id).map_err(|error| {
+                StoreError::StoredDataCorrupt {
+                    record_kind: "attachment condemnation",
+                    message: error.to_string(),
+                }
+            })?;
+            AttachmentCondemnationProvenance::RestoringWrite { session_id }
+        }
+        (write_token_present, write_session_id) => {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind: "attachment condemnation",
+                message: format!(
+                    "attachment `{digest}` has inconsistent phase/provenance: phase `{phase:?}`, write token present {write_token_present}, write session present {}",
+                    write_session_id.is_some()
+                ),
+            });
+        }
+    };
+    Ok(AttachmentCondemnationRecord {
+        digest,
+        phase,
+        provenance,
+    })
+}
+
+#[cfg(test)]
+mod condemnation_record_decode_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_phase_and_inconsistent_provenance_fail_closed() {
+        let digest = || crate::AttachmentId::parse("digest").unwrap();
+        for result in [
+            decode_attachment_condemnation_record(digest(), "future-phase", false, None),
+            decode_attachment_condemnation_record(digest(), "condemned", true, None),
+            decode_attachment_condemnation_record(
+                digest(),
+                "deleting",
+                true,
+                Some(SessionId::from("session")),
+            ),
+        ] {
+            assert!(matches!(result, Err(StoreError::StoredDataCorrupt { .. })));
+        }
+    }
+}
+
 /// Outcome of arming the physical delete for a condemned digest
 /// ([`AttachmentRootSet::arm_attachment_delete`](crate::AttachmentRootSet::arm_attachment_delete)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

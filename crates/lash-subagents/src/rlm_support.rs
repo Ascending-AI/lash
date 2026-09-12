@@ -4,7 +4,6 @@ use lash_core::{
     CausalRef, SessionCreateRequest, SessionSnapshot, SessionToolAccess, SubagentSessionContext,
     ToolDefinition, ToolOutcome, TurnInput, facade_support::AssembledTurn,
     facade_support::SessionSpec, facade_support::TurnFinish, facade_support::TurnOutcome,
-    facade_support::TurnStop,
 };
 use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use lash_sansio::SessionId;
@@ -260,28 +259,45 @@ pub(crate) fn subagent_capability_note(authority: &SubagentSessionContext) -> St
     )
 }
 
-pub(crate) fn task_result_value(turn: &AssembledTurn) -> Value {
-    match &turn.outcome {
-        TurnOutcome::Finished(TurnFinish::FinalValue { value }) => return value.clone(),
-        TurnOutcome::Finished(TurnFinish::ToolValue { value, .. }) => return value.clone(),
+pub(crate) fn task_result_value(turn: &AssembledTurn) -> Result<Value, String> {
+    let value = match &turn.outcome {
+        TurnOutcome::Finished(TurnFinish::FinalValue { value }) => value.clone(),
+        TurnOutcome::Finished(TurnFinish::ToolValue { value, .. }) => value.clone(),
         TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) => {
             if !text.trim().is_empty() {
-                return json!(text.trim().to_string());
+                json!(text.trim().to_string())
+            } else if !turn.assistant_output.safe_text.trim().is_empty() {
+                json!(turn.assistant_output.safe_text.trim().to_string())
+            } else {
+                json!(turn.assistant_output.raw_text.trim().to_string())
             }
         }
-        TurnOutcome::Stopped(TurnStop::SubmittedError { value }) => return value.clone(),
-        TurnOutcome::Stopped(TurnStop::ToolError { value, .. }) => return value.clone(),
-        TurnOutcome::AgentFrameSwitch {
-            frame_key, task, ..
-        } => {
-            return json!({ "frame_key": frame_key, "task": task });
+        TurnOutcome::AgentFrameSwitch { .. } => {
+            return Err(
+                "subagent switched agent frames instead of producing a final task result"
+                    .to_string(),
+            );
         }
-        TurnOutcome::Stopped(_) => {}
+        TurnOutcome::Stopped(_) => {
+            return Err("subagent process reported success for a stopped child turn".to_string());
+        }
+    };
+    Ok(value)
+}
+
+/// Apply the same JSON Schema semantics as the child's in-turn `finish`
+/// validator. This backstop runs after the child session has closed, so a
+/// mismatch is returned to the parent instead of asking the child to repair.
+pub(crate) fn validate_task_result(value: &Value, schema: &Value) -> Result<(), String> {
+    let compiled = jsonschema::JSONSchema::compile(schema)
+        .map_err(|err| format!("required output schema is invalid: {err}"))?;
+    if let Err(errors) = compiled.validate(value) {
+        return Err(errors
+            .map(|err| err.to_string())
+            .collect::<Vec<_>>()
+            .join("; "));
     }
-    if !turn.assistant_output.safe_text.trim().is_empty() {
-        return json!(turn.assistant_output.safe_text.trim().to_string());
-    }
-    json!(turn.assistant_output.raw_text.trim().to_string())
+    Ok(())
 }
 
 /// Wrap an `Ok`/`Err` result as a `ToolOutcome`. Used by both providers'

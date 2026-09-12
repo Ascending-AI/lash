@@ -18,6 +18,41 @@ use lash_core::{
 
 pub use rlm::spawn_agent_tool_definition;
 
+/// Builds the session-scoped plugin that authors built-in subagent requests.
+///
+/// # Child tool access
+///
+/// Built-in capabilities start child requests with this factory's configured
+/// [`SessionToolAccess`], which defaults to ambient access. The factory does not
+/// automatically copy access from the session being built, so a child may have
+/// broader or narrower access than its parent.
+///
+/// A host that wants built-in child requests to copy each parent's actual access
+/// can delegate through a host factory and configure this factory from
+/// [`PluginSessionContext::tool_access`]:
+///
+/// ```ignore
+/// impl PluginFactory for HostSubagentsFactory {
+///     fn build(
+///         &self,
+///         ctx: &PluginSessionContext,
+///     ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+///         SubagentsPluginFactory::new(Arc::clone(&self.registry))
+///             .with_tool_access(ctx.tool_access.clone())
+///             .build(ctx)
+///     }
+/// }
+/// ```
+///
+/// On rematerialization, `ctx.tool_access` is restored from that session's
+/// durable authority. The recipe therefore continues to copy the rematerialized
+/// parent's recorded access rather than recomputing it from a live parent.
+///
+/// Copying this access input is not effective-catalog containment. Ambient
+/// access is resolved against the child session's own plugin source and catalog
+/// contributions, so the resulting child catalog need not be a subset of the
+/// parent's catalog. Registered custom [`Capability`] implementations are also
+/// trusted to author a complete request and may choose different access.
 pub struct SubagentsPluginFactory {
     session_spec: SessionSpec,
     tool_access: SessionToolAccess,
@@ -40,6 +75,12 @@ impl SubagentsPluginFactory {
         self
     }
 
+    /// Sets the access input copied into child requests made by built-in
+    /// capabilities.
+    ///
+    /// This value is factory configuration, not automatic inheritance from the
+    /// parent session. See [`SubagentsPluginFactory`] for the host-factory recipe
+    /// that copies [`PluginSessionContext::tool_access`] when that is desired.
     pub fn with_tool_access(mut self, access: SessionToolAccess) -> Self {
         self.tool_access = access;
         self
@@ -50,6 +91,11 @@ impl SubagentsPluginFactory {
         self
     }
 
+    /// Hides resident tools by exact manifest name in built-in child requests.
+    ///
+    /// Use the callable name, not a dialect-facing display spelling. For
+    /// example, the shell input tool is named `write_stdin`; `shell.write` is
+    /// only its Lashlang-facing spelling.
     pub fn with_hidden_tools<I, S>(
         mut self,
         tools: I,

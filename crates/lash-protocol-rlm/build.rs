@@ -16,7 +16,7 @@ enum Definition {
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let local_source = manifest_dir.join("src/executor/state.rs");
-    println!("cargo:rerun-if-changed={}", local_source.display());
+    println!("cargo:rerun-if-changed=src/executor/state.rs");
     let mut definitions = HashMap::new();
     collect_definitions(&local_source, &mut definitions);
 

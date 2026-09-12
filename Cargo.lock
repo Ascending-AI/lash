@@ -2336,7 +2336,6 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
- "lash-internal-tools",
  "serde_json",
  "tokio",
  "tokio-util",

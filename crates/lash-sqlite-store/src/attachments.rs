@@ -369,6 +369,53 @@ fn live_ref_exists_sql(process_registry_attached: bool) -> String {
 }
 
 impl Store {
+    /// Enumerate the durable condemnation authority without exposing write
+    /// tokens. Persisted phase/provenance combinations are decoded strictly so
+    /// a corrupt row cannot be mistaken for sweep-owned maintenance work.
+    pub(crate) async fn list_attachment_condemnations(
+        &self,
+    ) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, StoreError> {
+        let rows = self
+            .conn
+            .call(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT attachment_id, phase, write_token, write_session_id
+                     FROM attachment_condemnations",
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        let mut condemnations = rows
+            .into_iter()
+            .map(|(digest, phase, write_token, write_session_id)| {
+                let digest = AttachmentId::parse(&digest).map_err(|error| {
+                    stored_data_corrupt(
+                        "attachment condemnation",
+                        format!("attachment_id is not a valid attachment id: {error}"),
+                    )
+                })?;
+                lash_core::store::decode_attachment_condemnation_record(
+                    digest,
+                    &phase,
+                    write_token.is_some(),
+                    write_session_id.map(SessionId::from),
+                )
+            })
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        condemnations.sort_by(|left, right| left.digest.cmp(&right.digest));
+        Ok(condemnations)
+    }
+
     /// `Free -> Condemned` for one digest, conditional on there being no live
     /// root. The root predicate, the existing-condemnation check, and the insert
     /// share one SQLite transaction, so this is one CAS against every concurrent

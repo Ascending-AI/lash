@@ -102,6 +102,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let mut state = self.state.clone();
         state.schedule_outstanding_effect();
         TurnCheckpoint {
+            schema_version: TURN_CHECKPOINT_SCHEMA_VERSION,
             state,
             pending_effects: self.side_effect_outbox.iter().cloned().collect(),
             next_effect_id: self.next_effect_id,
@@ -121,12 +122,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn restore_from_checkpoint(
         config: TurnMachineConfig<M>,
         checkpoint: TurnCheckpoint<M>,
-    ) -> Self {
+    ) -> Result<Self, TurnCheckpointRestoreError> {
+        if checkpoint.schema_version > TURN_CHECKPOINT_SCHEMA_VERSION {
+            return Err(TurnCheckpointRestoreError::UnsupportedSchemaVersion {
+                actual: checkpoint.schema_version,
+                supported: TURN_CHECKPOINT_SCHEMA_VERSION,
+            });
+        }
         let side_effect_outbox = checkpoint
             .pending_effects
             .into_iter()
             .collect::<VecDeque<_>>();
-        Self {
+        Ok(Self {
             config,
             state: checkpoint.state,
             side_effect_outbox,
@@ -142,7 +149,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             termination: checkpoint.termination,
             synced_protocol_iteration: checkpoint.synced_protocol_iteration,
             observed_cancellation: None,
-        }
+        })
     }
 
     fn driver_context(&self) -> DriverContextView<'_, M> {
@@ -389,6 +396,23 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     driver_state,
                 } => self.start_llm_request(request, driver_state),
                 DriverAction::StartTools { calls } => self.start_tool_calls(calls),
+                DriverAction::ReportToolCalls { completed } => {
+                    let accounting = completed
+                        .iter()
+                        .map(|outcome| SessionStreamEvent::ToolCall {
+                            call_id: Some(outcome.call_id.clone()),
+                            name: outcome.tool_name.clone(),
+                            args: outcome.args.clone(),
+                            output: outcome.output.clone(),
+                            duration_ms: outcome.duration_ms,
+                        })
+                        .collect::<Vec<_>>();
+                    self.side_effect_outbox
+                        .push_back(Effect::ReportToolCalls { completed });
+                    for event in accounting {
+                        self.emit(event);
+                    }
+                }
                 DriverAction::StartExec {
                     language,
                     code,

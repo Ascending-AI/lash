@@ -152,6 +152,36 @@ pub(crate) async fn release_attachment_condemnation(
     tx.commit().await.map_err(store_sqlx_error)
 }
 
+/// Enumerate the durable condemnation authority without exposing write
+/// tokens. Persisted phase/provenance combinations are decoded strictly so a
+/// corrupt row cannot be mistaken for sweep-owned maintenance work.
+pub(crate) async fn list_attachment_condemnations(
+    pool: &PgPool,
+) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, StoreError> {
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+        "SELECT attachment_id, phase, write_token, write_session_id
+         FROM lash_attachment_condemnations",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(store_sqlx_error)?;
+    let mut condemnations = rows
+        .into_iter()
+        .map(|(digest, phase, write_token, write_session_id)| {
+            let digest =
+                attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
+            lash_core::store::decode_attachment_condemnation_record(
+                digest,
+                &phase,
+                write_token.is_some(),
+                write_session_id.map(SessionId::from),
+            )
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    condemnations.sort_by(|left, right| left.digest.cmp(&right.digest));
+    Ok(condemnations)
+}
+
 /// Clear an abandoned restoring writer under explicit host quiescence.
 /// Preserve `Reclaimed`; retire `Condemned` only when its associated intent
 /// became committed, otherwise preserve it after removing that intent.

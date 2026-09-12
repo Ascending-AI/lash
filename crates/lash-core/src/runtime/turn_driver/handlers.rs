@@ -204,7 +204,7 @@ impl RuntimeTurnDriver<'_> {
         }
         if let Ok(response) = &result {
             let usage = crate::runtime::effect::token_usage_from_llm(&response.usage);
-            self.turn_pipeline.state_mut().last_prompt_usage = normalize_prompt_usage(&usage);
+            self.latest_prompt_usage = normalize_prompt_usage(&usage);
             if !text_streamed {
                 let prose_projector = self.session.plugins().assistant_prose_projector();
                 emit_semantic_response_parts(event_tx, response, prose_projector.as_deref()).await;

@@ -34,7 +34,7 @@ use lash_core::provider::{
 };
 use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
 use lash_llm_transport::LlmHttpTransport;
-use lash_provider_auth::{CredentialManager, Lease};
+use lash_provider_auth::CredentialManager;
 use lash_sansio::Redacted;
 
 use credential::{CodexCredential, CodexCredentialRefresher};
@@ -73,7 +73,6 @@ pub(crate) enum CodexTransport {
 #[derive(Clone, Debug)]
 pub struct CodexProvider {
     credentials: Arc<CredentialManager<CodexCredential>>,
-    attempt_credential: Option<Lease<CodexCredential>>,
     pub options: ProviderOptions,
     pub(crate) transport: CodexTransport,
     websocket_sessions: CodexWebsocketSessionCache,
@@ -103,7 +102,6 @@ impl CodexProvider {
                 credential,
                 Arc::new(CodexCredentialRefresher),
             )),
-            attempt_credential: None,
             options: ProviderOptions {
                 reliability: ProviderReliability::codex(),
                 ..ProviderOptions::default()

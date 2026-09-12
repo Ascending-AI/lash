@@ -45,9 +45,15 @@ impl RlmSubagentToolsProvider {
     /// background session turn takes.
     async fn execute_orchestration(
         &self,
-        _args: &Value,
+        args: &Value,
         context: &lash_core::facade_support::OrchestrationContext<'_>,
     ) -> Result<Value, String> {
+        // Validate against the caller's declaration at the result boundary as
+        // well as inside the built-in child. Capabilities are trusted request
+        // authors and may construct a child request that does not carry the
+        // declaration into the RLM repair loop.
+        let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))
+            .map_err(|err| format!("spawn_agent output schema was invalid: {err}"))?;
         let prepared: PreparedSpawnAgent = context
             .decode_prepared_payload()
             .map_err(|err| format!("spawn_agent was not prepared correctly: {err}"))?;
@@ -78,7 +84,7 @@ impl RlmSubagentToolsProvider {
             .await_process(&prepared.process_id)
             .await
             .map_err(|err| format!("subagent failed while executing its task: {err}"))?;
-        child_task_result(output)
+        child_task_result(output, output_schema.as_ref())
     }
 
     async fn prepare_spawn_agent(
@@ -212,11 +218,14 @@ struct PreparedSpawnAgent {
 
 /// Project the awaited subagent process output back onto the spawn tool's
 /// result. The generic `SessionTurn` runner wraps the child's terminal
-/// `AssembledTurn` in its success value; recover it and apply the existing
-/// `task_result_value` mapping so the spawn surface is unchanged. A child that
-/// terminated via `submit_error` (or otherwise failed) surfaces as a tool error
-/// carrying its reason.
-fn child_task_result(output: lash_core::ProcessAwaitOutput) -> Result<Value, String> {
+/// `AssembledTurn` in its success value. Recover it, require a finished answer,
+/// project that answer, and enforce the caller's declared output schema. A
+/// child that terminated via `submit_error` (or otherwise failed) surfaces as
+/// a tool error carrying its reason.
+fn child_task_result(
+    output: lash_core::ProcessAwaitOutput,
+    output_schema: Option<&Value>,
+) -> Result<Value, String> {
     match output {
         lash_core::ProcessAwaitOutput::Abandoned { .. } => {
             Err("subagent process was abandoned before recording an outcome".to_string())
@@ -235,7 +244,15 @@ fn child_task_result(output: lash_core::ProcessAwaitOutput) -> Result<Value, Str
                     .transpose()
                     .map_err(|err| format!("subagent process output was malformed: {err}"))?
                     .ok_or_else(|| "subagent process output was missing its turn".to_string())?;
-                Ok(task_result_value(&turn))
+                let value = task_result_value(&turn)?;
+                if let Some(schema) = output_schema {
+                    rlm_support::validate_task_result(&value, schema).map_err(|err| {
+                        format!(
+                            "subagent task result did not match the declared output schema: {err}"
+                        )
+                    })?;
+                }
+                Ok(value)
             }
             lash_core::ToolCallOutcome::Failure(failure) => Err(failure.message),
             lash_core::ToolCallOutcome::Cancelled(cancellation) => Err(cancellation.message),

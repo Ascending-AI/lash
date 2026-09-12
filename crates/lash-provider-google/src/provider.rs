@@ -5,6 +5,11 @@
 use crate::support::*;
 use std::sync::Arc;
 
+struct GoogleCredentialCallContext<'a> {
+    provider: &'a mut GoogleOAuthProvider,
+    request: &'a LlmRequest,
+}
+
 impl GoogleOAuthProvider {
     fn should_retry_inline(err: &LlmTransportError) -> bool {
         matches!(err.code.as_deref(), Some("400" | "404"))
@@ -408,6 +413,85 @@ impl GoogleOAuthProvider {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()))
     }
+
+    async fn complete_with_credential(
+        &mut self,
+        req: LlmRequest,
+        credential: Lease<GoogleCredential>,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        let stream_events = req.stream_events.clone();
+        let provider_trace = req.provider_trace.clone();
+        let stream_termination = req
+            .model_capability
+            .stream_termination
+            .unwrap_or(self.stream_termination);
+        let GoogleCredential {
+            access_token,
+            refresh_token,
+            ..
+        } = credential.value;
+        // The single deliberate exposure point: from here the plaintext only
+        // feeds request headers and the upload path.
+        let access_token = access_token.into_inner();
+        let refresh_token = refresh_token.into_inner();
+        if self.project_id.is_none() {
+            self.project_id = self.resolve_project_id(&access_token).await?;
+        }
+        let project_id = self.project_id.clone();
+
+        let inline_attachment_parts = req
+            .attachments()
+            .iter()
+            .map(|source| {
+                (
+                    (*source).clone(),
+                    Self::inline_attachment_part(&req, source),
+                )
+            })
+            .collect::<Vec<_>>();
+        let inline_contents =
+            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts);
+
+        let (attachment_parts, used_uploaded_files) = self
+            .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
+            .await?;
+        let contents = if used_uploaded_files {
+            self.build_contents_with_attachment_parts(&req, &attachment_parts)
+        } else {
+            inline_contents.clone()
+        };
+
+        let request = Self::build_request(self, &req, contents, project_id.as_deref())?;
+        let generation_disposition = Some(Self::generation_disposition(&req));
+
+        match self
+            .execute_request(
+                &access_token,
+                request,
+                stream_events.clone(),
+                provider_trace.clone(),
+                stream_termination,
+                generation_disposition,
+            )
+            .await
+        {
+            Ok(response) => Ok(response),
+            Err(err) if used_uploaded_files && Self::should_retry_inline(&err) => {
+                let inline_request =
+                    Self::build_request(self, &req, inline_contents, project_id.as_deref())?;
+                self.execute_request(
+                    &access_token,
+                    inline_request,
+                    stream_events,
+                    provider_trace,
+                    stream_termination,
+                    generation_disposition,
+                )
+                .await
+            }
+            Err(err) => Err(err),
+        }
+    }
 }
 
 #[async_trait]
@@ -488,112 +572,35 @@ impl Provider for GoogleOAuthProvider {
                     .with_code("invalid_provider_endpoint")
             })?;
         Self::validate_attachments(&req)?;
-        if self.attempt_credential.is_none() {
-            let manager = Arc::clone(&self.credentials);
-            let provider = self.clone();
-            let (response, project_id) = manager
-                .execute(move |lease| {
-                    let mut provider = provider.clone();
-                    let req = req.clone();
-                    provider.attempt_credential = Some(lease);
-                    async move {
-                        let result = Box::pin(provider.complete(req)).await;
-                        match result {
-                            Ok(response) => Ok((response, provider.project_id.clone())),
-                            Err(error) if error.status == Some(401) => {
-                                Err(CredentialCallError::PreOutputAuth(error))
-                            }
-                            Err(error) => Err(CredentialCallError::Failed(error)),
+        let manager = Arc::clone(&self.credentials);
+        let mut context = GoogleCredentialCallContext {
+            provider: self,
+            request: &req,
+        };
+        manager
+            .execute(&mut context, |context, lease| {
+                Box::pin(async move {
+                    match context
+                        .provider
+                        .complete_with_credential(context.request.clone(), lease)
+                        .await
+                    {
+                        Ok(response) => Ok(response),
+                        Err(error) if error.status == Some(401) => {
+                            Err(CredentialCallError::PreOutputAuth(error))
                         }
+                        Err(error) => Err(CredentialCallError::Failed(error)),
                     }
                 })
-                .await
-                .map_err(|error| match error {
-                    CredentialExecuteError::Credential(error) => error.into_transport_error(),
-                    CredentialExecuteError::Call(error) => error,
-                    // Unknown failures cannot establish that replay is safe.
-                    _ => LlmTransportError::new(error.to_string())
-                        .with_retry_verdict(TransportRetryVerdict::Forbidden),
-                })?;
-            self.project_id = project_id;
-            return Ok(response);
-        }
-        let stream_events = req.stream_events.clone();
-        let provider_trace = req.provider_trace.clone();
-        let stream_termination = req
-            .model_capability
-            .stream_termination
-            .unwrap_or(self.stream_termination);
-        let credential = self
-            .attempt_credential
-            .take()
-            .expect("credential attempt is configured");
-        let GoogleCredential {
-            access_token,
-            refresh_token,
-            ..
-        } = credential.value;
-        // The single deliberate exposure point: from here the plaintext only
-        // feeds request headers and the upload path.
-        let access_token = access_token.into_inner();
-        let refresh_token = refresh_token.into_inner();
-        if self.project_id.is_none() {
-            self.project_id = self.resolve_project_id(&access_token).await?;
-        }
-        let project_id = self.project_id.clone();
-
-        let inline_attachment_parts = req
-            .attachments()
-            .iter()
-            .map(|source| {
-                (
-                    (*source).clone(),
-                    Self::inline_attachment_part(&req, source),
-                )
             })
-            .collect::<Vec<_>>();
-        let inline_contents =
-            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts);
-
-        let (attachment_parts, used_uploaded_files) = self
-            .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
-            .await?;
-        let contents = if used_uploaded_files {
-            self.build_contents_with_attachment_parts(&req, &attachment_parts)
-        } else {
-            inline_contents.clone()
-        };
-
-        let request = Self::build_request(self, &req, contents, project_id.as_deref())?;
-        let generation_disposition = Some(Self::generation_disposition(&req));
-
-        match self
-            .execute_request(
-                &access_token,
-                request,
-                stream_events.clone(),
-                provider_trace.clone(),
-                stream_termination,
-                generation_disposition,
-            )
             .await
-        {
-            Ok(response) => Ok(response),
-            Err(err) if used_uploaded_files && Self::should_retry_inline(&err) => {
-                let inline_request =
-                    Self::build_request(self, &req, inline_contents, project_id.as_deref())?;
-                self.execute_request(
-                    &access_token,
-                    inline_request,
-                    stream_events,
-                    provider_trace,
-                    stream_termination,
-                    generation_disposition,
-                )
-                .await
-            }
-            Err(err) => Err(err),
-        }
+            .map_err(|error| match error {
+                CredentialExecuteError::Credential(error) => error.into_transport_error(),
+                CredentialExecuteError::Call(error) => error,
+                // Unknown failures cannot establish that replay is safe.
+                _ => LlmTransportError::new(error.to_string())
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden),
+            })
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
@@ -604,9 +611,15 @@ impl Provider for GoogleOAuthProvider {
 #[cfg(test)]
 mod error_detail_tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
     struct ApiErrorTransport;
+
+    #[derive(Debug)]
+    struct ProjectResolutionTransport {
+        calls: AtomicUsize,
+    }
 
     #[async_trait::async_trait]
     impl LlmHttpTransport for ApiErrorTransport {
@@ -622,6 +635,58 @@ mod error_detail_tests {
                     r#"{"error":{"message":"Gemini API detail"}}"#,
                 ),
             })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmHttpTransport for ProjectResolutionTransport {
+        async fn send(
+            &self,
+            request: LlmHttpRequest,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<lash_llm_transport::LlmHttpResponse, LlmTransportError> {
+            let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
+            let body = match attempt {
+                0 => {
+                    assert!(request.url.ends_with(":loadCodeAssist"));
+                    r#"{"cloudaicompanionProject":"resolved-project"}"#
+                }
+                1 => {
+                    assert!(request.url.ends_with(":generateContent"));
+                    r#"{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"done"}]}}]}"#
+                }
+                _ => panic!("unexpected provider request {attempt}"),
+            };
+            Ok(lash_llm_transport::LlmHttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: lash_llm_transport::LlmHttpBody::buffered(body),
+            })
+        }
+    }
+
+    fn completion_request() -> LlmRequest {
+        LlmRequest {
+            instructions: None,
+            model: "gemini-3.1-pro-preview".to_string(),
+            messages: vec![lash_core::llm::types::LlmMessage::text(
+                LlmRole::User,
+                "hello",
+            )],
+            resolved_stored: Default::default(),
+            tools: Arc::new(Vec::<lash_core::llm::types::LlmToolSpec>::new()),
+            tool_choice: LlmToolChoice::Auto,
+            model_variant: Default::default(),
+            model_capability: Default::default(),
+            scope: lash_core::LlmRequestScope::new(
+                "project-resolution",
+                "project-resolution:frame",
+                "project-resolution:request",
+            ),
+            output_spec: None,
+            stream_events: None,
+            generation: Default::default(),
+            provider_trace: None,
         }
     }
 
@@ -668,5 +733,35 @@ mod error_detail_tests {
             .await
             .expect_err("fixture is an HTTP error");
         assert!(error.message.contains("Gemini API detail"));
+    }
+
+    #[tokio::test]
+    async fn complete_retains_resolved_project_on_original_provider() {
+        let transport = Arc::new(ProjectResolutionTransport {
+            calls: AtomicUsize::new(0),
+        });
+        let mut provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            u64::MAX,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(transport.clone());
+
+        let response = provider
+            .complete(completion_request())
+            .await
+            .expect("credentialed completion succeeds");
+
+        assert_eq!(response.full_text(), "done");
+        assert_eq!(provider.project_id.as_deref(), Some("resolved-project"));
+        assert_eq!(
+            provider.serialize_config()["project_id"],
+            json!("resolved-project")
+        );
+        assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
     }
 }

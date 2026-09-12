@@ -26,6 +26,19 @@ pub fn default_explore_plugin_source() -> TierPluginSource {
     TierPluginSource::CurrentHostFresh
 }
 
+/// Trusted extension point that authors a complete child-session request.
+///
+/// Built-in capabilities use [`SubagentSpawnContext::rlm_request`], which copies
+/// [`SubagentSpawnContext::base_tool_access`] into the request. A custom
+/// implementation may instead replace or ignore that input because the
+/// returned [`SessionCreateRequest`] is authoritative. Registering a custom
+/// capability therefore trusts it to select the child's tool authority.
+///
+/// The model-facing spawn schema does not accept arbitrary additional
+/// arguments, so a model cannot inject a tool-access record into a built-in
+/// request. That closed argument shape does not impose transitive confinement:
+/// it neither constrains what a custom capability authors nor guarantees that a
+/// child's effective catalog is contained by its parent's catalog.
 pub trait Capability: Send + Sync {
     fn name(&self) -> &str;
     fn build_session_request(
@@ -39,6 +52,13 @@ pub struct SubagentSpawnContext<'a> {
     pub parent_session_id: &'a SessionId,
     pub parent_snapshot: &'a SessionSnapshot,
     pub session_spec: &'a SessionSpec,
+    /// Factory-configured access input used by built-in request helpers.
+    ///
+    /// This is not the parent's access unless the host factory explicitly
+    /// copied [`lash_core::plugin::PluginSessionContext::tool_access`] into
+    /// [`crate::SubagentsPluginFactory::with_tool_access`]. Even when copied,
+    /// it is an access-input record rather than proof that the child's resolved
+    /// tool catalog is a subset of the parent's effective catalog.
     pub base_tool_access: &'a SessionToolAccess,
     pub final_answer_format: lash_rlm_types::RlmFinalAnswerFormat,
     pub output_schema: Option<Value>,
@@ -71,6 +91,11 @@ impl SubagentSpawnContext<'_> {
             .resolve_against(&self.parent_snapshot.policy)
     }
 
+    /// Builds the standard RLM child request used by built-in capabilities.
+    ///
+    /// Policy is resolved against the parent snapshot, while tool access is
+    /// copied from [`Self::base_tool_access`]. The latter is factory input and
+    /// is not derived from the parent's effective tool catalog.
     pub fn rlm_request(
         &self,
         capability_name: &str,

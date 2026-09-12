@@ -65,8 +65,8 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
                                     tool_name: "batch".to_string(),
                                     input_json: serde_json::json!({
                                         "tool_calls": [
-                                            {"tool": "fig1293_echo", "parameters": {"value": "alpha"}},
-                                            {"tool": "fig1293_echo", "parameters": {"value": "beta"}},
+                                            {"tool": lash_core::testing::FIXTURE_ECHO_TOOL, "parameters": {"value": "alpha"}},
+                                            {"tool": lash_core::testing::FIXTURE_ECHO_TOOL, "parameters": {"value": "beta"}},
                                         ]
                                     })
                                     .to_string(),
@@ -173,8 +173,8 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
             "start_command".to_string(),
             "write_stdin".to_string(),
             "cancel_process".to_string(),
-            "fig1293_echo".to_string(),
-            "fig1293_echo".to_string(),
+            lash_core::testing::FIXTURE_ECHO_TOOL.to_string(),
+            lash_core::testing::FIXTURE_ECHO_TOOL.to_string(),
         ],
         "leaf tools and batch children are attempts; batch, spawn_agent, and the shell process body are not"
     );
@@ -229,7 +229,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
             let is_nested_batch = matches!(
                 &envelope.command,
                 RuntimeEffectCommand::ToolBatch { batch }
-                    if batch.calls.iter().any(|child| child.call.tool_name == "fig1293_echo")
+                    if batch.calls.iter().any(|child| child.call.tool_name == lash_core::testing::FIXTURE_ECHO_TOOL)
             );
             (is_spawn_command || is_nested_batch)
                 && envelope.invocation.caused_by.as_ref() == Some(&outer_causal_ref)
@@ -330,14 +330,14 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
                             "index": 0,
                             "result": {"echo": "alpha"},
                             "success": true,
-                            "tool": "fig1293_echo",
+                            "tool": lash_core::testing::FIXTURE_ECHO_TOOL,
                         },
                         {
                             "duration_ms": 0,
                             "index": 1,
                             "result": {"echo": "beta"},
                             "success": true,
-                            "tool": "fig1293_echo",
+                            "tool": lash_core::testing::FIXTURE_ECHO_TOOL,
                         },
                     ]
                 }),
