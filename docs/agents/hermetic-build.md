@@ -148,13 +148,27 @@ labels stay manual because Cargo owns rustdoc execution, and the one target
 whose required feature is outside the default graph remains recorded as a
 Cargo feature-gate target without a Bazel label.
 
-Trusted same-repository pull requests and `main` run the generated suite in
-`.github/workflows/bazel.yml` with the authenticated shared cache. The workflow
-does not run for forks or Dependabot and never exposes its write credentials to
-those events. It is supplementary to the single required `CI conclusion`, so
-the required Cargo/nextest board continues to own all Cargo-only behavior and
-the merge contract; the Bazel workflow has one test operation rather than a
-duplicate compile-then-test pair.
+The main CI workflow makes this a single authoritative partition. Trusted
+same-repository pull requests, merge-queue groups, `main` pushes, and manual CI
+dispatches run `//:workspace_tests` with the authenticated shared cache. On the
+same events the ordinary nextest job reads the generated
+`tools/bazel/cargo_owned_nextest_filter.txt`, so its `profile.ci` run executes
+only ordinary cases from the 22 Cargo-owned binaries. The existing doctest,
+trybuild, heavy, service, feature, fuzz, packaging, and release jobs keep their
+own Cargo commands and schedules. `CI conclusion` requires the Bazel job to
+succeed on every trusted event.
+
+Fork and Dependabot pull requests never receive cache credentials: their Bazel
+job is intentionally skipped and their ordinary nextest job omits the generated
+filter, preserving the full workspace fallback. `CI conclusion` accepts that
+skip only when the shared trust decision classifies the event as untrusted.
+
+GitHub-hosted actions execute locally, not in Orb's pinned executor image. Their
+remote-cache platform property is therefore derived from GitHub's `runner.os`,
+`runner.arch`, `ImageOS`, and `ImageVersion` values. This gives each concrete
+GitHub runner image a deterministic action identity distinct from
+`orb_executor_runtime`; the cache service and instance remain shared, but
+actions cannot cross the runtime boundary under the same key.
 
 The Bazel default is the development compilation graph. Timing comparisons
 must use Rust 1.98.1, the resolved default workspace features, equivalent

@@ -130,6 +130,20 @@ def cargo_test_policy(
     return sorted(set(tags)), reason
 
 
+def nextest_filter_term(package_name: str, target: dict) -> str:
+    """Select exactly one Cargo test binary in nextest's filter language."""
+    kind = target["kind"]
+    if kind == "unit-test":
+        target_filter = "kind(lib)"
+    elif kind == "bin-unit-test":
+        target_filter = f"kind(bin) & binary({target['cargo']})"
+    elif kind == "test":
+        target_filter = f"kind(test) & binary({target['cargo']})"
+    else:
+        raise ValueError(f"unsupported nextest target kind: {kind}")
+    return f"(package({package_name}) & {target_filter})"
+
+
 def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
     manifest = relative(package["manifest_path"])
     package_dir = pathlib.PurePosixPath(manifest).parent.as_posix()
@@ -234,6 +248,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 + ")\n\n"
             )
             unit_inventory = {
+                "cargo": library["name"],
                 "kind": "unit-test",
                 "label": f"//{package_dir}:{primary_target}__unit_test",
                 "tags": unit_tags,
@@ -408,6 +423,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             ])
             chunks.append("".join(unit_args))
             bin_unit_inventory = {
+                "cargo": target["name"],
                 "kind": "bin-unit-test",
                 "label": f"//{package_dir}:{name}__unit_test",
                 "tags": bin_unit_tags,
@@ -542,6 +558,17 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     for name, values in groups.items():
         bzl.append(f"{name} = {string_list(values, indent=4)}\n\n")
     outputs[ROOT / "tools/bazel/workspace_targets.bzl"] = "".join(bzl).rstrip() + "\n"
+    cargo_nextest_terms = sorted(
+        nextest_filter_term(package["package"], target)
+        for package in inventory
+        for target in package["targets"]
+        if target.get("label") is not None
+        and target["kind"] in ("bin-unit-test", "test", "unit-test")
+        and "manual" in target["tags"]
+    )
+    outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
+        " + ".join(cargo_nextest_terms) + "\n"
+    )
     return outputs, inventory
 
 
