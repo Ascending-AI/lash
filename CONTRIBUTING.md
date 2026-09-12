@@ -8,9 +8,7 @@ internals are still moving fast, so open an issue before starting a substantial
 implementation and agree on the shape first.
 
 To understand how the runtime fits together, start at <https://lash.run/>. The
-architecture chapters cover the crate layout, turn/effect boundary, and plugin
-model. Before changing a crate boundary, check its
-[per-crate architecture invariants](docs/architecture/crate-invariants.html).
+published guides cover the crate layout, turn/effect boundary, and plugin model.
 
 Use `mod` declarations and explicit re-exports for hand-written Rust source.
 Reserve `include!` for build-script-generated code and assets; keep text assets
