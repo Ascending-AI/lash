@@ -24,6 +24,7 @@ mod tests {
 
     use crate::stream::StreamState;
     use crate::{AnthropicProvider, DEFAULT_BASE_URL};
+    use lash_core::llm::transport::ProviderFailureKind;
     use lash_core::llm::types::{
         AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage,
         LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRole, LlmStreamEvent, LlmTerminalReason,
@@ -170,6 +171,28 @@ mod tests {
             Value::Array(array) => array.iter().map(|value| count_object_key(value, key)).sum(),
             _ => 0,
         }
+    }
+
+    #[test]
+    fn malformed_tool_call_input_json_fails_the_anthropic_request() {
+        let provider = AnthropicProvider::new("key");
+        let req = request(vec![LlmMessage::new(
+            LlmRole::Assistant,
+            vec![LlmContentBlock::ToolCall {
+                call_id: "call1".into(),
+                tool_name: "lookup".into(),
+                input_json: "{".into(),
+                replay: None,
+            }],
+        )]);
+
+        let error = provider
+            .build_request_body(&req)
+            .expect_err("malformed tool input must not become {}");
+        assert_eq!(error.kind, ProviderFailureKind::Validation);
+        assert_eq!(error.code.as_deref(), Some("invalid_tool_call_input_json"));
+        assert!(error.message.contains("lookup"));
+        assert_eq!(error.raw.as_deref().map(String::as_str), Some("{"));
     }
 
     #[test]
