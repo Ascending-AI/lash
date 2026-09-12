@@ -60,6 +60,7 @@ fn reasoning_capability() -> ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash_core::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     }
 }
 

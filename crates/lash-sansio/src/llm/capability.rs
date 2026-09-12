@@ -19,17 +19,9 @@ pub struct ModelCapability {
     /// Anthropic native runtime feedback at legal conversation positions.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mid_conversation_system: bool,
-    /// Host acceptance revision retained with the session policy.
-    #[serde(
-        default,
-        skip_serializing_if = "AttachmentCapabilitySnapshot::is_empty"
-    )]
-    pub attachment_acceptance: std::sync::Arc<AttachmentCapabilitySnapshot>,
     /// Google wire dialect selected by the host for this route.
     #[serde(default, skip_serializing_if = "GoogleDialect::is_legacy")]
     pub google_dialect: GoogleDialect,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<ReasoningCapability>,
     /// Cache-control wire dialect accepted by this model on its selected route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_control: Option<CacheControlDialect>,
@@ -39,7 +31,122 @@ pub struct ModelCapability {
     /// Whether this model lets a caller set the sampling temperature.
     #[serde(default, skip_serializing_if = "SamplingCapability::is_default")]
     pub sampling: SamplingCapability,
+    /// Host acceptance revision retained with the session policy.
+    #[serde(
+        default,
+        skip_serializing_if = "AttachmentCapabilitySnapshot::is_empty"
+    )]
+    pub attachment_acceptance: std::sync::Arc<AttachmentCapabilitySnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningCapability>,
+    /// Host-selected reasoning-history retention, independent of reasoning
+    /// effort. Providers consume this exact capability/selection pair; they do
+    /// not infer support from model identifiers or approximate other units.
+    pub reasoning_retention: Box<ReasoningRetentionPolicy>,
 }
+
+/// One provider-native retention primitive, or the conservative fallback for
+/// routes whose API has no native reasoning-history control.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReasoningRetentionCapability {
+    OpenAiContext {
+        /// Exact `reasoning.context` values accepted by the selected route.
+        supported: Vec<OpenAiReasoningContext>,
+    },
+    AnthropicClearThinking,
+    ClientSideUserSegments,
+}
+
+/// OpenAI Responses reasoning-history policy. These are provider wire values,
+/// not Lash approximations of token or turn budgets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiReasoningContext {
+    CurrentTurn,
+    AllTurns,
+}
+
+impl OpenAiReasoningContext {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CurrentTurn => "current_turn",
+            Self::AllTurns => "all_turns",
+        }
+    }
+}
+
+/// Anthropic native thinking retention. The count is Anthropic thinking turns,
+/// deliberately distinct from Lash genuine-user segments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AnthropicThinkingRetention {
+    All,
+    Turns(std::num::NonZeroU32),
+}
+
+/// Exact host choice for reasoning-history retention.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReasoningRetentionSelection {
+    #[default]
+    ProviderDefault,
+    OpenAiContext {
+        context: OpenAiReasoningContext,
+    },
+    AnthropicClearThinking {
+        keep: AnthropicThinkingRetention,
+    },
+    ClientSideUserSegments {
+        max_segments: std::num::NonZeroUsize,
+    },
+}
+
+/// Host-visible capability plus selection. Keeping both in the durable model
+/// snapshot makes cold reopen and remote execution apply the same contract.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReasoningRetentionPolicy {
+    pub capability: Option<ReasoningRetentionCapability>,
+    pub selection: ReasoningRetentionSelection,
+}
+
+impl ReasoningRetentionPolicy {
+    pub fn is_default(&self) -> bool {
+        self.capability.is_none() && self.selection == ReasoningRetentionSelection::ProviderDefault
+    }
+}
+
+/// The primitive implemented by an adapter. It is determined by the provider
+/// protocol, never by a model-name heuristic.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderReasoningRetentionSupport {
+    OpenAiContext,
+    AnthropicClearThinking,
+    ClientSideUserSegments,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningRetentionValidationCategory {
+    UnsupportedSelection,
+    MalformedCapability,
+    InvalidHistory,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasoningRetentionValidationError {
+    pub category: ReasoningRetentionValidationCategory,
+    pub message: String,
+}
+
+impl std::fmt::Display for ReasoningRetentionValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ReasoningRetentionValidationError {}
 
 /// Host-supplied instruction role; model identifiers never select authority.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -229,6 +336,81 @@ impl ModelCapability {
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
             && self.sampling.is_default()
+            && self.reasoning_retention.is_default()
+    }
+
+    /// Validate retention against both the host-supplied model facts and the
+    /// adapter's protocol primitive. No cross-unit approximation is allowed.
+    pub fn validate_reasoning_retention(
+        &self,
+        model: &str,
+        provider_kind: &str,
+        adapter_support: ProviderReasoningRetentionSupport,
+    ) -> Result<(), ReasoningRetentionValidationError> {
+        use ReasoningRetentionCapability as Capability;
+        use ReasoningRetentionSelection as Selection;
+
+        let policy = &self.reasoning_retention;
+        if policy.selection == Selection::ProviderDefault {
+            return Ok(());
+        }
+        let Some(capability) = policy.capability.as_ref() else {
+            return Err(ReasoningRetentionValidationError {
+                category: ReasoningRetentionValidationCategory::MalformedCapability,
+                message: format!(
+                    "Model `{model}` on {provider_kind} selects reasoning retention without a host-supplied retention capability."
+                ),
+            });
+        };
+
+        let supported = matches!(
+            (capability, adapter_support),
+            (
+                Capability::OpenAiContext { .. },
+                ProviderReasoningRetentionSupport::OpenAiContext
+            ) | (
+                Capability::AnthropicClearThinking,
+                ProviderReasoningRetentionSupport::AnthropicClearThinking
+            ) | (
+                Capability::ClientSideUserSegments,
+                ProviderReasoningRetentionSupport::ClientSideUserSegments
+            )
+        );
+        if !supported {
+            return Err(ReasoningRetentionValidationError {
+                category: ReasoningRetentionValidationCategory::UnsupportedSelection,
+                message: format!(
+                    "Model `{model}` on {provider_kind} cannot apply the selected reasoning-retention primitive."
+                ),
+            });
+        }
+
+        match (&policy.selection, capability) {
+            (Selection::OpenAiContext { context }, Capability::OpenAiContext { supported })
+                if supported.contains(context) =>
+            {
+                Ok(())
+            }
+            (Selection::AnthropicClearThinking { .. }, Capability::AnthropicClearThinking)
+            | (Selection::ClientSideUserSegments { .. }, Capability::ClientSideUserSegments) => {
+                Ok(())
+            }
+            (Selection::OpenAiContext { context }, Capability::OpenAiContext { .. }) => {
+                Err(ReasoningRetentionValidationError {
+                    category: ReasoningRetentionValidationCategory::UnsupportedSelection,
+                    message: format!(
+                        "Model `{model}` on {provider_kind} does not support OpenAI reasoning.context=`{}`.",
+                        context.as_str()
+                    ),
+                })
+            }
+            _ => Err(ReasoningRetentionValidationError {
+                category: ReasoningRetentionValidationCategory::UnsupportedSelection,
+                message: format!(
+                    "Model `{model}` on {provider_kind} has a retention selection that does not match its host-supplied capability."
+                ),
+            }),
+        }
     }
 
     /// Whether an adapter may put a caller-requested temperature on the wire
@@ -373,6 +555,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: SamplingCapability::Configurable,
+            reasoning_retention: Box::default(),
         }
     }
 

@@ -21,12 +21,16 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::common::{DEFAULT_HTTP_TRANSPORT, DEFAULT_MAX_OUTPUT_TOKENS, reasoning_intent};
+use crate::common::{
+    DEFAULT_HTTP_TRANSPORT, DEFAULT_MAX_OUTPUT_TOKENS, reasoning_intent,
+    reasoning_retention_transport_error,
+};
 use crate::reasoning::ReasoningWireIntent;
 use crate::responses_shared as shared;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     GenerationOptionOutcome, GenerationReceipt, LlmOutputSpec, LlmRequest,
+    ProviderReasoningRetentionSupport, ReasoningRetentionSelection,
 };
 use lash_core::provider::{
     CacheRetention, Provider, ProviderComponents, ProviderOptions, ProviderReliability,
@@ -227,7 +231,13 @@ impl CodexProvider {
         stream: bool,
     ) -> Result<(Value, bool), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
-        let safe_request = req.replay_safe_for(&serving_route);
+        let safe_request = req
+            .reasoning_retention_safe_for(
+                &serving_route,
+                "OpenAI Codex",
+                ProviderReasoningRetentionSupport::OpenAiContext,
+            )
+            .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Codex")?;
         let tools = Self::build_tools(req)?;
@@ -272,6 +282,14 @@ impl CodexProvider {
                 reasoning["summary"] = json!("auto");
             }
             body["reasoning"] = reasoning;
+        }
+        if let ReasoningRetentionSelection::OpenAiContext { context } =
+            req.model_capability.reasoning_retention.selection
+        {
+            if !body["reasoning"].is_object() {
+                body["reasoning"] = json!({});
+            }
+            body["reasoning"]["context"] = json!(context.as_str());
         }
         let cache_control_emitted = policy.cache_retention != CacheRetention::None;
         if cache_control_emitted {

@@ -3,6 +3,10 @@ mod runtime_feedback;
 use crate::support::*;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmJsonSchema, LlmMessage, LlmToolChoice, LlmToolSpec};
+use lash_core::llm::types::{
+    OpenAiReasoningContext, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+    ReasoningRetentionSelection,
+};
 use lash_core::provider::{
     CacheControlDialect, CacheRetention, ModelCapability, ProviderHandle, ProviderReliability,
     ReasoningCapability, ReasoningEncoding, RequestTimeout,
@@ -22,6 +26,7 @@ mod error_classification_tests;
 mod generation_tests;
 mod openrouter_execution_evidence_tests;
 mod output_started_tests;
+mod reasoning_retention_tests;
 mod replay_provenance_tests;
 mod request_work_tests;
 mod responses_text_slot_tests;
@@ -171,6 +176,7 @@ fn reasoning_capability() -> ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash_core::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     }
 }
 
@@ -192,6 +198,7 @@ fn budget_reasoning_capability() -> ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash_core::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     }
 }
 
@@ -210,6 +217,7 @@ fn toggle_false_reasoning_capability() -> ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash_core::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     }
 }
 

@@ -6,11 +6,13 @@ use std::sync::Arc;
 use crate::{AttachmentRef, MediaType, SchemaContract};
 
 pub use crate::llm::capability::{
-    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
-    ModelEffortValidationCategory, ModelEffortValidationError, ReasoningCapability,
-    ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection, SamplingCapability,
-    StreamTermination,
+    AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
+    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
+    InstructionRole, ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
+    OpenAiReasoningContext, ProviderReasoningRetentionSupport, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
+    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -415,6 +417,10 @@ pub enum LlmContentBlock {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LlmMessage {
     pub role: LlmRole,
+    /// True only for a host-confirmed genuine user input. Client-side retention
+    /// may cut before this message; synthetic observations and tool results do
+    /// not receive the marker even when their provider role is `user`.
+    pub starts_user_segment: bool,
     pub blocks: Arc<Vec<LlmContentBlock>>,
 }
 
@@ -422,6 +428,7 @@ impl LlmMessage {
     pub fn new(role: LlmRole, blocks: Vec<LlmContentBlock>) -> Self {
         Self {
             role,
+            starts_user_segment: false,
             blocks: Arc::new(blocks),
         }
     }
@@ -430,12 +437,19 @@ impl LlmMessage {
     pub fn text(role: LlmRole, text: impl Into<Arc<str>>) -> Self {
         Self {
             role,
+            starts_user_segment: false,
             blocks: Arc::new(vec![LlmContentBlock::Text {
                 text: text.into(),
                 response_meta: None,
                 cache_breakpoint: false,
             }]),
         }
+    }
+
+    /// Mark this message as the first message of a genuine user segment.
+    pub fn with_user_segment_start(mut self) -> Self {
+        self.starts_user_segment = true;
+        self
     }
 
     /// True if every block is a `Text` whose content is whitespace-only.
@@ -1055,25 +1069,102 @@ impl LlmRequest {
         drops
     }
 
-    /// Return a serializer-safe request, borrowing the original on the common
-    /// no-drop path and cloning only when the structural replay backstop must
-    /// remove state.
+    /// Validate and apply the selected reasoning-history policy before a
+    /// provider serializes the request. Native policies leave the HTTP history
+    /// intact; only the explicit client-side fallback removes whole genuine
+    /// user segments.
     #[doc(hidden)]
-    pub fn replay_safe_for<'a>(
+    pub fn reasoning_retention_safe_for<'a>(
         &'a self,
         serving_route: &ProviderRouteIdentity,
-    ) -> std::borrow::Cow<'a, Self> {
-        if !self.messages.iter().any(|message| {
+        provider_kind: &str,
+        adapter_support: ProviderReasoningRetentionSupport,
+    ) -> Result<std::borrow::Cow<'a, Self>, ReasoningRetentionValidationError> {
+        self.model_capability.validate_reasoning_retention(
+            &self.model,
+            provider_kind,
+            adapter_support,
+        )?;
+
+        let cutoff = match self.model_capability.reasoning_retention.selection {
+            ReasoningRetentionSelection::ClientSideUserSegments { max_segments } => {
+                let starts = self
+                    .messages
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, message)| message.starts_user_segment.then_some(index))
+                    .collect::<Vec<_>>();
+                if starts.len() > max_segments.get() {
+                    starts[starts.len() - max_segments.get()]
+                } else {
+                    0
+                }
+            }
+            ReasoningRetentionSelection::ProviderDefault
+            | ReasoningRetentionSelection::OpenAiContext { .. }
+            | ReasoningRetentionSelection::AnthropicClearThinking { .. } => 0,
+        };
+
+        for (index, message) in self.messages.iter().enumerate() {
+            if message.starts_user_segment
+                && (message.role != LlmRole::User
+                    || message
+                        .blocks
+                        .iter()
+                        .any(|block| matches!(block, LlmContentBlock::ToolResult { .. })))
+            {
+                return Err(ReasoningRetentionValidationError {
+                    category: ReasoningRetentionValidationCategory::InvalidHistory,
+                    message: format!(
+                        "LLM message {index} has an invalid genuine-user-segment marker."
+                    ),
+                });
+            }
+        }
+
+        if cutoff != 0 {
+            let mut retained_calls = std::collections::HashSet::new();
+            for message in &self.messages[cutoff..] {
+                for block in message.blocks.iter() {
+                    match block {
+                        LlmContentBlock::ToolCall { call_id, .. } => {
+                            retained_calls.insert(call_id.as_str());
+                        }
+                        LlmContentBlock::ToolResult { call_id, .. }
+                            if !retained_calls.contains(call_id.as_str()) =>
+                        {
+                            return Err(ReasoningRetentionValidationError {
+                                category: ReasoningRetentionValidationCategory::InvalidHistory,
+                                message: format!(
+                                    "Client-side retention would orphan tool result `{call_id}`."
+                                ),
+                            });
+                        }
+                        LlmContentBlock::Text { .. }
+                        | LlmContentBlock::Attachment { .. }
+                        | LlmContentBlock::Reasoning { .. }
+                        | LlmContentBlock::ToolResult { .. } => {}
+                    }
+                }
+            }
+        }
+
+        let replay_drop_needed = self.messages.iter().any(|message| {
             message
                 .blocks
                 .iter()
                 .any(|block| replay_drop_for_block(block, serving_route).is_some())
-        }) {
-            return std::borrow::Cow::Borrowed(self);
+        });
+        if cutoff == 0 && !replay_drop_needed {
+            return Ok(std::borrow::Cow::Borrowed(self));
         }
+
         let mut safe = self.clone();
+        if cutoff != 0 {
+            safe.messages.drain(..cutoff);
+        }
         safe.drop_foreign_replay(serving_route);
-        std::borrow::Cow::Owned(safe)
+        Ok(std::borrow::Cow::Owned(safe))
     }
 
     pub fn attachment_bytes<'a>(&'a self, source: &'a AttachmentSource) -> Option<&'a [u8]> {

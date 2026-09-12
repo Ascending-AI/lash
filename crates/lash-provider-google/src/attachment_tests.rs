@@ -44,6 +44,7 @@ fn assert_inline_data(mime: &str) {
     let part = GoogleOAuthProvider::inline_attachment_part(&request, &attachment);
     let contents = GoogleOAuthProvider::for_test()
         .build_contents_with_attachment_parts(&request, &[(attachment, part)]);
+    let contents = contents.expect("retention policy");
     let wire_part = &contents[0]["parts"][0];
 
     assert_eq!(wire_part["inlineData"]["mimeType"], mime, "MIME: {mime}");

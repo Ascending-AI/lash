@@ -94,6 +94,7 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
             cache_control,
             stream_termination,
             sampling,
+            reasoning_retention,
         } = value;
         Self {
             instruction_role: instruction_role.into(),
@@ -104,6 +105,7 @@ impl From<core_llm::ModelCapability> for RemoteModelCapability {
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
             sampling: sampling.into(),
+            reasoning_retention: (*reasoning_retention).into(),
         }
     }
 }
@@ -119,6 +121,7 @@ impl From<RemoteModelCapability> for core_llm::ModelCapability {
             cache_control,
             stream_termination,
             sampling,
+            reasoning_retention,
         } = value;
         Self {
             instruction_role: instruction_role.into(),
@@ -129,6 +132,133 @@ impl From<RemoteModelCapability> for core_llm::ModelCapability {
             cache_control: cache_control.map(Into::into),
             stream_termination: stream_termination.map(Into::into),
             sampling: sampling.into(),
+            reasoning_retention: Box::new(reasoning_retention.into()),
+        }
+    }
+}
+
+impl From<core_llm::ReasoningRetentionPolicy> for RemoteReasoningRetentionPolicy {
+    fn from(value: core_llm::ReasoningRetentionPolicy) -> Self {
+        Self {
+            capability: value.capability.map(Into::into),
+            selection: value.selection.into(),
+        }
+    }
+}
+
+impl From<RemoteReasoningRetentionPolicy> for core_llm::ReasoningRetentionPolicy {
+    fn from(value: RemoteReasoningRetentionPolicy) -> Self {
+        Self {
+            capability: value.capability.map(Into::into),
+            selection: value.selection.into(),
+        }
+    }
+}
+
+impl From<core_llm::ReasoningRetentionCapability> for RemoteReasoningRetentionCapability {
+    fn from(value: core_llm::ReasoningRetentionCapability) -> Self {
+        match value {
+            core_llm::ReasoningRetentionCapability::OpenAiContext { supported } => {
+                Self::OpenAiContext {
+                    supported: supported.into_iter().map(Into::into).collect(),
+                }
+            }
+            core_llm::ReasoningRetentionCapability::AnthropicClearThinking => {
+                Self::AnthropicClearThinking
+            }
+            core_llm::ReasoningRetentionCapability::ClientSideUserSegments => {
+                Self::ClientSideUserSegments
+            }
+        }
+    }
+}
+
+impl From<RemoteReasoningRetentionCapability> for core_llm::ReasoningRetentionCapability {
+    fn from(value: RemoteReasoningRetentionCapability) -> Self {
+        match value {
+            RemoteReasoningRetentionCapability::OpenAiContext { supported } => {
+                Self::OpenAiContext {
+                    supported: supported.into_iter().map(Into::into).collect(),
+                }
+            }
+            RemoteReasoningRetentionCapability::AnthropicClearThinking => {
+                Self::AnthropicClearThinking
+            }
+            RemoteReasoningRetentionCapability::ClientSideUserSegments => {
+                Self::ClientSideUserSegments
+            }
+        }
+    }
+}
+
+impl From<core_llm::OpenAiReasoningContext> for RemoteOpenAiReasoningContext {
+    fn from(value: core_llm::OpenAiReasoningContext) -> Self {
+        match value {
+            core_llm::OpenAiReasoningContext::CurrentTurn => Self::CurrentTurn,
+            core_llm::OpenAiReasoningContext::AllTurns => Self::AllTurns,
+        }
+    }
+}
+
+impl From<RemoteOpenAiReasoningContext> for core_llm::OpenAiReasoningContext {
+    fn from(value: RemoteOpenAiReasoningContext) -> Self {
+        match value {
+            RemoteOpenAiReasoningContext::CurrentTurn => Self::CurrentTurn,
+            RemoteOpenAiReasoningContext::AllTurns => Self::AllTurns,
+        }
+    }
+}
+
+impl From<core_llm::AnthropicThinkingRetention> for RemoteAnthropicThinkingRetention {
+    fn from(value: core_llm::AnthropicThinkingRetention) -> Self {
+        match value {
+            core_llm::AnthropicThinkingRetention::All => Self::All,
+            core_llm::AnthropicThinkingRetention::Turns(turns) => Self::Turns(turns),
+        }
+    }
+}
+
+impl From<RemoteAnthropicThinkingRetention> for core_llm::AnthropicThinkingRetention {
+    fn from(value: RemoteAnthropicThinkingRetention) -> Self {
+        match value {
+            RemoteAnthropicThinkingRetention::All => Self::All,
+            RemoteAnthropicThinkingRetention::Turns(turns) => Self::Turns(turns),
+        }
+    }
+}
+
+impl From<core_llm::ReasoningRetentionSelection> for RemoteReasoningRetentionSelection {
+    fn from(value: core_llm::ReasoningRetentionSelection) -> Self {
+        match value {
+            core_llm::ReasoningRetentionSelection::ProviderDefault => Self::ProviderDefault,
+            core_llm::ReasoningRetentionSelection::OpenAiContext { context } => {
+                Self::OpenAiContext {
+                    context: context.into(),
+                }
+            }
+            core_llm::ReasoningRetentionSelection::AnthropicClearThinking { keep } => {
+                Self::AnthropicClearThinking { keep: keep.into() }
+            }
+            core_llm::ReasoningRetentionSelection::ClientSideUserSegments { max_segments } => {
+                Self::ClientSideUserSegments { max_segments }
+            }
+        }
+    }
+}
+
+impl From<RemoteReasoningRetentionSelection> for core_llm::ReasoningRetentionSelection {
+    fn from(value: RemoteReasoningRetentionSelection) -> Self {
+        match value {
+            RemoteReasoningRetentionSelection::ProviderDefault => Self::ProviderDefault,
+            RemoteReasoningRetentionSelection::OpenAiContext { context } => Self::OpenAiContext {
+                context: context.into(),
+            },
+            RemoteReasoningRetentionSelection::AnthropicClearThinking { keep } => {
+                Self::AnthropicClearThinking { keep: keep.into() }
+            }
+            RemoteReasoningRetentionSelection::ClientSideUserSegments { max_segments } => {
+                Self::ClientSideUserSegments { max_segments }
+            }
         }
     }
 }
@@ -708,10 +838,15 @@ impl TryFrom<RemoteGenerationOptions> for core_llm::GenerationOptions {
 
 impl From<core_llm::LlmMessage> for RemoteLlmMessage {
     fn from(value: core_llm::LlmMessage) -> Self {
-        let core_llm::LlmMessage { role, blocks } = value;
+        let core_llm::LlmMessage {
+            role,
+            blocks,
+            starts_user_segment,
+        } = value;
         Self {
             role: role.into(),
             content: blocks.iter().cloned().map(Into::into).collect(),
+            starts_user_segment,
         }
     }
 }
@@ -719,14 +854,20 @@ impl From<core_llm::LlmMessage> for RemoteLlmMessage {
 impl TryFrom<RemoteLlmMessage> for core_llm::LlmMessage {
     type Error = RemoteProtocolError;
     fn try_from(value: RemoteLlmMessage) -> Result<Self, Self::Error> {
-        let RemoteLlmMessage { role, content } = value;
-        Ok(Self::new(
+        let RemoteLlmMessage {
+            role,
+            content,
+            starts_user_segment,
+        } = value;
+        let mut message = Self::new(
             role.into(),
             content
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
-        ))
+        );
+        message.starts_user_segment = starts_user_segment;
+        Ok(message)
     }
 }
 

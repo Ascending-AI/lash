@@ -2,7 +2,9 @@
 //! `complete` request/stream driver.
 
 use crate::config::DEFAULT_BASE_URL;
-use crate::policy::{ANTHROPIC_VERSION, FINE_GRAINED_BETA, INTERLEAVED_THINKING_BETA};
+use crate::policy::{
+    ANTHROPIC_VERSION, CONTEXT_MANAGEMENT_BETA, FINE_GRAINED_BETA, INTERLEAVED_THINKING_BETA,
+};
 use crate::stream::StreamState;
 use crate::support::*;
 
@@ -105,6 +107,9 @@ impl Provider for AnthropicProvider {
             == Some("enabled");
         if budget_thinking {
             betas.push(INTERLEAVED_THINKING_BETA.to_string());
+        }
+        if body.get("context_management").is_some() {
+            betas.push(CONTEXT_MANAGEMENT_BETA.to_string());
         }
 
         let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));

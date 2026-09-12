@@ -506,6 +506,7 @@ pub struct RemoteModelCapability {
     /// Whether this model lets a caller set the sampling temperature.
     #[serde(default, skip_serializing_if = "RemoteSamplingCapability::is_default")]
     pub sampling: RemoteSamplingCapability,
+    pub reasoning_retention: RemoteReasoningRetentionPolicy,
 }
 
 impl RemoteModelCapability {
@@ -518,6 +519,60 @@ impl RemoteModelCapability {
             && self.cache_control.is_none()
             && self.stream_termination.is_none()
             && self.sampling.is_default()
+            && self.reasoning_retention.is_default()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteReasoningRetentionCapability {
+    OpenAiContext {
+        supported: Vec<RemoteOpenAiReasoningContext>,
+    },
+    AnthropicClearThinking,
+    ClientSideUserSegments,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteOpenAiReasoningContext {
+    CurrentTurn,
+    AllTurns,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteAnthropicThinkingRetention {
+    All,
+    Turns(std::num::NonZeroU32),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteReasoningRetentionSelection {
+    #[default]
+    ProviderDefault,
+    OpenAiContext {
+        context: RemoteOpenAiReasoningContext,
+    },
+    AnthropicClearThinking {
+        keep: RemoteAnthropicThinkingRetention,
+    },
+    ClientSideUserSegments {
+        max_segments: std::num::NonZeroUsize,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteReasoningRetentionPolicy {
+    pub capability: Option<RemoteReasoningRetentionCapability>,
+    pub selection: RemoteReasoningRetentionSelection,
+}
+
+impl RemoteReasoningRetentionPolicy {
+    pub fn is_default(&self) -> bool {
+        self.capability.is_none()
+            && self.selection == RemoteReasoningRetentionSelection::ProviderDefault
     }
 }
 
@@ -748,6 +803,7 @@ pub enum RemoteLlmRole {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLlmMessage {
     pub role: RemoteLlmRole,
+    pub starts_user_segment: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content: Vec<RemoteLlmContentBlock>,
 }

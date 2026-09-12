@@ -450,13 +450,13 @@ impl GoogleOAuthProvider {
             })
             .collect::<Vec<_>>();
         let inline_contents =
-            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts);
+            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts)?;
 
         let (attachment_parts, used_uploaded_files) = self
             .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
             .await?;
         let contents = if used_uploaded_files {
-            self.build_contents_with_attachment_parts(&req, &attachment_parts)
+            self.build_contents_with_attachment_parts(&req, &attachment_parts)?
         } else {
             inline_contents.clone()
         };

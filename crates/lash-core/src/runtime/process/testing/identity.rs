@@ -44,6 +44,7 @@ fn process_execution_env_identity_golden_corpus() {
                 cache_control: Some(crate::CacheControlDialect::Anthropic),
                 stream_termination: Some(crate::StreamTermination::EofTolerated),
                 sampling: crate::SamplingCapability::Pinned,
+                reasoning_retention: Default::default(),
             }),
         provider_id: "provider".to_string(),
         session_id: Some(SessionId::from("session")),
