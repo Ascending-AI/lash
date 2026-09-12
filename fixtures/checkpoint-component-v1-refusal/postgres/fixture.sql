@@ -536,7 +536,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     source_session_id text,
     source_node_id text,
     observer_inheritance_kind text,
-    CONSTRAINT ck_session_meta_caused_by_kind CHECK ((caused_by_kind = ANY (ARRAY['turn'::text, 'effect'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text]))),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK ((caused_by_kind = ANY (ARRAY['turn'::text, 'effect_address'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text]))),
     CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK ((observer_inheritance_kind = ANY (ARRAY['all'::text, 'none'::text, 'only'::text]))),
     CONSTRAINT ck_session_meta_relation_kind CHECK ((relation_kind = ANY (ARRAY['root'::text, 'child'::text, 'fork'::text])))
 );
@@ -669,6 +669,17 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_closure_authorizations (
     session_id text NOT NULL,
     turn_id text NOT NULL,
     authorization_json text NOT NULL
+);
+
+
+--
+-- Name: lash_turn_cancel_closure_participants; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_closure_participants (
+    scope_id text NOT NULL,
+    participant_id text NOT NULL,
+    scope_json text NOT NULL
 );
 
 
@@ -997,7 +1008,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 88);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 90);
 
 
 --
@@ -1069,6 +1080,12 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigge
 
 --
 -- Data for Name: lash_turn_cancel_closure_authorizations; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_cancel_closure_participants; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1521,6 +1538,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_closure_authorizations
     ADD CONSTRAINT lash_turn_cancel_closure_authorizations_pkey PRIMARY KEY (session_id, turn_id);
+
+
+--
+-- Name: lash_turn_cancel_closure_participants lash_turn_cancel_closure_participants_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_closure_participants
+    ADD CONSTRAINT lash_turn_cancel_closure_participants_pkey PRIMARY KEY (scope_id, participant_id);
 
 
 --

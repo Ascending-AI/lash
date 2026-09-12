@@ -324,7 +324,7 @@ impl TurnBoundary {
         session: Option<&mut Session>,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         claim_settlement: TurnClaimSettlement,
-        current_session_lease_generation: Option<u64>,
+        current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
@@ -372,7 +372,7 @@ impl TurnBoundary {
                 failure_evidence: &returned_turn.failure_evidence,
                 outcome: &returned_turn.outcome,
                 claim_settlement,
-                current_session_lease_generation,
+                current_session_lease_fence,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
@@ -454,7 +454,7 @@ impl TurnBoundary {
             failure_evidence,
             outcome,
             claim_settlement,
-            current_session_lease_generation,
+            current_session_lease_fence,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
@@ -521,7 +521,7 @@ impl TurnBoundary {
                 failure_evidence,
                 self.final_operation(),
                 claim_settlement,
-                current_session_lease_generation,
+                current_session_lease_fence,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
@@ -557,7 +557,7 @@ impl TurnBoundary {
         failure_evidence: &[crate::TurnFailureEvidence],
         operation: crate::OperationId,
         mut claim_settlement: TurnClaimSettlement,
-        current_session_lease_generation: Option<u64>,
+        current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
@@ -608,8 +608,15 @@ impl TurnBoundary {
             .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();
         commit.adopted_intent_rows = adopted_intent_rows;
+        let current_session_lease_generation = current_session_lease_fence
+            .as_ref()
+            .map(|fence| fence.fencing_token);
+        // A physical frame can commit while retaining the lease for a follow-on
+        // frame. Closure settlement still requires the current writer fence.
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
+        } else {
+            commit.session_execution_lease_fence = current_session_lease_fence;
         }
         commit.completed_queue_claims = claim_settlement.queued.completions.clone();
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();

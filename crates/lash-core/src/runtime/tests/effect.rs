@@ -12,8 +12,12 @@ mod fig1127;
 mod fig1416;
 
 mod fig2471;
+mod recording_authority;
 mod response_settlement;
 mod turn_cancel_modes;
+pub(super) use recording_authority::{
+    host_with_effect_recorder, runtime_host_config_with_native_controller,
+};
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
@@ -247,14 +251,6 @@ impl RecordingEffectController {
     }
 }
 
-pub(super) fn runtime_host_config_with_native_controller(
-    controller: Arc<dyn RuntimeEffectController>,
-) -> RuntimeHostConfig {
-    let mut config = test_runtime_host_config();
-    config.control.effect_host = Arc::new(NativeEffectHost::new(controller));
-    config
-}
-
 pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &TurnId,
@@ -265,6 +261,13 @@ pub(super) fn scoped_test_turn<'a>(
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for RecordingEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!(
+            "recording-controller:{:p}",
+            Arc::as_ptr(&self.records)
+        ))
+    }
+
     async fn acquire_queued_lane(
         &self,
         lane: Arc<dyn crate::QueuedLaneProbe>,
@@ -613,20 +616,31 @@ impl RuntimeEffectController for RecordingEffectController {
                     }
                     _ => None,
                 };
-                Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution })
+                if let Some(resolution) = resolution {
+                    self.native.resolve_await_event(&key, resolution).await?;
+                }
+                Ok(RuntimeEffectOutcome::PeekAwaitEvent {
+                    resolution: self.native.peek_await_event(&key).await?,
+                })
             }
-            RuntimeEffectCommand::PeekAwaitEvent { .. }
+            RuntimeEffectCommand::PeekAwaitEvent { key }
                 if self.cancel_after_llm && *self.llm_calls.lock_recover() > 0 =>
             {
+                self.native
+                    .resolve_await_event(
+                        &key,
+                        Resolution::Ok(serde_json::json!({
+                            "state": "cancel_requested",
+                            "cancellation": {
+                                "request_id": "cancel-after-llm",
+                                "origin": "effect-controller-test",
+                                "reason": "cancel landed during the journaled LLM run"
+                            }
+                        })),
+                    )
+                    .await?;
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent {
-                    resolution: Some(Resolution::Ok(serde_json::json!({
-                        "state": "cancel_requested",
-                        "cancellation": {
-                            "request_id": "cancel-after-llm",
-                            "origin": "effect-controller-test",
-                            "reason": "cancel landed during the journaled LLM run"
-                        }
-                    }))),
+                    resolution: self.native.peek_await_event(&key).await?,
                 })
             }
             RuntimeEffectCommand::PeekAwaitEvent { key }
@@ -708,16 +722,6 @@ impl RuntimeEffectController for RecordingEffectController {
         self.strict_replay.record(strict_replay, &outcome);
         outcome
     }
-}
-
-pub(super) fn host_with_effect_recorder(
-    recorder: RecordingEffectController,
-) -> EmbeddedRuntimeHost {
-    let mut config = runtime_host_config_with_native_controller(Arc::new(recorder));
-    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
-        mock_provider(Vec::new()).into_handle(),
-    ));
-    EmbeddedRuntimeHost::new(config)
 }
 
 #[tokio::test]

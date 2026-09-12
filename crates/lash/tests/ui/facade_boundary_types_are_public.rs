@@ -174,6 +174,34 @@ impl SessionExecutionLeaseStore for FacadeStore {
 // (and its signature vocabulary) is nameable through the facade.
 #[async_trait]
 impl TurnInputStore for FacadeStore {
+    async fn validate_turn_cancellation_binding(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+        _admitted_scope: &lash::runtime::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _authorization: &lash::TurnCancelClosureAuthorization,
+    ) -> Result<lash::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        _session_id: &SessionId,
+        _session_execution_lease: &SessionExecutionLeaseAuthority,
+        _binding_id: &str,
+        _admitted_scope: &lash::runtime::ExecutionScope,
+    ) -> Result<Vec<lash::TurnCancelClosureAuthorization>, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
     async fn turn_is_committed(&self, _address: &lash::TurnAddress) -> Result<bool, StoreError> {
         Ok(false)
     }
@@ -404,6 +432,8 @@ fn persistence_types_are_nameable(
         enqueued_queue_batches: Vec::new(),
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,
+        interrupted_turn_cancel_intent: None,
+        turn_cancel_closure_settlement: None,
         committed_attachment_ids: Vec::new(),
         commit_budget: lash::CommitBudget::bounded(1024 * 1024, 512),
     }

@@ -311,10 +311,17 @@ pub(super) fn test_turn_cancel_wake_step(
     if escalated || wake != RestateTurnCancelWake::TurnCancelDeferred {
         return Ok(TestTurnCancelWakeStep::Unwind(wake));
     }
-    let escalation_key = restate_await_event_key(
-        &turn_cancel_key.scope,
-        AwaitEventWaitIdentity::TurnCancelEscalation,
-    )
+    let escalation_key = match crate::durable_wait::restate_authority_id_for_key(turn_cancel_key) {
+        Some(authority) => crate::durable_wait::restate_await_event_key_for_authority(
+            &authority,
+            &turn_cancel_key.scope,
+            AwaitEventWaitIdentity::TurnCancelEscalation,
+        ),
+        None => restate_await_event_key(
+            &turn_cancel_key.scope,
+            AwaitEventWaitIdentity::TurnCancelEscalation,
+        ),
+    }
     .map_err(TerminalError::from_error)?;
     match gate.register(escalation_key)? {
         TestTurnCancelRegistrationVerdict::Registered(registration) => {

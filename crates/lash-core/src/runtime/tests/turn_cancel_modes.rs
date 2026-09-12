@@ -445,8 +445,12 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             crate::TurnCancelDisposition::Drop,
         ] {
             let transport = mock_provider(Vec::new());
-            let (mut runtime, store) =
-                standard_runtime_with_transport_and_queue_store(transport).await;
+            let matrix_session = SessionId::from(format!("cancel-matrix-{mode:?}-{disposition:?}"));
+            let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
+                transport,
+                &matrix_session,
+            )
+            .await;
             let persisted = runtime.export_persistence_state();
             let session_id = persisted.session_id.clone();
             let driver = crate::TurnWorkDriver::for_session(

@@ -284,6 +284,23 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("refresh refusal fixture pending-input and process-lease catalog");
+    // The enclosing catalog uses the current causal discriminator vocabulary;
+    // only the deliberately obsolete checkpoint component remains historical.
+    let causal_constraint =
+        lash_core::store_backend_support::required_constraints::POSTGRES_EXPECTED_CONSTRAINTS
+            .iter()
+            .find(|constraint| constraint.name == "ck_session_meta_caused_by_kind")
+            .expect("registered session causal discriminator constraint");
+    sqlx::raw_sql(&format!(
+        "ALTER TABLE {} DROP CONSTRAINT {}, ADD CONSTRAINT {} CHECK ({})",
+        causal_constraint.table,
+        causal_constraint.name,
+        causal_constraint.name,
+        causal_constraint.expression,
+    ))
+    .execute(&pool)
+    .await
+    .expect("refresh refusal fixture causal vocabulary from the current schema contract");
     upgrade_prior_fixture_frame_identity(&pool).await;
     sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")
         .bind(i32::try_from(lash_core::store::CURRENT_SESSION_STATE_VERSION).unwrap())

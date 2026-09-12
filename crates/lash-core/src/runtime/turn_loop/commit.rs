@@ -151,7 +151,7 @@ impl PreparedTurn {
                 session,
                 staged_usage.deltas(),
                 commit_effects.claim_settlement,
-                session_execution_lease.map(|lease| lease.fence().fencing_token),
+                session_execution_lease.map(SessionExecutionLeaseGuard::fence),
                 commit_effects.enqueued_queue_batches,
                 // Any active-turn input that missed the turn's final
                 // checkpoint must become the next ordinary user turn.

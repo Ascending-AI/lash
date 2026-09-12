@@ -16,6 +16,10 @@ use lash_core::facade_support::{
 const SESSION: &str = "session";
 const TURN: &str = "turn";
 
+fn cancel_mode_authority_id() -> RestateAuthorityId {
+    RestateAuthorityId::new("restate-test-authority").expect("authority used by new_for_test")
+}
+
 fn cancel_request(request_id: &str, mode: TurnCancelMode) -> TurnCancelRequest {
     TurnCancelRequest::new(TurnAddress::new(SESSION, TURN), request_id, None).mode(mode)
 }
@@ -100,7 +104,9 @@ async fn after_step_during_a_parked_sleep_lets_the_timer_finish() {
         cancellation.clone(),
         "fig635-after-step-sleep",
     );
-    context.await_sleep_started().await;
+    tokio::time::timeout(Duration::from_secs(10), context.await_sleep_started())
+        .await
+        .expect("the configured owner starts the parked sleep");
 
     let receipt = driver_for(Arc::clone(&context))
         .request_cancel(cancel_request("stop-in-sleep", TurnCancelMode::AfterStep))
@@ -137,7 +143,9 @@ async fn immediate_during_a_parked_sleep_still_aborts_at_wake() {
         cancellation.clone(),
         "fig635-immediate-sleep",
     );
-    context.await_sleep_started().await;
+    tokio::time::timeout(Duration::from_secs(10), context.await_sleep_started())
+        .await
+        .expect("the configured owner starts the parked sleep");
 
     let receipt = driver_for(Arc::clone(&context))
         .request_cancel(cancel_request("abort-in-sleep", TurnCancelMode::Immediate))
@@ -167,7 +175,9 @@ async fn escalating_a_deferred_stop_aborts_the_parked_sleep() {
         cancellation.clone(),
         "fig635-escalated-sleep",
     );
-    context.await_sleep_started().await;
+    tokio::time::timeout(Duration::from_secs(10), context.await_sleep_started())
+        .await
+        .expect("the configured owner starts the parked sleep");
     let driver = driver_for(Arc::clone(&context));
 
     let receipt = driver
@@ -207,7 +217,8 @@ async fn escalating_a_deferred_stop_aborts_the_parked_sleep() {
 #[tokio::test]
 async fn after_step_during_a_parked_await_event_keeps_waiting_for_the_event() {
     let context = Arc::new(RecordingContext::default());
-    let awaited_key = restate_await_event_key(
+    let awaited_key = crate::durable_wait::restate_await_event_key_for_authority(
+        &cancel_mode_authority_id(),
         &durable_turn_scope(SESSION, TURN),
         AwaitEventWaitIdentity::Custom {
             key: "fig635-signal".to_string(),
@@ -465,6 +476,9 @@ async fn follow_on_pending_tool_uses_physical_turn_cancel_scope_and_replays_in_o
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     context.park_sleeps();
+    host.control.effect_host = Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+        &context,
+    )));
     let mut first_runtime = replay_test_runtime_with_plugins(
         &SessionId::from(session_id),
         policy,
@@ -474,11 +488,11 @@ async fn follow_on_pending_tool_uses_physical_turn_cancel_scope_and_replays_in_o
         plugins,
     )
     .await;
-    let first = {
+    let mut first = {
         let context = Arc::clone(&context);
         tokio::spawn(async move {
             let controller =
-                RestateRuntimeEffectController::new(context, test_restate_authority_id());
+                RestateRuntimeEffectController::new(context, cancel_mode_authority_id());
             let scoped = controller
                 .scoped_effect_controller(durable_turn_scope(session_id, root_turn_id))
                 .expect("scoped Restate controller");
@@ -493,11 +507,19 @@ async fn follow_on_pending_tool_uses_physical_turn_cancel_scope_and_replays_in_o
                 .await
         })
     };
-    context.await_sleep_started().await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::select! {
+            () = context.await_sleep_started() => {}
+            result = &mut first => panic!("follow-on turn ended before parking its retry sleep: {result:?}"),
+        }
+    })
+        .await
+        .expect("the configured owner starts the parked sleep");
     assert_eq!(
         context.events.turn_cancel_gate.registered_keys(),
         vec![
-            restate_await_event_key(
+            crate::durable_wait::restate_await_event_key_for_authority(
+                &cancel_mode_authority_id(),
                 &ExecutionScope::turn(session_id, follow_turn_id.clone()),
                 AwaitEventWaitIdentity::TurnCancelGate,
             )
@@ -532,7 +554,8 @@ async fn follow_on_pending_tool_uses_physical_turn_cancel_scope_and_replays_in_o
     assert_eq!(
         context.events.turn_cancel_gate.registered_keys(),
         vec![
-            restate_await_event_key(
+            crate::durable_wait::restate_await_event_key_for_authority(
+                &cancel_mode_authority_id(),
                 &ExecutionScope::turn(session_id, follow_turn_id.clone()),
                 AwaitEventWaitIdentity::TurnCancelGate,
             )
@@ -554,10 +577,15 @@ async fn follow_on_pending_tool_uses_physical_turn_cancel_scope_and_replays_in_o
         .expect("the resolved follow-on turn finishes")
         .expect("join first turn")
         .expect("first turn succeeds");
-    assert!(matches!(
+    assert!(
+        matches!(
+            first_turn.outcome,
+            lash_core::facade_support::TurnOutcome::Finished(_)
+        ),
+        "follow-on outcome: {:?}; errors: {:?}",
         first_turn.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
-    ));
+        first_turn.errors
+    );
     assert_eq!(context.events.turn_cancel_gate.registration_count(), 0);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 3);
     assert_eq!(tool_executions.load(Ordering::SeqCst), 3);
@@ -585,7 +613,7 @@ async fn follow_on_pending_tool_uses_physical_turn_cancel_scope_and_replays_in_o
 
     context.start_replay();
     let replayed =
-        RestateRuntimeEffectController::new(Arc::clone(&context), test_restate_authority_id())
+        RestateRuntimeEffectController::new(Arc::clone(&context), cancel_mode_authority_id())
             .execute_effect(pending_envelope, RuntimeEffectLocalExecutor::unavailable())
             .await
             .expect("redrive the runtime-produced follow-on pending tool batch");
@@ -609,7 +637,8 @@ async fn restate_await_rejects_cancel_scope_for_a_different_physical_turn() {
     let session_id = "restate-wrong-physical-cancel-session";
     let admitted_scope = ExecutionScope::turn(session_id, "root");
     let follow_turn_id = "root:agent-frame:1";
-    let key = restate_await_event_key(
+    let key = crate::durable_wait::restate_await_event_key_for_authority(
+        &cancel_mode_authority_id(),
         &admitted_scope,
         AwaitEventWaitIdentity::Custom {
             key: "pending-tool".to_string(),
@@ -623,7 +652,7 @@ async fn restate_await_rejects_cancel_scope_for_a_different_physical_turn() {
     );
     let context = Arc::new(RecordingContext::default());
     let error =
-        RestateRuntimeEffectController::new(Arc::clone(&context), test_restate_authority_id())
+        RestateRuntimeEffectController::new(Arc::clone(&context), cancel_mode_authority_id())
             .execute_effect(
                 RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
                 RuntimeEffectLocalExecutor::await_event(
@@ -839,6 +868,9 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
             .expect("open sqlite store"),
     );
     let driver_store = Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>;
+    host.control.effect_host = Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+        &context,
+    )));
     let mut runtime = replay_test_runtime_with_plugins_and_registry(
         &SessionId::from(session_id),
         policy,
@@ -868,7 +900,9 @@ async fn after_step_during_a_parked_retry_sleep_finishes_the_iteration_and_stops
                 .await
         })
     };
-    context.await_sleep_started().await;
+    tokio::time::timeout(Duration::from_secs(10), context.await_sleep_started())
+        .await
+        .expect("the configured owner starts the parked sleep");
     assert_eq!(tool.attempts.load(Ordering::SeqCst), 1);
 
     let receipt = driver_for_session(Arc::clone(&context), session_id, driver_store)
