@@ -1,0 +1,75 @@
+name: Bazel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - Cargo.lock
+      - '**/*.bazel'
+      - '**/*.bzl'
+      - .bazelversion
+      - .bazelrc
+      - MODULE.bazel.lock
+      - .github/workflows/bazel.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    # Fork code and Dependabot never receive cache-writing credentials.
+    if: github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    environment: build-cache
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Bazelisk
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-amd64 -o "$RUNNER_TEMP/bazel"
+          printf '5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992  %s\n' "$RUNNER_TEMP/bazel" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bazel"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Configure authenticated cache
+        shell: bash
+        env:
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CACHE_CA" && test -n "$CACHE_CERT" && test -n "$CACHE_KEY"
+          mkdir -p "$RUNNER_TEMP/build-cache"
+          printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
+          printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
+          printf '%s' "$CACHE_KEY" > "$RUNNER_TEMP/build-cache/client.key"
+      - name: Compile workspace with shared cache
+        shell: bash
+        run: |
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
+            --repository_cache="$RUNNER_TEMP/bazel-repository" \
+            --disk_cache= --spawn_strategy=local \
+            --remote_cache=grpcs://51.15.75.60:8443 --remote_instance_name=orb \
+            --tls_certificate="$RUNNER_TEMP/build-cache/ca.crt" \
+            --tls_client_certificate="$RUNNER_TEMP/build-cache/client.crt" \
+            --tls_client_key="$RUNNER_TEMP/build-cache/client.key" \
+            --remote_default_exec_properties=orb_executor_runtime=orb-runtime-sha256-47495b3de590444ce9c8605d2b1e6da0f41077ff6c5ff44ae141343d951f4390 \
+            --remote_default_exec_properties=cpu_count=1 \
+            --remote_default_exec_properties=memory_kb=2097152 \
+            --remote_download_outputs=toplevel --remote_timeout=120 \
+            --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
+            //:workspace_compile
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
