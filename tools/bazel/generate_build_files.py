@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -37,9 +38,18 @@ def string_list(values: list[str], indent: int = 8) -> str:
 
 
 def cargo_metadata() -> dict:
+    metadata_env = os.environ.copy()
+    for variable in (
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_BUILD_RUSTC_WRAPPER",
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+    ):
+        metadata_env[variable] = ""
     result = subprocess.run(
-        ["cargo", "metadata", "--locked", "--format-version", "1"],
+        [os.environ.get("ORB_REAL_CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"],
         cwd=ROOT,
+        env=metadata_env,
         check=True,
         capture_output=True,
         text=True,
@@ -226,6 +236,11 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         target_features = sorted(set(features) | set(target.get("required-features", [])))
         source = pathlib.Path(target["src_path"])
         rustc_env, binary_data = cargo_bin_env(source, binary_labels)
+        test_env = {}
+        if package["name"] == "lash-internal-sqlite-store" and target["name"] == "integration":
+            # The warning-capture contract installs a scoped tracing subscriber.
+            # Other tests in this libtest process must not emit concurrently.
+            test_env["RUST_TEST_THREADS"] = "1"
         extra_compile_data = []
         if package["name"] in (
             "lash-internal-postgres-store",
@@ -252,6 +267,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         ]
         if kind in ("bin", "example", "bench"):
             args.append(f"    include_dev_deps = {str(kind in ('example', 'bench'))},")
+        elif test_env:
+            args.append(f"    test_env = {json.dumps(test_env, sort_keys=True)},")
         args.extend([
             f"    library = {quote(library_label) if library_label else 'None'},",
             f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},",

@@ -197,6 +197,7 @@ def lash_rust_integration_test(
         library_crate_name = None,
         extra_compile_data = [],
         rustc_env = {},
+        test_env = {},
         tags = []):
     deps = all_crate_deps(normal = True, normal_dev = True)
     if library:
@@ -211,6 +212,7 @@ def lash_rust_integration_test(
         data = _all_package_files() + extra_compile_data,
         deps = deps,
         edition = "2024",
+        env = test_env,
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version, rustc_env),
         rustc_flags = _cargo_check_cfg(declared_features),
