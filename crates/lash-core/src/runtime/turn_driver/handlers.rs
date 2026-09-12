@@ -187,7 +187,7 @@ impl RuntimeTurnDriver<'_> {
             let pending_cancel = self
                 .turn_control
                 .observe_pending_cancel(
-                    self.scoped_effect_controller.controller(),
+                    &self.scoped_effect_controller,
                     crate::runtime::turn_control::TurnCancelPeekIdentity::AfterLlm {
                         protocol_iteration: machine.protocol_iteration(),
                     },
@@ -317,13 +317,11 @@ impl RuntimeTurnDriver<'_> {
         let binding = effect_host
             .turn_control_binding(&self.scoped_effect_controller)
             .await?;
-        let (resolver, peek_controller): (&dyn AwaitEventResolver, &dyn RuntimeEffectController) =
+        let (resolver, peek_controller): (&dyn AwaitEventResolver, &ScopedEffectController<'_>) =
             match &binding {
-                crate::TurnControlBinding::HostOwned { resolver, peek } => {
-                    (*resolver, peek.controller())
-                }
+                crate::TurnControlBinding::HostOwned { resolver, peek } => (*resolver, peek),
                 crate::TurnControlBinding::RunScoped { resolver, .. } => {
-                    (*resolver, self.scoped_effect_controller.controller())
+                    (*resolver, &self.scoped_effect_controller)
                 }
             };
         // A process-local after-step stop lands on the durable gate before
@@ -489,7 +487,7 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
-        let graph_key = foreground_exec_graph_key(&invocation);
+        let graph_key = Some(foreground_effect_graph_key(&invocation));
         send_turn_activity(
             event_tx,
             code_correlation_id.clone(),
@@ -730,22 +728,14 @@ fn join_observations(observations: &[crate::Observation]) -> String {
         .join("\n")
 }
 
+pub(super) fn foreground_effect_graph_key(invocation: &RuntimeEffectInvocation) -> String {
+    invocation.address().graph_key()
+}
+
 pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Option<String> {
-    let RuntimeSubject::Effect { effect_id, kind } = &invocation.subject else {
-        return None;
-    };
-    if *kind != RuntimeEffectKind::ExecCode {
-        return None;
-    }
-    Some(match invocation.scope.turn_id.as_deref() {
-        Some(turn_id) if !turn_id.is_empty() => {
-            format!(
-                "effect:{}:{turn_id}:{effect_id}",
-                invocation.scope.session_id
-            )
-        }
-        _ => format!("effect:{}:{effect_id}", invocation.scope.session_id),
-    })
+    invocation
+        .effect_address()
+        .map(crate::EffectAddress::graph_key)
 }
 
 #[cfg(test)]
@@ -754,16 +744,16 @@ mod tests {
 
     #[test]
     fn foreground_exec_graph_key_uses_runtime_invocation_identity() {
-        let invocation = RuntimeInvocation::effect(
-            RuntimeScope::for_turn("session-1", "turn-1", 2, 3),
+        let invocation = RuntimeEffectInvocation::new(
+            EffectAddress::new(ExecutionScope::turn("session-1", "turn-1"), "replay-key")
+                .expect("valid foreground exec address"),
+            RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
             "effect-7",
-            RuntimeEffectKind::ExecCode,
-            "replay-key",
         );
 
         assert_eq!(
-            foreground_exec_graph_key(&invocation).as_deref(),
-            Some("effect:session-1:turn-1:effect-7")
+            foreground_effect_graph_key(&invocation),
+            "effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"session-1\",\"execution_id\":\"turn-1\"}:\"replay-key\""
         );
     }
 }

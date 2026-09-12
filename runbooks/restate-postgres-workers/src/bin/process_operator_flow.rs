@@ -388,11 +388,7 @@ impl RuntimeEffectController for JournalController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> std::result::Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let key = envelope
-            .invocation
-            .replay_key()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| format!("{:?}", envelope.invocation.effect_kind()));
+        let key = envelope.invocation.replay_key().to_owned();
         self.active.lock_recover().insert(key.clone());
         let result = self.inline.execute_effect(envelope, local_executor).await;
         self.active.lock_recover().remove(&key);

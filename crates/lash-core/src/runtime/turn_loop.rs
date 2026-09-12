@@ -7,9 +7,7 @@ use super::turn_control::ActiveTurnControl;
 use super::*;
 use crate::SessionId;
 use crate::TurnId;
-use crate::facade_support::{
-    ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps, ScopedEffectControllerFacadeOps,
-};
+use crate::facade_support::{ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFacadeOps};
 use lash_sansio::core_support::*;
 use std::pin::Pin;
 
@@ -217,15 +215,6 @@ impl TurnStopwatch {
 
 fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
     TurnId::from(format!("{parent_turn_id}:{phase}"))
-}
-
-fn scoped_child_turn_controller<'run>(
-    scoped_effect_controller: &ScopedEffectController<'run>,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> Result<ScopedEffectController<'run>, RuntimeError> {
-    let scope = ExecutionScope::turn(session_id, turn_id);
-    scoped_effect_controller.rescope(scope)
 }
 
 async fn turn_control_binding<'a>(

@@ -107,10 +107,10 @@ pub use work_claim::{WorkClaim, WorkCompletion};
 fn default_root_session_id() -> SessionId {
     SessionId::from("root")
 }
-/// Version 8 makes resident-tool authority explicit: every persisted config
-/// names ambient or restricted access and version 7 heads are refused rather
-/// than interpreted through the retired empty-means-ambient convention.
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 8;
+/// Version 9 combines full effect addresses and truthful attribution with
+/// explicit ambient-or-restricted resident-tool authority. Both version 8
+/// parent encodings are refused rather than inventing either identity or access.
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 9;
 
 #[cfg(test)]
 mod prompt_persistence_compat_tests;

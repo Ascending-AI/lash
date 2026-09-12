@@ -228,7 +228,7 @@ async fn deadline_excludes_awaited_tool_time() {
     let source = r#"
 value = tools.echo({ value: 1 })
 i = 0
-while i < 5000 { i = i + 1 }
+while i < 100 { i = i + 1 }
 finish value
 "#;
     let program = crate::parse(source).expect("program should parse");

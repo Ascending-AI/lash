@@ -273,6 +273,37 @@ pub enum RemoteTriggerOwnerScope {
     Platform,
 }
 
+impl RemoteTriggerOwnerScope {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Session { session_id } => {
+                validate_owner_key(type_name, "owner_scope.session_id", session_id)
+            }
+            Self::Host { binding_id } => {
+                validate_owner_key(type_name, "owner_scope.binding_id", binding_id.trim())
+            }
+            Self::Platform => Ok(()),
+        }
+    }
+}
+
+fn validate_owner_key(
+    type_name: &'static str,
+    field: &'static str,
+    value: &str,
+) -> Result<(), RemoteProtocolError> {
+    if value.is_empty() {
+        return Err(RemoteProtocolError::MissingRequiredField { type_name, field });
+    }
+    if value.contains('\0') {
+        return Err(RemoteProtocolError::InvalidEnvelope {
+            type_name,
+            message: format!("{field} contains a NUL byte"),
+        });
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerSubscriptionDraft {
     pub subscription_key: String,
@@ -439,6 +470,7 @@ pub struct RemoteTriggerSubscriptionRecord {
 impl RemoteTriggerSubscriptionRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "subscription_id", &self.subscription_id)?;
+        self.owner_scope.validate(type_name)?;
         require_non_empty(type_name, "subscription_key", &self.subscription_key)?;
         require_non_empty(type_name, "incarnation", &self.incarnation)?;
         require_non_empty(

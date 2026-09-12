@@ -466,6 +466,7 @@ impl RuntimeEffectController for FencedNativeController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        envelope.invocation.validate_execution_scope(&self.scope)?;
         let _live = self.admit().await?;
         self.host.execute_effect(envelope, local_executor).await
     }
@@ -478,6 +479,7 @@ impl RuntimeEffectController for FencedNativeController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
         let live = self.admit().await?;
         let handle = self.host.open_effect_group(group).await?;
         // An open group stays live until it is closed through this
@@ -585,16 +587,16 @@ impl RuntimeEffectController for NativeEffectHost {
 mod tests {
     use super::*;
     use crate::{
-        AwaitEventWaitIdentity, EffectJournalRetirement, RuntimeEffectCommand, RuntimeEffectKind,
-        RuntimeInvocation, RuntimeScope,
+        AwaitEventWaitIdentity, EffectJournalRetirement, RuntimeEffectCommand,
+        RuntimeEffectInvocation,
     };
 
-    fn envelope(effect_id: &str) -> RuntimeEffectEnvelope {
+    fn envelope(scope: &ExecutionScope, effect_id: &str) -> RuntimeEffectEnvelope {
         RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope::for_turn("native-fence-session", "native-fence-turn", 1, 0),
-                effect_id,
-                RuntimeEffectKind::LanguageRuntimeValue,
+            RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(scope.clone(), effect_id)
+                    .expect("valid native host test address"),
+                crate::RuntimeAttribution::none(),
                 effect_id,
             ),
             RuntimeEffectCommand::LanguageRuntimeValue {
@@ -646,7 +648,7 @@ mod tests {
         host.scoped(scope.clone())
             .expect("scope binds")
             .controller()
-            .execute_effect(envelope("before"), executor())
+            .execute_effect(envelope(&scope, "before"), executor())
             .await
             .expect("an unretired scope runs effects");
         host.retire_effect_journal(
@@ -658,7 +660,7 @@ mod tests {
             .scoped(scope.clone())
             .expect("a retired scope still binds a controller")
             .controller()
-            .execute_effect(envelope("after"), executor())
+            .execute_effect(envelope(&scope, "after"), executor())
             .await
             .expect_err("a retired scope runs nothing");
         assert_eq!(refusal.code, crate::RuntimeErrorCode::EffectScopeRetired);
@@ -667,15 +669,15 @@ mod tests {
             .expect("scope binds")
             .expect("the native host hands out owned controllers")
             .controller()
-            .execute_effect(envelope("after-static"), executor())
+            .execute_effect(envelope(&scope, "after-static"), executor())
             .await
             .expect_err("the owned controller is fenced too");
         assert_eq!(refusal.code, crate::RuntimeErrorCode::EffectScopeRetired);
         let session_scope = ExecutionScope::turn("native-fence-session", "turn-1");
-        host.scoped(session_scope)
+        host.scoped(session_scope.clone())
             .expect("session scope binds")
             .controller()
-            .execute_effect(envelope("session"), executor())
+            .execute_effect(envelope(&session_scope, "session"), executor())
             .await
             .expect("session scopes are never fenced by the scope lever");
     }
@@ -692,7 +694,7 @@ mod tests {
         host.scoped(scope.clone())
             .expect("scope binds")
             .controller()
-            .execute_effect(envelope("fenced"), executor())
+            .execute_effect(envelope(&scope, "fenced"), executor())
             .await
             .expect_err("a pruned process id runs nothing");
         host.reinstate_effect_scope(&scope)
@@ -701,7 +703,7 @@ mod tests {
         host.scoped(scope.clone())
             .expect("scope binds")
             .controller()
-            .execute_effect(envelope("reinstated"), executor())
+            .execute_effect(envelope(&scope, "reinstated"), executor())
             .await
             .expect("the re-registered incarnation runs effects");
         host.await_event_key(

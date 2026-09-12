@@ -161,11 +161,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
                 )
         })
         .expect("outer FIG-1293 Restate tool-batch frame");
-    let outer_causal_ref = outer_batch
-        .1
-        .invocation
-        .causal_ref()
-        .expect("outer FIG-1293 Restate batch causal ref");
+    let outer_causal_ref = outer_batch.1.invocation.causal_ref();
     let outer_recorded: RecordedRuntimeEffect = serde_json::from_slice(
         context
             .records
@@ -1414,8 +1410,8 @@ finish (await handle)?
     );
     let (scalar_effect_name, scalar_envelope) = scalar_tool_attempts[0];
     assert_eq!(
-        scalar_envelope.invocation.effect_kind(),
-        Some(RuntimeEffectKind::ToolAttempt)
+        scalar_envelope.command.kind(),
+        RuntimeEffectKind::ToolAttempt
     );
     let RuntimeEffectCommand::ToolAttempt {
         call,

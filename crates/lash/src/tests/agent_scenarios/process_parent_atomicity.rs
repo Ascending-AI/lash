@@ -781,29 +781,36 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         serde_json::json!([
             {
                 "invocation": {
-                    "scope": {"session_id": "process-env:pg-segmented-process-parent"},
-                    "subject": {
-                        "type": "effect",
-                        "effect_id": "process:parent-end:tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392",
-                        "kind": "process"
+                    "address": {
+                        "execution_scope": {
+                            "type": "process",
+                            "process_id": "pg-segmented-process-parent"
+                        },
+                        "replay_key": "tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392:parent-end:process:parent-end:tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392"
                     },
+                    "attribution": {
+                        "session_id": "process-env:pg-segmented-process-parent"
+                    },
+                    "effect_id": "process:parent-end:tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392",
                     "caused_by": {
                         "type": "effect",
-                        "session_id": "process-env:pg-segmented-process-parent",
-                        "effect_id": "tool-intent-parent-end:0"
+                        "address": {
+                            "execution_scope": {
+                                "type": "process",
+                                "process_id": "pg-segmented-process-parent"
+                            },
+                            "replay_key": "tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392:parent-end"
+                        }
                     },
-                    "replay": {
-                        "key": "tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392:parent-end:process:parent-end:tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392",
-                        "attribution": {
-                            "kind": "tool_intent",
-                            "identity": {
-                                "session_id": "process-env:pg-segmented-process-parent",
-                                "execution_scope_id": "pg-segmented-process-parent",
-                                "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:2d24bad5f0b4c3f310cc4b2d:1",
-                                "intent_index": 0,
-                                "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:2d24bad5f0b4c3f310cc4b2d:1:attempt:1",
-                                "replay_key": "tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392"
-                            }
+                    "replay_attribution": {
+                        "kind": "tool_intent",
+                        "identity": {
+                            "session_id": "process-env:pg-segmented-process-parent",
+                            "execution_scope_id": "pg-segmented-process-parent",
+                            "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:2d24bad5f0b4c3f310cc4b2d:1",
+                            "intent_index": 0,
+                            "minting_emission_replay_key": "tool:lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:2d24bad5f0b4c3f310cc4b2d:1:attempt:1",
+                            "replay_key": "tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392"
                         }
                     }
                 },

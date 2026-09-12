@@ -2117,10 +2117,13 @@ fn process_event(process_id: &ProcessId) -> lash_core::ProcessEvent {
         event_type: "process.completed".to_string(),
         payload: serde_json::json!({ "await_output": { "type": "success", "value": true } }),
         invocation: lash_core::RuntimeInvocation::effect(
-            lash_core::runtime::RuntimeScope::for_turn("session-a", "turn-a", 1, 0),
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn("session-a", "turn-a"),
+                "replay:1",
+            )
+            .expect("valid test effect address"),
+            lash_core::RuntimeAttribution::for_turn("session-a", "turn-a", 1, 0),
             "effect:1",
-            lash_core::RuntimeEffectKind::Process,
-            "replay:1",
         )
         .with_caused_by(Some(lash_core::CausalRef::Process {
             process_id: ProcessId::from(process_id.to_string()),

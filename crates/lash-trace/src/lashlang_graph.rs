@@ -483,14 +483,18 @@ mod tests {
     fn identity() -> LanguageIdentity {
         LanguageIdentity {
             scope: TraceRuntimeScope {
-                session_id: SessionId::from("session-1".to_string()),
+                session_id: Some(SessionId::from("session-1".to_string())),
                 turn_id: Some(TurnId::from("turn-1")),
                 turn_index: Some(0),
                 protocol_iteration: Some(0),
             },
             subject: TraceRuntimeSubject::Effect {
+                address: lash_sansio::EffectAddress::new(
+                    lash_sansio::ExecutionScope::turn("session-1", "turn-1"),
+                    "exec-replay-1",
+                )
+                .expect("valid trace test effect address"),
                 effect_id: "exec-1".to_string(),
-                kind: "exec_code".to_string(),
             },
             module_ref: "module-1".to_string(),
             entry_kind: "main".to_string(),
@@ -498,6 +502,8 @@ mod tests {
             entry_name: "main".to_string(),
         }
     }
+
+    const EFFECT_GRAPH_KEY: &str = r#"effect:{"version":2,"kind":"turn","session_id":"session-1","execution_id":"turn-1"}:"exec-replay-1""#;
 
     fn append_at(store: &TraceLashlangGraphStore, event: TraceLanguageExecution, ms: i64) {
         store
@@ -603,9 +609,7 @@ mod tests {
 
         append_at(&store, started_event("start"), 1_000);
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         assert_eq!(graph.status, LanguageExecutionStatus::Running);
         assert_eq!(
             graph.nodes[0].observation,
@@ -655,9 +659,7 @@ mod tests {
 
         append_at(&store, event, 1_000);
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         assert_eq!(
             graph.nodes[0].label_metadata,
             Some(TraceLabelMetadata {
@@ -674,9 +676,7 @@ mod tests {
         append_at(&store, node_started("same-key", 1), 1_000);
         append_at(&store, node_completed("same-key", 1), 1_250);
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         assert!(matches!(
             graph.nodes[0].observation,
             TraceLashlangNodeObservation::Running { occurrence: 1, .. }
@@ -690,9 +690,7 @@ mod tests {
         append_at(&store, node_started("start-node", 1), 1_000);
         append_at(&store, node_completed("complete-node", 1), 1_750);
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         let node = &graph.nodes[0];
         assert!(matches!(
             node.observation,
@@ -717,9 +715,7 @@ mod tests {
         append_at(&store, node_started("second-start", 2), 2_000);
         append_at(&store, node_completed("second-complete", 2), 2_400);
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         let node = &graph.nodes[0];
         assert!(matches!(
             node.observation,
@@ -743,9 +739,7 @@ mod tests {
             append_at(&store, node_started("start-node", 1), 1_000);
             append_at(&store, terminal, 1_750);
 
-            let graph = store
-                .graph("effect:session-1:turn-1:exec-1")
-                .expect("graph");
+            let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
             let (occurrence, start, end, duration_ms) = match &graph.nodes[0].observation {
                 TraceLashlangNodeObservation::Completed {
                     occurrence,
@@ -788,9 +782,7 @@ mod tests {
             1_100,
         );
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         let node = graph
             .nodes
             .iter()
@@ -835,9 +827,7 @@ mod tests {
             1_100,
         );
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         assert_eq!(
             graph
                 .edges
@@ -882,9 +872,7 @@ mod tests {
             1_000,
         );
 
-        let graph = store
-            .graph("effect:session-1:turn-1:exec-1")
-            .expect("graph");
+        let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
         assert_eq!(graph.children[0].parent_node_id, "spawn");
         assert_eq!(graph.children[0].child_graph_key, "process:process:child");
         assert_eq!(graph.children[0].child_entry_name.as_deref(), Some("child"));

@@ -31,8 +31,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::{
-    EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
+    EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_postgres_store::{PostgresEffectHost, PostgresStorage};
 
@@ -1032,31 +1032,34 @@ async fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::Assemb
     );
 }
 
-fn attempt_invocation() -> RuntimeInvocation {
-    RuntimeInvocation::effect(
-        RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+fn attempt_invocation() -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, TURN), ATTEMPT_KEY)
+            .expect("valid attempt address"),
+        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-attempt-atomicity-attempt",
-        RuntimeEffectKind::ToolAttempt,
-        ATTEMPT_KEY,
     )
 }
 
 /// The nested effect the attempt body emits. It carries its own replay key,
 /// derived from the attempt's key exactly as `process_effect_invocation` derives
 /// a nested process command's key in production.
-fn nested_invocation() -> RuntimeInvocation {
-    RuntimeInvocation::effect(
-        RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+fn nested_invocation() -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, TURN), NESTED_KEY)
+            .expect("valid nested attempt address"),
+        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-attempt-atomicity-nested",
-        RuntimeEffectKind::ToolAttempt,
-        NESTED_KEY,
     )
 }
 
 /// A recorded `ToolAttempt` — the unit whose body must not be re-entered on
 /// redrive. Both the outer attempt and the nested command it emits are journaled
 /// as attempts here so each one's body execution is observable.
-fn attempt_envelope(invocation: RuntimeInvocation, call_id: &str) -> RuntimeEffectEnvelope {
+fn attempt_envelope(
+    invocation: lash_core::RuntimeEffectInvocation,
+    call_id: &str,
+) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         invocation,
         RuntimeEffectCommand::ToolAttempt {
@@ -1246,21 +1249,13 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
                 )
         })
         .expect("outer FIG-1293 tool-batch frame");
-    let outer_causal_ref = outer_batch
-        .invocation
-        .causal_ref()
-        .expect("outer FIG-1293 batch causal ref");
+    let outer_causal_ref = outer_batch.invocation.causal_ref();
     let outer_outcome_json: String = sqlx::query_scalar(
         "SELECT outcome_json FROM lash_runtime_effect_replay
          WHERE session_id = $1 AND replay_key = $2",
     )
     .bind("fig1293-restate-migrated-tools")
-    .bind(
-        outer_batch
-            .invocation
-            .replay_key()
-            .expect("outer FIG-1293 batch replay key"),
-    )
+    .bind(outer_batch.invocation.replay_key())
     .fetch_one(storage.pool())
     .await
     .expect("read outer FIG-1293 PostgreSQL outcome");
@@ -1695,10 +1690,7 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
         })
         .expect("recorded FIG-1293 nested fault ToolBatch");
     let recorded_outcome_json = batch_outcome.expect("nested fault batch is terminal");
-    assert_eq!(
-        batch_envelope.invocation.replay_key(),
-        Some(batch_replay_key.as_str())
-    );
+    assert_eq!(batch_envelope.invocation.replay_key(), batch_replay_key);
     assert_eq!(
         batch_envelope
             .stable_hash()
@@ -2005,18 +1997,18 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         0,
     )
     .expect("literal PostgreSQL intent identity");
-    let mut invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+    let invocation = lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::turn(SESSION, TURN),
+            identity.replay_key.clone(),
+        )
+        .expect("valid recorded intent address"),
+        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-recorded-intent-start",
-        RuntimeEffectKind::Process,
-        identity.replay_key.clone(),
-    );
-    invocation.replay = Some(lash_core::RuntimeReplay {
-        key: identity.replay_key.clone(),
-        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
-            identity.clone(),
-        )),
-    });
+    )
+    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
+        identity.clone(),
+    ));
     let registration = lash_core::ProcessRegistration::new(
         identity.replay_key.clone(),
         lash_core::ProcessInput::External {

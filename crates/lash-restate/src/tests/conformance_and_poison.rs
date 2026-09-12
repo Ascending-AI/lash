@@ -1,5 +1,43 @@
 use super::*;
 
+fn operation_effect_invocation(
+    operation_id: impl Into<String>,
+    attribution: lash_core::RuntimeAttribution,
+    effect_id: impl Into<String>,
+    replay_key: impl Into<String>,
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(
+            ExecutionScope::runtime_operation(operation_id.into()),
+            replay_key,
+        )
+        .expect("valid test runtime-operation effect address"),
+        attribution,
+        effect_id,
+    )
+}
+
+fn turn_effect_invocation(
+    session_id: &str,
+    turn_id: &str,
+    turn_index: usize,
+    protocol_iteration: usize,
+    effect_id: impl Into<String>,
+    replay_key: impl Into<String>,
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
+            .expect("valid test turn effect address"),
+        lash_core::RuntimeAttribution::for_turn(
+            session_id,
+            turn_id,
+            turn_index,
+            protocol_iteration,
+        ),
+        effect_id,
+    )
+}
+
 #[tokio::test]
 pub(super) async fn restate_turn_work_driver_satisfies_shared_conformance() {
     let context = Arc::new(RecordingContext::default());
@@ -14,6 +52,7 @@ pub(super) fn replayable_conformance_invocation(
         Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
     lash_conformance::ConformanceInvocation::new(
         controller,
+        ExecutionScope::runtime_operation("restate-replay-conformance"),
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
@@ -32,6 +71,7 @@ pub(super) fn crash_redrive_conformance_invocation(
         Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
     lash_conformance::ConformanceInvocation::new(
         controller,
+        ExecutionScope::runtime_operation("restate-crash-redrive-conformance"),
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
@@ -247,13 +287,13 @@ pub(super) async fn restate_wake_delivery_crash_matrix_conformance() {
             Arc::clone(&clock) as Arc<dyn lash_core::Clock>
         ),
     );
-    lash_conformance::wake_delivery_crash_matrix(
+    Box::pin(lash_conformance::wake_delivery_crash_matrix(
         factory,
         registry as Arc<dyn lash_core::ConformanceProcessRegistry>,
         clock,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
-    )
+    ))
     .await;
     wait_transport.assert_reattached_to(&ProcessId::from("wake-crash-terminal"));
 }
@@ -342,10 +382,10 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
         },
     );
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new("trace-replay-session"),
+        operation_effect_invocation(
+            "trace-replay-session",
+            lash_core::RuntimeAttribution::for_session("trace-replay-session"),
             "trace-replay-tool",
-            RuntimeEffectKind::ToolAttempt,
             "trace-replay-tool",
         ),
         RuntimeEffectCommand::ToolAttempt {
@@ -437,10 +477,10 @@ pub(super) async fn restate_handler_controller_journals_typed_trigger_execution(
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new("restate-trigger-session"),
+        operation_effect_invocation(
+            "restate-trigger-session",
+            lash_core::RuntimeAttribution::for_session("restate-trigger-session"),
             "restate-trigger-list",
-            RuntimeEffectKind::Trigger,
             "restate-trigger-list",
         ),
         RuntimeEffectCommand::Trigger {
@@ -472,10 +512,10 @@ pub(super) async fn restate_handler_controller_journals_typed_trigger_execution(
 
 pub(super) fn fig1464_poison_list_envelope(session: &str, effect: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new(session),
+        operation_effect_invocation(
+            session,
+            lash_core::RuntimeAttribution::for_session(session),
             effect,
-            RuntimeEffectKind::Trigger,
             effect,
         ),
         RuntimeEffectCommand::Trigger {
@@ -772,10 +812,12 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     );
 
     // Arm 1: Durable Process Command
-    let process_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let process_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-process-cmd",
-        RuntimeEffectKind::Process,
         "fig1767-process-cmd",
     );
     let process_envelope = RuntimeEffectEnvelope::new(
@@ -839,16 +881,18 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             process_record_bytes,
-            br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-process-cmd\",\"kind\":\"process\"},\"replay\":{\"key\":\"fig1767-process-cmd\"}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"5835270dc6c0d47c9127a1a10a99091198b46c65364b8882a6536e600b41bcc3"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
+            br##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"c45eb273a964f6348942738e134cbbadeca1a952b6b1cea0c668592347ea2d81"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
 
     // Arm 2: Durable Tool Batch
-    let batch_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let batch_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-tool-batch",
-        RuntimeEffectKind::ToolBatch,
         "fig1767-tool-batch",
     );
     let batch_envelope = RuntimeEffectEnvelope::new(
@@ -890,7 +934,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     );
     assert_eq!(
         batch_record_bytes,
-        br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-tool-batch\",\"kind\":\"tool_batch\"},\"replay\":{\"key\":\"fig1767-tool-batch\"}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"fig1767-batch\",\"calls\":[{\"call\":{\"call_id\":\"call-1\",\"tool_id\":\"tool:tool\",\"tool_name\":\"tool\",\"args\":{}},\"replay_suffix\":\"child:0:call-1\"}]}}}","hash":"0bf2599c0b0e7a6f1d853291fe89fd801d018c76bc12e25fb5e48a0632777a38"},"outcome":{"Ok":{"type":"tool_batch","launches":[],"settlement_order":[]}}}"##,
+        br##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-tool-batch\"},\"effect_id\":\"fig1767-tool-batch\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"fig1767-batch\",\"calls\":[{\"call\":{\"call_id\":\"call-1\",\"tool_id\":\"tool:tool\",\"tool_name\":\"tool\",\"args\":{}},\"replay_suffix\":\"child:0:call-1\"}]}}}","hash":"7303b5b54d2d530f219457ea07eeaea45e798d3d71c38df1356b428b0a4ba623"},"outcome":{"Ok":{"type":"tool_batch","launches":[],"settlement_order":[]}}}"##,
         "tool batch recorded effect golden bytes changed"
     );
     assert_eq!(
@@ -913,10 +957,12 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     let context = Arc::new(ReplayableRecordingContext::default());
 
     // 1. Durable Process Command over budget
-    let process_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let process_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-over-budget-proc",
-        RuntimeEffectKind::Process,
         "fig1767-over-budget-proc",
     );
     let process_envelope = RuntimeEffectEnvelope::new(
@@ -991,10 +1037,12 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 
     // 2. Durable Tool Batch over budget
     context.replaying.store(false, Ordering::SeqCst);
-    let batch_invocation = RuntimeInvocation::effect(
-        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+    let batch_invocation = turn_effect_invocation(
+        "fig1767-session",
+        "fig1767-turn",
+        1,
+        0,
         "fig1767-over-budget-batch",
-        RuntimeEffectKind::ToolBatch,
         "fig1767-over-budget-batch",
     );
     let batch_envelope = RuntimeEffectEnvelope::new(
@@ -1072,15 +1120,15 @@ pub(super) async fn journaled_cancel_peeks_replay_while_live_watcher_observes_la
         .expect("cancel gate key");
     let envelope = |identity: &str| {
         RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope {
-                    session_id: SessionId::from("journaled-peek-session"),
+            lash_core::RuntimeEffectInvocation::new(
+                lash_core::EffectAddress::new(scope.clone(), identity)
+                    .expect("valid journaled peek address"),
+                lash_core::RuntimeAttribution {
+                    session_id: Some(SessionId::from("journaled-peek-session")),
                     turn_id: Some(TurnId::from("journaled-peek-turn")),
                     turn_index: None,
                     protocol_iteration: None,
                 },
-                identity,
-                RuntimeEffectKind::PeekAwaitEvent,
                 identity,
             ),
             RuntimeEffectCommand::PeekAwaitEvent { key: key.clone() },
@@ -1209,12 +1257,7 @@ pub(super) fn recorded_runtime_effect_hash_match_returns_replayed_outcome() {
 
 pub(super) fn test_sleep_envelope(duration_ms: u64) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            lash_core::runtime::RuntimeScope::for_turn("session", "turn", 0, 0),
-            "sleep:test",
-            RuntimeEffectKind::Sleep,
-            "sleep:test",
-        ),
+        turn_effect_invocation("session", "turn", 0, 0, "sleep:test", "sleep:test"),
         RuntimeEffectCommand::Sleep { duration_ms },
     )
 }

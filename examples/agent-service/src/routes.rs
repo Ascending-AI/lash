@@ -331,7 +331,14 @@ pub(crate) async fn send_message(
 
     #[cfg(feature = "restate")]
     if state.durability() == AgentServiceDurability::Restate {
-        return send_message_restate(state, chat_id, text, user_message, model_selection).await;
+        return Box::pin(send_message_restate(
+            state,
+            chat_id,
+            text,
+            user_message,
+            model_selection,
+        ))
+        .await;
     }
 
     let turn_model = model_spec_for_chat_selection(&model_selection)?;

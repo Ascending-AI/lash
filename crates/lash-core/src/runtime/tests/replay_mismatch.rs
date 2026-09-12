@@ -126,14 +126,16 @@ async fn proxied_controller_owned_replay_mismatch_aborts_with_structured_summary
     let controller_task = crate::task::spawn({
         let controller = Arc::clone(&controller);
         async move {
+            let pump_scope = ExecutionScope::runtime_operation("proxied-replay-mismatch-pump");
             crate::runtime::effect::drive_effect_controller_task(
                 controller.as_ref(),
+                pump_scope.clone(),
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::new("proxied-replay-mismatch-pump"),
+                    RuntimeEffectInvocation::new(
+                        EffectAddress::new(pump_scope, "proxy-pump:sleep")
+                            .expect("valid proxy pump address"),
+                        RuntimeAttribution::none(),
                         "proxy-pump",
-                        RuntimeEffectKind::Sleep,
-                        "proxy-pump:sleep",
                     ),
                     RuntimeEffectCommand::Sleep {
                         duration_ms: u64::MAX,

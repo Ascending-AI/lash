@@ -890,11 +890,33 @@ finish "done""#,
     else {
         unreachable!();
     };
-    assert!(
-        started_graph_key
-            .as_deref()
-            .is_some_and(|key| key.starts_with("effect:rlm-live-tool-events:")),
-        "missing foreground graph key on CodeBlockStarted: {started_graph_key:?}"
+    let encoded_address = started_graph_key
+        .as_deref()
+        .and_then(|key| key.strip_prefix("effect:"))
+        .unwrap_or_else(|| {
+            panic!("missing foreground effect address on CodeBlockStarted: {started_graph_key:?}")
+        });
+    let mut scope =
+        serde_json::Deserializer::from_str(encoded_address).into_iter::<serde_json::Value>();
+    let scope_value = scope
+        .next()
+        .transpose()?
+        .expect("foreground graph key carries its execution scope");
+    let replay_key = encoded_address
+        .get(scope.byte_offset()..)
+        .and_then(|suffix| suffix.strip_prefix(':'))
+        .map(serde_json::from_str::<String>)
+        .transpose()?
+        .expect("foreground graph key carries its replay key");
+    assert_eq!(scope_value["version"], 2);
+    assert_eq!(scope_value["kind"], "turn");
+    assert_eq!(scope_value["session_id"], "rlm-live-tool-events");
+    let execution_id = scope_value["execution_id"]
+        .as_str()
+        .expect("foreground turn scope carries its execution id");
+    assert_eq!(
+        replay_key,
+        format!("rlm-live-tool-events:{execution_id}:1:0:exec_code:3")
     );
     let TurnEvent::CodeBlockCompleted {
         language,

@@ -55,11 +55,7 @@ impl lash_core::RuntimeEffectController for CapturingTriggerEffectController {
         self.envelopes.lock_recover().push(envelope.clone());
         match envelope.command {
             lash_core::RuntimeEffectCommand::Trigger { command } => {
-                let operation_id = envelope
-                    .invocation
-                    .effect_id()
-                    .expect("captured trigger effect id")
-                    .to_string();
+                let operation_id = envelope.invocation.effect_id().to_string();
                 let result = lash_core::RuntimeEffectLocalExecutor::into_trigger(local_executor)?
                     .execute(&operation_id, *command)
                     .await?;
@@ -90,14 +86,7 @@ impl CapturingTriggerEffectController {
                     lash_core::TriggerCommand::Revive { .. } => "revive",
                     lash_core::TriggerCommand::Prune { .. } => "prune",
                 };
-                Some((
-                    envelope
-                        .invocation
-                        .effect_id()
-                        .unwrap_or_default()
-                        .to_string(),
-                    operation,
-                ))
+                Some((envelope.invocation.effect_id().to_string(), operation))
             })
             .collect()
     }

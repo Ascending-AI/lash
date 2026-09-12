@@ -3,7 +3,6 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 
@@ -26,6 +25,10 @@ pub struct RuntimeExecutionContext<'run> {
     pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
     pub(super) cancellation_token: Option<CancellationToken>,
     pub(super) observe_turn_cancel: bool,
+    /// Durable cancellation authority for waits issued by this execution.
+    /// A follow-on physical turn keeps its admitted effect scope but observes
+    /// the cancellation gate addressed to its own turn identity.
+    turn_cancel_scope: Option<crate::ExecutionScope>,
     /// Per-tool trace emission handle for this execution. Present only when the
     /// host installed a trace sink; `None` keeps every trace call a no-op.
     tracing: Option<RuntimeExecutionTracing>,
@@ -165,6 +168,43 @@ impl<'run> RuntimeExecutionContext<'run> {
         process_ids
     }
 
+    pub(super) fn effect_attribution(&self) -> crate::RuntimeAttribution {
+        if let Some(parent) = self.parent_invocation.as_ref() {
+            return parent.attribution.clone();
+        }
+        match self
+            .process_execution
+            .as_ref()
+            .map(|execution| &execution.originator)
+        {
+            Some(crate::ProcessOriginator::Host { .. }) => crate::RuntimeAttribution::none(),
+            Some(crate::ProcessOriginator::Session { session_id, .. }) => {
+                crate::RuntimeAttribution::for_session(session_id.clone())
+            }
+            None => crate::RuntimeAttribution::for_session(self.session_id.clone()),
+        }
+    }
+
+    fn language_runtime_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
+        let execution_scope = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .execution_scope()
+            .clone();
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(execution_scope, effect_id)
+                .expect("runtime context carries an admitted effect scope"),
+            self.effect_attribution(),
+            effect_id,
+        )
+        .with_caused_by(
+            self.parent_invocation
+                .as_ref()
+                .and_then(crate::RuntimeInvocation::causal_ref),
+        )
+    }
+
     /// Executes a nondeterministic language-runtime operation behind the
     /// durable effect controller so replay returns the recorded sample.
     pub async fn journaled_language_runtime_value(
@@ -172,25 +212,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         effect_id: String,
         operation: String,
     ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
-        let scope = self
-            .parent_invocation
-            .as_ref()
-            .map(|invocation| invocation.scope.clone())
-            .unwrap_or_else(|| crate::RuntimeScope::new(self.session_id.clone()));
-        let invocation = crate::RuntimeInvocation::effect(
-            scope,
-            effect_id.clone(),
-            crate::RuntimeEffectKind::LanguageRuntimeValue,
-            effect_id,
-        )
-        .with_caused_by(
-            self.parent_invocation
-                .as_ref()
-                .and_then(crate::RuntimeInvocation::causal_ref),
-        );
+        let invocation = self.language_runtime_invocation(&effect_id);
         self.dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -263,6 +288,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_event_tx: None,
             cancellation_token: None,
             observe_turn_cancel: true,
+            turn_cancel_scope: None,
             tracing: None,
             code_block_graph_key: None,
             batch_parent_call_id: None,
@@ -286,6 +312,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             turn_event_tx: self.turn_event_tx.clone(),
             cancellation_token: self.cancellation_token.clone(),
             observe_turn_cancel: self.observe_turn_cancel,
+            turn_cancel_scope: self.turn_cancel_scope.clone(),
             tracing: self.tracing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
             batch_parent_call_id: self.batch_parent_call_id.clone(),
@@ -481,6 +508,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
+    pub(crate) fn with_turn_cancel_scope(mut self, scope: crate::ExecutionScope) -> Self {
+        self.turn_cancel_scope = Some(scope);
+        self
+    }
+
     /// The complete turn-cancel trio for one wait built from this execution:
     /// the token the wait races against, whether this execution observes turn
     /// cancellation, and the execution scope its turn-cancel gate registers
@@ -495,10 +527,14 @@ impl<'run> RuntimeExecutionContext<'run> {
         cancellation: CancellationToken,
     ) -> crate::runtime::TurnCancelWait {
         if self.observe_turn_cancel {
-            self.dispatch
-                .effect_controller
-                .scoped()
-                .turn_cancel_wait(cancellation)
+            match self.turn_cancel_scope.clone() {
+                Some(scope) => crate::runtime::TurnCancelWait::observing(cancellation, scope),
+                None => self
+                    .dispatch
+                    .effect_controller
+                    .scoped()
+                    .turn_cancel_wait(cancellation),
+            }
         } else {
             crate::runtime::TurnCancelWait::unobserved(cancellation)
         }
@@ -711,7 +747,11 @@ impl<'run> RuntimeExecutionContext<'run> {
             )
             .await?;
         let invocation = crate::runtime::causal::process_await_event_invocation(
-            &self.session_id,
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.parent_invocation
+                .as_ref()
+                .map(|parent| parent.attribution.clone())
+                .unwrap_or_else(crate::RuntimeAttribution::none),
             self.parent_invocation.as_ref(),
             process_id,
             signal_name,
@@ -720,7 +760,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -786,7 +826,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         };
         let effect_id = command.effect_id();
         let invocation = crate::runtime::causal::process_effect_invocation(
-            &self.session_id,
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.parent_invocation
+                .as_ref()
+                .map(|parent| parent.attribution.clone())
+                .unwrap_or_else(crate::RuntimeAttribution::none),
             self.parent_invocation.clone(),
             &effect_id,
         );
@@ -833,6 +877,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = if let Some(task_requests) = task_requests {
             crate::runtime::effect::drive_effect_controller_task(
                 controller,
+                scoped.execution_scope().clone(),
                 envelope,
                 local_executor,
                 task_requests,
@@ -860,7 +905,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let cancellation = self.cancellation_token.clone().unwrap_or_default();
         let invocation = crate::runtime::causal::process_sleep_invocation(
-            &self.session_id,
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.parent_invocation
+                .as_ref()
+                .map(|parent| parent.attribution.clone())
+                .unwrap_or_else(crate::RuntimeAttribution::none),
             self.parent_invocation.as_ref(),
             scope,
             sequence,
@@ -868,7 +917,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let outcome = self
             .dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -948,16 +997,18 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "trigger store is unavailable in this runtime",
             )
         })?;
-        let scope = self
-            .parent_invocation
-            .as_ref()
-            .map(|invocation| invocation.scope.clone())
-            .unwrap_or_else(|| crate::RuntimeScope::new(self.session_id.clone()));
-        let invocation = crate::RuntimeInvocation::effect(
-            scope,
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                self.dispatch
+                    .effect_controller
+                    .scoped()
+                    .execution_scope()
+                    .clone(),
+                effect_id.clone(),
+            )
+            .expect("runtime context carries an admitted effect scope"),
+            self.effect_attribution(),
             effect_id.clone(),
-            crate::RuntimeEffectKind::Trigger,
-            effect_id,
         )
         .with_caused_by(
             self.parent_invocation
@@ -966,7 +1017,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         );
         self.dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -1235,6 +1286,55 @@ mod tests {
             None,
             crate::TurnContext::default(),
         )
+    }
+
+    #[test]
+    fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
+        let envelope = |context: &RuntimeExecutionContext<'_>, effect_id: &str| {
+            crate::RuntimeEffectEnvelope::new(
+                context.language_runtime_invocation(effect_id),
+                crate::RuntimeEffectCommand::LanguageRuntimeValue {
+                    operation: "sample".to_string(),
+                },
+            )
+        };
+
+        let foreground = test_execution_context();
+        assert_eq!(
+            envelope(&foreground, "foreground").invocation.attribution,
+            crate::RuntimeAttribution::for_session("session")
+        );
+
+        let mut host_process = test_execution_context();
+        host_process.process_execution = Some(RuntimeProcessExecution {
+            process_id: ProcessId::from("host-process"),
+            originator: crate::ProcessOriginator::host_scoped("automation"),
+            env_ref: None,
+            wake_session_id: None,
+            event_context: None,
+        });
+        assert_eq!(
+            envelope(&host_process, "host").invocation.attribution,
+            crate::RuntimeAttribution::none(),
+            "ambient current-session capability is descriptive inside a host-owned process"
+        );
+
+        let mut session_process = test_execution_context();
+        session_process.process_execution = Some(RuntimeProcessExecution {
+            process_id: ProcessId::from("session-process"),
+            originator: crate::ProcessOriginator::session(crate::SessionScope::new(
+                "origin-session",
+            )),
+            env_ref: None,
+            wake_session_id: None,
+            event_context: None,
+        });
+        assert_eq!(
+            envelope(&session_process, "session-origin")
+                .invocation
+                .attribution,
+            crate::RuntimeAttribution::for_session("origin-session")
+        );
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
-    invocation: &RuntimeInvocation,
+    invocation: &RuntimeEffectInvocation,
     command: ProcessCommand,
     local_executor: RuntimeEffectLocalExecutor<'_>,
     trace_park: impl Fn(&'static str),

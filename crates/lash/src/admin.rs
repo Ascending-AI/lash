@@ -79,7 +79,7 @@ impl CoreTriggerAdmin {
         let process_work = ports.process.ok_or(EmbedError::MissingProcessRegistry)?;
         let router = lash_core::facade_support::TriggerRouter::new(store, process_work);
         router
-            .emit(request, scoped_effect_controller.controller())
+            .emit(request, &scoped_effect_controller)
             .await
             .map_err(Into::into)
     }

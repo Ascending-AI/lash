@@ -59,59 +59,15 @@ impl RuntimeSessionServices {
         // The child session's first turn is deliberately scoped by the
         // process identity that started it, so the crossing is spelled out.
         let child_turn_id = crate::TurnId::from(registration.id.as_str());
-        let child_scope = match self
-            .current
-            .turn_scope_by_id(&self.managed, &child_session_id, &child_turn_id)
-            .await
-        {
-            Ok(scope) => scope,
-            Err(err) => {
-                if self
-                    .close_or_reclaim_cancelled_session_turn(
-                        &registration.id,
-                        &child_session_id,
-                        &cancellation,
-                    )
-                    .await?
-                {
-                    return Ok(cancelled_session_turn_output());
-                }
-                return Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-                        crate::ToolFailureClass::Execution,
-                        "process_session_turn_scope_failed",
-                        err.to_string(),
-                    )),
-                ));
-            }
-        };
-        let child_scoped_effect_controller = match scoped_effect_controller.rescope(child_scope) {
-            Ok(controller) => controller,
-            Err(err) => {
-                if self
-                    .close_or_reclaim_cancelled_session_turn(
-                        &registration.id,
-                        &child_session_id,
-                        &cancellation,
-                    )
-                    .await?
-                {
-                    return Ok(cancelled_session_turn_output());
-                }
-                return Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-                        crate::ToolFailureClass::Execution,
-                        "process_session_turn_scope_failed",
-                        err.to_string(),
-                    )),
-                ));
-            }
-        };
-        let request = match crate::SessionTurnRequest::new(
+        // The process worker admitted this controller under `registration.id`.
+        // Keep that execution authority through the child turn; session and
+        // turn ids remain the turn's foreground routing and attribution.
+        let request = match crate::SessionTurnRequest::new_process_backed(
             &child_session_id,
             &child_turn_id,
             turn_input,
-            child_scoped_effect_controller,
+            &registration.id,
+            scoped_effect_controller,
         ) {
             Ok(request) => request,
             Err(err) => {
@@ -396,7 +352,7 @@ mod tests {
     use super::*;
     use crate::llm::types::LlmStreamEvent;
     use crate::runtime::tests::helpers::{
-        MockCall, mock_provider, named_turn_scope, runtime_with_plugins_and_tools_and_host,
+        MockCall, mock_provider, native_scope, runtime_with_plugins_and_tools_and_host,
     };
     use std::sync::Arc;
 
@@ -499,10 +455,7 @@ mod tests {
                     foreign_registration,
                     foreign_create_request,
                     crate::TurnInput::text("must not run"),
-                    named_turn_scope(
-                        &foreign_session_id,
-                        &TurnId::from(foreign_process_id.as_str())
-                    ),
+                    native_scope(crate::ExecutionScope::process(&foreign_process_id)),
                     foreign_cancellation,
                 )
                 .await
@@ -540,7 +493,7 @@ mod tests {
             registration,
             create_request.clone(),
             crate::TurnInput::text("park the child turn"),
-            named_turn_scope(&child_session_id, &TurnId::from(process_id.as_str())),
+            native_scope(crate::ExecutionScope::process(&process_id)),
             cancellation.clone(),
         ));
         tokio::select! {
@@ -601,7 +554,7 @@ mod tests {
                 replay_registration,
                 create_request,
                 crate::TurnInput::text("replayed cancelled child turn"),
-                named_turn_scope(&child_session_id, &TurnId::from(process_id.as_str())),
+                native_scope(crate::ExecutionScope::process(&process_id)),
                 cancellation,
             )
             .await
@@ -729,7 +682,7 @@ mod tests {
                     registration,
                     request,
                     crate::TurnInput::text("park"),
-                    named_turn_scope(&SessionId::from("permit-child"), &TurnId::from("permit-process")),
+                    native_scope(crate::ExecutionScope::process("permit-process")),
                     cancellation.clone(),
                 ));
                 tokio::select! {

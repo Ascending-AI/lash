@@ -1214,10 +1214,10 @@ fn agent_contract_graph_facts(
         *graph_status_counts
             .entry(trace_lashlang_status_label(graph.status).to_string())
             .or_default() += 1;
-        if graph.scope.session_id != root_session_id
+        if graph.scope.session_id.as_ref() != Some(root_session_id)
             && matches!(
                 &graph.subject,
-                lash::tracing::TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
+                lash::tracing::TraceRuntimeSubject::Effect { .. }
             )
         {
             match graph.status {

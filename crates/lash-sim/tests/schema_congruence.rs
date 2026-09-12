@@ -4,6 +4,7 @@ use lash_core::store_backend_support::required_constraints::{
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+use lash_sansio::{EffectAddress, ExecutionScope};
 use std::collections::BTreeSet;
 
 const SQLITE_SCHEMA_SOURCE: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
@@ -738,9 +739,8 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             turn_id: TurnId::from("turn"),
         },
         CausalRef::Effect {
-            session_id: SessionId::from("session"),
-            turn_id: None,
-            effect_id: "effect".to_string(),
+            address: EffectAddress::new(ExecutionScope::runtime_operation("operation"), "effect")
+                .expect("valid effect cause address"),
         },
         CausalRef::ToolCall {
             session_id: SessionId::from("session"),
@@ -777,7 +777,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         causal_kinds,
         [
             "turn",
-            "effect",
+            "effect_address",
             "tool_call",
             "process",
             "process_event",

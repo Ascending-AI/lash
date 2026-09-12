@@ -325,10 +325,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // backend put settles, and explicit recovery can remove exactly that attempt's
 // intent, so component-83 stores are rejected rather than running the old unsafe
 // re-put lifecycle.
-// Version 85 requires pending-input claim identity and token to be either both
-// NULL or both populated. Component-84 stores are recreated; there is no
-// migration into this generation.
-const SCHEMA_VERSION: i32 = 85;
+// Version 86 combines full admitted effect addresses and truthful attribution with
+// all-or-none pending-input claim identity and token fencing. Both incompatible
+// component-85 parent shapes are rejected and recreated.
+const SCHEMA_VERSION: i32 = 86;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

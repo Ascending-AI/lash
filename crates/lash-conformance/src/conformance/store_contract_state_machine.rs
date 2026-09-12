@@ -2357,7 +2357,7 @@ fn runtime_wake_for(
         sequence,
         event_type: "property.wake".to_string(),
         event_invocation: RuntimeInvocation {
-            scope: RuntimeScope::new(session_id),
+            attribution: RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
                 process_id: process_id.clone(),
                 sequence,

@@ -442,6 +442,7 @@ impl RuntimeEffectController for FencedRestateController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        envelope.invocation.validate_execution_scope(&self.scope)?;
         self.refuse_if_retired().await?;
         self.controller
             .execute_effect(envelope, local_executor)
@@ -452,6 +453,7 @@ impl RuntimeEffectController for FencedRestateController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
         self.refuse_if_retired().await?;
         // The group is a live child of this scope until its index reports
         // every child settled: recorded in the scope's index so a
@@ -934,6 +936,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(group.invocation().execution_scope())?;
         let ingress = &self.await_event_ingress.ingress;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
@@ -1255,10 +1258,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
             format!(
                 "effect `{}` must enter a Restate handler and use RestateRuntimeEffectController::scoped_effect_controller",
-                envelope
-                    .invocation
-                    .effect_id()
-                    .unwrap_or_else(|| envelope.command.kind().as_str())
+                envelope.invocation.effect_id()
             ),
         ))
     }

@@ -984,13 +984,20 @@ fn child_replay_key(group_key: &str, position: usize) -> String {
     format!("{group_key}:child:{position}")
 }
 
-fn child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
+fn child(
+    execution_scope: &ExecutionScope,
+    group_key: &str,
+    position: usize,
+) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new(group_key),
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(
+                execution_scope.clone(),
+                child_replay_key(group_key, position),
+            )
+            .expect("valid group-child address"),
+            RuntimeAttribution::none(),
             "effect",
-            RuntimeEffectKind::LanguageRuntimeValue,
-            child_replay_key(group_key, position),
         ),
         RuntimeEffectCommand::LanguageRuntimeValue {
             operation: format!("group-child-{position}"),
@@ -998,16 +1005,23 @@ fn child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {
     )
 }
 
-fn group(key: &str, children: usize, disposition: LoserPolicy) -> RuntimeEffectGroup {
+fn group(
+    execution_scope: &ExecutionScope,
+    key: &str,
+    children: usize,
+    disposition: LoserPolicy,
+) -> RuntimeEffectGroup {
     RuntimeEffectGroup::try_new(
-        RuntimeInvocation::effect(
-            RuntimeScope::new(key),
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(execution_scope.clone(), format!("{key}:group"))
+                .expect("valid group address"),
+            RuntimeAttribution::none(),
             "group",
-            RuntimeEffectKind::LanguageRuntimeValue,
-            format!("{key}:group"),
         ),
         key,
-        (0..children).map(|position| child(key, position)).collect(),
+        (0..children)
+            .map(|position| child(execution_scope, key, position))
+            .collect(),
         GroupWakePolicy::All,
         disposition,
     )
@@ -1037,7 +1051,10 @@ async fn open(
 ) -> EffectGroupHandle {
     scoped
         .controller()
-        .open_effect_group(staged_executors().stage(group(key, children, disposition), executors))
+        .open_effect_group(staged_executors().stage(
+            group(scoped.execution_scope(), key, children, disposition),
+            executors,
+        ))
         .await
         .expect("the group opens")
 }
@@ -1268,11 +1285,7 @@ impl GroupExecutors for RecordingExecutors {
         if let Some(staged) = staged_executors().executor_for(envelope) {
             return Some(staged);
         }
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("a journaled child carries its replay key")
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         let position = envelope
             .group
             .as_ref()

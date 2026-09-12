@@ -233,7 +233,10 @@ impl RuntimeTurnDriver<'_> {
                 let _ = runtime_event_tx.send(RuntimeStreamEvent::Turn(event)).await;
             }
         });
-        let protocol_iteration = invocation.scope.protocol_iteration.unwrap_or_default();
+        let protocol_iteration = invocation
+            .attribution
+            .protocol_iteration
+            .unwrap_or_default();
         let context = match self.execution_context(
             tool_event_tx.clone(),
             Arc::new(crate::ChronologicalProjection::default()),
@@ -284,23 +287,23 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<crate::Resolution, RuntimeEffectControllerError> {
         let parent =
             self.turn_effect_invocation(machine, parent_effect_id, RuntimeEffectKind::ToolBatch)?;
-        let invocation = crate::runtime::causal::child_effect_invocation(
+        let invocation = crate::runtime::causal::child_effect_invocation_from_effect(
+            self.scoped_effect_controller.execution_scope(),
             &parent,
             format!("{}:{call_id}:await", parent_effect_id.0),
-            RuntimeEffectKind::AwaitEvent,
             format!("{call_id}:await"),
         );
         let _ = event_tx;
         let scoped_effect_controller = self.scoped_effect_controller.clone();
+        let turn_cancel_wait = self.turn_cancel_wait(cancel.clone());
         let deadline = _pending
             .deadline
             .map(|duration| self.host.core.clock.now() + duration);
         let outcome = scoped_effect_controller
-            .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::AwaitEvent { key }),
                 crate::RuntimeEffectLocalExecutor::await_event_under(
-                    &scoped_effect_controller.turn_cancel_wait(cancel.clone()),
+                    &turn_cancel_wait,
                     deadline,
                     Arc::clone(&self.host.core.clock),
                 ),

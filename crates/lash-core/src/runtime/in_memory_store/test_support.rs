@@ -648,7 +648,7 @@ mod tests {
             sequence: 7,
             event_type: "producer.wake".to_string(),
             event_invocation: crate::RuntimeInvocation {
-                scope: crate::RuntimeScope::new(session_id),
+                attribution: crate::RuntimeAttribution::for_session(session_id),
                 subject: crate::RuntimeSubject::ProcessEvent {
                     process_id: ProcessId::from(process_id.to_string()),
                     sequence: 7,

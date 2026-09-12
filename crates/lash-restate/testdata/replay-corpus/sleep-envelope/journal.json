@@ -1,12 +1,12 @@
 {
   "scenario": "sleep-envelope",
-  "recorded_at_git_sha": "43b68a105c057077e43025550a5300b034ee1c81",
+  "recorded_at_git_sha": "cb3ad2305918c8090a713e4cda701547ac22c723",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:sleep:test": {
       "envelope": {
-        "json": "{\"invocation\":{\"scope\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"sleep:test\",\"kind\":\"sleep\"},\"replay\":{\"key\":\"sleep:test\"}},\"command\":{\"type\":\"sleep\",\"duration_ms\":1}}",
-        "hash": "8cb851889f3c002dbd3e1d99c77ba8b013b9254a8132343fd2ba1733385d3426"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session\",\"turn_id\":\"turn\"},\"replay_key\":\"sleep:test\"},\"effect_id\":\"sleep:test\",\"attribution\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":0,\"protocol_iteration\":0}},\"command\":{\"type\":\"sleep\",\"duration_ms\":1}}",
+        "hash": "0b9f0b29e0303cb65bc771e2761543c41a362b8f8a18ca1800809a5f23ef61da"
       },
       "outcome": {
         "Ok": {

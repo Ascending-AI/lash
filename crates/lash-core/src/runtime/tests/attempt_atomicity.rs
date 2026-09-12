@@ -240,11 +240,14 @@ fn prepared_tool_call() -> crate::PreparedToolCall {
     }
 }
 
-fn attempt_invocation() -> crate::RuntimeInvocation {
-    crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
-        ATTEMPT_EFFECT_ID,
-        crate::RuntimeEffectKind::ToolAttempt,
+fn attempt_invocation() -> crate::RuntimeEffectInvocation {
+    crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn(SESSION, TURN),
+            ATTEMPT_EFFECT_ID,
+        )
+        .expect("valid attempt address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         ATTEMPT_EFFECT_ID,
     )
 }
@@ -258,6 +261,7 @@ fn tool_context<'run>(
         fixtures,
         Arc::new(crate::testing::EmptyToolProvider),
         Vec::new(),
+        true,
     )
 }
 
@@ -266,6 +270,7 @@ fn tool_context_with_provider<'run>(
     fixtures: &Fixtures,
     tools: Arc<dyn crate::ToolProvider>,
     catalog: Vec<crate::ToolDefinition>,
+    bind_direct_client_to_attempt: bool,
 ) -> crate::ToolContext<'run> {
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(4);
     let plugins = crate::plugin::PluginHost::new(Vec::new())
@@ -274,6 +279,7 @@ fn tool_context_with_provider<'run>(
     let processes = crate::testing::effect_backed_process_service(Arc::clone(&fixtures.registry));
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
     let effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
+    let attempt_parent = attempt_invocation().into_runtime_invocation();
     // The production client, minted against the very controller the sentinel
     // wraps: an `Independent` classification therefore shows up in the ledger
     // as a real crossing instead of being swallowed by a stub.
@@ -285,6 +291,11 @@ fn tool_context_with_provider<'run>(
             effect_controller.clone(),
             Some(TurnId::from(TURN.to_string())),
         );
+    let direct_completions = if bind_direct_client_to_attempt {
+        direct_completions.with_tool_attempt_parent_invocation(attempt_parent.clone())
+    } else {
+        direct_completions
+    };
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
         tools,
@@ -300,7 +311,7 @@ fn tool_context_with_provider<'run>(
         )),
         effect_controller,
         direct_completions,
-        parent_invocation: Some(attempt_invocation()),
+        parent_invocation: Some(attempt_parent.clone()),
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -318,7 +329,7 @@ fn tool_context_with_provider<'run>(
     });
     crate::ToolContext::from_dispatch(dispatch)
         .tool_call_id(Some(CALL_ID.to_string()))
-        .parent_invocation(Some(attempt_invocation()))
+        .parent_invocation(Some(attempt_parent))
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
         .child_execution_trace_hook(Some(crate::ToolChildExecutionTraceHook::new(
             move |_started| {
@@ -480,6 +491,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
         &fixtures,
         Arc::clone(&provider) as Arc<dyn crate::ToolProvider>,
         Vec::new(),
+        true,
     );
 
     crate::RuntimeEffectController::execute_effect(
@@ -568,11 +580,14 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     crate::RuntimeEffectController::execute_effect(
         &sentinel,
         crate::RuntimeEffectEnvelope::new(
-            crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::new(SESSION),
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn(SESSION, TURN),
+                    effect_id.clone(),
+                )
+                .expect("valid process effect address"),
+                crate::RuntimeAttribution::for_session(SESSION),
                 effect_id.clone(),
-                crate::RuntimeEffectKind::Process,
-                effect_id,
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
@@ -621,11 +636,14 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
             crate::RuntimeEffectController::execute_effect(
                 nested_sentinel,
                 crate::RuntimeEffectEnvelope::new(
-                    crate::RuntimeInvocation::effect(
-                        crate::RuntimeScope::new(SESSION),
+                    crate::RuntimeEffectInvocation::new(
+                        crate::EffectAddress::new(
+                            crate::ExecutionScope::turn(SESSION, TURN),
+                            effect_id.clone(),
+                        )
+                        .expect("valid nested process effect address"),
+                        crate::RuntimeAttribution::for_session(SESSION),
                         effect_id.clone(),
-                        crate::RuntimeEffectKind::Process,
-                        effect_id,
                     ),
                     crate::RuntimeEffectCommand::process(command),
                 ),
@@ -679,9 +697,9 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
     dispatch.parent_invocation = Some(crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
-        "intent-drain",
-        crate::RuntimeEffectKind::ToolBatch,
+        crate::EffectAddress::new(crate::ExecutionScope::turn(SESSION, TURN), "intent-drain")
+            .expect("valid intent-drain address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "intent-drain",
     ));
 
@@ -850,18 +868,18 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         )
         .with_replay_key("structural-attribution-event"),
     };
-    let mut attributed = crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+    let attributed = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn(SESSION, TURN),
+            "plain-unprefixed-key",
+        )
+        .expect("valid structurally attributed address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "structurally-attributed-command",
-        crate::RuntimeEffectKind::Process,
-        "plain-unprefixed-key",
-    );
-    attributed.replay = Some(crate::RuntimeReplay {
-        key: "plain-unprefixed-key".to_string(),
-        attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(
-            identity.clone(),
-        )),
-    });
+    )
+    .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
+        identity.clone(),
+    ));
     crate::RuntimeEffectController::execute_effect(
         &sentinel,
         crate::RuntimeEffectEnvelope::new(
@@ -883,11 +901,14 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
     crate::RuntimeEffectController::execute_effect(
         &sentinel,
         crate::RuntimeEffectEnvelope::new(
-            crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn(SESSION, TURN),
+                    "another-plain-key",
+                )
+                .expect("valid missing-attribution test address"),
+                crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
                 "missing-attribution-command",
-                crate::RuntimeEffectKind::Process,
-                "another-plain-key",
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
@@ -1025,12 +1046,8 @@ impl OrdinalJournaledTier {
     }
 
     fn identity(envelope: &crate::RuntimeEffectEnvelope) -> String {
-        let kind = envelope
-            .invocation
-            .effect_kind()
-            .map(crate::RuntimeEffectKind::as_str)
-            .unwrap_or("no_effect_kind");
-        let effect_id = envelope.invocation.effect_id().unwrap_or("no_effect_id");
+        let kind = envelope.command.kind().as_str();
+        let effect_id = envelope.invocation.effect_id();
         format!("{kind}:{effect_id}")
     }
 }
@@ -1117,11 +1134,14 @@ impl crate::RuntimeEffectController for OrdinalJournaledTier {
     }
 }
 
-fn follow_on_invocation() -> crate::RuntimeInvocation {
-    crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn(SESSION, TURN, 0, 0),
-        FOLLOW_ON_EFFECT_ID,
-        crate::RuntimeEffectKind::Sleep,
+fn follow_on_invocation() -> crate::RuntimeEffectInvocation {
+    crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn(SESSION, TURN),
+            FOLLOW_ON_EFFECT_ID,
+        )
+        .expect("valid follow-on address"),
+        crate::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         FOLLOW_ON_EFFECT_ID,
     )
 }
@@ -1311,7 +1331,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
             crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
             Some(TurnId::from(TURN.to_string())),
         )
-        .with_parent_invocation(Some(attempt_invocation()));
+        .with_tool_attempt_parent_invocation(attempt_invocation().into_runtime_invocation());
 
     crate::RuntimeEffectController::execute_effect(
         &sentinel,
@@ -1400,7 +1420,52 @@ fn raw_client_probe<'run>(
         fixtures,
         Arc::clone(provider) as Arc<dyn crate::ToolProvider>,
         vec![RawClientDirectProvider::definition()],
+        false,
     )
+}
+
+async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
+    let tier = ControllerOwnedTier::ordinal_addressed();
+    let ledger = NestedJournalLedger::new();
+    let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
+    let provider = Arc::new(RawClientDirectProvider::default());
+    let tool = raw_client_probe(&sentinel, fixtures, &provider);
+    let direct_completions = tool
+        .runtime_dispatch
+        .as_ref()
+        .expect("raw-client probe carries runtime dispatch")
+        .direct_completions
+        .clone();
+
+    crate::RuntimeEffectController::execute_effect(
+        &sentinel,
+        attempt_effect_envelope(),
+        crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
+            let completion = direct_completions
+                .direct_completion(
+                    crate::DirectRequest::text(DIRECT_MODEL, "unbound client precondition"),
+                    "attempt-atomicity",
+                )
+                .await
+                .expect("unbound direct-client precondition completes");
+            assert_eq!(completion.text, DIRECT_TEXT);
+            Ok(attempt_done_outcome())
+        }),
+    )
+    .await
+    .expect("unbound direct-client precondition attempt completes");
+
+    assert_eq!(ledger.attempt_bodies_opened(), 1);
+    let crossings = ledger.crossings_inside_attempt();
+    assert_eq!(
+        crossings.len(),
+        1,
+        "the raw-client fixture must enter production with exactly one observable unbound crossing"
+    );
+    assert!(
+        crossings[0].starts_with("execute_effect:direct:"),
+        "the raw-client fixture must start unbound to a ToolAttempt: {crossings:?}"
+    );
 }
 
 /// The execution-context attempt path (`RuntimeExecutionContext::
@@ -1409,6 +1474,7 @@ fn raw_client_probe<'run>(
 #[tokio::test]
 async fn execution_context_attempt_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
+    assert_raw_client_probe_starts_unbound(&fixtures).await;
     let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
@@ -1439,7 +1505,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
                     None,
                     1,
                     1,
-                    envelope.invocation,
+                    envelope.invocation.into_runtime_invocation(),
                     None,
                     None,
                 )
@@ -1468,6 +1534,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
 #[tokio::test]
 async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
+    assert_raw_client_probe_starts_unbound(&fixtures).await;
     let tier = ControllerOwnedTier::ordinal_addressed();
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));

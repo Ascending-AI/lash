@@ -66,6 +66,6 @@ ordinary startup and never apply DDL or repair data.
   registry as well as both DDL artifacts. The registry supplements rather than
   expands the ADR 0052 fingerprint.
 - The pending-turn-input claim id and claim token are an all-or-none pair in
-  both SQL schemas. PostgreSQL component 85 and SQLite durable-core version 56
+  both SQL schemas. PostgreSQL component 86 and SQLite durable-core version 57
   are reject-and-recreate boundaries for that new guard; neither backend adds a
   migration arm.

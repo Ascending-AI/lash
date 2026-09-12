@@ -1,6 +1,5 @@
 use crate::ProcessId;
 use crate::SessionId;
-use crate::TurnId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -13,97 +12,26 @@ use crate::llm::types::{
 use crate::sansio::{CompletedToolCall, ExecutionEnvironmentSync, LlmCallError};
 use crate::tool_dispatch::ToolTriggerEffectOutcome;
 use crate::{
-    AttachmentCreateMeta, CausalRef, CheckpointDelivery, ExecResponse,
-    LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput, ProcessExecutionContext,
-    ProcessListMode, ProcessRecord, ProcessRegistration, SessionScope,
+    AttachmentCreateMeta, CausalRef, CheckpointDelivery, EffectAddress, ExecResponse,
+    ExecutionScope, LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput,
+    ProcessExecutionContext, ProcessListMode, ProcessRecord, ProcessRegistration, SessionScope,
 };
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
+#[cfg(test)]
+use super::identity_types::process_transfer_set_preimage;
+use super::identity_types::{
+    RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
+    process_transfer_set_identity,
+};
 
-const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
-
-/// Permanent tag registry for process-transfer set identities.
-///
-/// Version 1 has no sum variants: it preserves the caller's ordered process
-/// id sequence. Retired tags remain burned when variants are introduced.
-fn process_transfer_set_preimage(process_ids: &[ProcessId]) -> Vec<u8> {
-    let mut identity = crate::stable_identity::IdentityEncoder::new(
-        "lash.process-transfer-set",
-        PROCESS_TRANSFER_FAMILY_VERSION,
-    );
-    identity.sequence(process_ids, |identity, process_id| {
-        identity.string(process_id);
-    });
-    identity.finish()
-}
-
-fn process_transfer_set_identity(process_ids: &[ProcessId]) -> String {
-    crate::stable_identity::rendered_hash(
-        "process-transfer-set",
-        PROCESS_TRANSFER_FAMILY_VERSION,
-        &process_transfer_set_preimage(process_ids),
-    )
-}
-
-/// Durable category for a runtime effect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeEffectKind {
-    LlmCall,
-    /// Phase 2 of the staged LLM-call boundary: host response hooks derive a
-    /// transformed response from the raw completion phase 1 already journaled.
-    AssistantResponseHooks,
-    Direct,
-    ToolAttempt,
-    ToolBatch,
-    ToolParentEnd,
-    Trigger,
-    Process,
-    ExecCode,
-    /// Durable admission of a turn input (ADR 0069 §6).
-    ///
-    /// Acceptance happens before the turn runs, which puts it inside a durable
-    /// engine's replay window. Journaling it lets replay re-derive the
-    /// admission from the recorded result instead of admitting the turn twice.
-    AcceptTurnInput,
-    Checkpoint,
-    SyncExecutionEnvironment,
-    Sleep,
-    AwaitEvent,
-    PeekAwaitEvent,
-    LanguageRuntimeValue,
-}
-
-impl RuntimeEffectKind {
-    /// Exposes the stable snake-case kind label effect-host implementors persist in replay
-    /// diagnostics.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::LlmCall => "llm_call",
-            Self::AssistantResponseHooks => "assistant_response_hooks",
-            Self::Direct => "direct",
-            Self::ToolAttempt => "tool_attempt",
-            Self::ToolBatch => "tool_batch",
-            Self::ToolParentEnd => "tool_parent_end",
-            Self::Trigger => "trigger",
-            Self::Process => "process",
-            Self::ExecCode => "exec_code",
-            Self::AcceptTurnInput => "accept_turn_input",
-            Self::Checkpoint => "checkpoint",
-            Self::SyncExecutionEnvironment => "sync_execution_environment",
-            Self::Sleep => "sleep",
-            Self::AwaitEvent => "await_event",
-            Self::PeekAwaitEvent => "peek_await_event",
-            Self::LanguageRuntimeValue => "language_runtime_value",
-        }
-    }
-}
+pub(super) const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 
 /// Canonical lineage for a runtime-side invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeInvocation {
-    pub scope: RuntimeScope,
+    pub attribution: RuntimeAttribution,
     pub subject: RuntimeSubject,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caused_by: Option<CausalRef>,
@@ -112,25 +40,21 @@ pub struct RuntimeInvocation {
 }
 
 impl RuntimeInvocation {
-    /// Constructs a replay-scoped effect invocation for effect-host implementors, binding the
-    /// effect ID, kind, and replay key before nondeterministic work begins.
+    /// Constructs the general causal-fact projection of an effect invocation.
     pub fn effect(
-        scope: RuntimeScope,
+        address: EffectAddress,
+        attribution: RuntimeAttribution,
         effect_id: impl Into<String>,
-        kind: RuntimeEffectKind,
-        replay_key: impl Into<String>,
     ) -> Self {
         Self {
-            scope,
+            attribution,
             subject: RuntimeSubject::Effect {
+                address,
                 effect_id: effect_id.into(),
-                kind,
+                replay_attribution: None,
             },
             caused_by: None,
-            replay: Some(RuntimeReplay {
-                key: replay_key.into(),
-                attribution: None,
-            }),
+            replay: None,
         }
     }
 
@@ -150,11 +74,10 @@ impl RuntimeInvocation {
         }
     }
 
-    /// Exposes the declared kind to effect-host implementors only for effect subjects, returning
-    /// `None` for other invocation subjects.
-    pub fn effect_kind(&self) -> Option<RuntimeEffectKind> {
+    /// Exposes the admitted address only for effect subjects.
+    pub fn effect_address(&self) -> Option<&EffectAddress> {
         match &self.subject {
-            RuntimeSubject::Effect { kind, .. } => Some(*kind),
+            RuntimeSubject::Effect { address, .. } => Some(address),
             _ => None,
         }
     }
@@ -162,17 +85,40 @@ impl RuntimeInvocation {
     /// Exposes replay key to store, effect-host, and protocol implementors while materializing,
     /// executing, or persisting a session turn. Returns `None` when no replay key is present.
     pub fn replay_key(&self) -> Option<&str> {
-        self.replay.as_ref().map(|replay| replay.key.as_str())
+        self.effect_address()
+            .map(|address| address.replay_key.as_str())
+            .or_else(|| self.replay.as_ref().map(|replay| replay.key.as_str()))
+    }
+
+    pub fn replay_attribution(&self) -> Option<&RuntimeReplayAttribution> {
+        match &self.subject {
+            RuntimeSubject::Effect {
+                replay_attribution, ..
+            } => replay_attribution.as_ref(),
+            _ => self
+                .replay
+                .as_ref()
+                .and_then(|replay| replay.attribution.as_ref()),
+        }
+    }
+
+    #[must_use]
+    pub fn with_replay_attribution(mut self, attribution: RuntimeReplayAttribution) -> Self {
+        match &mut self.subject {
+            RuntimeSubject::Effect {
+                replay_attribution, ..
+            } => *replay_attribution = Some(attribution),
+            _ => panic!("runtime replay attribution can only be attached to an effect subject"),
+        }
+        self
     }
 
     /// Projects stable causal identity for protocol and effect-host implementors; each invocation
     /// subject maps to its corresponding causal-reference variant.
     pub fn causal_ref(&self) -> Option<CausalRef> {
         match &self.subject {
-            RuntimeSubject::Effect { effect_id, .. } => Some(CausalRef::Effect {
-                session_id: self.scope.session_id.clone(),
-                turn_id: self.scope.turn_id.clone(),
-                effect_id: effect_id.clone(),
+            RuntimeSubject::Effect { address, .. } => Some(CausalRef::Effect {
+                address: address.clone(),
             }),
             RuntimeSubject::Process { process_id } => Some(CausalRef::Process {
                 process_id: process_id.clone(),
@@ -185,104 +131,200 @@ impl RuntimeInvocation {
                 process_id: process_id.clone(),
                 sequence: *sequence,
             }),
-            RuntimeSubject::TriggerOccurrence { occurrence_id } => {
-                Some(CausalRef::TriggerOccurrence {
-                    occurrence_id: occurrence_id.clone(),
-                    subscription_id: None,
-                    subscription_incarnation: None,
-                    subscription_revision: None,
-                })
-            }
-            RuntimeSubject::SessionNode { node_id } => Some(CausalRef::SessionNode {
-                session_id: self.scope.session_id.clone(),
+            RuntimeSubject::TriggerOccurrence {
+                occurrence_id,
+                subscription_id,
+                subscription_incarnation,
+                subscription_revision,
+            } => Some(CausalRef::TriggerOccurrence {
+                occurrence_id: occurrence_id.clone(),
+                subscription_id: subscription_id.clone(),
+                subscription_incarnation: subscription_incarnation.clone(),
+                subscription_revision: *subscription_revision,
+            }),
+            RuntimeSubject::SessionNode {
+                session_id,
+                node_id,
+            } => Some(CausalRef::SessionNode {
+                session_id: session_id.clone(),
                 node_id: node_id.clone(),
             }),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeScope {
-    pub session_id: SessionId,
+/// Effect-specific header whose address is present by construction.
+///
+/// Unlike [`RuntimeInvocation`], this cannot represent a process, trigger, or
+/// session-node subject and cannot carry a second optional replay key. The
+/// descriptive `effect_id` does not participate in journal identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RuntimeEffectInvocation {
+    pub address: EffectAddress,
+    pub effect_id: String,
+    #[serde(default, skip_serializing_if = "RuntimeAttribution::is_none")]
+    pub attribution: RuntimeAttribution,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<TurnId>,
+    pub caused_by: Option<CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_index: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_iteration: Option<usize>,
+    pub replay_attribution: Option<RuntimeReplayAttribution>,
 }
 
-impl RuntimeScope {
-    /// Constructs a `RuntimeScope` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
-    pub fn new(session_id: impl Into<SessionId>) -> Self {
-        Self {
-            session_id: session_id.into(),
-            turn_id: None,
-            turn_index: None,
-            protocol_iteration: None,
-        }
-    }
-
-    /// Constructs the complete turn scope effect-host implementors persist with an effect,
-    /// including turn index and protocol iteration.
-    pub fn for_turn(
-        session_id: impl Into<SessionId>,
-        turn_id: impl Into<TurnId>,
-        turn_index: usize,
-        protocol_iteration: usize,
+impl RuntimeEffectInvocation {
+    pub fn new(
+        address: EffectAddress,
+        attribution: RuntimeAttribution,
+        effect_id: impl Into<String>,
     ) -> Self {
-        Self {
-            session_id: session_id.into(),
-            turn_id: Some(turn_id.into()),
-            turn_index: Some(turn_index),
-            protocol_iteration: Some(protocol_iteration),
+        Self::try_new(address, attribution, effect_id).expect("valid runtime effect invocation")
+    }
+
+    pub fn try_new(
+        address: EffectAddress,
+        attribution: RuntimeAttribution,
+        effect_id: impl Into<String>,
+    ) -> Result<Self, RuntimeEffectControllerError> {
+        let invocation = Self {
+            address,
+            effect_id: effect_id.into(),
+            attribution,
+            caused_by: None,
+            replay_attribution: None,
+        };
+        invocation.validate()?;
+        Ok(invocation)
+    }
+
+    pub fn validate(&self) -> Result<(), RuntimeEffectControllerError> {
+        if self.effect_id.trim().is_empty() {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
+                "runtime effect envelope effect id must be non-empty",
+            ));
         }
+        self.address.validate().map_err(|error| {
+            let code = match error {
+                lash_sansio::EffectIdentityError::MissingExecutionScopeId => {
+                    crate::RuntimeErrorCode::MissingExecutionScopeId
+                }
+                lash_sansio::EffectIdentityError::MissingReplayKey => {
+                    crate::RuntimeErrorCode::RuntimeEffectReplayRequired
+                }
+            };
+            RuntimeEffectControllerError::new(code, error.to_string())
+        })?;
+        self.attribution.validate()
+    }
+
+    #[must_use]
+    pub fn with_caused_by(mut self, caused_by: Option<CausalRef>) -> Self {
+        self.caused_by = caused_by;
+        self
+    }
+
+    #[must_use]
+    pub fn with_replay_attribution(mut self, attribution: RuntimeReplayAttribution) -> Self {
+        self.replay_attribution = Some(attribution);
+        self
+    }
+
+    pub fn into_runtime_invocation(self) -> RuntimeInvocation {
+        RuntimeInvocation {
+            attribution: self.attribution,
+            subject: RuntimeSubject::Effect {
+                address: self.address,
+                effect_id: self.effect_id,
+                replay_attribution: self.replay_attribution,
+            },
+            caused_by: self.caused_by,
+            replay: None,
+        }
+    }
+
+    pub fn address(&self) -> &EffectAddress {
+        &self.address
+    }
+
+    pub fn effect_id(&self) -> &str {
+        &self.effect_id
+    }
+
+    pub fn replay_key(&self) -> &str {
+        &self.address.replay_key
+    }
+
+    pub fn replay_attribution(&self) -> Option<&RuntimeReplayAttribution> {
+        self.replay_attribution.as_ref()
+    }
+
+    pub fn causal_ref(&self) -> CausalRef {
+        CausalRef::Effect {
+            address: self.address.clone(),
+        }
+    }
+
+    pub fn execution_scope(&self) -> &ExecutionScope {
+        &self.address().execution_scope
+    }
+
+    /// Proves that this invocation belongs to the controller scope which is
+    /// about to admit it. Callers use this before capture, storage, or local
+    /// execution so a mismatched address cannot create partial durable state.
+    pub fn validate_execution_scope(
+        &self,
+        admitted_scope: &ExecutionScope,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        if self.execution_scope() == admitted_scope {
+            return Ok(());
+        }
+        Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectScopeMismatch,
+            format!(
+                "effect address scope {:?} does not match admitted controller scope {:?}",
+                self.execution_scope(),
+                admitted_scope
+            ),
+        ))
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeReplay {
-    pub key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attribution: Option<RuntimeReplayAttribution>,
+impl<'de> Deserialize<'de> for RuntimeEffectInvocation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            address: EffectAddress,
+            effect_id: String,
+            #[serde(default)]
+            attribution: RuntimeAttribution,
+            #[serde(default)]
+            caused_by: Option<CausalRef>,
+            #[serde(default)]
+            replay_attribution: Option<RuntimeReplayAttribution>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let mut invocation = Self::try_new(wire.address, wire.attribution, wire.effect_id)
+            .map_err(serde::de::Error::custom)?;
+        invocation.caused_by = wire.caused_by;
+        invocation.replay_attribution = wire.replay_attribution;
+        Ok(invocation)
+    }
 }
 
-/// Structural attribution for a durable replay entry. Consumers must use this
-/// tag rather than infer ownership from replay-key spelling.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "identity", rename_all = "snake_case")]
-pub enum RuntimeReplayAttribution {
-    ToolIntent(crate::ToolIntentIdentity),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RuntimeSubject {
-    Effect {
-        effect_id: String,
-        kind: RuntimeEffectKind,
-    },
-    Process {
-        process_id: ProcessId,
-    },
-    ProcessEvent {
-        process_id: ProcessId,
-        sequence: u64,
-        event_type: String,
-    },
-    TriggerOccurrence {
-        occurrence_id: String,
-    },
-    SessionNode {
-        node_id: String,
-    },
+impl From<RuntimeEffectInvocation> for RuntimeInvocation {
+    fn from(invocation: RuntimeEffectInvocation) -> Self {
+        invocation.into_runtime_invocation()
+    }
 }
 
 /// Fully serializable envelope emitted at Lash's nondeterministic boundary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuntimeEffectEnvelope {
-    pub invocation: RuntimeInvocation,
+    pub invocation: RuntimeEffectInvocation,
     pub command: RuntimeEffectCommand,
     /// This effect's membership in a durable effect group, when it is a group
     /// child (FIG-1416).
@@ -297,23 +339,23 @@ pub struct RuntimeEffectEnvelope {
 
 // Measured 600 B on rustc 1.97.0, x86_64-unknown-linux-gnu after the
 // endpoint-aware replay route and typed tool-intent attribution cutovers.
-const _: () = assert!(std::mem::size_of::<RuntimeEffectEnvelope>() <= 640);
+const _: () = assert!(std::mem::size_of::<RuntimeEffectEnvelope>() <= 1024);
 
 impl RuntimeEffectEnvelope {
     /// Constructs a validated effect envelope for effect-host implementors and panics if the
     /// invocation and command violate the durable-effect contract.
-    pub fn new(invocation: RuntimeInvocation, command: RuntimeEffectCommand) -> Self {
+    pub fn new(invocation: RuntimeEffectInvocation, command: RuntimeEffectCommand) -> Self {
         Self::try_new(invocation, command).expect("valid runtime effect invocation")
     }
 
-    /// Validates and constructs an effect envelope for effect-host implementors: the subject must
-    /// be a non-empty effect with a replay key and matching command kind, and tool attempts and
-    /// batches must carry valid indices and IDs.
+    /// Validates and constructs an effect envelope for effect-host implementors. The admitted
+    /// address and descriptive effect label must be valid, and tool attempts and batches must
+    /// carry valid indices and IDs.
     pub fn try_new(
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         command: RuntimeEffectCommand,
     ) -> Result<Self, RuntimeEffectControllerError> {
-        validate_effect_invocation(&invocation, command.kind())?;
+        invocation.validate()?;
         validate_effect_command(&command)?;
         Ok(Self {
             invocation,
@@ -365,45 +407,6 @@ impl RuntimeEffectEnvelope {
     ) -> Result<super::CanonicalRuntimeEffectEnvelope, RuntimeEffectControllerError> {
         super::CanonicalRuntimeEffectEnvelope::capture(self)
     }
-}
-
-fn validate_effect_invocation(
-    invocation: &RuntimeInvocation,
-    command_kind: RuntimeEffectKind,
-) -> Result<(), RuntimeEffectControllerError> {
-    let RuntimeSubject::Effect { effect_id, kind } = &invocation.subject else {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
-            "runtime effect envelope subject must be an effect",
-        ));
-    };
-    if effect_id.trim().is_empty() {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
-            "runtime effect envelope effect id must be non-empty",
-        ));
-    }
-    if *kind != command_kind {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectInvocationKind,
-            format!(
-                "runtime effect invocation kind {} does not match command kind {}",
-                kind.as_str(),
-                command_kind.as_str()
-            ),
-        ));
-    }
-    if invocation
-        .replay
-        .as_ref()
-        .is_none_or(|replay| replay.key.is_empty())
-    {
-        return Err(RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectReplayRequired,
-            "runtime effect envelope requires replay.key",
-        ));
-    }
-    Ok(())
 }
 
 fn validate_effect_command(
@@ -1423,8 +1426,14 @@ impl RuntimeEffectOutcome {
 mod rejection_tests {
     use super::*;
 
-    fn invocation(kind: RuntimeEffectKind) -> RuntimeInvocation {
-        RuntimeInvocation::effect(RuntimeScope::new("session"), "effect", kind, "replay")
+    fn invocation(kind: RuntimeEffectKind) -> RuntimeEffectInvocation {
+        let _ = kind;
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(ExecutionScope::runtime_operation("session"), "replay")
+                .expect("valid rejection-test address"),
+            RuntimeAttribution::for_session("session"),
+            "effect",
+        )
     }
 
     fn hex(bytes: &[u8]) -> String {
@@ -1473,7 +1482,7 @@ mod rejection_tests {
     }
 
     fn assert_rejected(
-        invocation: RuntimeInvocation,
+        invocation: RuntimeEffectInvocation,
         command: RuntimeEffectCommand,
         expected_code: &str,
     ) {
@@ -1483,58 +1492,81 @@ mod rejection_tests {
     }
 
     #[test]
-    fn rejects_non_effect_subject() {
-        let mut value = invocation(RuntimeEffectKind::Sleep);
-        value.subject = RuntimeSubject::Process {
-            process_id: ProcessId::from("process"),
-        };
-        assert_rejected(
-            value,
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
-            "runtime_effect_invocation_subject",
-        );
-    }
-
-    #[test]
     fn rejects_empty_effect_id() {
+        let error = RuntimeEffectInvocation::try_new(
+            EffectAddress::new(ExecutionScope::runtime_operation("session"), "replay")
+                .expect("valid rejection-test address"),
+            RuntimeAttribution::for_session("session"),
+            "  ",
+        )
+        .expect_err("empty descriptive labels are refused");
+        assert_eq!(error.code.as_str(), "runtime_effect_invocation_subject");
+    }
+
+    #[test]
+    fn rejects_empty_address_replay_key() {
+        let mut empty_address = invocation(RuntimeEffectKind::Sleep);
+        empty_address.address.replay_key.clear();
         assert_rejected(
-            RuntimeInvocation::effect(
-                RuntimeScope::new("session"),
-                "  ",
-                RuntimeEffectKind::Sleep,
-                "replay",
-            ),
+            empty_address,
             RuntimeEffectCommand::Sleep { duration_ms: 1 },
-            "runtime_effect_invocation_subject",
+            "runtime_effect_replay_required",
         );
     }
 
     #[test]
-    fn rejects_invocation_command_kind_mismatch() {
-        assert_rejected(
-            invocation(RuntimeEffectKind::AwaitEvent),
-            RuntimeEffectCommand::Sleep { duration_ms: 1 },
-            "runtime_effect_invocation_kind",
+    fn effect_header_round_trips_without_universal_subject_or_replay_slots() {
+        let invocation =
+            invocation(RuntimeEffectKind::Sleep).with_caused_by(Some(CausalRef::Process {
+                process_id: ProcessId::from("process"),
+            }));
+        let encoded = serde_json::to_value(&invocation).expect("effect header encodes");
+        assert!(encoded.get("address").is_some());
+        assert!(encoded.get("subject").is_none());
+        assert!(encoded.get("replay").is_none());
+        assert_eq!(
+            serde_json::from_value::<RuntimeEffectInvocation>(encoded)
+                .expect("effect header decodes"),
+            invocation
         );
     }
 
     #[test]
-    fn rejects_missing_or_empty_replay_key() {
-        for replay in [
-            None,
-            Some(RuntimeReplay {
-                key: String::new(),
-                attribution: None,
-            }),
-        ] {
-            let mut value = invocation(RuntimeEffectKind::Sleep);
-            value.replay = replay;
-            assert_rejected(
-                value,
-                RuntimeEffectCommand::Sleep { duration_ms: 1 },
-                "runtime_effect_replay_required",
-            );
-        }
+    fn legacy_universal_effect_header_is_refused() {
+        let legacy = serde_json::to_value(RuntimeInvocation::effect(
+            EffectAddress::new(ExecutionScope::runtime_operation("session"), "replay")
+                .expect("valid legacy address"),
+            RuntimeAttribution::for_session("session"),
+            "effect",
+        ))
+        .expect("legacy header encodes");
+        assert!(serde_json::from_value::<RuntimeEffectInvocation>(legacy).is_err());
+    }
+
+    #[test]
+    fn session_node_identity_is_structural_and_missing_identity_is_refused() {
+        let invocation = RuntimeInvocation {
+            attribution: RuntimeAttribution::none(),
+            subject: RuntimeSubject::SessionNode {
+                session_id: SessionId::from("session"),
+                node_id: "node".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        };
+        assert_eq!(
+            serde_json::from_value::<RuntimeInvocation>(
+                serde_json::to_value(&invocation).expect("session-node invocation encodes")
+            )
+            .expect("session-node invocation decodes")
+            .causal_ref(),
+            invocation.causal_ref()
+        );
+        let missing = serde_json::json!({
+            "attribution": {},
+            "subject": {"type": "session_node", "node_id": "node"}
+        });
+        assert!(serde_json::from_value::<RuntimeInvocation>(missing).is_err());
     }
 
     #[test]

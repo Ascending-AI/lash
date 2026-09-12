@@ -3,11 +3,14 @@ use super::*;
 fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffectOutcome) {
     let call_id = "continue-as-call";
     let envelope = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cutover-session", "cutover-turn", 3, 1),
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn("cutover-session", "cutover-turn"),
+                "continue-as-attempt-replay",
+            )
+            .expect("valid cutover effect address"),
+            lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 3, 1),
             "continue-as-attempt",
-            RuntimeEffectKind::ToolAttempt,
-            "continue-as-attempt-replay",
         ),
         RuntimeEffectCommand::ToolAttempt {
             call: lash_core::PreparedToolCall::from_parts(
@@ -113,6 +116,6 @@ async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
     };
     assert_eq!(
         error.to_string(),
-        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 17, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.\")"
+        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 18, but the database reports version 8. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.\")"
     );
 }

@@ -1239,7 +1239,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
         .await
         .expect("register workflow process");
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
-        runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-effect"),
+        runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-effect").into_runtime_invocation(),
     ));
 
     let output = workflow

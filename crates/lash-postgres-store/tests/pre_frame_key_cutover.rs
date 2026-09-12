@@ -1,6 +1,6 @@
 use lash_core::{
-    ExecutionScope, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ExecutionScope, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_sansio::SessionId;
@@ -48,11 +48,14 @@ fn completed_continue_as_effect_fixture() -> (lash_core::RuntimeEffectEnvelope, 
 {
     let call_id = "continue-as-call";
     let envelope = lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cutover-session", "cutover-turn", 3, 1),
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn("cutover-session", "cutover-turn"),
+                "continue-as-attempt-replay",
+            )
+            .expect("valid cutover effect address"),
+            lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 3, 1),
             "continue-as-attempt",
-            RuntimeEffectKind::ToolAttempt,
-            "continue-as-attempt-replay",
         ),
         RuntimeEffectCommand::ToolAttempt {
             call: lash_core::PreparedToolCall::from_parts(
@@ -170,6 +173,6 @@ async fn postgres_refuses_completed_pre_frame_key_continue_as_at_open_when_confi
     };
     assert_eq!(
         message,
-        "store backend error: Postgres schema component `lash-postgres-store` has version 43, expected 85. The component schema is normally a reject-and-recreate boundary. This build has legacy declarations from component-50 through component-61 plus the component-62 forward migration, but every published pre-61 graph shape carries the retired sequence column and is refused before migration DDL can run. Component 61 is a hard append-identity cutover with no applicable migration. This mismatch has no applicable migration. Drain affected sessions and recreate the whole Lash trust domain with this version: provision the database from this build's schema.sql artifact, and reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions. This gate is unconditional; SchemaCheck::WarnOnly does not relax it."
+        "store backend error: Postgres schema component `lash-postgres-store` has version 43, expected 86. The component schema is normally a reject-and-recreate boundary. This build has legacy declarations from component-50 through component-61 plus the component-62 forward migration, but every published pre-61 graph shape carries the retired sequence column and is refused before migration DDL can run. Component 61 is a hard append-identity cutover with no applicable migration. This mismatch has no applicable migration. Drain affected sessions and recreate the whole Lash trust domain with this version: provision the database from this build's schema.sql artifact, and reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions. This gate is unconditional; SchemaCheck::WarnOnly does not relax it."
     );
 }
