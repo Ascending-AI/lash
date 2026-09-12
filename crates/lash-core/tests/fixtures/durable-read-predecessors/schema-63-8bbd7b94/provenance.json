@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 63,
+  "source_commit": "8bbd7b9466129f53b9901ef7d0ce19045df38e21",
+  "relationship": "main baseline immediately before the FIG-2960 required lifecycle cutover",
+  "artifacts": {
+    "sqlite-expected.json": "f6c4ffee2336ebed3be30b148b3ae739ca846ebc1e1ccd318fa055d8e4ff7e2a",
+    "postgres-expected.json": "4e8fa03f4c0839f93cb0b0fd47cfb27abf09859c0304de071ff33ff81b24e84f"
+  }
+}

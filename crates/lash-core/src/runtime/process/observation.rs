@@ -422,6 +422,10 @@ mod tests {
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         )
     }
 
@@ -846,9 +850,17 @@ mod tests {
                 ProcessInput::External { .. } => RecoveryContract::ExternallyOwned,
                 _ => RecoveryContract::Rerunnable,
             };
-            let mut registration =
-                ProcessRegistration::new(process_id, input, disposition, ProcessProvenance::host())
-                    .with_identity(ProcessIdentity::new(kind).with_label(Some(label.to_string())));
+            let mut registration = ProcessRegistration::new(
+                process_id,
+                input,
+                disposition,
+                ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            )
+            .with_identity(ProcessIdentity::new(kind).with_label(Some(label.to_string())));
             if needs_env {
                 registration = registration.with_execution_env_ref(Some(
                     ProcessExecutionEnvRef::new(format!("process-env:test:{process_id}")),

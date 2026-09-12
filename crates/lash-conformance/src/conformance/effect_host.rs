@@ -2454,8 +2454,11 @@ fn replay_conformance_tool_attempt_outcome(
                         format!("{call_id}:intent-child"),
                         crate::ProcessOriginator::host_scoped("effect-host-conformance"),
                         serde_json::json!({"tool": tool_name}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 },
             ))]),
         }),

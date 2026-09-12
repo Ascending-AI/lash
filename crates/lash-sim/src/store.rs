@@ -1239,8 +1239,11 @@ impl ModelStore {
                         format!("{effect_id}:intent-child"),
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
                         json!({"durable_key": durable_key}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                 },
             ))]);
         let (result_digest, projected_result, execution_count, replay_count, replayed) =

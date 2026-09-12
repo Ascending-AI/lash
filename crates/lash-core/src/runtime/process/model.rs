@@ -497,12 +497,53 @@ impl ProcessStartOptions {
     }
 }
 
+/// The host-selected action when a process's parent scope ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OnParentEnd {
+    Abandon,
+    Cancel,
+}
+
+/// Durable scope whose end controls a child's lifecycle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ParentScope {
+    Turn {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
+    Process {
+        process_id: ProcessId,
+        incarnation: ProcessIncarnation,
+    },
+    Host,
+}
+
+/// Required lifecycle facts selected by the process's author or host.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ProcessLifecyclePolicy {
+    pub parent: ParentScope,
+    pub on_parent_end: OnParentEnd,
+}
+
+impl ProcessLifecyclePolicy {
+    /// Declare the parent and its end action for a process start.
+    pub fn new(parent: ParentScope, on_parent_end: OnParentEnd) -> Self {
+        Self {
+            parent,
+            on_parent_end,
+        }
+    }
+}
+
 /// Public host-facing request for starting a visible process handle.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessStartRequest {
     pub id: ProcessId,
     pub input: ProcessInput,
     pub disposition: RecoveryContract,
+    pub lifecycle: ProcessLifecyclePolicy,
     /// Maximum execution attempts. `None` delegates pacing indefinitely to the
     /// engine; deterministic failures then require host cancellation or
     /// abandonment to resolve awaiters.
@@ -529,11 +570,13 @@ impl ProcessStartRequest {
         input: ProcessInput,
         disposition: RecoveryContract,
         originator: ProcessOriginator,
+        lifecycle: ProcessLifecyclePolicy,
     ) -> Self {
         Self {
             id: id.into(),
             input,
             disposition,
+            lifecycle,
             max_attempts: None,
             env_spec: None,
             originator,
@@ -550,12 +593,14 @@ impl ProcessStartRequest {
         id: impl Into<ProcessId>,
         originator: ProcessOriginator,
         metadata: serde_json::Value,
+        lifecycle: ProcessLifecyclePolicy,
     ) -> Self {
         Self::new(
             id,
             ProcessInput::External { metadata },
             RecoveryContract::ExternallyOwned,
             originator,
+            lifecycle,
         )
     }
 
@@ -625,6 +670,7 @@ impl ProcessStartRequest {
             self.input,
             self.disposition,
             ProcessProvenance::new(self.originator),
+            self.lifecycle,
         )
         .with_max_attempts(self.max_attempts)
         .with_event_types(self.event_types)
@@ -776,6 +822,7 @@ pub struct ProcessRegistration {
     pub id: ProcessId,
     pub input: Arc<ProcessInput>,
     pub disposition: RecoveryContract,
+    pub lifecycle: ProcessLifecyclePolicy,
     /// Maximum execution attempts, or `None` for engine-paced indefinite
     /// retry. A deterministic failure with `None` can remain non-terminal
     /// indefinitely; producers with deterministic failure modes should set an
@@ -798,6 +845,7 @@ impl Clone for ProcessRegistration {
             id: self.id.clone(),
             input: Arc::clone(&self.input),
             disposition: self.disposition,
+            lifecycle: self.lifecycle.clone(),
             max_attempts: self.max_attempts,
             identity: self.identity.clone(),
             event_types: self.event_types.clone(),
@@ -816,12 +864,14 @@ impl ProcessRegistration {
         input: ProcessInput,
         disposition: RecoveryContract,
         provenance: ProcessProvenance,
+        lifecycle: ProcessLifecyclePolicy,
     ) -> Self {
         let identity = ProcessIdentity::from_process_input(&input);
         Self {
             id: id.into(),
             input: Arc::new(input),
             disposition,
+            lifecycle,
             max_attempts: None,
             identity,
             event_types: default_process_event_types(),
@@ -837,7 +887,13 @@ impl ProcessRegistration {
         input: ProcessInput,
         disposition: RecoveryContract,
     ) -> Self {
-        Self::new(id, input, disposition, ProcessProvenance::host())
+        Self::new(
+            id,
+            input,
+            disposition,
+            ProcessProvenance::host(),
+            ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+        )
     }
 
     /// Sets the process provenance carried by a `ProcessRegistration` for store and
@@ -1005,6 +1061,7 @@ pub struct ProcessRecord {
     /// durable rows cannot deserialize and are handled by each store's schema
     /// version bump (reject-and-recreate), never by an API/serde default.
     pub disposition: RecoveryContract,
+    pub lifecycle: ProcessLifecyclePolicy,
     /// Persisted attempt budget; `None` retains engine-paced indefinite retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
@@ -1108,6 +1165,7 @@ impl ProcessRecord {
             registration_fingerprint,
             input: registration.input,
             disposition: registration.disposition,
+            lifecycle: registration.lifecycle,
             max_attempts: registration.max_attempts,
             identity: registration.identity,
             event_types: registration.event_types,

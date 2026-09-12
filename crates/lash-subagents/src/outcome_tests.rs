@@ -25,6 +25,10 @@ async fn registry_result(
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .unwrap();

@@ -572,6 +572,15 @@ impl HostBridge<'_> {
                 std::sync::Arc::clone(&self.artifact_store),
                 &parent_start_seed,
                 start,
+                self.ctx.trigger_actor(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    self.ctx
+                        .child_process_parent_scope()
+                        .await
+                        .map_err(|error| ExecutionHostError::new(error.to_string()))?,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+                lash_core::RecoveryContract::Rerunnable,
             )
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?
@@ -579,7 +588,7 @@ impl HostBridge<'_> {
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.start");
             self.ctx
-                .start_child_process(prepared.registration, LASHLANG_ENGINE_KIND, prepared.label)
+                .start_child_process(prepared.request, LASHLANG_ENGINE_KIND, prepared.label)
                 .await
         };
         let (result, host_record) = self.consume_reply(reply);

@@ -159,6 +159,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             registration_fingerprint: _,
             input,
             disposition,
+            lifecycle,
             max_attempts,
             identity,
             event_types,
@@ -179,6 +180,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             last_event_sequence,
             input: input.as_ref().clone().try_into()?,
             disposition: disposition.into(),
+            lifecycle: lifecycle.into(),
             max_attempts,
             identity: identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),
@@ -211,6 +213,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             last_event_sequence,
             input,
             disposition,
+            lifecycle,
             max_attempts,
             identity,
             event_types,
@@ -231,6 +234,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
                 input.try_into()?,
                 disposition.into(),
                 provenance.try_into()?,
+                lifecycle.try_into()?,
             )
             .with_max_attempts(max_attempts)
             .with_identity(identity.into())

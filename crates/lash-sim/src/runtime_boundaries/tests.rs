@@ -554,6 +554,10 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .expect("register seeded process");

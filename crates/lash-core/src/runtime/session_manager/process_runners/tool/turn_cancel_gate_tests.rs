@@ -289,6 +289,7 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
         crate::ProcessInput::ToolCall { call: call.clone() },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     );
     let cancellation = tokio_util::sync::CancellationToken::new();
     let (output, _) = services
@@ -357,6 +358,7 @@ async fn run_retrying_host_process_tool(
         crate::ProcessInput::ToolCall { call: call.clone() },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     );
     let (output, _) = services
         .run_process_tool_call(ProcessToolCallRun {

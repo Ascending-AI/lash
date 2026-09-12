@@ -17,6 +17,7 @@ mod completion_support;
 mod direct_completion;
 mod dispatch;
 pub(crate) mod orchestration;
+mod parent_scope;
 mod process;
 pub(crate) mod process_events;
 mod session;
@@ -131,6 +132,8 @@ pub(crate) enum ToolExecutionRoute {
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
     session_id: SessionId,
+    parent_scope: crate::ExecutionScope,
+    parent_process_query: Option<Arc<dyn crate::ProcessQuery>>,
     execution_scope_id: String,
     agent_frame_id: crate::FrameNodeId,
     sessions: AttemptSessionReads,
@@ -164,6 +167,34 @@ pub struct AttemptContext<'run> {
 }
 
 impl<'run> AttemptContext<'run> {
+    /// Resolve the runtime-owned parent scope for an explicit child lifecycle declaration.
+    pub async fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
+        match &self.parent_scope {
+            crate::ExecutionScope::Turn {
+                session_id,
+                turn_id,
+            } => Ok(crate::ParentScope::Turn {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            }),
+            crate::ExecutionScope::Process { process_id } => {
+                let query = self.parent_process_query.as_ref().ok_or_else(|| {
+                    PluginError::Session(
+                        "process parent scope requires process query authority".to_string(),
+                    )
+                })?;
+                let parent = query.resolve_process_ref(process_id).await?;
+                Ok(crate::ParentScope::Process {
+                    process_id: parent.process_id,
+                    incarnation: parent.incarnation,
+                })
+            }
+            crate::ExecutionScope::QueueDrain { .. }
+            | crate::ExecutionScope::SessionDelete { .. }
+            | crate::ExecutionScope::RuntimeOperation { .. } => Ok(crate::ParentScope::Host),
+        }
+    }
+
     pub(crate) fn from_tool_context(
         context: &ToolContext<'run>,
         execution_scope_id: String,
@@ -179,6 +210,21 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(|dispatch| dispatch.turn_context.provider().cloned());
         Self {
+            parent_scope: context.effect_controller.scoped().execution_scope().clone(),
+            parent_process_query: context
+                .process_events
+                .as_ref()
+                .map(|events| {
+                    let query: Arc<dyn crate::ProcessQuery> =
+                        events.process_work.registry().clone();
+                    query
+                })
+                .or_else(|| {
+                    context
+                        .runtime_execution_context
+                        .as_ref()
+                        .and_then(crate::RuntimeExecutionContext::child_process_query)
+                }),
             session_id: context.session_id.clone(),
             execution_scope_id,
             agent_frame_id: context.agent_frame_id.clone(),

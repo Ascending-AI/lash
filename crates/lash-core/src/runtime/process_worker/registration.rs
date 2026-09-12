@@ -7,6 +7,7 @@ pub(super) fn registration_from_record(record: ProcessRecord) -> ProcessRegistra
         id: record.id,
         input: record.input,
         disposition: record.disposition,
+        lifecycle: record.lifecycle,
         max_attempts: record.max_attempts,
         identity: record.identity,
         event_types: record.event_types,

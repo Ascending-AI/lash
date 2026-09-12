@@ -478,6 +478,12 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
         &self,
         call: lash_core::ToolCall<'_>,
     ) -> lash_core::ToolAttemptOutcome {
+        let parent_scope = call
+            .context
+            .child_process_parent_scope()
+            .await
+            .expect("recorded attempt carries its parent scope");
+
         self.calls.fetch_add(1, Ordering::SeqCst);
         let intent = match self.kind {
             PublicIntentKind::Signal => {
@@ -493,10 +499,15 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
                     session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         "pg-public-parent-end-child",
-                        lash_core::ProcessOriginator::host_scoped("pg-public-caller"),
+                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                            lash_core::SessionId::from(call.context.session_id()),
+                        )),
                         serde_json::json!({"source": "parent-end"}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            parent_scope.clone(),
+                            lash_core::OnParentEnd::Cancel,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
                 }))
             }
         };
@@ -870,6 +881,10 @@ async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegist
                 // on scheduler timing instead of the law's literal journal.
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.stdin".to_string(),
@@ -1095,8 +1110,11 @@ fn attempt_outcome(call_id: &str, value: &str) -> RuntimeEffectOutcome {
                         format!("{call_id}:recorded-child"),
                         lash_core::ProcessOriginator::host_scoped("pg-attempt-atomicity"),
                         serde_json::json!({"value": value}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                 }),
             )]),
         }),
@@ -2016,6 +2034,10 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     );
     let envelope = RuntimeEffectEnvelope::new(
         invocation,
@@ -2107,6 +2129,10 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
@@ -2294,6 +2320,10 @@ async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_po
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),

@@ -835,6 +835,12 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                     Some(session_id.clone()),
                 )
             });
+        if self.originator_override.is_some()
+            && matches!(originator, lash_core::ProcessOriginator::Host { .. })
+        {
+            // This fixture's override emulates a host-admin start, including its host parent.
+            registration.lifecycle.parent = lash_core::ParentScope::Host;
+        }
         registration = registration
             .with_process_provenance(lash_core::ProcessProvenance::new(originator))
             .with_wake_session_id(wake_session_id);
@@ -1109,6 +1115,16 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     let [record] = records.as_slice() else {
         panic!("expected exactly one started TypeScript process, got {records:?}");
     };
+    assert_eq!(
+        record.lifecycle,
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Turn {
+                session_id: SessionId::from("test-session"),
+                turn_id: lash_core::TurnId::from("test-turn")
+            },
+            lash_core::OnParentEnd::Abandon,
+        )
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let terminal = match tokio::time::timeout(
         std::time::Duration::from_secs(5),

@@ -306,6 +306,10 @@ fn external_registration(process_id: &ProcessId) -> lash_core::ProcessRegistrati
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_identity(lash_core::ProcessIdentity::new("test"))
 }
@@ -467,6 +471,10 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessOriginator::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ),
             start_scope,
         )
@@ -553,6 +561,10 @@ fn start_request(process_id: &ProcessId) -> lash_core::ProcessStartRequest {
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -732,7 +744,6 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
                     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                         session_id: SessionId::from(REUSE_SESSION.to_string()),
                         request: start_request(&ProcessId::from("host-chosen-id-is-replaced")),
-                        on_parent_end: Default::default(),
                     })),
                 )
                 .await;

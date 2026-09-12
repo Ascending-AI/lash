@@ -807,7 +807,7 @@ impl TryFrom<LashlangProcessInput> for lash_remote_protocol::RemoteProcessInput 
 
 #[derive(Clone, Debug)]
 pub struct PreparedLashlangProcessStart {
-    pub registration: lash_core::ProcessRegistration,
+    pub request: lash_core::ProcessStartRequest,
     pub label: Option<String>,
 }
 
@@ -815,6 +815,9 @@ pub async fn prepare_lashlang_process_start(
     artifact_store: Arc<dyn LashlangArtifactStore>,
     parent_start_seed: &str,
     start: lashlang::ProcessStart,
+    originator: lash_core::ProcessOriginator,
+    lifecycle: lash_core::ProcessLifecyclePolicy,
+    disposition: lash_core::RecoveryContract,
 ) -> Result<PreparedLashlangProcessStart, LashlangRuntimeError> {
     let display_name = Some(start.process_name.clone());
     let artifact = artifact_store
@@ -906,13 +909,12 @@ pub async fn prepare_lashlang_process_start(
     let process_input = process_input
         .into_process_input()
         .map_err(|source| LashlangRuntimeError::EncodeProcessInput { source })?;
-    let registration = lash_core::ProcessRegistration::new(
+    let request = lash_core::ProcessStartRequest::new(
         process_id,
         process_input,
-        // Lashlang engine rows are journaled and idempotent by process id, so
-        // recovery may re-execute them (ADR 0019).
-        lash_core::RecoveryContract::Rerunnable,
-        lash_core::ProcessProvenance::host(),
+        disposition,
+        originator,
+        lifecycle,
     )
     .with_identity(identity)
     .with_extra_event_types(
@@ -921,7 +923,7 @@ pub async fn prepare_lashlang_process_start(
             .chain(signal_event_types),
     );
     Ok(PreparedLashlangProcessStart {
-        registration,
+        request,
         label: display_name,
     })
 }

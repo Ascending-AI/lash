@@ -17,6 +17,10 @@ async fn claim_cannot_interleave_between_authority_validation_and_append() {
                 },
                 crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new("test-env"))),
         )

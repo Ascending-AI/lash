@@ -181,6 +181,10 @@ async fn fixtures() -> Fixtures {
                     },
                     disposition,
                     crate::ProcessProvenance::host(),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types(event_types.clone()),
                 &[SessionId::from(SESSION.to_string())],
@@ -710,8 +714,11 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
                 "ignored-by-stable-intent-id",
                 crate::ProcessOriginator::host_scoped("intent-test"),
                 serde_json::json!({"step": "start"}),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             ),
-            on_parent_end: crate::ProcessParentEndPolicy::Abandon,
         })),
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
@@ -851,6 +858,10 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "structural.note".to_string(),

@@ -440,6 +440,7 @@ impl RestateProcessIngressRunner {
             id: record.id,
             input: record.input,
             disposition: record.disposition,
+            lifecycle: record.lifecycle,
             max_attempts: record.max_attempts,
             identity: record.identity,
             event_types: record.event_types,

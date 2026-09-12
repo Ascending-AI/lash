@@ -86,6 +86,10 @@ impl LinkedTestProcess {
             self.process_input(),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_env_spec(process_env_spec())
         .with_extra_event_types(
@@ -344,6 +348,10 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(lash_core::ProcessIdentity::new("test")),
         )
@@ -427,6 +435,10 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(lash_core::ProcessIdentity::new("test")),
         )
@@ -1036,6 +1048,27 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
         all.iter().any(|process| process.process_id != process_id),
         "child process record"
     );
+    let parent = registry
+        .get_process(&ProcessId::from(process_id))
+        .await?
+        .expect("parent record");
+    let child_id = &all
+        .iter()
+        .find(|record| record.process_id != process_id)
+        .expect("child exists")
+        .process_id;
+    let child = registry.get_process(child_id).await?.expect("child record");
+    assert_eq!(child.disposition, lash_core::RecoveryContract::Rerunnable);
+    assert_eq!(
+        child.lifecycle,
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Process {
+                process_id: parent.id,
+                incarnation: parent.incarnation,
+            },
+            lash_core::OnParentEnd::Abandon,
+        )
+    );
     Ok(())
 }
 
@@ -1558,6 +1591,10 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         process_input,
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_env_spec(process_env_spec())
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types());
@@ -1592,7 +1629,6 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         lash_core::StartProcessIntent {
             session_id: SessionId::from(SESSION_ID),
             request: start_request,
-            on_parent_end: Default::default(),
         },
     ))]);
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -2021,6 +2057,10 @@ fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration
         },
         lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -2333,6 +2373,10 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
                     },
                     lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_identity(lash_core::ProcessIdentity::new("test")),
             )

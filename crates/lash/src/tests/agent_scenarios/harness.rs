@@ -355,6 +355,10 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                     lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
                         &case.session_id,
                     )),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_identity(lash_core::ProcessIdentity::new("test.awaited-child")),
                 std::slice::from_ref(&case.session_id),
@@ -712,6 +716,10 @@ impl AgentSessionTurnProcessScenario {
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
     }
 

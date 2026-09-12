@@ -526,8 +526,11 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
                         "runtime-scenario-intent-child",
                         crate::ProcessOriginator::host_scoped("runtime-scenario"),
                         serde_json::json!({"kind": "start"}),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
                     session_id: SessionId::from(session_id.clone()),
@@ -607,6 +610,10 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([
                 crate::ProcessEventType {

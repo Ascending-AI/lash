@@ -388,8 +388,11 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
                                                 "restate-positional-law",
                                             ),
                                             serde_json::json!({"captured": true}),
+                                            lash_core::ProcessLifecyclePolicy::new(
+                                                lash_core::ParentScope::Host,
+                                                lash_core::OnParentEnd::Abandon,
+                                            ),
                                         ),
-                                        on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                                     },
                                 )),
                             ]),
@@ -1183,6 +1186,10 @@ pub(super) async fn fig1293_seed_control_target(
                 // fixture.
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.stdin".to_string(),
@@ -1228,6 +1235,12 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
         &self,
         call: lash_core::ToolCall<'_>,
     ) -> lash_core::ToolAttemptOutcome {
+        let parent_scope = call
+            .context
+            .child_process_parent_scope()
+            .await
+            .expect("recorded attempt carries its parent scope");
+
         self.calls.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
@@ -1248,8 +1261,14 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
                                         }),
                                     },
                                     lash_core::RecoveryContract::Rerunnable,
-                                    lash_core::ProcessOriginator::host_scoped(
-                                        "restate-parent-end-law",
+                                    lash_core::ProcessOriginator::session(
+                                        lash_core::SessionScope::new(SessionId::from(
+                                            call.context.session_id(),
+                                        )),
+                                    ),
+                                    lash_core::ProcessLifecyclePolicy::new(
+                                        parent_scope.clone(),
+                                        lash_core::OnParentEnd::Cancel,
                                     ),
                                 )
                                 .with_env_spec(
@@ -1258,7 +1277,6 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
                                         lash_core::testing::mock_session_policy(),
                                     ),
                                 ),
-                                on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
                             },
                         ))
                     })

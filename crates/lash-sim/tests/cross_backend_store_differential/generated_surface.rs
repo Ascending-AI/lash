@@ -240,6 +240,12 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
         &self,
         call: lash_core::ToolCall<'_>,
     ) -> lash_core::ToolAttemptOutcome {
+        let parent_scope = call
+            .context
+            .child_process_parent_scope()
+            .await
+            .expect("recorded attempt carries its parent scope");
+
         assert_eq!(call.context.session_id(), SURFACE_SESSION);
         assert_eq!(call.context.execution_scope_id(), SURFACE_TURN);
         assert_eq!(call.context.tool_call_id(), Some("surface-intent-call"));
@@ -255,13 +261,16 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
                                 session_id: SessionId::from(SURFACE_SESSION.to_string()),
                                 request: lash_core::ProcessStartRequest::external(
                                     format!("ignored-derived-intent-id-{index}"),
-                                    ProcessOriginator::host_scoped("surface-differential"),
+                                    ProcessOriginator::session(SessionScope::new(SURFACE_SESSION)),
                                     serde_json::json!({
                                         "source": "literal-intent-row",
                                         "index": index,
                                     }),
+                                    lash_core::ProcessLifecyclePolicy::new(
+                                        parent_scope.clone(),
+                                        lash_core::OnParentEnd::Cancel,
+                                    ),
                                 ),
-                                on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
                             },
                         ))
                     })
@@ -653,6 +662,10 @@ impl SurfaceRunner {
                         lash_core::ProcessProvenance::new(ProcessOriginator::host_scoped(
                             "surface-differential",
                         )),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ))
                     .await
                     .map_err(|error| error.to_string())?;
