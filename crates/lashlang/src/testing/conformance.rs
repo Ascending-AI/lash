@@ -133,7 +133,10 @@ async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
 async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process beta(root: str) -> str { finish root }");
     let staged = execution_owner("module-transfer");
-    let process = ArtifactOwner::process("process-beta");
+    let process = ArtifactOwner::process(lash_core::ProcessRef::new(
+        "process-beta",
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    ));
     store
         .publish_module_artifact(&staged, &artifact)
         .await
@@ -215,6 +218,7 @@ async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactS
 
 async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     let ReopenableLashlangArtifactStore { open, reopen } = reopenable;
+    let open_identity = Arc::downgrade(&open);
     let artifact = sample_module_artifact("process epsilon(root: str) -> str { finish root }");
     let first = ArtifactOwner::host("reopen-host-first");
     let second = ArtifactOwner::host("reopen-host-second");
@@ -230,6 +234,10 @@ async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     drop(open);
 
     let reopened = reopen();
+    assert!(
+        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopened)),
+        "lashlang artifact reopen factory reused the writer handle"
+    );
     assert!(
         reopened
             .get_module_artifact(&artifact.module_ref)

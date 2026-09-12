@@ -495,7 +495,7 @@ pub(super) async fn restate_success_and_error_body_reads_share_the_request_deadl
         let (base_url, server) = spawn_restate_http_stalled_body(status, "{}").await;
         let client = RestateIngressClient::new(RestateConnection::with_config(
             base_url,
-            short_restate_timeouts(250, 500),
+            short_restate_timeouts(30, 500),
         ));
         let error = client
             .send_service_json("LashService", "run", &serde_json::json!({}))

@@ -334,8 +334,8 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
             .and_then(|version| u32::try_from(version).ok())
             .expect("recorded durable-read predecessor carries a u32 schema version");
         assert_eq!(
-            predecessor, 63,
-            "each frozen parent artifact is an actual pre-integration fixture"
+            predecessor, 64,
+            "the frozen predecessor artifact is the actual origin/main fixture"
         );
         assert_eq!(
             predecessor + 1,

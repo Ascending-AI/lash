@@ -651,7 +651,10 @@ impl ProcessEngineRegistry {
             return Ok(());
         };
         self.require(kind)?
-            .release_artifacts(&crate::ArtifactOwner::process(record.id.clone()), payload)
+            .release_artifacts(
+                &crate::ArtifactOwner::process(crate::ProcessRef::from_record(record)),
+                payload,
+            )
             .await
     }
 
@@ -666,7 +669,10 @@ impl ProcessEngineRegistry {
         };
         self.require(kind)?
             .release_artifacts(
-                &crate::ArtifactOwner::process(cleanup.process_id.clone()),
+                &crate::ArtifactOwner::process(crate::ProcessRef::new(
+                    cleanup.process_id.clone(),
+                    cleanup.incarnation,
+                )),
                 payload,
             )
             .await

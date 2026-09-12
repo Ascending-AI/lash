@@ -699,7 +699,10 @@ impl Processes {
                 .host_process_engines
                 .retire_artifact_owner(&staging_owner)
                 .await?;
-            let owner = lash_core::ArtifactOwner::process(cleanup.process_id.clone());
+            let owner = lash_core::ArtifactOwner::process(lash_core::ProcessRef::new(
+                cleanup.process_id.clone(),
+                cleanup.incarnation,
+            ));
             if let Some(env_ref) = cleanup.env_ref.as_ref() {
                 self.core
                     .env

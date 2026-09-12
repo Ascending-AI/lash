@@ -26,7 +26,6 @@ where
             execution_context,
         } => {
             let staging_owner = lash_core::ArtifactOwner::process_start(&registration.id);
-            let process_owner = lash_core::ArtifactOwner::process(registration.id.clone());
             let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
@@ -52,22 +51,10 @@ where
                 .await
                 {
                     Ok(env_ref) => (env_ref, true),
-                    Err(publish_error) => {
-                        match env_store
-                            .transfer_process_execution_env(
-                                &staging_owner,
-                                &process_owner,
-                                &expected_ref,
-                            )
-                            .await
-                        {
-                            Ok(()) => (expected_ref, true),
-                            Err(_) if artifact_owner_is_permanently_retired(&publish_error) => {
-                                (expected_ref, false)
-                            }
-                            Err(_) => return Err(publish_error.into()),
-                        }
+                    Err(publish_error) if artifact_owner_is_permanently_retired(&publish_error) => {
+                        (expected_ref, false)
                     }
+                    Err(publish_error) => return Err(publish_error.into()),
                 };
                 registration = registration.with_execution_env_ref(Some(env_ref.clone()));
                 Some((env_ref, bytes, staged))
@@ -90,13 +77,10 @@ where
                     .publish_process_execution_env(&staging_owner, env_ref, &bytes)
                     .await
                 {
-                    match env_store
-                        .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
-                        .await
-                    {
-                        Ok(()) => true,
-                        Err(_) if artifact_owner_is_permanently_retired(&publish_error) => false,
-                        Err(_) => return Err(publish_error.into()),
+                    if artifact_owner_is_permanently_retired(&publish_error) {
+                        false
+                    } else {
+                        return Err(publish_error.into());
                     }
                 } else {
                     true
@@ -118,18 +102,10 @@ where
                         .protect_start_artifacts(&staging_owner, payload)
                         .await
                     {
-                        if engine
-                            .transfer_start_artifacts(&staging_owner, &process_owner, payload)
-                            .await
-                            .is_err()
-                        {
-                            if artifact_owner_is_permanently_retired(&protect_error) {
-                                false
-                            } else {
-                                return Err(protect_error.into());
-                            }
+                        if artifact_owner_is_permanently_retired(&protect_error) {
+                            false
                         } else {
-                            true
+                            return Err(protect_error.into());
                         }
                     } else {
                         true
@@ -155,6 +131,8 @@ where
                 // authoritative process retirement owns their eventual permanent fence.
                 Err(error) => return Err(error.into()),
             };
+            let process_owner =
+                lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&record));
             if let (Some(store), Some((env_ref, bytes, staged))) =
                 (process_env_store.as_ref(), env_artifacts.as_ref())
             {

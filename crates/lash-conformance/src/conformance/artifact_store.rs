@@ -116,7 +116,10 @@ async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecutionEn
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
     let staged = execution_owner("env-transfer");
-    let process = crate::ArtifactOwner::process("env-process");
+    let process = crate::ArtifactOwner::process(crate::ProcessRef::new(
+        "env-process",
+        crate::ProcessIncarnation::from_registration_sequence(1),
+    ));
     store
         .publish_process_execution_env(&staged, &env_ref, &bytes)
         .await
@@ -180,6 +183,7 @@ async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExecutio
 
 async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvStore) {
     let ReopenableProcessExecutionEnvStore { open, reopen } = reopenable;
+    let open_identity = Arc::downgrade(&open);
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
@@ -196,6 +200,10 @@ async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvSt
         .expect("sever first owner before reopen");
     drop(open);
     let reopened = reopen();
+    assert!(
+        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopened)),
+        "process execution env reopen factory reused the writer handle"
+    );
     assert_eq!(
         reopened
             .get_process_execution_env(&env_ref)

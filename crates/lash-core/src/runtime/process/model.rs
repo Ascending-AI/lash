@@ -312,8 +312,9 @@ impl fmt::Display for ProcessExecutionEnvRef {
 pub enum ArtifactOwner {
     /// Host-managed publication retained until that host explicitly releases it.
     Host(String),
-    /// A durable process record retaining the bytes it references.
-    Process(ProcessId),
+    /// One incarnation of a durable process record retaining the bytes it
+    /// references. A reusable process name alone is not an owner identity.
+    Process(ProcessRef),
     /// A publication staged by replayable execution before ownership transfers
     /// to a registered process.
     Execution(crate::ExecutionScope),
@@ -326,8 +327,8 @@ impl ArtifactOwner {
     }
 
     /// Construct the owner represented by one durable process record.
-    pub fn process(id: impl Into<ProcessId>) -> Self {
-        Self::Process(id.into())
+    pub fn process(process_ref: ProcessRef) -> Self {
+        Self::Process(process_ref)
     }
 
     /// Construct the staging owner for one replayable execution scope.
@@ -346,7 +347,7 @@ impl ArtifactOwner {
     pub fn storage_parts(&self) -> Result<(&'static str, String), crate::PluginError> {
         let (kind, id) = match self {
             Self::Host(id) => ("host", id.clone()),
-            Self::Process(id) => ("process", id.to_string()),
+            Self::Process(process_ref) => ("process", process_ref.to_string()),
             Self::Execution(scope) => (
                 "execution",
                 scope

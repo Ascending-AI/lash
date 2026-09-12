@@ -15,8 +15,7 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/sqlite-expected.json",
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-41ad1609/sqlite-expected.json",
 ];
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]

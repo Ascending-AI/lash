@@ -1026,7 +1026,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 88);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 87);
 
 
 --
@@ -1059,7 +1059,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 -- Data for Name: lash_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 4, '{"schema_version":11,"session_id":"durable-read-fixture","config":{"provider_id":"","model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"turn_budget":"unbounded","prompt":{},"generation":{},"tool_access":{"mode":"ambient"},"subagent":null,"protocol_turn_options":{"schema_version":1,"payload":{}}},"current_frame_node_id":"frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940"}', 'b249f3a0536cbc5dba96c56913085e94e6bef2f5a3e3332ea6c6f01a0ca169a7', 'n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a');
+INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 4, '{"schema_version":10,"session_id":"durable-read-fixture","config":{"provider_id":"","model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"turn_budget":"unbounded","prompt":{},"generation":{},"tool_access":{"mode":"ambient"},"subagent":null,"protocol_turn_options":{"schema_version":1,"payload":{}}},"current_frame_node_id":"frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940"}', 'b249f3a0536cbc5dba96c56913085e94e6bef2f5a3e3332ea6c6f01a0ca169a7', 'n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a');
 
 
 --

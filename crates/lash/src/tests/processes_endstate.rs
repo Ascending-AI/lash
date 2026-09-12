@@ -469,18 +469,13 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
         )),
     });
     let process_id = ProcessId::from(format!("prune-recovery-{failing_store}"));
-    let process_owner = lash_core::ArtifactOwner::process(process_id.clone());
     let shared_owner = lash_core::ArtifactOwner::host(format!("shared-{failing_store}"));
     let env_spec = process_env_spec();
     let env_ref = env_spec.stable_ref().expect("stable environment ref");
     let env_bytes = env_spec.to_store_bytes().expect("environment bytes");
     env_store
-        .publish_process_execution_env(&process_owner, &env_ref, &env_bytes)
-        .await?;
-    env_store
         .publish_process_execution_env(&shared_owner, &env_ref, &env_bytes)
         .await?;
-    engine.retain(process_owner.clone());
     engine.retain(shared_owner.clone());
     let registered = registry
         .register_process(
@@ -496,6 +491,12 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
             .with_execution_env_ref(Some(env_ref.clone())),
         )
         .await?;
+    let process_owner =
+        lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&registered));
+    env_store
+        .publish_process_execution_env(&process_owner, &env_ref, &env_bytes)
+        .await?;
+    engine.retain(process_owner.clone());
     registry
         .complete_process(
             &registered.id,
@@ -2334,4 +2335,5 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     Ok(())
 }
 
+mod artifact_cleanup_round4;
 mod recovery_dispositions;

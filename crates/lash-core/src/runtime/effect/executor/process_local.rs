@@ -34,7 +34,6 @@ impl ProcessLocalExecution {
                 execution_context: _,
             } => {
                 let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
-                let process_owner = crate::ArtifactOwner::process(registration.id.clone());
                 let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                     let env_store = process_env_store.as_ref().ok_or_else(|| {
                         RuntimeEffectControllerError::foreign(
@@ -60,22 +59,12 @@ impl ProcessLocalExecution {
                     .await
                     {
                         Ok(env_ref) => (env_ref, true),
-                        Err(publish_error) => {
-                            match env_store
-                                .transfer_process_execution_env(
-                                    &staging_owner,
-                                    &process_owner,
-                                    &expected_ref,
-                                )
-                                .await
-                            {
-                                Ok(()) => (expected_ref, true),
-                                Err(_) if artifact_owner_is_permanently_retired(&publish_error) => {
-                                    (expected_ref, false)
-                                }
-                                Err(_) => return Err(publish_error.into()),
-                            }
+                        Err(publish_error)
+                            if artifact_owner_is_permanently_retired(&publish_error) =>
+                        {
+                            (expected_ref, false)
                         }
+                        Err(publish_error) => return Err(publish_error.into()),
                     };
                     registration = registration.with_execution_env_ref(Some(env_ref.clone()));
                     Some((env_ref, bytes, staged))
@@ -98,15 +87,10 @@ impl ProcessLocalExecution {
                         .publish_process_execution_env(&staging_owner, env_ref, &bytes)
                         .await
                     {
-                        match env_store
-                            .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
-                            .await
-                        {
-                            Ok(()) => true,
-                            Err(_) if artifact_owner_is_permanently_retired(&publish_error) => {
-                                false
-                            }
-                            Err(_) => return Err(publish_error.into()),
+                        if artifact_owner_is_permanently_retired(&publish_error) {
+                            false
+                        } else {
+                            return Err(publish_error.into());
                         }
                     } else {
                         true
@@ -125,18 +109,10 @@ impl ProcessLocalExecution {
                             .protect_start_artifacts(&staging_owner, payload)
                             .await
                         {
-                            if engine
-                                .transfer_start_artifacts(&staging_owner, &process_owner, payload)
-                                .await
-                                .is_err()
-                            {
-                                if artifact_owner_is_permanently_retired(&protect_error) {
-                                    false
-                                } else {
-                                    return Err(protect_error.into());
-                                }
+                            if artifact_owner_is_permanently_retired(&protect_error) {
+                                false
                             } else {
-                                true
+                                return Err(protect_error.into());
                             }
                         } else {
                             true
@@ -165,6 +141,8 @@ impl ProcessLocalExecution {
                         return Err(error.into());
                     }
                 };
+                let process_owner =
+                    crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record));
                 if let (Some(env_store), Some((env_ref, bytes, staged))) =
                     (process_env_store.as_ref(), env_artifacts.as_ref())
                 {
@@ -184,19 +162,12 @@ impl ProcessLocalExecution {
                 if let Some((engine, payload, staged)) = engine_artifacts {
                     if staged {
                         engine
-                            .transfer_start_artifacts(
-                                &staging_owner,
-                                &crate::ArtifactOwner::process(record.id.clone()),
-                                &payload,
-                            )
+                            .transfer_start_artifacts(&staging_owner, &process_owner, &payload)
                             .await?;
                         engine.retire_artifact_owner(&staging_owner).await?;
                     } else {
                         engine
-                            .protect_start_artifacts(
-                                &crate::ArtifactOwner::process(record.id.clone()),
-                                &payload,
-                            )
+                            .protect_start_artifacts(&process_owner, &payload)
                             .await?;
                     }
                 }
@@ -490,7 +461,7 @@ mod tests {
     use crate::ProcessExecutionEnvStore as _;
     use crate::ProcessId;
     use crate::TestProcessRegistryWriteExt as _;
-    use crate::{ProcessEventLog as _, ProcessRegistrar as _};
+    use crate::{ProcessEventLog as _, ProcessQuery as _, ProcessRegistrar as _};
 
     fn tool_registration(process_id: &str, marker: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
@@ -570,9 +541,17 @@ mod tests {
             .execute_effect(command, executor())
             .await
             .expect("replayed process start after staging retirement");
+        let record = registry
+            .get_process(&process_id)
+            .await
+            .expect("read registered process")
+            .expect("registered process remains live");
 
         env_store
-            .release_process_execution_env(&crate::ArtifactOwner::process(process_id), &env_ref)
+            .release_process_execution_env(
+                &crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record)),
+                &env_ref,
+            )
             .await
             .expect("release process environment owner");
         assert_eq!(

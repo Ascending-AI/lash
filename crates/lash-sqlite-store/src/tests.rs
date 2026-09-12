@@ -190,7 +190,9 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
                     lash_core::RuntimeAttribution::none(),
                     "late-effect",
                 ),
-                lash_core::RuntimeEffectCommand::Sleep { duration_ms: 0 },
+                lash_core::RuntimeEffectCommand::Sleep {
+                    spec: lash_core::SleepSpec::For { duration_ms: 0 },
+                },
             ),
             lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
                 Ok(lash_core::RuntimeEffectOutcome::Sleep)
@@ -1101,6 +1103,45 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
     assert_eq!(
         restored.process_ref("scan"),
         linked.artifact.process_ref("scan")
+    );
+}
+
+#[tokio::test]
+async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_handle() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("artifacts.db");
+    let releasing = Store::open(&path).await.expect("open releasing store");
+    let cached = Store::open(&path).await.expect("open caching store");
+    let module = lashlang::ModuleArtifact::from_program(
+        lashlang::parse("process cache_probe(root: str) -> str { finish root }")
+            .expect("parse module"),
+    )
+    .expect("build module artifact");
+    let owner = lash_core::ArtifactOwner::host("cross-handle-cache-owner");
+
+    releasing
+        .publish_module_artifact(&owner, &module)
+        .await
+        .expect("publish module through first handle");
+    assert!(
+        cached
+            .get_module_artifact(&module.module_ref)
+            .await
+            .expect("prime second handle cache")
+            .is_some()
+    );
+    releasing
+        .release_module_artifact(&owner, &module.module_ref)
+        .await
+        .expect("release final owner through first handle");
+
+    assert!(
+        cached
+            .get_module_artifact(&module.module_ref)
+            .await
+            .expect("read after cross-handle reclamation")
+            .is_none(),
+        "a handle-local cache must not resurrect durably reclaimed bytes"
     );
 }
 

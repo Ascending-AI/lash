@@ -493,10 +493,6 @@ impl lashlang::LashlangArtifactStore for Store {
                 "invalid module reference".into(),
             ));
         }
-        if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
-            return Ok(Some(artifact));
-        }
-
         let artifact_ref = module_ref.as_str().to_string();
         let Some(bytes) = self
             .get_artifact_ref_blob(
@@ -507,8 +503,12 @@ impl lashlang::LashlangArtifactStore for Store {
             .await
             .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?
         else {
+            self.artifact_cache.lock_recover().remove(module_ref);
             return Ok(None);
         };
+        if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
+            return Ok(Some(artifact));
+        }
         let artifact = Arc::new(
             lashlang::ModuleArtifact::from_store_bytes(&bytes)
                 .map_err(lashlang::ArtifactStoreError::from)?,
