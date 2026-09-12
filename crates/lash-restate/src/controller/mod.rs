@@ -1467,13 +1467,7 @@ pub(crate) fn restate_effect_execution(
 }
 
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {
-    // Restate consumes commands by journal ordinal before Lash can inspect the
-    // recorded envelope. Keep the pre-cutover lookup label for v2 tool intents
-    // so an in-flight v1 row reaches the shared validation seam and is refused
-    // as a typed format cutover instead of as an opaque SDK command mismatch.
-    let replay_key = lash_core::facade_support::legacy_tool_intent_v1_lookup_key(invocation)
-        .unwrap_or_else(|| invocation.replay_key().to_string());
-    format!("lash:{replay_key}")
+    format!("lash:{}", invocation.replay_key())
 }
 
 pub(crate) fn validate_recorded_effect_envelope(
