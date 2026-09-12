@@ -5,8 +5,8 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    PreparedToolCall, ToolCall, ToolContract, ToolExecutionGrant, ToolId, ToolManifest,
-    ToolOutcome, ToolPrepareCall, ToolProvider,
+    PreparedToolCall, ToolCall, ToolContract, ToolId, ToolManifest, ToolOutcome, ToolPrepareCall,
+    ToolProvider,
 };
 
 #[cfg(test)]

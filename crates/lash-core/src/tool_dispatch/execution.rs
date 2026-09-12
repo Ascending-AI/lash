@@ -19,8 +19,8 @@ use super::retry::execute_leaf_tool_attempt;
 /// deferred-resolution call carries its own out-of-catalog
 /// [`crate::ToolExecutionGrant`]. Both admit exactly one tool manifest, and
 /// every downstream difference between the two routes — the identifier guard,
-/// the execution binding, the execution seam, the attachment producer name —
-/// is a method on this value rather than a forked dispatch body.
+/// the execution binding, the source route, the attachment producer name — is
+/// a method on this value rather than a forked dispatch body.
 pub(super) enum AttemptAuthority<'grant> {
     /// Tool Catalog membership admitted the call; the manifest was resolved by
     /// the prepared tool id.
@@ -96,9 +96,9 @@ impl<'grant> AttemptAuthority<'grant> {
     fn apply_execution_binding<'run>(&self, tool_context: ToolContext<'run>) -> ToolContext<'run> {
         match self {
             Self::Catalog(_) => tool_context,
-            Self::Granted(grant) => {
-                tool_context.with_tool_execution_binding(grant.execution_binding.clone())
-            }
+            Self::Granted(grant) => tool_context
+                .with_tool_execution_binding(grant.execution_binding.clone())
+                .with_granted_source_id(grant.source_id.clone()),
         }
     }
 }

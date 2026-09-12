@@ -32,17 +32,6 @@ impl lash_core::ToolProvider for PolicyDeniedToolProvider {
             .then(|| Arc::new(approval_request_definition().contract()))
     }
 
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &lash_core::ToolExecutionGrant,
-        call: lash_core::ToolPrepareCall<'_>,
-    ) -> Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
-        Ok(lash_core::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         lash_core::ToolOutcome::failure(lash_core::ToolFailure {
             class: lash_core::ToolFailureClass::PermissionDenied,
@@ -52,16 +41,6 @@ impl lash_core::ToolProvider for PolicyDeniedToolProvider {
             retry: lash_core::ToolRetryStatus::Never,
             raw: None,
         })
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &lash_core::ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &lash_core::AttemptContext<'_>,
-    ) -> lash_core::ToolOutcome {
-        self.execute_by_id(&grant.manifest().id, args, context)
-            .await
     }
 }
 

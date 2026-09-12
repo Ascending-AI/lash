@@ -5,6 +5,9 @@ use lash_sansio::sync::MutexExt;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod grant_support;
+use grant_support::{GrantBindingProvider, grant_deferral_registry};
+
 struct MockTool;
 struct MixedEnabledTool;
 struct ExternalMockSource;
@@ -13,7 +16,6 @@ struct ExactResolvingSource {
     manifest_resolutions: Arc<AtomicUsize>,
     contract_resolutions: Arc<AtomicUsize>,
     executions: Arc<AtomicUsize>,
-    observed_execution_bindings: Option<Arc<std::sync::Mutex<Vec<serde_json::Value>>>>,
 }
 struct NamedExactSource {
     id: &'static str,
@@ -593,11 +595,7 @@ impl ToolSourceExecutor for ExactResolvingSource {
         context: &crate::AttemptContext<'_>,
     ) -> ToolOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
-        if let Some(bindings) = &self.observed_execution_bindings {
-            bindings
-                .lock_recover()
-                .push(context.tool_execution_binding().clone());
-        }
+        let _ = context;
         ToolOutcome::ok(json!(tool))
     }
 }
@@ -1129,7 +1127,6 @@ fn advertised_manifest_resolves_without_exact_host_lookup() {
             manifest_resolutions: Arc::clone(&manifest_resolutions),
             contract_resolutions: Arc::new(AtomicUsize::new(0)),
             executions: Arc::new(AtomicUsize::new(0)),
-            observed_execution_bindings: None,
         }))
         .expect("source registered");
 
@@ -1260,7 +1257,6 @@ async fn dispatch_manifest_lookup_does_not_mutate_registry_generation() {
             manifest_resolutions: Arc::new(AtomicUsize::new(0)),
             contract_resolutions: Arc::new(AtomicUsize::new(0)),
             executions: Arc::new(AtomicUsize::new(0)),
-            observed_execution_bindings: None,
         }))
         .expect("source registered");
     let generation_before_dispatch = registry.generation();
@@ -1293,7 +1289,6 @@ async fn unadmitted_exact_manifest_is_not_dispatchable() {
             manifest_resolutions: Arc::clone(&manifest_resolutions),
             contract_resolutions: Arc::clone(&contract_resolutions),
             executions: Arc::clone(&executions),
-            observed_execution_bindings: None,
         }))
         .expect("source registered");
 
@@ -1324,20 +1319,22 @@ async fn unadmitted_exact_manifest_is_not_dispatchable() {
 }
 
 #[tokio::test]
-async fn execution_grant_routes_without_adding_tool_to_state_or_catalog() {
-    let manifest_resolutions = Arc::new(AtomicUsize::new(0));
-    let contract_resolutions = Arc::new(AtomicUsize::new(0));
-    let executions = Arc::new(AtomicUsize::new(0));
-    let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+async fn execution_grant_routes_through_ordinary_provider_contexts_without_catalog_membership() {
+    let prepared_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let executed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
     registry
-        .upsert_source(Arc::new(ExactResolvingSource {
-            manifest_resolutions: Arc::clone(&manifest_resolutions),
-            contract_resolutions: Arc::clone(&contract_resolutions),
-            executions: Arc::clone(&executions),
-            observed_execution_bindings: Some(Arc::clone(&observed_execution_bindings)),
-        }))
+        .upsert_source(Arc::new(ToolProviderSource::new(
+            "exact",
+            vec![Arc::new(GrantBindingProvider {
+                prepared_bindings: Arc::clone(&prepared_bindings),
+                executed_bindings: Arc::clone(&executed_bindings),
+            })],
+        )))
         .expect("source registered");
+    let registry = registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("resident catalog with live grant sources");
 
     assert!(!registry.export_state().contains(&tool_id("host_only")));
     assert!(
@@ -1356,30 +1353,32 @@ async fn execution_grant_routes_without_adding_tool_to_state_or_catalog() {
         crate::TurnContext::default(),
         Some("grant-call".to_string()),
         grant.execution_binding.clone(),
-    );
+    )
+    .with_granted_source_id(grant.source_id.clone());
     let prepared = registry
-        .prepare_granted_tool_call(
-            &grant,
-            crate::ToolPrepareCall {
-                tool_id: grant.manifest().id.clone(),
-                pending: crate::sansio::PendingToolCall {
-                    call_id: "grant-call".to_string(),
-                    tool_name: grant.manifest().name.clone(),
-                    args: json!({}),
-                    replay: None,
-                },
-                context: &prepare_context,
+        .prepare_tool_call(crate::ToolPrepareCall {
+            tool_id: grant.manifest().id.clone(),
+            pending: crate::sansio::PendingToolCall {
+                call_id: "grant-call".to_string(),
+                tool_name: grant.manifest().name.clone(),
+                args: json!({}),
+                replay: None,
             },
-        )
+            context: &prepare_context,
+        })
         .await
         .expect("grant prepare");
     assert_eq!(prepared.tool_id, grant.manifest().id);
 
     let context = crate::testing::mock_attempt_context_from(
-        &test_tool_context().with_tool_execution_binding(grant.execution_binding.clone()),
+        &test_tool_context()
+            .with_tool_execution_binding(grant.execution_binding.clone())
+            .with_granted_source_id(grant.source_id.clone()),
     );
     let args = json!({});
-    let result = registry.execute_granted(&grant, &args, &context).await;
+    let result = registry
+        .execute_by_id(&grant.manifest().id, &args, &context)
+        .await;
     assert!(result.is_success());
     assert_eq!(result.value_for_projection(), json!("host_only"));
 
@@ -1390,12 +1389,28 @@ async fn execution_grant_routes_without_adding_tool_to_state_or_catalog() {
             .iter()
             .any(|manifest| manifest.name == "host_only")
     );
-    assert_eq!(contract_resolutions.load(Ordering::SeqCst), 0);
-    assert_eq!(executions.load(Ordering::SeqCst), 1);
     assert_eq!(
-        *observed_execution_bindings.lock_recover(),
+        *prepared_bindings.lock_recover(),
         vec![json!({ "kind": "test", "route": "grant" })]
     );
+    assert_eq!(
+        *executed_bindings.lock_recover(),
+        vec![json!({ "kind": "test", "route": "grant" })]
+    );
+}
+
+#[test]
+fn granted_deferred_source_reports_attempt_may_defer() {
+    let registry = grant_deferral_registry(true);
+
+    assert!(registry.attempt_may_defer_for_grant(&tool_id("host_only"), Some("grant-source")));
+}
+
+#[test]
+fn granted_non_deferred_source_reports_attempt_cannot_defer() {
+    let registry = grant_deferral_registry(false);
+
+    assert!(!registry.attempt_may_defer_for_grant(&tool_id("host_only"), Some("grant-source")));
 }
 
 #[tokio::test]
@@ -1406,14 +1421,17 @@ async fn execution_grant_without_source_does_not_infer_registry_route() {
             manifest_resolutions: Arc::new(AtomicUsize::new(0)),
             contract_resolutions: Arc::new(AtomicUsize::new(0)),
             executions: Arc::new(AtomicUsize::new(0)),
-            observed_execution_bindings: None,
         }))
         .expect("source registered");
 
     let grant = crate::ToolExecutionGrant::from_definition(test_tool("host_only", "host-only"));
-    let context = test_attempt_context();
+    let context = crate::testing::mock_attempt_context_from(
+        &test_tool_context().with_granted_source_id(grant.source_id.clone()),
+    );
     let args = json!({});
-    let result = registry.execute_granted(&grant, &args, &context).await;
+    let result = registry
+        .execute_by_id(&grant.manifest().id, &args, &context)
+        .await;
 
     assert!(!result.is_success());
     assert_eq!(
@@ -1488,9 +1506,13 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
     ))
     .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
 
-    let context = test_attempt_context();
+    let context = crate::testing::mock_attempt_context_from(
+        &test_tool_context().with_granted_source_id(grant.source_id.clone()),
+    );
     let args = json!({});
-    let result = registry.execute_granted(&grant, &args, &context).await;
+    let result = registry
+        .execute_by_id(&grant.manifest().id, &args, &context)
+        .await;
 
     assert!(result.is_success());
     assert_eq!(result.value_for_projection(), json!("right-provider"));

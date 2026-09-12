@@ -189,19 +189,16 @@ async fn prepare_authorized_tool_call_with_context(
         tool_call_id,
         execution_binding,
     );
+    let prepare_context = match grant {
+        Some(grant) => prepare_context.with_granted_source_id(grant.source_id.clone()),
+        None => prepare_context,
+    };
     let prepare_call = ToolPrepareCall {
         tool_id: manifest.id.clone(),
         pending,
         context: &prepare_context,
     };
-    let prepared = if let Some(grant) = grant {
-        context
-            .tools
-            .prepare_granted_tool_call(grant, prepare_call)
-            .await
-    } else {
-        context.tools.prepare_tool_call(prepare_call).await
-    };
+    let prepared = context.tools.prepare_tool_call(prepare_call).await;
     match prepared {
         Ok(prepared) if prepared.tool_id == manifest.id => {
             ToolPreparationOutcome::Prepared(Box::new(prepared))
