@@ -1351,25 +1351,33 @@ impl Fig1128DeadlineRedrive for Fig1128DeadlineRedriveImpl {
         Json(_input): Json<Fig1128DeadlineRedriveInput>,
     ) -> HandlerResult<Json<Resolution>> {
         let key = restate_await_event_key(
-            &durable_turn_scope("fig1128-session", "fig1128-turn"),
+            &ExecutionScope::runtime_operation("fig1128-deadline-redrive"),
             AwaitEventWaitIdentity::tool_completion("fig1128-deadline"),
         )
         .map_err(TerminalError::from_error)?;
         let deadline = self.clock.now() + Duration::from_secs(60);
-        let request = crate::controller::context::journaled_restate_durable_wait_request(
-            &ctx,
-            &key,
-            Some(deadline),
-            self.clock.as_ref(),
-        )
-        .await?;
-        let Json(resolution) = ctx
-            .workflow_client::<crate::durable_wait::LashDurableWaitWorkflowClient>(
-                crate::durable_wait::RestateDurableWaitAddress::for_key(&key).workflow_key,
+        let controller = RestateRuntimeEffectController::new(ctx);
+        let outcome = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline"),
+                    RuntimeEffectCommand::AwaitEvent { key },
+                ),
+                RuntimeEffectLocalExecutor::await_event_with_clock(
+                    tokio_util::sync::CancellationToken::new(),
+                    Some(deadline),
+                    self.clock.clone(),
+                )
+                .with_turn_cancel_observation(false),
             )
-            .await_resolution(Json(request))
-            .call()
-            .await?;
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::AwaitEvent { resolution } = outcome else {
+            return Err(TerminalError::new(
+                "FIG-1128 await-event effect returned the wrong outcome",
+            )
+            .into());
+        };
         Ok(Json(resolution))
     }
 }

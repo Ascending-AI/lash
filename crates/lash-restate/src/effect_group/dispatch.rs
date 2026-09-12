@@ -206,10 +206,13 @@ impl EffectGroupDispatch {
                 let address = RestateDurableWaitAddress::for_key(&key);
                 let Json(_) = ctx
                     .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
-                    .await_resolution(Json(RestateDurableWaitAwaitRequest {
-                        key,
-                        deadline: None,
-                    }))
+                    .await_resolution(Json(
+                        RestateDurableWaitAwaitRequest {
+                            key,
+                            deadline: None,
+                        }
+                        .into(),
+                    ))
                     .call()
                     .await?;
                 // ADMIT is notification only. Authorization always comes from

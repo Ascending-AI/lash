@@ -209,8 +209,27 @@ pub enum RestateDurableWaitClassification {
 #[serde(deny_unknown_fields)]
 pub struct RestateDurableWaitAwaitRequest {
     pub key: AwaitEventKey,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<RestateDurableWaitDeadline>,
+}
+
+/// Decoder for the durable-wait workflow's clean-cutover request boundary.
+///
+/// The predecessor is decoded only so the handler can return the same typed,
+/// actionable incompatibility as an unsupported stamped deadline. It is never
+/// executed or translated into the current absolute-deadline request.
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum RestateDurableWaitAwaitInput {
+    Current(RestateDurableWaitAwaitRequest),
+    Predecessor { key: AwaitEventKey, timeout_ms: u64 },
+}
+
+impl From<RestateDurableWaitAwaitRequest> for RestateDurableWaitAwaitInput {
+    fn from(request: RestateDurableWaitAwaitRequest) -> Self {
+        Self::Current(request)
+    }
 }
 
 /// Absolute deadline carried by the version-2 durable-wait request.
@@ -224,8 +243,8 @@ pub struct RestateDurableWaitDeadline {
 impl RestateDurableWaitDeadline {
     fn validate(self) -> Result<(), TerminalError> {
         if self.version != DURABLE_WAIT_REQUEST_VERSION {
-            return Err(TerminalError::new(format!(
-                "Lash Restate durable-wait request version {} is incompatible with version {DURABLE_WAIT_REQUEST_VERSION}; drain deadline-bearing waits before opening this deployment",
+            return Err(incompatible_durable_wait_request(format!(
+                "version {}",
                 self.version
             )));
         }
@@ -238,6 +257,12 @@ impl RestateDurableWaitDeadline {
             self.unix_epoch_ms.saturating_sub(now_ms),
         ))
     }
+}
+
+fn incompatible_durable_wait_request(observed: impl std::fmt::Display) -> TerminalError {
+    TerminalError::new(format!(
+        "Lash Restate durable-wait request {observed} is incompatible with version {DURABLE_WAIT_REQUEST_VERSION}; drain deadline-bearing waits before opening this deployment"
+    ))
 }
 
 #[cfg(test)]
@@ -480,7 +505,7 @@ where
 pub trait LashDurableWaitWorkflow {
     #[shared]
     async fn await_resolution(
-        request: Json<RestateDurableWaitAwaitRequest>,
+        request: Json<RestateDurableWaitAwaitInput>,
     ) -> HandlerResult<Json<Resolution>>;
 
     #[shared]
@@ -499,8 +524,16 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
     async fn await_resolution(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateDurableWaitAwaitRequest>,
+        Json(input): Json<RestateDurableWaitAwaitInput>,
     ) -> HandlerResult<Json<Resolution>> {
+        let request = match input {
+            RestateDurableWaitAwaitInput::Current(request) => request,
+            RestateDurableWaitAwaitInput::Predecessor { .. } => {
+                return Err(
+                    incompatible_durable_wait_request("predecessor field `timeout_ms`").into(),
+                );
+            }
+        };
         if let Some(deadline) = request.deadline {
             deadline.validate()?;
         }

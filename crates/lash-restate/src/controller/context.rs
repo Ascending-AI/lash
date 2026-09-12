@@ -1030,7 +1030,7 @@ macro_rules! impl_restate_controller_context {
                             .workflow_client::<LashDurableWaitWorkflowClient>(
                                 address.workflow_key.clone(),
                             )
-                            .await_resolution(Json(request.clone()));
+                            .await_resolution(Json(request.clone().into()));
                         let call = start.call();
                         restate_sdk::select! {
                             result = call => {
@@ -1090,7 +1090,7 @@ macro_rules! impl_restate_controller_context {
                             .workflow_client::<LashDurableWaitWorkflowClient>(
                                 event_address.workflow_key.clone(),
                             )
-                            .await_resolution(Json(request));
+                            .await_resolution(Json(request.into()));
                         let event = erase_gate_wait(event.call());
                         match race_turn_cancel_gate(
                             self,
@@ -1475,7 +1475,7 @@ macro_rules! impl_restate_controller_context {
                         let address = RestateDurableWaitAddress::for_key(&request.key);
                         let call = self
                             .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
-                            .await_resolution(Json(request))
+                            .await_resolution(Json(request.into()))
                             .call();
                         let wait = guard_restate_context_future(call);
                         let cancelled = cancellation.cancelled();

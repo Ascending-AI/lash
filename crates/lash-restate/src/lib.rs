@@ -94,10 +94,10 @@ pub use controller::{
 pub use durable_wait::{
     DURABLE_WAIT_REQUEST_VERSION, LashDurableWaitIndex, LashDurableWaitIndexClient,
     LashDurableWaitIndexImpl, LashDurableWaitWorkflow, LashDurableWaitWorkflowClient,
-    LashDurableWaitWorkflowImpl, RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
-    RestateDurableWaitAwakeableRequest, RestateDurableWaitClassification,
-    RestateDurableWaitDeadline, RestateDurableWaitEffectRequest, RestateDurableWaitGroupRequest,
-    RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
+    LashDurableWaitWorkflowImpl, RestateDurableWaitAddress, RestateDurableWaitAwaitInput,
+    RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
+    RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
+    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
     RestateDurableWaitResolveRequest, RestateDurableWaitScope, RestateDurableWaitSettleRequest,
     ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
 };
