@@ -458,7 +458,9 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
-    let host = host.with_process_engine(Arc::new(RestateParentEndLawEngine));
+    let host = host.with_process_engine_registration(
+        lash_core::ProcessEngineRegistration::accepting(Arc::new(RestateParentEndLawEngine)),
+    );
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
             .await
@@ -1266,10 +1268,14 @@ finish (await handle)?
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(DurableMemoryProcessEnvStore::default());
     host.durability.process_env_store = Arc::clone(&process_env_store);
-    host = host.with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        Arc::clone(&artifact_store),
-        lash_lashlang_runtime::LashlangSurface::default(),
-    )));
+    host = host.with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                Arc::clone(&artifact_store),
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
+        ),
+    );
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
             .await

@@ -114,21 +114,20 @@ impl CodexProvider {
     fn non_sse_body_read_error(
         status: u16,
         content_type: Option<&str>,
-        err: LlmTransportError,
+        mut err: LlmTransportError,
     ) -> LlmTransportError {
         let content_type_detail = content_type
             .map(|ct| format!(" ({ct})"))
             .unwrap_or_default();
-        let code = err
-            .code
-            .clone()
-            .unwrap_or_else(|| "body_read_failed".to_string());
-        LlmTransportError::new(format!(
+        let detail = std::mem::take(&mut err.message);
+        err.message = format!(
             "Codex returned HTTP {status} with non-SSE body{content_type_detail} but it could not be read: {}",
-            err.message
-        ))
-        .with_retry_verdict(err.retry_verdict)
-        .with_code(code)
+            detail
+        );
+        err.status = Some(status);
+        err.code
+            .get_or_insert_with(|| "body_read_failed".to_string());
+        err
     }
 
     async fn complete_websocket(

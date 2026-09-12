@@ -11,10 +11,11 @@ pub(crate) use lash_core::llm::transport::{
     unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
-    AttachmentSource, ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt,
-    LlmContentBlock, LlmEventSender, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse,
-    LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage,
-    ProviderReasoningReplay, ProviderRouteIdentity,
+    AnthropicThinkingRetention, AttachmentSource, ExecutionEvidence, GenerationOptionOutcome,
+    GenerationReceipt, LlmContentBlock, LlmEventSender, LlmOutputPart, LlmOutputSpec, LlmRequest,
+    LlmResponse, LlmRole, LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmToolChoice,
+    LlmUsage, ProviderReasoningReplay, ProviderReasoningRetentionSupport, ProviderRouteIdentity,
+    ReasoningRetentionSelection, ReasoningRetentionValidationError,
 };
 pub(crate) use lash_core::provider::{
     CacheRetention, Provider, ProviderComponents, ProviderOptions, ReasoningDisableEncoding,

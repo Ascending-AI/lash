@@ -410,7 +410,13 @@ impl OpenAiCompatibleProvider {
         stream: bool,
     ) -> Result<(Value, CacheBreakpointDiagnostics), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
-        let safe_request = req.replay_safe_for(&serving_route);
+        let safe_request = req
+            .reasoning_retention_safe_for(
+                &serving_route,
+                "OpenAI Chat Completions",
+                ProviderReasoningRetentionSupport::ClientSideUserSegments,
+            )
+            .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
         Self::validate_chat_attachments(req)?;
         let compat = self.resolved_compat(CompletionEndpoint::ChatCompletions);

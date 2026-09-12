@@ -258,7 +258,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 63;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 64;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -334,7 +334,7 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
             .and_then(|version| u32::try_from(version).ok())
             .expect("recorded durable-read predecessor carries a u32 schema version");
         assert_eq!(
-            predecessor, 62,
+            predecessor, 63,
             "each frozen parent artifact is an actual pre-integration fixture"
         );
         assert_eq!(

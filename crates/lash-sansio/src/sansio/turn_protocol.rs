@@ -531,7 +531,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             generation: ctx.config.generation.clone(),
             scope: crate::llm::types::LlmRequestScope::new(
                 ctx.config.session_id.clone(),
-                format!("{}:frame:sansio", ctx.config.session_id),
+                ctx.config.agent_frame_id.clone(),
                 format!(
                     "{}:sansio:llm:{}",
                     ctx.config.session_id, ctx.protocol_iteration
@@ -627,6 +627,8 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub system_prompt: Arc<str>,
     pub session_id: SessionId,
+    /// The committed active frame whose history is being projected.
+    pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,

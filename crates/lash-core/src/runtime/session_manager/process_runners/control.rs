@@ -459,9 +459,8 @@ impl ProcessCapability {
         // runs against the recorded spec instead of a stored env ref. It must
         // run here: once the start command crosses the journal the entry is
         // committed and replays forever.
-        let registration = self
-            .validate_and_stamp_engine_start(current, session_id, registration, env_spec.as_ref())
-            .await?;
+        let registration =
+            self.admit_and_stamp_engine_start(current, registration, env_spec.as_ref())?;
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         self.command_runner(current, &scope)?
@@ -477,7 +476,7 @@ impl ProcessCapability {
     async fn prepare_process_environment(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &SessionId,
+        _session_id: &SessionId,
         registration: crate::ProcessRegistration,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
         if !matches!(
@@ -496,21 +495,13 @@ impl ProcessCapability {
             ),
             None => None,
         };
-        self.validate_and_stamp_engine_start(current, session_id, registration, env_spec.as_ref())
-            .await
+        self.admit_and_stamp_engine_start(current, registration, env_spec.as_ref())
     }
 
-    /// Both parts of the engine-admission gate documented on
-    /// [`crate::ProcessEngineRegistry::require`]: resolve the kind, validate the
-    /// payload against this session's resolved tool catalog, then stamp the
-    /// engine identity. Every start route that holds a live session — the
-    /// request-shaped path (env loaded from the captured env ref) and the
-    /// recorded-intent path (env carried by the recorded request) — runs it
-    /// before the start command crosses the journal.
-    async fn validate_and_stamp_engine_start(
+    /// Admit immutable recorded inputs and stamp the sole engine identity.
+    fn admit_and_stamp_engine_start(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &SessionId,
         registration: crate::ProcessRegistration,
         env_spec: Option<&crate::ProcessExecutionEnvSpec>,
     ) -> Result<crate::ProcessRegistration, crate::PluginError> {
@@ -533,20 +524,11 @@ impl ProcessCapability {
                 registration.id
             )));
         };
-        let engine = current.host.core.process_engines.require(kind)?;
-        let tool_catalog = current.plugins.resolved_tool_catalog(session_id)?;
-        engine
-            .validate_start(
-                crate::ProcessEngineValidationContext::new(
-                    current.plugins.host(),
-                    tool_catalog,
-                    current.host.process_registry().is_some(),
-                ),
-                payload,
-                Some(env_spec),
-            )
-            .await?;
-        let identity = engine.identity(payload);
+        let identity = current
+            .host
+            .core
+            .process_engines
+            .admit(kind, payload, Some(env_spec))?;
         Ok(registration.with_identity(identity))
     }
 

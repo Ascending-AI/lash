@@ -47,6 +47,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from(""),
         session_id: SessionId::from("parity"),
+        agent_frame_id: "parity-frame".to_string(),
         turn_id: TurnId::from("parity-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {

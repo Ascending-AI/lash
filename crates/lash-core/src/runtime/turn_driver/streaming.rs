@@ -313,15 +313,15 @@ impl RuntimeTurnDriver<'_> {
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
         let provider_trace =
             self.provider_trace_sender(protocol_iteration, llm_call_id.clone(), &debug);
+        // The projector is built from the physical turn's committed frame.
+        // A logical-turn follow-on may already have advanced beyond the
+        // boundary's resident snapshot, so keep that frame identity while
+        // replacing only the runtime-owned request correlation fields.
+        let projected_agent_frame_id = request.scope.agent_frame_id.clone();
         let mut llm_request = LlmRequest {
             scope: crate::LlmRequestScope::new(
                 self.session_id.clone(),
-                self.turn_pipeline
-                    .state()
-                    .current_frame_node_id
-                    .clone()
-                    .map(crate::FrameNodeId::into_inner)
-                    .unwrap_or_default(),
+                projected_agent_frame_id,
                 format!(
                     "{}:turn:{}:llm:{}",
                     self.session_id, self.turn_id, protocol_iteration

@@ -9,6 +9,7 @@ use crate::turn_driver::TurnDriverPreamble;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub session_id: SessionId,
+    pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub autonomous: bool,
     pub model: String,
@@ -56,6 +57,7 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             tool_specs: input.turn_driver_preamble.tool_specs.clone(),
             system_prompt: Arc::clone(&input.prepared_prompt.system_prompt),
             session_id: input.session_id,
+            agent_frame_id: input.agent_frame_id,
             turn_id: input.turn_id,
             emit_llm_trace: input.emit_llm_trace,
             termination: input.termination,
@@ -178,6 +180,7 @@ mod tests {
         });
         let prepared = build_turn(SansIoTurnInput {
             session_id: SessionId::from("session".to_string()),
+            agent_frame_id: "frame-test".to_string(),
             turn_id: TurnId::from("turn"),
             autonomous: false,
             model: "gpt-5".to_string(),

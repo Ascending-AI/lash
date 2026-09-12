@@ -360,6 +360,7 @@ pub(crate) fn build_llm_request(
 
     let mut llm_messages = Vec::new();
     for message in messages {
+        let starts_user_segment = matches!(message.role, DirectRole::User);
         let role = match message.role {
             DirectRole::System => LlmRole::System,
             DirectRole::User => LlmRole::User,
@@ -383,7 +384,9 @@ pub(crate) fn build_llm_request(
             }
         }
         if !blocks.is_empty() {
-            llm_messages.push(LlmMessage::new(role, blocks));
+            let mut message = LlmMessage::new(role, blocks);
+            message.starts_user_segment = starts_user_segment;
+            llm_messages.push(message);
         }
     }
 
@@ -882,6 +885,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: crate::SamplingCapability::Configurable,
+            reasoning_retention: Default::default(),
         }
     }
 

@@ -44,6 +44,7 @@ fn process_execution_env_identity_golden_corpus() {
                 cache_control: Some(crate::CacheControlDialect::Anthropic),
                 stream_termination: Some(crate::StreamTermination::EofTolerated),
                 sampling: crate::SamplingCapability::Pinned,
+                reasoning_retention: Default::default(),
             }),
         provider_id: "provider".to_string(),
         session_id: Some(SessionId::from("session")),
@@ -80,11 +81,11 @@ fn process_execution_env_identity_golden_corpus() {
         [
             (
                 "{\"plugin_options\":{},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
-                "process-env:v5:blake3:121c494b7d7665eb7b77c0e0abf8cd09def126dae90dec99489179196c702a1c".to_string(),
+                "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738".to_string(),
             ),
             (
-                "{\"plugin_options\":{\"plugins\":{\"a:b\":{\"enabled\":true}}},\"policy\":{\"model\":{\"id\":\"model:rich\",\"variant\":{\"effort\":\"high\"},\"limits\":{\"context_window_tokens\":8192,\"output_token_capacity\":2048},\"capability\":{\"instruction_role\":\"developer\",\"native_mid_conversation_system\":true,\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"default_effort\":\"low\",\"aliases\":{\"max\":\"high\"},\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":\"toggle_false\",\"mandatory\":true},\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\"}},\"provider_id\":\"provider\",\"session_id\":\"session\",\"autonomous\":true,\"turn_budget\":{\"bounded\":1},\"prompt\":{\"template\":{\"sections\":[]}},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}".to_string(),
-                "process-env:v5:blake3:09f8e21f8af6e6698f3b257a96b5b02fd8a371ee7c02d22045f1b2a8fc735c74".to_string(),
+                r#"{"plugin_options":{"plugins":{"a:b":{"enabled":true}}},"policy":{"model":{"id":"model:rich","variant":{"effort":"high"},"limits":{"context_window_tokens":8192,"output_token_capacity":2048},"capability":{"instruction_role":"developer","native_mid_conversation_system":true,"cache_control":"anthropic","stream_termination":"eof_tolerated","sampling":"pinned","reasoning":{"efforts":["low","high"],"default_effort":"low","aliases":{"max":"high"},"encoding":{"budget":{"high":1024,"low":256}},"disable":"toggle_false","mandatory":true}}},"provider_id":"provider","session_id":"session","autonomous":true,"turn_budget":{"bounded":1},"prompt":{"template":{"sections":[]}},"generation":{"output_token_cap":1024,"temperature":0.25,"seed":-7}}}"#.to_string(),
+                "process-env:v6:blake3:7c2a6b64d1b7e20fb517db8720f073d40bfa41dfe99d160268cd3571f5e5dbac".to_string(),
             ),
         ]
     );
@@ -191,20 +192,25 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
         });
     let spec = ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy);
     let bytes = spec.to_store_bytes().unwrap();
-    let old = ProcessExecutionEnvRef::new(format!(
-        "process-env:v4:blake3:{}",
-        crate::stable_hash::blake3_hex("lash-process-env/v4", &bytes)
-    ));
-    store.put_process_execution_env(&old, &bytes).await.unwrap();
-    assert!(
-        load_process_execution_env(&store, &old)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("recreate")
-    );
+    for (prefix, domain) in [
+        ("process-env:v4:blake3:", "lash-process-env/v4"),
+        ("process-env:v5:blake3:", "lash-process-env/v5"),
+    ] {
+        let old = ProcessExecutionEnvRef::new(format!(
+            "{prefix}{}",
+            crate::stable_hash::blake3_hex(domain, &bytes)
+        ));
+        store.put_process_execution_env(&old, &bytes).await.unwrap();
+        assert!(
+            load_process_execution_env(&store, &old)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("recreate")
+        );
+    }
     let current = persist_process_execution_env(&store, &spec).await.unwrap();
-    assert!(current.as_str().starts_with("process-env:v5:blake3:"));
+    assert!(current.as_str().starts_with("process-env:v6:blake3:"));
     assert_eq!(
         load_process_execution_env(&store, &current).await.unwrap(),
         spec

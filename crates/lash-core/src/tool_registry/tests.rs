@@ -2314,6 +2314,70 @@ fn remove_source_removes_all_source_tools() {
 }
 
 #[test]
+fn remove_source_preserves_non_member_curation_across_reattach() {
+    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    registry
+        .upsert_source(Arc::new(ExternalMockSource))
+        .expect("source registered");
+    let external_id = tool_id("mcp__demo__search");
+    let mut disabled = registry.export_state();
+    disabled
+        .set_membership(&external_id, false)
+        .expect("external tool exists");
+    registry
+        .apply_state(disabled)
+        .expect("disable external tool");
+
+    let before_detach = registry.export_state();
+    let disabled_entry = before_detach
+        .get(&external_id)
+        .expect("precondition: external tool remains stored while disabled");
+    assert!(
+        !disabled_entry.member && !disabled_entry.is_orphaned(),
+        "precondition: the live external tool stores an explicit member=false opt-out"
+    );
+
+    registry
+        .remove_source_id("external")
+        .expect("source detached");
+    let detached = registry.export_state();
+    let detached_entry = detached
+        .get(&external_id)
+        .expect("detaching a source keeps its tools as orphans");
+    assert!(detached_entry.is_orphaned());
+    assert!(
+        !detached_entry.member,
+        "the orphan retains the stored member=false curation bit"
+    );
+
+    let encoded = serde_json::to_value(&detached).expect("serialize detached state");
+    let decoded: ToolState = serde_json::from_value(encoded).expect("deserialize detached state");
+    let restored = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("restore registry");
+    let report = restored
+        .restore_state(decoded)
+        .expect("restore detached state");
+    assert_eq!(report.orphaned, vec![external_id.clone()]);
+    assert!(
+        restored
+            .export_state()
+            .get(&external_id)
+            .is_some_and(|entry| entry.is_orphaned() && !entry.member),
+        "the exported orphan round-trips with its curation bit"
+    );
+
+    registry
+        .upsert_source(Arc::new(ExternalMockSource))
+        .expect("source reattached");
+    let rebound = registry.export_state();
+    let rebound_entry = rebound.get(&external_id).expect("tool rebounds by id");
+    assert!(!rebound_entry.is_orphaned());
+    assert!(
+        !rebound_entry.is_member(),
+        "the rebound tool remains a non-member after detach and reattach"
+    );
+}
+
+#[test]
 fn project_tool_catalog_projects_all_members_with_catalog_metadata() {
     fn member_fixture(name: &str) -> crate::ToolDefinition {
         crate::ToolDefinition::raw(

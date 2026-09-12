@@ -298,6 +298,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             cache_control: Some(core_llm::CacheControlDialect::Anthropic),
             stream_termination: Some(core_llm::StreamTermination::RequireTerminalEvidence),
             sampling: core_llm::SamplingCapability::Pinned,
+            reasoning_retention: Default::default(),
         },
         generation: core_llm::GenerationOptions {
             output_token_cap: NonZeroUsize::new(42),
@@ -1998,7 +1999,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
-            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         wake_target: Some(lash_core::SessionScope::new("session-a")),
         name: Some("button watcher".to_string()),
@@ -2495,6 +2496,5 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
-
 #[path = "core_conversions_tests/cancellation.rs"]
 mod cancellation;

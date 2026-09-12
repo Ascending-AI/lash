@@ -577,3 +577,50 @@ fn history_teaching_follows_indexable_entries() {
         assert!(!tail.contains("Runtime notes"));
     }
 }
+
+#[test]
+fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
+    let events = vec![
+        SessionHistoryRecord::Conversation(ConversationRecord {
+            id: "real".to_string(),
+            role: MessageRole::User,
+            parts: vec![Part::text("real.p0".to_string(), "real".to_string(), None)].into(),
+            origin: Some(MessageOrigin::TurnInput {
+                turn_id: lash_core::TurnId::from("turn"),
+                input_id: None,
+            }),
+        }),
+        SessionHistoryRecord::Conversation(ConversationRecord {
+            id: "synthetic".to_string(),
+            role: MessageRole::User,
+            parts: vec![Part::text(
+                "synthetic.p0".to_string(),
+                "synthetic".to_string(),
+                None,
+            )]
+            .into(),
+            origin: Some(MessageOrigin::Plugin {
+                plugin_id: "plugin".to_string(),
+                transient: false,
+            }),
+        }),
+    ];
+    let dialect = crate::dialect::lashlang_test_dialect();
+    let messages = render_history_messages(&RlmHistoryRenderInput {
+        images: false,
+        dialect: &dialect,
+        events: &events,
+        turn_messages: &Default::default(),
+        turn_causes: &[],
+        max_output_chars: 1000,
+        protocol_iteration: 1,
+        finalization: "finish",
+        required_output: None,
+        final_answer_format: None,
+        budget_suffix: None,
+        bound_variables: "",
+    });
+
+    assert!(messages[0].starts_user_segment);
+    assert!(!messages[1].starts_user_segment);
+}

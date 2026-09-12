@@ -914,7 +914,7 @@ impl HttpTransport for AwaitEventCancellationTransport {
         &self,
         request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         let url = request.url.clone();
         self.requests.lock_recover().push(request);
         let body = if url.ends_with("/is_revoked") {
@@ -924,7 +924,7 @@ impl HttpTransport for AwaitEventCancellationTransport {
         } else if url.ends_with("/resolve") {
             serde_json::to_string(&self.resolve_outcome).expect("encode resolve outcome")
         } else {
-            return Err(HttpTransportError::new(format!(
+            return Err(LlmTransportError::new(format!(
                 "unexpected await-event cancellation request: {url}"
             )));
         };

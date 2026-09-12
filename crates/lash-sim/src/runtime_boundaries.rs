@@ -932,7 +932,9 @@ impl RuntimeBoundaryHarness {
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
         runtime_host.process_engines = lash_core::facade_support::ProcessEngineRegistry::new()
-            .with_engine(Arc::new(LifecycleSuccessEngine));
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                LifecycleSuccessEngine,
+            )));
         let policy = lash_core::SessionPolicy {
             provider_id: "sim-lifecycle".to_string(),
             model: lash_core::ModelSpec::builder("sim-lifecycle-model")

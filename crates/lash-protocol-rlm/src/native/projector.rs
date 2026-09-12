@@ -144,7 +144,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             model_capability: ctx.config.model_capability.clone(),
             scope: LlmRequestScope::new(
                 ctx.config.session_id.clone(),
-                format!("{}:frame:sansio", ctx.config.session_id),
+                ctx.config.agent_frame_id.clone(),
                 format!(
                     "{}:sansio:rlm:{}",
                     ctx.config.session_id, ctx.protocol_iteration

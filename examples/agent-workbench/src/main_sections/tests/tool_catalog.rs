@@ -246,8 +246,8 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
             .await
             .expect("active manifests after re-add")
             .iter()
-            .any(|manifest| manifest.name == "inbox__live__send"),
-        "re-adding a removed source creates fresh default-member tool state"
+            .all(|manifest| manifest.name != "inbox__live__send"),
+        "re-adding a removed source preserves the tool's non-member curation"
     );
     session
         .admin()

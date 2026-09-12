@@ -316,7 +316,6 @@ pub mod facade_support {
     pub use crate::direct::DirectRole;
     pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
-    pub use crate::llm::transport::ProviderFailure;
     pub use crate::plugin::AbortTurnDirective;
     pub use crate::plugin::AfterToolCallPluginDirective;
     pub use crate::plugin::AfterTurnPluginDirective;
@@ -1117,10 +1116,12 @@ pub(crate) use plugin::{
 };
 
 pub use provider::{
-    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
-    ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
-    SamplingCapability, StreamTermination,
+    AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
+    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
+    InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
+    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,
@@ -1160,15 +1161,15 @@ pub use runtime::{
     PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessAwaitOutput,
     ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessEffectOutcome, ProcessEngine, ProcessEngineRunContext, ProcessEngineValidationContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,
-    ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessLeaseSchemaVersionError, ProcessLeases, ProcessLifecycle,
-    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
-    ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOutcome,
+    ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
+    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    ProcessEventLog, ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
+    ProcessIdentity, ProcessIncarnation, ProcessInfraError, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeaseSchemaVersionError,
+    ProcessLeases, ProcessLifecycle, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOutcome,
     ProcessOutcomeObserver, ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport,
     ProcessQuery, ProcessRecord, ProcessRef, ProcessRegistrar, ProcessRegistration,
     ProcessRegistrationProbe, ProcessRegistry, ProcessRegistryBinding, ProcessRetention,

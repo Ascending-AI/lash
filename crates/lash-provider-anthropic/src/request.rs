@@ -427,7 +427,18 @@ impl AnthropicProvider {
         req: &LlmRequest,
     ) -> Result<(Value, bool), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
-        let safe_request = req.replay_safe_for(&serving_route);
+        let safe_request = req
+            .reasoning_retention_safe_for(
+                &serving_route,
+                "Anthropic Messages",
+                ProviderReasoningRetentionSupport::AnthropicClearThinking,
+            )
+            .map_err(|error: ReasoningRetentionValidationError| {
+                LlmTransportError::new(error.message)
+                    .with_kind(ProviderFailureKind::Unsupported)
+                    .with_code("unsupported_reasoning_retention")
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden)
+            })?;
         let req = safe_request.as_ref();
         for (message_index, message) in req.messages.iter().enumerate() {
             for source in message.blocks.iter().filter_map(|block| match block {
@@ -516,6 +527,23 @@ impl AnthropicProvider {
             "max_tokens": policy.max_output_tokens,
             "messages": messages,
         });
+
+        if let ReasoningRetentionSelection::AnthropicClearThinking { keep } =
+            req.model_capability.reasoning_retention.selection
+        {
+            let keep = match keep {
+                AnthropicThinkingRetention::All => json!("all"),
+                AnthropicThinkingRetention::Turns(turns) => {
+                    json!({ "type": "thinking_turns", "value": turns.get() })
+                }
+            };
+            body["context_management"] = json!({
+                "edits": [{
+                    "type": "clear_thinking_20251015",
+                    "keep": keep,
+                }],
+            });
+        }
 
         if let Some(system_value) = system_value {
             body["system"] = system_value;

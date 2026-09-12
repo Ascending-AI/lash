@@ -555,6 +555,7 @@ fn standard_config() -> TurnMachineConfig {
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: lash_core::SessionId::from("standard-protocol-scenario"),
+        agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),
