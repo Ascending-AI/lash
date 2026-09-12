@@ -334,7 +334,9 @@ impl RuntimeExecutionContext<'_> {
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
                 };
-                let completed = self.complete_tool_call(call.id, None, outcome).await;
+                let completed = self
+                    .complete_undispatched_tool_call(call.id, None, outcome)
+                    .await;
                 replies[index] = Some(
                     ToolInvocationReply::from_output(completed.completed.output)
                         .with_record(completed.record),
@@ -361,7 +363,9 @@ impl RuntimeExecutionContext<'_> {
                     ));
                 }
                 ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = self.complete_tool_call(call.id, None, *outcome).await;
+                    let completed = self
+                        .complete_undispatched_tool_call(call.id, None, *outcome)
+                        .await;
                     replies[index] = Some(
                         ToolInvocationReply::from_output(completed.completed.output)
                             .with_record(completed.record),
@@ -727,13 +731,49 @@ mod tests {
         );
     }
 
+    #[derive(Default)]
+    struct ToolLifecycleTraceSink {
+        lifecycle: Mutex<Vec<(String, &'static str)>>,
+    }
+
+    impl lash_trace::TraceSink for ToolLifecycleTraceSink {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            let entry = match &record.event {
+                lash_trace::TraceEvent::ToolCallStarted {
+                    call_id: Some(call_id),
+                    ..
+                } => Some((call_id.clone(), "started")),
+                lash_trace::TraceEvent::ToolCallCompleted {
+                    call_id: Some(call_id),
+                    ..
+                } => Some((call_id.clone(), "completed")),
+                _ => None,
+            };
+            if let Some(entry) = entry {
+                self.lifecycle.lock_recover().push(entry);
+            }
+            Ok(())
+        }
+    }
+
     #[tokio::test]
-    async fn batch_with_unresolvable_tool_ids_emits_per_call_completion_correlations() {
+    async fn batch_failures_before_dispatch_emit_ordered_per_call_lifecycle_pairs() {
         let (turn_tx, mut turn_rx) = tokio::sync::mpsc::channel(8);
+        let trace_sink = Arc::new(ToolLifecycleTraceSink::default());
+        let erased_trace_sink: Arc<dyn lash_trace::TraceSink> = trace_sink.clone();
+        let tracing = crate::session::execution_context::RuntimeExecutionTracing::new(
+            erased_trace_sink,
+            lash_trace::TraceContext::default(),
+            lash_trace::TraceContext::default(),
+        );
         let context = batch_failure_context(Arc::new(BatchFailureEffectController::new(
             BatchFailureResponse::EffectDecodeError,
         )))
-        .with_turn_event_sender(turn_tx);
+        .with_turn_event_sender(turn_tx)
+        .with_tracing(Some(tracing));
 
         context
             .call_tool_batch(vec![
@@ -755,44 +795,45 @@ mod tests {
             ])
             .await;
 
-        let first = turn_rx.recv().await.expect("first completion activity");
-        let second = turn_rx.recv().await.expect("second completion activity");
-        let third = turn_rx.recv().await.expect("third completion activity");
-        assert_ne!(first.correlation_id, second.correlation_id);
-        assert_ne!(second.correlation_id, third.correlation_id);
-        assert_ne!(first.correlation_id, third.correlation_id);
-        assert!(matches!(
-            first.event,
-            crate::TurnEvent::ToolCallCompleted {
-                call_id: Some(ref call_id),
-                ..
-            } if call_id == "missing-call-a"
-        ));
-        assert!(matches!(
-            second.event,
-            crate::TurnEvent::ToolCallCompleted {
-                call_id: Some(ref call_id),
-                ..
-            } if call_id == "missing-call-b"
-        ));
-        assert_eq!(
-            first.correlation_id,
-            crate::TurnActivityId::new("tool:missing-call-a")
-        );
-        assert_eq!(
-            second.correlation_id,
-            crate::TurnActivityId::new("tool:missing-call-b")
-        );
-        assert!(matches!(
-            third.event,
-            crate::TurnEvent::ToolCallCompleted {
-                call_id: Some(ref call_id),
-                ..
-            } if call_id == "invalid-prepared"
-        ));
-        assert_eq!(
-            third.correlation_id,
-            crate::TurnActivityId::new("tool:invalid-prepared")
+        // A call that settles before provider dispatch is still a complete
+        // lifecycle attempt. Each call id therefore owns one ordered Started
+        // then Completed pair; the failure path must never publish a bare
+        // completion or borrow another call's correlation.
+        for call_id in ["missing-call-a", "missing-call-b", "invalid-prepared"] {
+            let started = turn_rx.recv().await.expect("tool start activity");
+            let completed = turn_rx.recv().await.expect("tool completion activity");
+            let correlation_id = crate::TurnActivityId::new(format!("tool:{call_id}"));
+            assert_eq!(started.correlation_id, correlation_id);
+            assert_eq!(completed.correlation_id, correlation_id);
+            assert!(matches!(
+                started.event,
+                crate::TurnEvent::ToolCallStarted {
+                    call_id: Some(ref observed),
+                    ..
+                } if observed == call_id
+            ));
+            assert!(matches!(
+                completed.event,
+                crate::TurnEvent::ToolCallCompleted {
+                    call_id: Some(ref observed),
+                    ..
+                } if observed == call_id
+            ));
+            let trace_lifecycle = trace_sink
+                .lifecycle
+                .lock_recover()
+                .iter()
+                .filter_map(|(observed, event)| (observed == call_id).then_some(*event))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                trace_lifecycle,
+                ["started", "completed"],
+                "exactly one ordered trace pair keyed by {call_id}"
+            );
+        }
+        assert!(
+            turn_rx.try_recv().is_err(),
+            "exactly one pair per failed call"
         );
     }
 

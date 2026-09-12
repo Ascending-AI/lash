@@ -627,7 +627,8 @@ impl RlmProtocolScenario {
                         "cell.checkpoint",
                     ));
                     let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-                    machine = TurnMachine::restore_from_checkpoint(build_config(), checkpoint);
+                    machine = TurnMachine::restore_from_checkpoint(build_config(), checkpoint)
+                        .expect("supported checkpoint");
                     observed.round_trips += 1;
                     observed.transcript.record(Entry::new(
                         Kind::Resume,

@@ -599,7 +599,8 @@ fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
         "checkpoint should contain RLM driver state"
     );
     let checkpoint = serde_json::from_value(checkpoint).expect("checkpoint deserializes");
-    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint);
+    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint)
+        .expect("supported checkpoint");
 
     let effects = drain_effects(&mut restored);
     let llm_id = *find_llm_call(&effects).expect("restored llm call");
@@ -662,7 +663,8 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     assert_eq!(code, "print \"hi\"");
 
     let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint);
+    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint)
+        .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     let (restored_exec_id, restored_code) = effects
         .iter()
@@ -778,7 +780,8 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
                     machine = TurnMachine::restore_from_checkpoint(
                         test_config_with_dialect(dialect),
                         checkpoint,
-                    );
+                    )
+                    .expect("supported checkpoint");
                     effects = drain_effects(&mut machine);
                 }
                 let exec_id = effects
@@ -1107,7 +1110,8 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     assert!(!emitted[2].3.is_success());
 
     let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint);
+    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint)
+        .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     assert!(
         !effects

@@ -612,20 +612,7 @@ impl RuntimeExecutionContext<'_> {
             output: output.clone(),
             duration_ms: outcome.record.duration_ms,
         };
-        self.emit_tool_call_completed_trace(&record, &attempts);
-        self.emit_turn_activity(
-            tool_correlation_id,
-            TurnEvent::ToolCallCompleted {
-                call_id: Some(call_id.clone()),
-                name: outcome.record.tool.clone(),
-                args: outcome.record.args.clone(),
-                output: output.clone(),
-                duration_ms: outcome.record.duration_ms,
-                graph_key: self.code_block_graph_key(),
-                parent_call_id: self.batch_parent_call_id(),
-            },
-        )
-        .await;
+        self.emit_tool_call_completed(&record, &attempts).await;
         CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
@@ -639,6 +626,67 @@ impl RuntimeExecutionContext<'_> {
             },
             record,
         }
+    }
+
+    async fn emit_tool_call_completed(
+        &self,
+        record: &ToolCallRecord,
+        attempts: &[lash_trace::TraceRetryAttempt],
+    ) {
+        self.emit_tool_call_completed_trace(record, attempts);
+        self.emit_turn_activity(
+            tool_activity_id(record.call_id.as_deref().unwrap_or_default()),
+            TurnEvent::ToolCallCompleted {
+                call_id: record.call_id.clone(),
+                name: record.tool.clone(),
+                args: record.args.clone(),
+                output: record.output.clone(),
+                duration_ms: record.duration_ms,
+                graph_key: self.code_block_graph_key(),
+                parent_call_id: self.batch_parent_call_id(),
+            },
+        )
+        .await;
+    }
+
+    pub(crate) async fn complete_undispatched_tool_call(
+        &self,
+        call_id: String,
+        replay: Option<crate::llm::types::ProviderReplayMeta>,
+        outcome: ToolDispatchOutcome,
+    ) -> CompletedProtocolToolCall {
+        self.emit_tool_call_started(
+            &call_id,
+            &outcome.record.tool,
+            outcome.record.args.clone(),
+            tool_activity_id(&call_id),
+        )
+        .await;
+        self.complete_tool_call(call_id, replay, outcome).await
+    }
+
+    pub(crate) async fn report_undispatched_tool_call(
+        &self,
+        completed: &crate::sansio::CompletedToolCall,
+    ) {
+        self.emit_tool_call_started(
+            &completed.call_id,
+            &completed.tool_name,
+            completed.args.clone(),
+            tool_activity_id(&completed.call_id),
+        )
+        .await;
+        self.emit_tool_call_completed(
+            &ToolCallRecord {
+                call_id: Some(completed.call_id.clone()),
+                tool: completed.tool_name.clone(),
+                args: completed.args.clone(),
+                output: completed.output.clone(),
+                duration_ms: completed.duration_ms,
+            },
+            &[],
+        )
+        .await;
     }
 
     pub(crate) async fn pending_completion_dispatch_outcome(
@@ -910,7 +958,9 @@ impl RuntimeExecutionContext<'_> {
                 intents: crate::ToolIntents::default(),
                 intent_outcomes: Vec::new(),
             };
-            return self.complete_tool_call(call_id, replay, outcome).await;
+            return self
+                .complete_undispatched_tool_call(call_id, replay, outcome)
+                .await;
         };
         self.emit_tool_call_started(&call_id, &name, args.clone(), tool_correlation_id.clone())
             .await;

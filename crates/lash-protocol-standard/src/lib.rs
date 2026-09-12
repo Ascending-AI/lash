@@ -627,6 +627,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     replay: call.replay,
                 }
             }).collect::<Vec<_>>();
+            actions.push(DriverAction::ReportToolCalls {
+                completed: completed.clone(),
+            });
             if calls.is_empty() {
                 actions.extend(self.handle_tool_results(ctx, completed));
                 return actions;

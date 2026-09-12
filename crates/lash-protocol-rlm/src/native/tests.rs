@@ -214,7 +214,8 @@ fn run(
         // Pending provider replay metadata survives the parked execution boundary.
         let checkpoint = serde_json::to_string(&machine.checkpoint()).unwrap();
         let saved = serde_json::from_str(&checkpoint).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved);
+        machine = TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved)
+            .expect("supported checkpoint");
         drain(&mut machine);
         machine.handle_response(Response::ExecResult { id, result });
         effects = drain(&mut machine);
@@ -233,7 +234,8 @@ fn run(
         checkpoints.push(serde_json::to_value(checkpoint).unwrap());
         let saved =
             serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved);
+        machine = TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved)
+            .expect("supported checkpoint");
         drain(&mut machine);
         machine.handle_response(Response::Checkpoint {
             id,
@@ -584,7 +586,8 @@ fn output_limit_prose_repairs_on_both_plugins() {
         let saved =
             serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
         machine =
-            TurnMachine::restore_from_checkpoint(config(native, RlmTermination::Natural), saved);
+            TurnMachine::restore_from_checkpoint(config(native, RlmTermination::Natural), saved)
+                .expect("supported checkpoint");
         drain(&mut machine);
         machine.handle_response(Response::Checkpoint {
             id,
@@ -654,7 +657,8 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                 serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap())
                     .unwrap();
             machine =
-                TurnMachine::restore_from_checkpoint(config(true, RlmTermination::Natural), saved);
+                TurnMachine::restore_from_checkpoint(config(true, RlmTermination::Natural), saved)
+                    .expect("supported checkpoint");
             drain(&mut machine);
             machine.handle_response(Response::Checkpoint {
                 id,
