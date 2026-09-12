@@ -25,7 +25,7 @@ use lash_core::{
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectInvocation,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, ScopedEffectController, TurnControlParticipation,
+    RuntimeErrorCode, ScopedEffectController, SleepSpec, TurnControlParticipation,
     facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
     facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
@@ -976,19 +976,23 @@ where
                 )
                 .await
             }
-            RestateEffectExecution::Timer {
-                invocation,
-                duration_ms,
-            } => {
-                self.emit_trace(Some(&invocation), || {
-                    lash_trace::TraceEvent::DurableTimerStarted { duration_ms }
-                });
-                let duration = Duration::from_millis(duration_ms);
+            RestateEffectExecution::Timer { invocation, spec } => {
                 let RuntimeSleepOptions {
                     cancellation,
                     observe_turn_cancel,
                     turn_cancel_scope,
+                    clock,
                 } = local_executor.into_sleep_options();
+                let duration_ms = match spec {
+                    SleepSpec::For { duration_ms } => duration_ms,
+                    SleepSpec::Until { deadline_ms } => {
+                        deadline_ms.saturating_sub(clock.timestamp_ms())
+                    }
+                };
+                self.emit_trace(Some(&invocation), || {
+                    lash_trace::TraceEvent::DurableTimerStarted { duration_ms }
+                });
+                let duration = Duration::from_millis(duration_ms);
                 let turn_cancel = restate_timer_turn_cancel_wait_request(
                     &invocation,
                     observe_turn_cancel,
@@ -1329,7 +1333,10 @@ pub(crate) enum RestateEffectExecution {
     },
     Timer {
         invocation: RuntimeEffectInvocation,
-        duration_ms: u64,
+        /// The journaled sleep intent. The Restate SDK wait duration is derived
+        /// from it against the injected clock at execution time, so an absolute
+        /// deadline keeps its envelope identity across redrive (FIG-2968).
+        spec: SleepSpec,
     },
     AwaitEvent {
         invocation: RuntimeEffectInvocation,
@@ -1431,12 +1438,9 @@ pub(crate) fn restate_effect_execution(
                 group,
             },
         },
-        RuntimeEffectCommand::Sleep { duration_ms } => {
+        RuntimeEffectCommand::Sleep { spec } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
-            RestateEffectExecution::Timer {
-                invocation,
-                duration_ms,
-            }
+            RestateEffectExecution::Timer { invocation, spec }
         }
         RuntimeEffectCommand::AwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;

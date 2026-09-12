@@ -156,7 +156,7 @@ fn claim(replay_key: &str, owner: &str) -> EffectClaimRequest {
         owner_id: owner.to_string(),
         lease_token: format!("token-{owner}"),
         lease_ttl_ms: 30_000,
-        sleep_duration_ms: None,
+        sleep: None,
         group_key: Some(GROUP.to_string()),
         strict_replay: false,
     }

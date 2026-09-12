@@ -892,7 +892,9 @@ impl Fig1631SleepGate for Fig1631SleepGateImpl {
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::Sleep, "fig1631-sleep-gate"),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: input.duration_ms,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: input.duration_ms,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(tokio_util::sync::CancellationToken::new())

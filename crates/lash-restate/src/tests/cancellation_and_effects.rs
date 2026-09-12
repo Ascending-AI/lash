@@ -444,7 +444,9 @@ pub(super) async fn restate_controller_routes_sleep_only_through_timer() {
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Sleep, "sleep"),
-                RuntimeEffectCommand::Sleep { duration_ms: 42 },
+                RuntimeEffectCommand::Sleep {
+                    spec: lash_core::SleepSpec::For { duration_ms: 42 },
+                },
             ),
             RuntimeEffectLocalExecutor::unavailable(),
         )
@@ -464,7 +466,9 @@ pub(super) async fn restate_turn_wait_rejects_missing_cancel_scope() {
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Sleep, "missing-cancel-scope"),
-                RuntimeEffectCommand::Sleep { duration_ms: 1 },
+                RuntimeEffectCommand::Sleep {
+                    spec: lash_core::SleepSpec::For { duration_ms: 1 },
+                },
             ),
             RuntimeEffectLocalExecutor::sleep(tokio_util::sync::CancellationToken::new()),
         )
@@ -486,7 +490,9 @@ pub(super) async fn restate_timer_stops_when_its_fresh_attempt_is_cancelled() {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Sleep, "cancelled-sleep"),
                 RuntimeEffectCommand::Sleep {
-                    duration_ms: 60_000,
+                    spec: lash_core::SleepSpec::For {
+                        duration_ms: 60_000,
+                    },
                 },
             ),
             RuntimeEffectLocalExecutor::sleep(cancellation)
@@ -515,7 +521,9 @@ pub(super) async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::Sleep, "suspended-sleep"),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: 300_000,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: 300_000,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(task_cancellation)

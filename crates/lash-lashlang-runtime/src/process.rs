@@ -24,8 +24,8 @@ use crate::{
     LASHLANG_ENGINE_KIND, LashlangHostEnvironmentCheck, LashlangHostError, LashlangProcessEngine,
     LashlangProcessFailureCode, LashlangProcessInput,
     bridge::{
-        lashlang_value_to_json, process_event_payload, protocol_tool_reply_to_lashlang_value,
-        sleep_duration_ms,
+        lashlang_value_to_json, process_event_payload, process_sleep,
+        protocol_tool_reply_to_lashlang_value,
     },
     prepare_lashlang_process_start, resolve_lashlang_module_operation,
     validate_lashlang_process_admission,
@@ -852,11 +852,11 @@ impl LashlangProcessHost<'_> {
     }
 
     async fn sleep(&self, sleep: lashlang::Sleep) -> Result<lashlang::Value, ExecutionHostError> {
-        let duration_ms = sleep_duration_ms(sleep.kind, &sleep.value)?;
+        let sleep = process_sleep(sleep.kind, &sleep.value)?;
         let sequence = self.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         let scope = format!("process:{}", self.process_id);
         self.ctx
-            .sleep_process(&scope, sequence, duration_ms)
+            .sleep_process(&scope, sequence, sleep)
             .await
             .map_err(|error| LashlangHostError::SleepProcess {
                 message: error.to_string(),

@@ -488,7 +488,9 @@ impl SurfaceRunner {
                         replay_key.clone(),
                     ),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: u64::from(*duration_ms),
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: u64::from(*duration_ms),
+                        },
                     },
                 );
                 let controller = self
@@ -1056,7 +1058,9 @@ impl SurfaceRunner {
                         RuntimeAttribution::for_session(SURFACE_SESSION),
                         replay_key.clone(),
                     ),
-                    RuntimeEffectCommand::Sleep { duration_ms: 1 },
+                    RuntimeEffectCommand::Sleep {
+                        spec: lash_core::SleepSpec::For { duration_ms: 1 },
+                    },
                 );
                 self.effect_host
                     .scoped(scope.clone())

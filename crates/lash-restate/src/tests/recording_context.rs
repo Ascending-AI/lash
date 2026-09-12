@@ -3,7 +3,12 @@ use super::*;
 #[test]
 pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
     let cases = vec![
-        (RuntimeEffectCommand::Sleep { duration_ms: 1 }, "timer"),
+        (
+            RuntimeEffectCommand::Sleep {
+                spec: lash_core::SleepSpec::For { duration_ms: 1 },
+            },
+            "timer",
+        ),
         (
             RuntimeEffectCommand::process(ProcessCommand::List {
                 session_scope: lash_core::SessionScope::new("session"),

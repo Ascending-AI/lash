@@ -54,17 +54,22 @@ pub fn process_event_payload(
     }))
 }
 
-pub fn sleep_duration_ms(
+/// Resolves a guest sleep into a durable intent without sampling the clock.
+///
+/// `until` keeps its absolute deadline; the effect seam derives the wait from
+/// the substrate clock, so the journaled envelope is replay-stable even though
+/// the remaining duration shrinks between attempts (FIG-2968).
+pub fn process_sleep(
     kind: lashlang::SleepKind,
     value: &LashlangValue,
-) -> Result<u64, ExecutionHostError> {
+) -> Result<lash_core::SleepSpec, ExecutionHostError> {
     match kind {
-        lashlang::SleepKind::For => duration_value_ms(value),
-        lashlang::SleepKind::Until => {
-            let target = deadline_value_ms(value)?;
-            let now = chrono::Utc::now().timestamp_millis();
-            Ok(target.saturating_sub(now.max(0) as u64))
-        }
+        lashlang::SleepKind::For => Ok(lash_core::SleepSpec::For {
+            duration_ms: duration_value_ms(value)?,
+        }),
+        lashlang::SleepKind::Until => Ok(lash_core::SleepSpec::Until {
+            deadline_ms: deadline_value_ms(value)?,
+        }),
     }
 }
 
@@ -220,5 +225,42 @@ mod tests {
             lashlang_value_to_json(&borrowed).expect("projected Lashlang value serializes"),
             expected
         );
+    }
+
+    #[test]
+    fn sleep_for_resolves_to_a_relative_duration() {
+        let value = LashlangValue::Number(1_500.0);
+        assert_eq!(
+            process_sleep(lashlang::SleepKind::For, &value).expect("a numeric duration resolves"),
+            lash_core::SleepSpec::For { duration_ms: 1_500 }
+        );
+    }
+
+    #[test]
+    fn sleep_until_keeps_the_absolute_deadline_and_never_samples_the_clock() {
+        // A deadline at a fixed absolute instant. `process_sleep` must return
+        // the deadline itself: the rejected implementation subtracted
+        // `Utc::now()` here, so two calls a moment apart produced different
+        // durations and the journaled envelope failed its own replay fence
+        // (FIG-2968).
+        let deadline_ms = 1_800_000_000_000_u64;
+        let value = LashlangValue::Number(deadline_ms as f64);
+        let first = process_sleep(lashlang::SleepKind::Until, &value).expect("deadline resolves");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second = process_sleep(lashlang::SleepKind::Until, &value).expect("deadline resolves");
+        assert_eq!(first, second);
+        assert_eq!(first, lash_core::SleepSpec::Until { deadline_ms });
+    }
+
+    #[test]
+    fn sleep_until_parses_an_absolute_rfc3339_deadline() {
+        let value = LashlangValue::String("2030-01-01T00:00:00Z".into());
+        match process_sleep(lashlang::SleepKind::Until, &value).expect("rfc3339 deadline resolves")
+        {
+            lash_core::SleepSpec::Until { deadline_ms } => {
+                assert_eq!(deadline_ms, 1_893_456_000_000);
+            }
+            other => panic!("expected an absolute deadline, got {other:?}"),
+        }
     }
 }

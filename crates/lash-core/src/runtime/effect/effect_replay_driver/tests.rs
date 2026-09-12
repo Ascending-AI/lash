@@ -73,7 +73,7 @@ fn request() -> EffectClaimRequest {
         owner_id: "owner-1".to_string(),
         lease_token: "owner-1:1".to_string(),
         lease_ttl_ms: TTL,
-        sleep_duration_ms: None,
+        sleep: None,
         group_key: None,
         strict_replay: false,
     }
@@ -250,7 +250,7 @@ fn a_missing_row_under_strict_replay_is_refused_without_writing() {
 #[test]
 fn a_fresh_sleep_claim_derives_its_due_time_from_the_claim_instant() {
     let request = EffectClaimRequest {
-        sleep_duration_ms: Some(5_000),
+        sleep: Some(crate::SleepSpec::For { duration_ms: 5_000 }),
         ..request()
     };
     assert_eq!(
@@ -259,6 +259,34 @@ fn a_fresh_sleep_claim_derives_its_due_time_from_the_claim_instant() {
             lease_expires_at_ms: NOW + TTL,
             due_at_ms: Some(NOW + 5_000),
             now_ms: NOW,
+        })
+    );
+}
+
+#[test]
+fn an_absolute_sleep_claim_records_the_deadline_not_a_derived_due() {
+    // The deadline is the journaled fact. It must land on the row unchanged and
+    // independently of the claim instant that stamps the lease, so a redrive
+    // that claims later still agrees on the same envelope (FIG-2968).
+    let deadline_ms = NOW + 12_345;
+    let request = EffectClaimRequest {
+        sleep: Some(crate::SleepSpec::Until { deadline_ms }),
+        ..request()
+    };
+    assert_eq!(
+        decide_effect_claim(None, &request, NOW),
+        EffectClaimDecision::Insert(EffectLeaseStamp {
+            lease_expires_at_ms: NOW + TTL,
+            due_at_ms: Some(deadline_ms),
+            now_ms: NOW,
+        })
+    );
+    assert_eq!(
+        decide_effect_claim(None, &request, NOW + 9_999),
+        EffectClaimDecision::Insert(EffectLeaseStamp {
+            lease_expires_at_ms: NOW + 9_999 + TTL,
+            due_at_ms: Some(deadline_ms),
+            now_ms: NOW + 9_999,
         })
     );
 }
@@ -389,7 +417,7 @@ fn a_takeover_keeps_the_recorded_due_time_instead_of_restarting_the_sleep() {
     expired.lease_expires_at_ms = NOW - 1;
     expired.due_at_ms = Some(NOW + 10);
     let request = EffectClaimRequest {
-        sleep_duration_ms: Some(5_000),
+        sleep: Some(crate::SleepSpec::For { duration_ms: 5_000 }),
         ..request()
     };
     assert_eq!(
@@ -407,7 +435,7 @@ fn a_takeover_of_a_sleep_without_a_recorded_due_time_derives_one() {
     let mut expired = row("in_progress");
     expired.lease_expires_at_ms = NOW - 1;
     let request = EffectClaimRequest {
-        sleep_duration_ms: Some(5_000),
+        sleep: Some(crate::SleepSpec::For { duration_ms: 5_000 }),
         ..request()
     };
     assert_eq!(
@@ -443,7 +471,7 @@ fn strict_replay_takes_over_an_expired_in_progress_row() {
     expired.due_at_ms = Some(NOW + 10);
     let request = EffectClaimRequest {
         strict_replay: true,
-        sleep_duration_ms: Some(5_000),
+        sleep: Some(crate::SleepSpec::For { duration_ms: 5_000 }),
         ..request()
     };
     assert_eq!(
@@ -479,7 +507,9 @@ fn strict_replay_reports_a_live_lease_as_busy() {
 fn lease_stamps_saturate_instead_of_overflowing() {
     let request = EffectClaimRequest {
         lease_ttl_ms: u64::MAX,
-        sleep_duration_ms: Some(u64::MAX),
+        sleep: Some(crate::SleepSpec::For {
+            duration_ms: u64::MAX,
+        }),
         ..request()
     };
     assert_eq!(

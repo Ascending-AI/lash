@@ -194,7 +194,9 @@ fn sleep_envelope(scope: ExecutionScope, replay_key: &str) -> RuntimeEffectEnvel
             crate::RuntimeAttribution::none(),
             "scope-admission-sleep",
         ),
-        crate::RuntimeEffectCommand::Sleep { duration_ms: 1 },
+        crate::RuntimeEffectCommand::Sleep {
+            spec: crate::SleepSpec::For { duration_ms: 1 },
+        },
     )
 }
 

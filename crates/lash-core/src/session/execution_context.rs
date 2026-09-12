@@ -897,7 +897,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         scope: &str,
         sequence: u64,
-        duration_ms: u64,
+        spec: crate::SleepSpec,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let cancellation = self.cancellation_token.clone().unwrap_or_default();
         let invocation = crate::runtime::causal::process_sleep_invocation(
@@ -910,15 +910,13 @@ impl<'run> RuntimeExecutionContext<'run> {
             scope,
             sequence,
         );
+        let command = crate::RuntimeEffectCommand::Sleep { spec };
         let outcome = self
             .dispatch
             .effect_controller
             .scoped()
             .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::Sleep { duration_ms },
-                ),
+                crate::RuntimeEffectEnvelope::new(invocation, command),
                 crate::RuntimeEffectLocalExecutor::sleep_under(
                     &self.turn_cancel_wait(cancellation.clone()),
                     std::sync::Arc::clone(&self.dispatch.clock),

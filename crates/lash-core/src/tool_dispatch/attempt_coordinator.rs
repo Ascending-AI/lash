@@ -756,7 +756,9 @@ async fn sleep_before_retry(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::Sleep {
-                    duration_ms: retry_after_ms,
+                    spec: crate::SleepSpec::For {
+                        duration_ms: retry_after_ms,
+                    },
                 },
             ),
             RuntimeEffectLocalExecutor::sleep_under(

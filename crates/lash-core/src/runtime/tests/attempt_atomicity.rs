@@ -1220,7 +1220,9 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
         &tier,
         crate::RuntimeEffectEnvelope::new(
             follow_on_invocation(),
-            crate::RuntimeEffectCommand::Sleep { duration_ms: 0 },
+            crate::RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 0 },
+            },
         ),
         crate::RuntimeEffectLocalExecutor::testing(|_envelope| async {
             Ok(crate::RuntimeEffectOutcome::Sleep)
@@ -1261,7 +1263,9 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
         &tier,
         crate::RuntimeEffectEnvelope::new(
             follow_on_invocation(),
-            crate::RuntimeEffectCommand::Sleep { duration_ms: 0 },
+            crate::RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 0 },
+            },
         ),
         crate::RuntimeEffectLocalExecutor::testing(|_envelope| async {
             Ok(crate::RuntimeEffectOutcome::Sleep)
