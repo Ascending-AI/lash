@@ -51,7 +51,7 @@ lash_rust_unit_test(
         "testing",
     ],
     extra_compile_data = [
-        "//crates/lashlang:package_files",
+        "//crates/lashlang:old_module_fixture",
     ],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -81,8 +81,7 @@ lash_rust_binary(
         "testing",
     ],
     extra_compile_data = [
-        "//crates/lash-core:test_support_sources",
-        "//crates/lashlang:package_files",
+        "//crates/lash-core:cold_process_drivers",
     ],
     include_dev_deps = True,
     library = ":lash-sqlite-store",
@@ -110,10 +109,7 @@ lash_rust_integration_test(
         "perf-witness",
         "testing",
     ],
-    extra_compile_data = [
-        "//crates/lash-core:test_support_sources",
-        "//crates/lashlang:package_files",
-    ],
+    extra_compile_data = [],
     test_env = {"RUST_TEST_THREADS": "1"},
     library = ":lash-sqlite-store",
     library_crate_name = "lash_sqlite_store",
@@ -141,8 +137,8 @@ lash_rust_integration_test(
         "testing",
     ],
     extra_compile_data = [
-        "//crates/lash-core:test_support_sources",
-        "//crates/lashlang:package_files",
+        "//crates/lash-core:cold_process_turn_parent",
+        "//crates/lash-core:queued_claim_atomicity",
     ],
     library = ":lash-sqlite-store",
     library_crate_name = "lash_sqlite_store",
@@ -169,10 +165,7 @@ lash_rust_integration_test(
         "perf-witness",
         "testing",
     ],
-    extra_compile_data = [
-        "//crates/lash-core:test_support_sources",
-        "//crates/lashlang:package_files",
-    ],
+    extra_compile_data = [],
     library = ":lash-sqlite-store",
     library_crate_name = "lash_sqlite_store",
     manifest_dir = "crates/lash-sqlite-store",
@@ -199,8 +192,7 @@ lash_rust_integration_test(
         "testing",
     ],
     extra_compile_data = [
-        "//crates/lash-core:test_support_sources",
-        "//crates/lashlang:package_files",
+        "//crates/lash-core:durable_read_fixture_source",
         "//:durable_fixtures",
     ],
     library = ":lash-sqlite-store",

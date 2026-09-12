@@ -157,8 +157,6 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         extra_compile_data = []
         if package["name"] == "slack-clone":
             extra_compile_data.append("//examples:shared_rust_sources")
-        if package["name"] == "lash-runtime":
-            extra_compile_data.append("//crates/lashlang:package_files")
         if package["name"] == "lash-perf":
             extra_compile_data.append("//:perf_guard_budgets")
         chunks.append(
@@ -189,7 +187,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 "lash-runtime",
                 "lash-internal-sqlite-store",
             ):
-                unit_compile_data.append("//crates/lashlang:package_files")
+                unit_compile_data.append("//crates/lashlang:old_module_fixture")
             unit_tags = cargo_owned_tags(package["name"], "unit-test", library["name"])
             chunks.append(
                 "lash_rust_unit_test(\n"
@@ -262,10 +260,23 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "lash-internal-postgres-store",
             "lash-internal-sqlite-store",
         ):
-            extra_compile_data.extend([
-                "//crates/lash-core:test_support_sources",
-                "//crates/lashlang:package_files",
-            ])
+            if target["name"] in (
+                "postgres-await-event-helper",
+                "sqlite-await-event-helper",
+            ):
+                extra_compile_data.append("//crates/lash-core:cold_process_drivers")
+            if target["name"] == "conformance":
+                extra_compile_data.extend([
+                    "//crates/lash-core:cold_process_turn_parent",
+                    "//crates/lash-core:queued_claim_atomicity",
+                ])
+            if target["name"] == "durable_read_fixture":
+                extra_compile_data.append("//crates/lash-core:durable_read_fixture_source")
+        if (
+            package["name"] == "lash-internal-postgres-store"
+            and target["name"] == "preflight_durable_walk"
+        ):
+            extra_compile_data.append("//crates/lashlang:old_module_fixture")
         if package["name"] in (
             "lash-internal-postgres-store",
             "lash-internal-sqlite-store",
@@ -343,8 +354,31 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
     if package["name"] == "lash-internal-core":
         chunks.append(
             "filegroup(\n"
-            "    name = \"test_support_sources\",\n"
-            "    srcs = glob([\"tests/support/**/*.rs\"]),\n"
+            "    name = \"cold_process_drivers\",\n"
+            "    srcs = [\n"
+            "        \"tests/support/cold_process_effect_driver.rs\",\n"
+            "        \"tests/support/cold_process_turn_driver.rs\",\n"
+            "    ],\n"
+            ")\n\n"
+            "filegroup(\n"
+            "    name = \"cold_process_turn_parent\",\n"
+            "    srcs = [\"tests/support/cold_process_turn_parent.rs\"],\n"
+            ")\n\n"
+            "filegroup(\n"
+            "    name = \"durable_read_fixture_source\",\n"
+            "    srcs = [\"tests/support/durable_read_fixture.rs\"],\n"
+            ")\n\n"
+            "filegroup(\n"
+            "    name = \"queued_claim_atomicity\",\n"
+            "    srcs = [\"tests/support/queued_claim_atomicity.rs\"],\n"
+            ")\n\n"
+        )
+
+    if package["name"] == "lash-internal-lashlang":
+        chunks.append(
+            "filegroup(\n"
+            "    name = \"old_module_fixture\",\n"
+            "    srcs = [\"tests/fixtures/module-artifact-old.json\"],\n"
             ")\n\n"
         )
 

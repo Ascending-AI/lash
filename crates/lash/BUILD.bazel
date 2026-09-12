@@ -26,9 +26,7 @@ lash_rust_library(
         "rlm",
         "testing",
     ],
-    extra_compile_data = [
-        "//crates/lashlang:package_files",
-    ],
+    extra_compile_data = [],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     version = "0.0.0-dev",
@@ -51,7 +49,7 @@ lash_rust_unit_test(
         "testing",
     ],
     extra_compile_data = [
-        "//crates/lashlang:package_files",
+        "//crates/lashlang:old_module_fixture",
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",

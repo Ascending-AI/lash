@@ -167,8 +167,26 @@ lash_rust_integration_test(
 )
 
 filegroup(
-    name = "test_support_sources",
-    srcs = glob(["tests/support/**/*.rs"]),
+    name = "cold_process_drivers",
+    srcs = [
+        "tests/support/cold_process_effect_driver.rs",
+        "tests/support/cold_process_turn_driver.rs",
+    ],
+)
+
+filegroup(
+    name = "cold_process_turn_parent",
+    srcs = ["tests/support/cold_process_turn_parent.rs"],
+)
+
+filegroup(
+    name = "durable_read_fixture_source",
+    srcs = ["tests/support/durable_read_fixture.rs"],
+)
+
+filegroup(
+    name = "queued_claim_atomicity",
+    srcs = ["tests/support/queued_claim_atomicity.rs"],
 )
 
 filegroup(

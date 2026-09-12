@@ -217,6 +217,11 @@ lash_rust_binary(
 )
 
 filegroup(
+    name = "old_module_fixture",
+    srcs = ["tests/fixtures/module-artifact-old.json"],
+)
+
+filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
 )
