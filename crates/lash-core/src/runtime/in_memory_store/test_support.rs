@@ -303,7 +303,11 @@ impl InMemorySessionStore {
         meta.leaf_node_id = Some(leaf_node_id.clone());
         self.session_graph
             .lock_recover()
-            .set_leaf_node_id(Some(leaf_node_id));
+            .apply_append(&crate::GraphAppend {
+                nodes: Vec::new(),
+                leaf_node_id: Some(leaf_node_id),
+            })
+            .expect("forced active leaf must resolve");
     }
 
     pub fn tombstone_node_for_testing(&self, node_id: String) {
@@ -431,6 +435,51 @@ mod tests {
             0,
             "a rejected ownership collision must not leak usage deltas"
         );
+    }
+
+    #[tokio::test]
+    async fn stale_head_precedes_collision_from_the_already_committed_append() {
+        let factory = super::super::InMemorySessionStoreFactory::new();
+        let session_id = SessionId::from("stale-head-before-append-validation");
+        let store = factory
+            .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: session_id.clone(),
+                relation: crate::SessionRelation::Root,
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create in-memory session store");
+        let mut state = RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        };
+        state.ensure_agent_frame_initialized();
+        let initial = RuntimeCommit::persisted_state_with_operation_for_testing(
+            &state,
+            &[],
+            crate::OperationId::turn(&session_id, "turn-1", "final"),
+        );
+        store
+            .commit_runtime_state(initial.clone())
+            .await
+            .expect("commit initial frame");
+
+        let (stale, _) = initial
+            .with_operation(crate::OperationId::turn(&session_id, "turn-2", "final"))
+            .expect("restamp stale commit with a distinct operation");
+        let error = store
+            .commit_runtime_state(stale)
+            .await
+            .expect_err("stale head must win before occupied append validation");
+
+        assert!(matches!(
+            error,
+            StoreError::HeadRevisionConflict {
+                expected: 0,
+                actual: 1,
+            }
+        ));
     }
 
     #[tokio::test]

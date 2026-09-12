@@ -1,4 +1,35 @@
 use super::*;
+use crate::facade_support::AgentFrameReasonFacadeOps;
+
+fn test_message(id: &str) -> crate::Message {
+    crate::Message {
+        id: id.to_string(),
+        role: crate::MessageRole::User,
+        parts: crate::shared_parts(vec![crate::Part::text(
+            format!("{id}.p0"),
+            "test message".to_string(),
+            None,
+        )]),
+        origin: None,
+    }
+}
+
+fn state_with_persisted_initial_frame(session_id: &str) -> crate::RuntimeSessionState {
+    let mut state = crate::RuntimeSessionState {
+        session_id: SessionId::from(session_id),
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.ensure_agent_frame_initialized();
+    state.mark_node_ids_persisted(
+        state
+            .session_graph
+            .nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>(),
+    );
+    state
+}
 
 fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
     fn scrub(value: &mut serde_json::Value) {
@@ -194,6 +225,98 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
     assert_eq!(leaf_node_id, Some(nodes[0].node_id.clone()));
     assert_eq!(state.session_graph.nodes[0].node_id, nodes[0].node_id);
     assert_eq!(state.session_graph.leaf_node_id, leaf_node_id);
+}
+
+#[test]
+fn commit_frame_derivation_reads_resident_parent_for_temporary_append_nodes() {
+    let mut state = state_with_persisted_initial_frame("temporary-frame-derivation");
+    let current_frame_node_id = state
+        .current_frame_node_id
+        .clone()
+        .expect("initial frame node id");
+    let temporary_node_id = state
+        .session_graph
+        .append_message(test_message("temporary"));
+    assert!(temporary_node_id.starts_with("draft-node/v3/"));
+    let graph = state.pending_graph_commit();
+    assert_eq!(graph.nodes[0].node_id, temporary_node_id);
+    assert!(state.session_graph.find_node(&temporary_node_id).is_some());
+
+    let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        &state,
+        graph,
+        &[],
+        OperationId::turn(&state.session_id, "turn-1", "final"),
+    )
+    .expect("derive frame from resident parent");
+
+    assert_eq!(commit.current_frame_node_id, Some(current_frame_node_id));
+}
+
+#[test]
+fn commit_frame_derivation_reads_resident_parent_for_derived_append_nodes() {
+    let mut state = state_with_persisted_initial_frame("derived-frame-derivation");
+    let current_frame_node_id = state
+        .current_frame_node_id
+        .clone()
+        .expect("initial frame node id");
+    let temporary_node_id = state.session_graph.append_message(test_message("derived"));
+    let operation = OperationId::turn(&state.session_id, "turn-1", "final");
+    let mut graph = state.pending_graph_commit();
+    graph
+        .derive_node_ids(&state.session_id, &operation)
+        .expect("derive final append ids");
+    assert_ne!(graph.nodes[0].node_id, temporary_node_id);
+    assert!(state.session_graph.find_node(&temporary_node_id).is_some());
+    assert!(
+        state
+            .session_graph
+            .find_node(&graph.nodes[0].node_id)
+            .is_none()
+    );
+
+    let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        &state,
+        graph,
+        &[],
+        operation,
+    )
+    .expect("derive frame from resident parent");
+
+    assert_eq!(commit.current_frame_node_id, Some(current_frame_node_id));
+}
+
+#[test]
+fn commit_frame_derivation_uses_last_frame_boundary_inside_append() {
+    let mut state = state_with_persisted_initial_frame("appended-frame-derivation");
+    state
+        .session_graph
+        .append_message(test_message("before-boundary"));
+    let frame_key = crate::FrameKey::from_caller_material("second-frame")
+        .expect("non-empty frame key material");
+    let appended_frame_node_id =
+        crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
+    assert!(state.session_graph.append_frame_open_with_id_at(
+        appended_frame_node_id.to_string(),
+        frame_key,
+        crate::AgentFrameReason::continue_as(),
+        crate::AgentFrameAssignment::from_policy(state.policy.clone()),
+        state.protocol_turn_options.clone(),
+        "2026-09-12T00:00:00Z".to_string(),
+    ));
+    state
+        .session_graph
+        .append_message(test_message("after-boundary"));
+
+    let commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        &state,
+        state.pending_graph_commit(),
+        &[],
+        OperationId::turn(&state.session_id, "turn-1", "final"),
+    )
+    .expect("derive appended frame boundary");
+
+    assert_eq!(commit.current_frame_node_id, Some(appended_frame_node_id));
 }
 
 #[test]

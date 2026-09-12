@@ -1,6 +1,6 @@
 use super::*;
 use crate::facade_support::AgentFrameReasonFacadeOps;
-use crate::{MessageRole, Part, shared_parts};
+use crate::{GraphAppend, MessageRole, Part, shared_parts};
 
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {
@@ -74,6 +74,79 @@ fn construction_enforces_structural_graph_integrity() {
     assert!(matches!(
         leafless.validate_resident_integrity(),
         Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None })
+    ));
+}
+
+#[test]
+fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
+    let mut graph = SessionGraph::from_active_read_state(&[text_message(
+        "resident-message",
+        MessageRole::User,
+        "resident",
+    )]);
+    let resident_leaf = graph.leaf_node_id.clone().expect("resident leaf");
+    let before_graph = serde_json::to_value(&graph).expect("serialize graph preimage");
+    let before_read = graph.read_model();
+    let node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
+        node_id: node_id.to_string(),
+        parent_node_id: Some(parent_node_id.to_string()),
+        timestamp: "2026-09-12T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Plugin {
+            plugin_type: "atomic-append-test".to_string(),
+            body: SharedJsonValue::new(serde_json::json!({"node": node_id})),
+        },
+    };
+
+    let duplicate = GraphAppend {
+        nodes: vec![node(&resident_leaf, &resident_leaf)],
+        leaf_node_id: Some(resident_leaf.clone()),
+    };
+    assert!(matches!(
+        graph.apply_append(&duplicate),
+        Err(crate::StoreError::NodeIdCollision { node_id }) if node_id == resident_leaf
+    ));
+
+    let duplicate_batch = GraphAppend {
+        nodes: vec![
+            node("duplicate-batch", &resident_leaf),
+            node("duplicate-batch", "duplicate-batch"),
+        ],
+        leaf_node_id: Some("duplicate-batch".to_string()),
+    };
+    assert!(matches!(
+        graph.apply_append(&duplicate_batch),
+        Err(crate::StoreError::NodeIdCollision { node_id }) if node_id == "duplicate-batch"
+    ));
+
+    let invalid = GraphAppend {
+        nodes: vec![node("invalid-child", "missing-parent")],
+        leaf_node_id: Some("invalid-child".to_string()),
+    };
+    assert!(matches!(
+        graph.apply_append(&invalid),
+        Err(crate::StoreError::InvalidGraphParent {
+            node_id,
+            actual: Some(parent),
+            ..
+        }) if node_id == "invalid-child" && parent == "missing-parent"
+    ));
+
+    assert_eq!(
+        serde_json::to_value(&graph).expect("serialize graph after refusals"),
+        before_graph
+    );
+    let after_read = graph.read_model();
+    assert!(std::sync::Arc::ptr_eq(
+        &before_read.active_events,
+        &after_read.active_events
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &before_read.messages,
+        &after_read.messages
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &before_read.prompt_render_cache,
+        &after_read.prompt_render_cache
     ));
 }
 
@@ -628,7 +701,8 @@ fn message_tree_marks_active_nodes_without_using_message_identity() {
     let message = text_message("same-message-id", MessageRole::User, "same content");
     let root = graph.append_message(message.clone());
     let inactive = graph.append_message(message.clone());
-    graph.set_leaf_node_id(Some(root));
+    graph = SessionGraph::from_nodes(graph.nodes.clone(), Some(root))
+        .expect("the selected branch leaf resolves");
     let active = graph.append_message(message);
 
     let tree = graph.message_tree();
@@ -661,17 +735,18 @@ fn active_read_rewrite_preserves_draft_node_id_sequence() {
 
     let leaf_node_id = graph.leaf_node_id.clone().expect("initial leaf");
     let draft_namespace = format!("unscoped-replacement:{leaf_node_id}");
-    for ordinal in 0..2 {
-        graph.push_node_record(SessionNodeRecord {
-            node_id: draft_node_id(&draft_namespace, ordinal),
-            parent_node_id: Some(leaf_node_id.clone()),
-            timestamp: "2026-08-20T00:00:00Z".to_string(),
-            payload: SessionNodePayload::Plugin {
-                plugin_type: "pre-existing-draft".to_string(),
-                body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
-            },
-        });
-    }
+    let mut nodes = graph.nodes.clone();
+    nodes.extend((0..2).map(|ordinal| SessionNodeRecord {
+        node_id: draft_node_id(&draft_namespace, ordinal),
+        parent_node_id: Some(leaf_node_id.clone()),
+        timestamp: "2026-08-20T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Plugin {
+            plugin_type: "pre-existing-draft".to_string(),
+            body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
+        },
+    }));
+    graph = SessionGraph::from_nodes(nodes, Some(leaf_node_id))
+        .expect("pre-existing draft branches are structurally valid");
 
     graph.rewrite_active_read_tail(&[
         first,

@@ -52,15 +52,11 @@ impl SessionCommitStore for Store {
                     let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
                         return Ok(None);
                     };
-                    let leaf_node_id = meta.leaf_node_id.clone();
-                    let mut graph = Self::load_active_path_session_graph_from_conn(
+                    let graph = Self::load_active_path_session_graph_from_conn(
                         &tx,
                         &session_id,
-                        leaf_node_id.clone(),
+                        meta.leaf_node_id.clone(),
                     )?;
-                    if !graph.nodes.is_empty() {
-                        graph.set_leaf_node_id(leaf_node_id);
-                    }
                     let checkpoint = match meta.checkpoint_ref.as_ref() {
                         Some(blob_ref) => {
                             Some(Self::get_checkpoint_conn(&tx, blob_ref)?.ok_or_else(|| {

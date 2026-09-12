@@ -70,10 +70,6 @@ pub(crate) mod facade_ops {
         fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str>;
 
         fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord>;
-
-        fn extend_node_records<I>(&mut self, nodes: I)
-        where
-            I: IntoIterator<Item = SessionNodeRecord>;
     }
 
     impl SessionGraphFacadeOps for SessionGraph {
@@ -97,13 +93,6 @@ pub(crate) mod facade_ops {
         fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord> {
             self.try_agent_frame_records(session_id)
                 .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
-        }
-
-        fn extend_node_records<I>(&mut self, nodes: I)
-        where
-            I: IntoIterator<Item = SessionNodeRecord>,
-        {
-            self.data_mut().nodes.extend(nodes);
         }
     }
 }
@@ -1249,16 +1238,69 @@ impl SessionGraph {
         node_ids
     }
 
-    /// Updates leaf node id state for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
-    pub fn set_leaf_node_id(&mut self, node_id: Option<String>) {
-        self.data_mut().leaf_node_id = node_id;
-    }
+    /// Atomically applies an append's nodes and selected leaf after validating the whole proposal.
+    ///
+    /// Incoming IDs must be unoccupied, including within the incoming batch. The append must be a
+    /// continuous chain, its first parent must already be resident (unless it starts a new root),
+    /// and its selected leaf must resolve. Validation completes before nodes, leaf, or cached read
+    /// state changes, so every refusal leaves this graph unchanged.
+    pub fn apply_append(
+        &mut self,
+        append: &crate::store::GraphAppend,
+    ) -> Result<(), crate::StoreError> {
+        let mut occupied_ids = HashSet::with_capacity(self.nodes.len() + append.nodes.len());
+        for node in &self.nodes {
+            if !occupied_ids.insert(node.node_id.as_str()) {
+                return Err(crate::StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
+        }
+        let resident_ids = occupied_ids.clone();
+        for node in &append.nodes {
+            if !occupied_ids.insert(node.node_id.as_str()) {
+                return Err(crate::StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
+        }
+        append.validate_append_topology()?;
 
-    /// Updates node record state for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
-    pub fn push_node_record(&mut self, node: SessionNodeRecord) {
-        self.data_mut().nodes.push(node);
+        if let Some(first) = append.nodes.first()
+            && let Some(parent_node_id) = first.parent_node_id.as_deref()
+            && !resident_ids.contains(parent_node_id)
+        {
+            return Err(crate::StoreError::InvalidGraphParent {
+                node_id: first.node_id.clone(),
+                expected: None,
+                actual: first.parent_node_id.clone(),
+            });
+        }
+        if append.nodes.is_empty()
+            && let Some(leaf_node_id) = append.leaf_node_id.as_deref()
+            && !resident_ids.contains(leaf_node_id)
+        {
+            return Err(crate::StoreError::InvalidGraphLeaf {
+                leaf_node_id: append.leaf_node_id.clone(),
+            });
+        }
+
+        if append.nodes.is_empty() {
+            if self.leaf_node_id != append.leaf_node_id {
+                self.data_mut().leaf_node_id = append.leaf_node_id.clone();
+            }
+            return Ok(());
+        }
+
+        let extends_active_leaf = append.nodes[0].parent_node_id == self.leaf_node_id;
+        if extends_active_leaf {
+            self.append_prebuilt_nodes(append.nodes.clone());
+        } else {
+            let data = self.data_mut();
+            data.nodes.extend(append.nodes.iter().cloned());
+            data.leaf_node_id = append.leaf_node_id.clone();
+        }
+        Ok(())
     }
 
     /// Tests branch liveness for store and protocol implementors against the current leaf ancestry.

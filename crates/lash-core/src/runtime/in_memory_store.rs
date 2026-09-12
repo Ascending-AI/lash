@@ -944,16 +944,16 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         };
         let tombstoned = self.tombstoned_node_ids.lock_recover().clone();
         let global_graph = self.global_session_graph.lock_recover().clone();
-        let mut graph = global_graph;
-        graph.set_leaf_node_id(meta.leaf_node_id.clone());
         let map_graph_corruption =
             |error: crate::StoreError| crate::StoreError::StoredDataCorrupt {
                 record_kind: "SessionGraph",
                 message: error.to_string(),
             };
-        let mut graph = graph
-            .try_trim_to_active_path()
-            .map_err(map_graph_corruption)?;
+        let mut graph =
+            crate::SessionGraph::from_nodes(global_graph.nodes.clone(), meta.leaf_node_id.clone())
+                .map_err(map_graph_corruption)?
+                .try_trim_to_active_path()
+                .map_err(map_graph_corruption)?;
         if !tombstoned.is_empty() {
             let leaf_node_id = graph
                 .leaf_node_id
@@ -1183,9 +1183,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
             | crate::AppendRequestIdentity::SemanticBoundary { .. } => true,
         };
-        let mut proposed = self.global_session_graph.lock_recover().clone();
-        proposed.extend_node_records(commit.graph.nodes.iter().cloned());
-        proposed.set_leaf_node_id(commit.graph.leaf_node_id().cloned());
         let plan = planner.plan(crate::store::FreshRuntimeCommitFacts {
             actual_head_revision: actual,
             published_leaf,
@@ -1194,6 +1191,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             selected_leaf_is_live,
             has_live_nodes: has_existing_live_nodes,
         })?;
+        let mut proposed = self.global_session_graph.lock_recover().clone();
+        proposed.apply_append(&commit.graph)?;
         let (staged_tombstoned_node_ids, staged_session_heads) = {
             let new_leaf_node_id = commit.graph.leaf_node_id().cloned();
             let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
@@ -1431,12 +1430,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         *self.queued_work_next_seq.lock_recover() = staged_queued_work_next_seq;
         *self.pending_turn_inputs.lock_recover() = staged_pending_turn_inputs;
         *self.turn_cancel_requests.lock_recover() = staged_turn_cancel_requests;
+        let resident_graph = proposed.trim_to_active_path();
         let mut global_graph = self.global_session_graph.lock_recover();
-        global_graph.extend_node_records(commit.graph.nodes.iter().cloned());
-        let leaf_node_id = commit.graph.leaf_node_id.clone();
-        let mut resident_graph = global_graph.clone();
-        resident_graph.set_leaf_node_id(leaf_node_id.clone());
-        resident_graph = resident_graph.trim_to_active_path();
+        *global_graph = proposed;
         *self.session_graph.lock_recover() = resident_graph;
         drop(global_graph);
         *self.tombstoned_node_ids.lock_recover() = staged_tombstoned_node_ids;
