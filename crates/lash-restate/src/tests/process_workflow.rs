@@ -804,11 +804,13 @@ pub(super) fn recovery_worker_with_plugins(
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_env_store(process_env_store)
-    .with_process_engine(Arc::new(
-        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
-            lash_lashlang_runtime::LashlangSurface::default(),
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
         ),
-    ));
+    );
     DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
@@ -940,11 +942,13 @@ pub(super) fn process_parent_worker(
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_env_store(process_env_store)
-    .with_process_engine(Arc::new(
-        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
-            lash_lashlang_runtime::LashlangSurface::default(),
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
         ),
-    ));
+    );
     let plugins = vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
             as Arc<dyn lash_core::facade_support::PluginFactory>,

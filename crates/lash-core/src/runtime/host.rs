@@ -214,8 +214,11 @@ impl RuntimeHostConfig {
         self
     }
 
-    pub fn with_process_engine(mut self, engine: Arc<dyn crate::ProcessEngine>) -> Self {
-        self.process_engines = self.process_engines.with_engine(engine);
+    pub fn with_process_engine_registration(
+        mut self,
+        registration: crate::ProcessEngineRegistration,
+    ) -> Self {
+        self.process_engines = self.process_engines.with_registration(registration);
         self
     }
 

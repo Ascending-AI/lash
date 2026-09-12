@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessQuery as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
@@ -1259,11 +1260,16 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
 #[derive(Clone, Default)]
 struct CollectingProcessEventSink {
     events: Arc<std::sync::Mutex<Vec<(String, u64)>>>,
+    faults: Arc<std::sync::Mutex<Vec<lash_core::facade_support::ProcessWorkerFault>>>,
 }
 
 impl CollectingProcessEventSink {
     fn collected(&self) -> Vec<(String, u64)> {
         self.events.lock_recover().clone()
+    }
+
+    fn faults(&self) -> Vec<lash_core::facade_support::ProcessWorkerFault> {
+        self.faults.lock_recover().clone()
     }
 }
 
@@ -1274,6 +1280,209 @@ impl lash_core::facade_support::ProcessEventSink for CollectingProcessEventSink 
             .lock_recover()
             .push((event.event_type.clone(), event.sequence));
     }
+
+    async fn emit_worker_fault(&self, fault: &lash_core::facade_support::ProcessWorkerFault) {
+        self.faults.lock_recover().push(fault.clone());
+    }
+}
+
+#[derive(Clone)]
+struct SwitchableArtifactStore {
+    inner: Arc<lash_sqlite_store::Store>,
+    unavailable: Arc<std::sync::atomic::AtomicBool>,
+    failed_reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl SwitchableArtifactStore {
+    fn new(inner: Arc<lash_sqlite_store::Store>) -> Self {
+        Self {
+            inner,
+            unavailable: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            failed_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    fn set_unavailable(&self, unavailable: bool) {
+        self.unavailable
+            .store(unavailable, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn failed_reads(&self) -> usize {
+        self.failed_reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::LashlangArtifactStore for SwitchableArtifactStore {
+    fn durability_tier(&self) -> lashlang::DurabilityTier {
+        lashlang::DurabilityTier::Durable
+    }
+
+    async fn put_module_artifact(
+        &self,
+        artifact: &lashlang::ModuleArtifact,
+    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::put_module_artifact(
+            self.inner.as_ref(),
+            artifact,
+        )
+        .await
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &lashlang::ModuleRef,
+    ) -> std::result::Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError>
+    {
+        if self.unavailable.load(std::sync::atomic::Ordering::SeqCst) {
+            self.failed_reads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "simulated durable artifact store outage".to_string(),
+            ));
+        }
+        lash_lashlang_runtime::LashlangArtifactStore::get_module_artifact(
+            self.inner.as_ref(),
+            module_ref,
+        )
+        .await
+    }
+
+    async fn put_artifact_bytes(
+        &self,
+        artifact_ref: &str,
+        descriptor: &str,
+        bytes: &[u8],
+    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::put_artifact_bytes(
+            self.inner.as_ref(),
+            artifact_ref,
+            descriptor,
+            bytes,
+        )
+        .await
+    }
+
+    async fn get_artifact_bytes(
+        &self,
+        artifact_ref: &str,
+    ) -> std::result::Result<Option<Vec<u8>>, lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::get_artifact_bytes(
+            self.inner.as_ref(),
+            artifact_ref,
+        )
+        .await
+    }
+}
+
+#[derive(Clone)]
+struct DurableAdmissionPaths {
+    sessions: std::path::PathBuf,
+    processes: std::path::PathBuf,
+    triggers: std::path::PathBuf,
+    effects: std::path::PathBuf,
+    artifacts: std::path::PathBuf,
+    attachments: std::path::PathBuf,
+}
+
+impl DurableAdmissionPaths {
+    fn new(root: &std::path::Path) -> Self {
+        Self {
+            sessions: root.join("sessions"),
+            processes: root.join("processes.db"),
+            triggers: root.join("triggers.db"),
+            effects: root.join("effects.db"),
+            artifacts: root.join("artifacts.db"),
+            attachments: root.join("attachments"),
+        }
+    }
+}
+
+async fn durable_admission_core(
+    paths: &DurableAdmissionPaths,
+    artifact_store: Arc<SwitchableArtifactStore>,
+    registry: Arc<lash_sqlite_store::SqliteProcessRegistry>,
+    sink: CollectingProcessEventSink,
+    owner: &str,
+) -> Result<LashCore> {
+    let provider = mock_provider();
+    let provider_id = provider.kind().to_string();
+    let effect_host = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open(&paths.effects)
+            .await
+            .expect("open durable effect journal"),
+    );
+    let trigger_store = Arc::new(
+        lash_sqlite_store::SqliteTriggerStore::open(&paths.triggers)
+            .await
+            .expect("open durable trigger store"),
+    );
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+            &paths.sessions,
+            &paths.processes,
+        ),
+    );
+    let artifact: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> = artifact_store.clone();
+    LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash_protocol_rlm::RlmChannel::Cell)
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
+            artifact,
+        ),
+    )
+    .session_spec(
+        crate::SessionSpec::new()
+            .provider_id(provider_id)
+            .turn_budget(crate::TurnBudget::Unbounded),
+    )
+    .provider(provider)
+    .model(mock_model_spec())
+    .store_factory(store_factory)
+    .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
+        &paths.attachments,
+    )))
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+    .process_env_store(artifact_store.inner.clone())
+    .process_registry(registry)
+    .trigger_store(trigger_store)
+    .effect_host(effect_host)
+    .process_event_sink(Arc::new(sink))
+    .without_queued_work()
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        owner,
+        format!("{owner}:incarnation"),
+    ))
+}
+
+async fn wait_for_worker_fault(
+    sink: &CollectingProcessEventSink,
+    process_id: &ProcessId,
+) -> lash_core::facade_support::ProcessWorkerFault {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let Some(fault) = sink.faults().into_iter().find(|fault| {
+                matches!(
+                    fault,
+                    lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
+                        process_id: fault_process_id,
+                        ..
+                    } if fault_process_id == process_id
+                )
+            }) {
+                return fault;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker reports the retryable artifact-store fault")
 }
 
 fn process_test_core_with_sink(
@@ -1313,6 +1522,240 @@ fn process_test_core_with_sink(
     .advanced()
     .runtime_host_config(process_runtime_host_config(process_env_store, provider))
     .build(crate::testing::runtime_lease_owner())
+}
+
+/// FIG-1838 + FIG-1521: Start admission is a recorded-input decision. A live
+/// artifact-store outage belongs to retryable worker execution, after the
+/// Start outcome and process row are durable, and a cold reopen can redrive it.
+#[tokio::test]
+async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart() -> Result<()> {
+    const SESSION_ID: &str = "durable-artifact-outage-session";
+    let dir = tempfile::tempdir().expect("durable admission tempdir");
+    let paths = DurableAdmissionPaths::new(dir.path());
+    let durable_store = Arc::new(
+        lash_sqlite_store::Store::open(&paths.artifacts)
+            .await
+            .expect("open durable artifact and process-environment store"),
+    );
+    let artifact_store = Arc::new(SwitchableArtifactStore::new(durable_store));
+    let process = LinkedTestProcess::new(
+        artifact_store.as_ref(),
+        r#"process main() -> str { finish "redriven" }"#,
+        "main",
+    )
+    .await;
+    let process_input = lash_lashlang_runtime::LashlangProcessInput {
+        module_ref: process.module_ref.clone(),
+        process_ref: process.process_ref.clone(),
+        host_requirements_ref: process.host_requirements_ref.clone(),
+        process_name: process.process_name.clone(),
+        args: serde_json::Map::new(),
+    }
+    .into_process_input()
+    .expect("durable witness input serializes");
+    let start_request = lash_core::ProcessStartRequest::new(
+        "intent-executor-replaces-this-id",
+        process_input,
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessOriginator::host(),
+    )
+    .with_env_spec(process_env_spec())
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types());
+    let registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(&paths.processes, &paths.sessions)
+            .await
+            .expect("open durable process registry"),
+    );
+    let first_sink = CollectingProcessEventSink::default();
+    let first_core = durable_admission_core(
+        &paths,
+        Arc::clone(&artifact_store),
+        Arc::clone(&registry),
+        first_sink.clone(),
+        "artifact-outage-first-host",
+    )
+    .await?;
+    let first_session = first_core.session(SESSION_ID).open().await?;
+    let first_effect_host = first_session.effect_host();
+    let first_scoped = first_effect_host
+        .scoped_static(lash_core::ExecutionScope::turn(
+            SESSION_ID,
+            "durable-artifact-outage-turn",
+        ))?
+        .expect("SQLite effect host owns a static scoped controller");
+    let first_processes = {
+        let writer = first_session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let intents = lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+        lash_core::StartProcessIntent {
+            session_id: SessionId::from(SESSION_ID),
+            request: start_request,
+            on_parent_end: Default::default(),
+        },
+    ))]);
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let started_tx = Arc::new(std::sync::Mutex::new(Some(started_tx)));
+    let hook = lash_core::ToolChildExecutionTraceHook::new(move |started| {
+        if let Some(sender) = started_tx.lock_recover().take() {
+            let _ = sender.send(started.process_id);
+        }
+        panic!("simulate host interruption after the durable child Start");
+    });
+    let first_intents = intents.clone();
+    let interrupted = tokio::spawn(async move {
+        lash_core::testing::execute_tool_intents_with_services_and_hook(
+            first_scoped,
+            first_processes,
+            &SessionId::from(SESSION_ID),
+            "durable-artifact-outage-start",
+            &first_intents,
+            Some(&hook),
+        )
+        .await
+    });
+    let process_id = started_rx
+        .await
+        .expect("the hook observes Start only after the command returns");
+    artifact_store.set_unavailable(true);
+    let interruption = interrupted
+        .await
+        .expect_err("the host task must be interrupted");
+    assert!(interruption.is_panic());
+    let committed = registry
+        .get_process(&process_id)
+        .await?
+        .expect("the interrupted intent already committed its durable Start row");
+    assert_eq!(committed.status, lash_core::ProcessStatus::Running);
+    drop(first_session);
+    drop(first_core);
+    drop(registry);
+    drop(artifact_store);
+
+    let reopened_store = Arc::new(
+        lash_sqlite_store::Store::open(&paths.artifacts)
+            .await
+            .expect("reopen durable artifact and process-environment store"),
+    );
+    let reopened_artifact_store = Arc::new(SwitchableArtifactStore::new(reopened_store));
+    let reopened_registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(&paths.processes, &paths.sessions)
+            .await
+            .expect("reopen durable process registry"),
+    );
+    let reopened_sink = CollectingProcessEventSink::default();
+    reopened_artifact_store.set_unavailable(true);
+    let reopened_core = durable_admission_core(
+        &paths,
+        Arc::clone(&reopened_artifact_store),
+        Arc::clone(&reopened_registry),
+        reopened_sink.clone(),
+        "artifact-outage-restarted-host",
+    )
+    .await?;
+    let reopened_session = reopened_core.session(SESSION_ID).open().await?;
+    let reopened_effect_host = reopened_session.effect_host();
+    let reopened_processes = {
+        let writer = reopened_session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let replay_scope = || {
+        reopened_effect_host
+            .scoped(lash_core::ExecutionScope::turn(
+                SESSION_ID,
+                "durable-artifact-outage-turn",
+            ))
+            .expect("reopen the recorded intent's durable scope")
+    };
+    let reopened_replay = lash_core::testing::execute_tool_intents_with_services(
+        replay_scope(),
+        Arc::clone(&reopened_processes),
+        &SessionId::from(SESSION_ID),
+        "durable-artifact-outage-start",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    let [
+        lash_core::ToolIntentExecutionOutcome::Executed {
+            kind: lash_core::ToolIntentKind::StartProcess,
+            result,
+            ..
+        },
+    ] = reopened_replay.as_slice()
+    else {
+        panic!(
+            "cold redrive must replay Start success, never persist Refused(CommandFailed): \
+             {reopened_replay:?}"
+        )
+    };
+    let recorded_start: lash_core::ProcessHandleView =
+        serde_json::from_value(result.clone()).expect("Start records a process handle");
+    assert_eq!(
+        recorded_start,
+        lash_core::ProcessHandleView::from_record(committed),
+        "cold redrive must return the exact Start result committed before interruption"
+    );
+    assert_eq!(
+        reopened_artifact_store.failed_reads(),
+        0,
+        "intent redrive must not consult the unavailable artifact store"
+    );
+    let replayed_again = lash_core::testing::execute_tool_intents_with_services(
+        replay_scope(),
+        Arc::clone(&reopened_processes),
+        &SessionId::from(SESSION_ID),
+        "durable-artifact-outage-start",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    assert_eq!(
+        serde_json::to_vec(&reopened_replay)?,
+        serde_json::to_vec(&replayed_again)?,
+        "the durable Start result must replay byte-for-byte"
+    );
+
+    let restarted_worker = lash_core::facade_support::DurableProcessWorker::new(
+        reopened_core.durable_process_worker_config()?,
+    )?;
+    let restarted_drive = restarted_worker.drive_pending_processes().await?;
+    assert_eq!(restarted_drive.admitted, vec![process_id.clone()]);
+    let fault = wait_for_worker_fault(&reopened_sink, &process_id).await;
+    assert!(
+        matches!(
+            fault,
+            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
+                ref error,
+                ..
+            } if error.contains("simulated durable artifact store outage")
+        ),
+        "the outage is a retryable worker infrastructure fault: {fault:?}"
+    );
+    assert_eq!(reopened_artifact_store.failed_reads(), 1);
+    let retryable = reopened_registry
+        .get_process(&process_id)
+        .await?
+        .expect("failed execution leaves its durable row");
+    assert_eq!(retryable.status, lash_core::ProcessStatus::Running);
+    assert!(retryable.first_started.is_some());
+
+    reopened_artifact_store.set_unavailable(false);
+    let recovered_drive = restarted_worker.drive_pending_processes().await?;
+    assert_eq!(recovered_drive.admitted, vec![process_id.clone()]);
+    let completed = wait_for_process(
+        &reopened_core,
+        &process_id,
+        "redriven completion",
+        |process| process.lifecycle == lash_core::ProcessStatus::Completed,
+    )
+    .await;
+    assert!(completed.terminal);
+
+    drop(reopened_session);
+    Ok(())
 }
 
 /// native-substrate end to end across the process wait, observation, and retention
