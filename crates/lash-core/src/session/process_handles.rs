@@ -6,7 +6,7 @@ use super::tool_execution::ToolInvocationReply;
 use crate::tool_dispatch::ToolPreparationOutcome;
 #[cfg(test)]
 use crate::{ProcessInput, ProcessRegistration};
-use crate::{ToolCallOutput, ToolCallRecord};
+use crate::{ToolCallOutput, ToolCallRecord, ToolOutcome};
 
 const PROCESS_HANDLE_KIND: &str = "process";
 
@@ -218,6 +218,7 @@ impl RuntimeExecutionContext<'_> {
                 self.cancellation_token.clone(),
             )
             .await;
+        let duration_ms = self.elapsed_ms(started);
         let output = match output {
             Ok(output) => output.into_tool_output(),
             Err(crate::PluginError::RuntimeEffectController(err)) => {
@@ -226,13 +227,16 @@ impl RuntimeExecutionContext<'_> {
             }
             Err(err) => ToolInvocationReply::error(json!(err.to_string())).output,
         };
-        Self::recorded_process_reply(
-            call_id,
-            "await_process",
+        let mut outcome = crate::tool_dispatch::normalized_outcome(
+            self.dispatch.as_ref(),
+            "await_process".to_string(),
             args,
-            output,
-            self.elapsed_ms(started),
+            ToolOutcome::from_output(output),
+            duration_ms,
         )
+        .await;
+        outcome.record.call_id = Some(call_id);
+        ToolInvocationReply::from_output(outcome.record.output.clone()).with_record(outcome.record)
     }
 
     pub(super) async fn signal_process_handle(
@@ -352,6 +356,7 @@ impl RuntimeExecutionContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AttachmentStore as _;
     use crate::ProcessId;
     use crate::SessionId;
     use crate::plugin::PluginHost;
@@ -362,8 +367,9 @@ mod tests {
     };
     use crate::{
         ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
-        ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
+        ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _, SessionStoreFactory as _,
     };
+    use lash_sansio::sync::MutexExt as _;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -384,6 +390,192 @@ mod tests {
 
     struct PrepareRecordingTool {
         prepares: Arc<AtomicUsize>,
+    }
+
+    #[derive(Default)]
+    struct DenyProcessAwaitAttachments {
+        authorized: std::sync::Mutex<Vec<(crate::AttachmentProducer, crate::AttachmentSource)>>,
+    }
+
+    impl crate::AttachmentSourcePolicy for DenyProcessAwaitAttachments {
+        fn authorize(
+            &self,
+            producer: &crate::AttachmentProducer,
+            source: &crate::AttachmentSource,
+        ) -> Result<(), crate::test_support::AttachmentSourcePolicyError> {
+            self.authorized
+                .lock_recover()
+                .push((producer.clone(), source.clone()));
+            Err(crate::test_support::AttachmentSourcePolicyError {
+                producer: producer.clone(),
+                reason: "process-await test denies every attachment source".to_string(),
+            })
+        }
+    }
+
+    async fn await_external_process_attachment(
+        source: crate::AttachmentSource,
+    ) -> (
+        ToolInvocationReply,
+        Arc<dyn crate::RuntimePersistence>,
+        Arc<crate::InMemoryAttachmentStore>,
+        Arc<DenyProcessAwaitAttachments>,
+    ) {
+        let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
+            prepares: Arc::new(AtomicUsize::new(0)),
+        });
+        let plugins = PluginHost::empty()
+            .build_session("root")
+            .expect("plugin session");
+        let tool_catalog = Arc::new(catalog_for(&provider));
+        let host = Arc::new(crate::testing::MockSessionManager::default());
+        let process = host
+            .process_registry
+            .register_process(ProcessRegistration::new(
+                "external-attachment-process",
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            ))
+            .await
+            .expect("register external process");
+        host.process_registry
+            .add_observer(
+                &SessionId::from("session"),
+                &process.id,
+                crate::ProcessObserverBy::host("process-await-attachment-test"),
+            )
+            .await
+            .expect("observe external process");
+        host.process_registry
+            .complete_process(
+                &process.id,
+                crate::ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
+                        source.clone(),
+                    )),
+                ),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete external process with attachment");
+
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let request = crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from("session"),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        };
+        let persistence = factory
+            .create_store(&request)
+            .await
+            .expect("create real in-memory manifest store");
+        let backend = Arc::new(crate::InMemoryAttachmentStore::new());
+        let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
+            Arc::clone(&backend) as Arc<dyn crate::AttachmentStore>,
+            Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(
+                &persistence,
+            ))),
+            request.session_id.clone(),
+        ));
+        let policy = Arc::new(DenyProcessAwaitAttachments::default());
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
+        let dispatch = Arc::new(ToolDispatchContext {
+            plugins,
+            tools: provider,
+            tool_registry: None,
+            tool_catalog,
+            sessions: host.clone(),
+            session_lifecycle: host.clone(),
+            session_graph: host.clone(),
+            processes: host,
+            trigger_router: None,
+            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
+                crate::NativeRuntimeEffectController::default(),
+            )),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            session_id: request.session_id.clone(),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            event_tx,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
+            attachment_store: Arc::clone(&attachment_store),
+            attachment_source_policy: Arc::clone(&policy) as Arc<dyn crate::AttachmentSourcePolicy>,
+            turn_context: crate::TurnContext::default(),
+            clock: Arc::new(crate::SystemClock),
+        });
+        let context = RuntimeExecutionContext::new(
+            request.session_id,
+            dispatch,
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            attachment_store,
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        );
+        assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+        assert!(backend.list().await.unwrap().is_empty());
+        let handle = RuntimeExecutionContext::process_handle_value(
+            &crate::ProcessRef::from_record(&process),
+        );
+        let reply = context
+            .await_process_handle("await-external-attachment".to_string(), handle)
+            .await;
+        (reply, persistence, backend, policy)
+    }
+
+    async fn assert_external_process_attachment_denied(source: crate::AttachmentSource) {
+        let (reply, persistence, backend, policy) =
+            await_external_process_attachment(source.clone()).await;
+        let record = reply.record.expect("external process await is recorded");
+        assert_eq!(record.call_id.as_deref(), Some("await-external-attachment"));
+        assert_eq!(record.tool, "await_process");
+        let crate::ToolCallOutcome::Failure(failure) = record.output.outcome else {
+            panic!("denied external process attachment must replace the recorded result");
+        };
+        assert_eq!(failure.code, "attachment_source_policy_denied");
+        assert_eq!(
+            *policy.authorized.lock_recover(),
+            vec![(
+                crate::AttachmentProducer::Tool {
+                    tool_name: "await_process".to_string(),
+                },
+                source,
+            )],
+            "the completed process attachment must be authorized as await_process output"
+        );
+        assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+        assert!(backend.list().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn external_process_inline_attachment_is_denied_before_await_recording() {
+        assert_external_process_attachment_denied(crate::AttachmentSource::inline(
+            crate::MediaType::parse("text/plain").unwrap(),
+            b"external completion".to_vec(),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn external_process_referenced_attachment_is_denied_before_await_recording() {
+        assert_external_process_attachment_denied(crate::AttachmentSource::external_url(
+            crate::MediaType::parse("image/png").unwrap(),
+            "https://example.invalid/process.png",
+        ))
+        .await;
     }
 
     fn process_tool_definition() -> ToolDefinition {
