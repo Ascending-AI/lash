@@ -61,6 +61,9 @@ pub struct RuntimeAwaitEventOptions {
     pub cancellation: CancellationToken,
     pub deadline: Option<Instant>,
     pub clock: Arc<dyn crate::Clock>,
+    /// Selects the durable turn-cancel race shape. Restate-backed callers must
+    /// keep this stable for a wait's lifetime; see
+    /// `docs/adr/0012-durable-waits-via-effect-host-engines.md`.
     pub observe_turn_cancel: bool,
     pub turn_cancel_scope: Option<crate::ExecutionScope>,
 }
@@ -68,6 +71,9 @@ pub struct RuntimeAwaitEventOptions {
 /// Host controls attached to one sleep effect.
 pub struct RuntimeSleepOptions {
     pub cancellation: CancellationToken,
+    /// Selects the durable turn-cancel race shape. Restate-backed callers must
+    /// keep this stable for a wait's lifetime; see
+    /// `docs/adr/0012-durable-waits-via-effect-host-engines.md`.
     pub observe_turn_cancel: bool,
     pub turn_cancel_scope: Option<crate::ExecutionScope>,
     /// The clock the sleep was dispatched under. A deadline-bearing sleep is
@@ -408,6 +414,8 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 
     #[doc(hidden)]
+    /// This is a replay-shape switch, not a live policy toggle. A Restate
+    /// invocation must reconstruct the same value on every attempt.
     pub fn with_turn_cancel_observation(mut self, observe_turn_cancel: bool) -> Self {
         if let RuntimeEffectLocalExecutorState::Target(
             LocalTarget::SleepOnly { controls, .. }

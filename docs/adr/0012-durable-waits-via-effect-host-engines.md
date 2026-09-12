@@ -30,6 +30,25 @@ while both SQL substrates already did. The code had diverged from the record, an
 record was wrong. FIG-655 corrected it to the contract/substrate split above rather
 than preserving the rejected claim as settled history.
 
+## Restate deadline and cancellation replay shape
+
+A deadline-bearing Restate wait journals one absolute Unix-epoch deadline before it
+calls `LashDurableWaitWorkflow/await_resolution`. Replacement workers reuse that
+journaled value and derive the timer's remaining duration from it. Journaling the
+absolute deadline preserves the caller's one total budget; recomputing a relative
+`timeout_ms` would both extend the budget and change the nested call payload that
+Restate compares during replay. Deadline wire version 2 is a clean cutover from the
+unversioned `timeout_ms` field: predecessor payloads are refused, and deployments
+with deadline-bearing waits must drain them before upgrading. No-deadline requests
+retain their existing bytes and command geometry.
+
+`observe_turn_cancel` is also part of the Restate journal contract. It chooses between
+one durable-wait call and a wait-plus-gate command sequence, so the value must be
+reconstructed identically for the entire invocation. It is not journaled separately:
+doing so would alter every existing no-deadline wait even though shipped park flows
+already derive the flag from stable turn scope. Any future caller that cannot prove
+that stability must journal the choice before emitting either shape.
+
 ## Considered Options
 
 - **Process-event-log journal**: record effect outcomes into the process event log and
