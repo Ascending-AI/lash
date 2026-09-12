@@ -7,16 +7,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::runtime::{
-    QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeReplay, RuntimeScope, RuntimeSubject,
+    QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeAttribution, RuntimeReplay, RuntimeSubject,
 };
 use lash_core::{
-    ExecResponse, ExecutionScope, LeaseOwnerIdentity, PreparedToolCall, ProcessAwaitOutput,
-    ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry, RecoveryContract,
-    RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, ToolAttemptLaunch, ToolCallOutput,
-    ToolCallRecord, ToolId,
+    EffectAddress, ExecResponse, ExecutionScope, LeaseOwnerIdentity, PreparedToolCall,
+    ProcessAwaitOutput, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    RecoveryContract, RuntimeCommit, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeInvocation, RuntimePersistence, RuntimeSessionState, SessionExecutionLeaseClaimOutcome,
+    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError, ToolAttemptLaunch,
+    ToolCallOutput, ToolCallRecord, ToolId,
 };
 use serde_json::{Value, json};
 
@@ -31,7 +31,7 @@ use process_lifecycle::{
     record_lifecycle_started, register_lifecycle_row, register_rerunnable_lifecycle_row,
 };
 
-const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
+pub(crate) const EFFECT_SCOPE_ID: &str = "lash-sim-runtime-boundaries";
 const LEASE_TTL_MS: u64 = 30_000;
 
 #[derive(Clone)]
@@ -212,11 +212,14 @@ impl RuntimeBoundaryHarness {
             .unwrap_or(&event.boundary_id)
             .to_string();
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope::new(event.actor_alias.clone()),
+            lash_core::RuntimeEffectInvocation::new(
+                EffectAddress::new(
+                    ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
+                    durable_key.clone(),
+                )
+                .expect("durable effect carries an admitted effect scope"),
+                RuntimeAttribution::for_session(event.actor_alias.clone()),
                 effect_id.clone(),
-                RuntimeEffectKind::ToolAttempt,
-                durable_key.clone(),
             ),
             RuntimeEffectCommand::ToolAttempt {
                 call: PreparedToolCall::from_parts(
@@ -352,11 +355,14 @@ impl RuntimeBoundaryHarness {
             json!({"prepared_by": "lash-sim"}),
         );
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope::new(event.actor_alias.clone()),
+            lash_core::RuntimeEffectInvocation::new(
+                EffectAddress::new(
+                    ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
+                    format!("tool/{}/{}", event.actor_alias, event.boundary_id),
+                )
+                .expect("tool boundary carries an admitted effect scope"),
+                RuntimeAttribution::for_session(event.actor_alias.clone()),
                 format!("tool-attempt:{}", event.boundary_id),
-                RuntimeEffectKind::ToolAttempt,
-                format!("tool/{}/{}", event.actor_alias, event.boundary_id),
             ),
             RuntimeEffectCommand::ToolAttempt {
                 call,
@@ -437,11 +443,14 @@ impl RuntimeBoundaryHarness {
             .unwrap_or(0);
         let code = format!("sim_exec('{}')", event.boundary_id);
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope::new(event.actor_alias.clone()),
+            lash_core::RuntimeEffectInvocation::new(
+                EffectAddress::new(
+                    ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
+                    format!("exec/{}/{}", event.actor_alias, event.boundary_id),
+                )
+                .expect("exec boundary carries an admitted effect scope"),
+                RuntimeAttribution::for_session(event.actor_alias.clone()),
                 format!("exec-code:{}", event.boundary_id),
-                RuntimeEffectKind::ExecCode,
-                format!("exec/{}/{}", event.actor_alias, event.boundary_id),
             ),
             RuntimeEffectCommand::ExecCode {
                 language: "lash-sim-script".to_string(),
@@ -542,7 +551,7 @@ impl RuntimeBoundaryHarness {
                 sequence,
                 event_type: "process.wake".to_string(),
                 event_invocation: RuntimeInvocation {
-                    scope: RuntimeScope::new(session.clone()),
+                    attribution: RuntimeAttribution::for_session(session.clone()),
                     subject: RuntimeSubject::ProcessEvent {
                         process_id: ProcessId::from(process_id.clone()),
                         sequence,
@@ -1509,7 +1518,7 @@ fn worker_failover_work(
             sequence: 1,
             event_type: "process.wake".to_string(),
             event_invocation: RuntimeInvocation {
-                scope: RuntimeScope::new(session.to_string()),
+                attribution: RuntimeAttribution::for_session(session.to_string()),
                 subject: RuntimeSubject::ProcessEvent {
                     process_id,
                     sequence: 1,

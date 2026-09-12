@@ -13,7 +13,7 @@ use pretty_assertions::assert_eq;
 
 /// Number of named Layer-A vector groups executed by
 /// [`effect_host_await_events_cold_instance`].
-pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 9;
+pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 10;
 
 async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreFactory> {
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
@@ -76,6 +76,7 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     cold_scope_retirement_survives_reopen(&make, &prefix).await;
     cold_cancel_sweep_excludes_turn_control(&make, &prefix).await;
     cold_terminal_attach_both_orders(&make, &prefix).await;
+    super::effect_host::effect_host_lists_registered_unresolved_waits(make(), make(), make()).await;
 }
 
 async fn cold_replayed_parked_owner<F>(make: &F, prefix: &str)
@@ -93,15 +94,15 @@ where
         .await
         .expect("host A mints parked-owner key");
     let envelope = RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope {
-                session_id: session_id.clone(),
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(scope.clone(), "cold_await_event.parked_owner")
+                .expect("valid parked-owner address"),
+            RuntimeAttribution {
+                session_id: Some(session_id.clone()),
                 turn_id: Some(turn_id),
                 turn_index: None,
                 protocol_iteration: None,
             },
-            "cold_await_event.parked_owner",
-            RuntimeEffectKind::AwaitEvent,
             "cold_await_event.parked_owner",
         ),
         RuntimeEffectCommand::AwaitEvent { key: key.clone() },
@@ -422,11 +423,12 @@ where
     assert_eq!(mint_error.code.as_str(), "await_event_unknown_or_revoked");
     let host = make();
     let admission = host
-        .scoped(scope)
+        .scoped(scope.clone())
         .expect("a retired scope still binds a controller")
         .controller()
         .execute_effect(
             super::effect_host::exec_code_conformance_envelope(
+                &scope,
                 &format!("{prefix}-post-retirement-effect"),
                 "post-retirement-envelope",
             ),

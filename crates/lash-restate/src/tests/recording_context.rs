@@ -133,11 +133,10 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             }
         }
 
-        let execution = restate_effect_execution(RuntimeEffectEnvelope {
-            invocation: runtime_invocation(kind, "classification"),
+        let execution = restate_effect_execution(RuntimeEffectEnvelope::new(
+            runtime_invocation(kind, "classification"),
             command,
-            group: None,
-        })
+        ))
         .expect("an ungrouped effect classifies");
         let actual = match execution {
             RestateEffectExecution::DirectProcess { .. } => "direct_process",
@@ -246,6 +245,18 @@ impl TestTurnCancelGate {
 
     pub(super) fn registration_count(&self) -> usize {
         self.state.lock_recover().registrations.len()
+    }
+
+    pub(super) fn registered_keys(&self) -> Vec<AwaitEventKey> {
+        let mut keys = self
+            .state
+            .lock_recover()
+            .registrations
+            .values()
+            .map(|entry| entry.key.clone())
+            .collect::<Vec<_>>();
+        keys.sort_by_key(AwaitEventKey::promise_key);
+        keys
     }
 
     fn wake_matching(
@@ -534,6 +545,8 @@ pub(super) struct RecordingContext {
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
+    pub(super) scope_effect_begins: AtomicUsize,
+    pub(super) scope_group_records: AtomicUsize,
     awaited_events: Mutex<HashMap<String, Resolution>>,
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
@@ -681,6 +694,18 @@ impl RecordingContext {
 }
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
+    fn scope_group_record<'run>(
+        &'run self,
+        _index_key: String,
+        _group_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.scope_group_records.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(true) })
+    }
+
     fn sleep_send<'run>(
         &'run self,
         duration: Duration,
@@ -1012,6 +1037,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         let revoked = self.revoked_sessions.lock_recover().contains(&session_id);
         Box::pin(async move { Ok(revoked) })
     }
+
+    fn scope_effect_begin<'run>(
+        &'run self,
+        _index_key: String,
+        _replay_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.scope_effect_begins.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(true) })
+    }
 }
 
 pub(super) struct ZeroPermitSemaphore(tokio::sync::Semaphore);
@@ -1086,15 +1123,15 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
         let attempt = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn(
+                    lash_core::RuntimeEffectInvocation::new(
+                        lash_core::EffectAddress::new(scope.clone(), "tool-intent-corpus-attempt")
+                            .expect("valid tool-intent corpus address"),
+                        lash_core::RuntimeAttribution::for_turn(
                             TOOL_INTENT_CORPUS_SESSION,
                             TOOL_INTENT_CORPUS_TURN,
                             0,
                             0,
                         ),
-                        "tool-intent-corpus-attempt",
-                        RuntimeEffectKind::ToolAttempt,
                         "tool-intent-corpus-attempt",
                     ),
                     RuntimeEffectCommand::ToolAttempt {
@@ -1296,13 +1333,9 @@ pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with
     }
 }
 
-/// Pre-cutover journals refuse loudly and never duplicate their committed
-/// effect. The v1 journal carries the pre-cutover process reference format;
-/// the v2 journals that reached the durable-wait index addressed a
-/// session-free wait by its per-wait index object (`unscoped:{workflow key}`),
-/// which the scope-keyed index (`scope:{journal identity}`, durable-wait
-/// identity epoch 5, FIG-2499) replaced. Either replay diverges before the signal command re-executes,
-/// so the process sees its committed effect exactly once.
+/// The untouched pre-cutover endpoint artifacts now encounter the earlier
+/// effect-envelope shape fence. That refusal happens before their recorded
+/// signal effect is reconstructed, so a fresh registry stays empty.
 #[tokio::test]
 pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_without_duplicate_effect()
  {
@@ -1346,9 +1379,8 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
                 )
             });
         assert!(
-            error.contains("process_reference_format_cutover")
-                || error.contains("unscoped:") && error.contains("scope:"),
-            "{name} must refuse on its cutover, not somewhere later: {error}"
+            error.contains("Found a mismatch between the code paths taken during the previous execution and the paths taken during this execution"),
+            "{name} must retain its current Restate shape refusal: {error}"
         );
         assert_eq!(
             registry
@@ -1358,10 +1390,174 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
                 .into_iter()
                 .filter(|event| event.event_type == "signal.resume")
                 .count(),
-            1,
-            "{name}: a pre-cutover journal may reconstruct its committed effect but must not duplicate it"
+            0,
+            "{name}: the earlier shape refusal must happen before any effect is reconstructed"
         );
     }
+}
+
+fn replace_nth_restate_frame(
+    current: &[u8],
+    historical: &[u8],
+    message_type: u16,
+    occurrence: usize,
+) -> Vec<u8> {
+    fn frames(input: &[u8]) -> Vec<(u16, &[u8])> {
+        let mut cursor = 0;
+        let mut frames = Vec::new();
+        while cursor < input.len() {
+            let header = u64::from_be_bytes(
+                input[cursor..cursor + 8]
+                    .try_into()
+                    .expect("complete Restate frame header"),
+            );
+            let kind = (header >> 48) as u16;
+            let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
+                .expect("Restate frame payload length");
+            let end = cursor + 8 + payload_len;
+            frames.push((kind, &input[cursor..end]));
+            cursor = end;
+        }
+        frames
+    }
+
+    let replacement = frames(historical)
+        .into_iter()
+        .filter(|(kind, _)| *kind == message_type)
+        .nth(occurrence)
+        .map(|(_, frame)| frame)
+        .expect("historical fixture contains the selected Restate frame");
+    let mut seen = 0;
+    let mut result = Vec::with_capacity(current.len().saturating_add(replacement.len()));
+    for (kind, frame) in frames(current) {
+        if kind == message_type {
+            if seen == occurrence {
+                result.extend_from_slice(replacement);
+            } else {
+                result.extend_from_slice(frame);
+            }
+            seen += 1;
+        } else {
+            result.extend_from_slice(frame);
+        }
+    }
+    assert!(
+        seen > occurrence,
+        "current fixture contains the selected Restate frame"
+    );
+    result
+}
+
+fn replace_equal_length_bytes(input: &[u8], from: &[u8], to: &[u8]) -> (Vec<u8>, usize) {
+    assert_eq!(
+        from.len(),
+        to.len(),
+        "fixture substitution must preserve framing"
+    );
+    let mut result = input.to_vec();
+    let mut cursor = 0;
+    let mut replacements = 0;
+    while let Some(offset) = result[cursor..]
+        .windows(from.len())
+        .position(|window| window == from)
+    {
+        let start = cursor + offset;
+        result[start..start + from.len()].copy_from_slice(to);
+        cursor = start + to.len();
+        replacements += 1;
+    }
+    (result, replacements)
+}
+
+/// Isolate the old process-reference identity fence from the earlier envelope
+/// and durable-wait shape changes. The current supported endpoint corpus is
+/// rebound byte-for-byte to the equal-length historical replay key, and only
+/// its second completion frame is replaced from the immutable v1 artifact.
+#[tokio::test]
+pub(super) async fn pre_cutover_process_reference_refuses_before_duplicate_effect() {
+    let historical_bytes =
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v1-full-drain.json");
+    let historical: ToolIntentJournalCorpusFixture = serde_json::from_slice(historical_bytes)
+        .expect("decode immutable v1 endpoint corpus fixture");
+    let current: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/tool_intent_journals/v3-full-drain.json"
+    ))
+    .expect("decode current endpoint corpus fixture");
+    assert_eq!(
+        historical
+            .expected_output
+            .as_ref()
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1),
+        "the historical artifact must contain one actually recorded signal outcome"
+    );
+
+    let historical_replay_key = historical
+        .expected_output
+        .as_ref()
+        .and_then(serde_json::Value::as_array)
+        .and_then(|outcomes| outcomes.first())
+        .and_then(|outcome| outcome.pointer("/identity/replay_key"))
+        .and_then(serde_json::Value::as_str)
+        .expect("historical fixture records its tool-intent identity");
+    let current_replay_key = current
+        .expected_output
+        .as_ref()
+        .and_then(serde_json::Value::as_array)
+        .and_then(|outcomes| outcomes.first())
+        .and_then(|outcome| outcome.pointer("/identity/replay_key"))
+        .and_then(serde_json::Value::as_str)
+        .expect("current fixture records its tool-intent identity");
+    let (old_identity_witness, replacements) = replace_equal_length_bytes(
+        &current.invocation_body_bytes,
+        current_replay_key.as_bytes(),
+        historical_replay_key.as_bytes(),
+    );
+    assert_eq!(
+        replacements, 6,
+        "the current full-drain fixture must contain the pinned identity in its command and recorded effect"
+    );
+    let isolated = replace_nth_restate_frame(
+        &old_identity_witness,
+        &historical.invocation_body_bytes,
+        0x8011,
+        1,
+    );
+    let (endpoint, registry) = tool_intent_corpus_endpoint().await;
+    let response = invoke_endpoint_body(
+        &endpoint,
+        "ToolIntentCorpusReplay",
+        "run",
+        bytes::Bytes::from(isolated),
+    )
+    .await
+    .expect("feed isolated old-identity witness through the current endpoint");
+    let error = restate_output_failure_message(&response)
+        .or_else(|| restate_error_message(&response))
+        .unwrap_or_else(|| {
+            panic!(
+                "old process reference must refuse loudly; messages={:?}; frames={:?}; output={:?}",
+                restate_message_types(&response),
+                restate_command_frame_types(&response),
+                restate_output_json::<serde_json::Value>(&response)
+            )
+        });
+    assert!(
+        error.contains("process_reference_format_cutover"),
+        "isolated old process reference must reach its identity guard: {error}"
+    );
+    assert_eq!(
+        registry
+            .events_after(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
+            .await
+            .expect("read the isolated refusal witness target")
+            .into_iter()
+            .filter(|event| event.event_type == "signal.resume")
+            .count(),
+        1,
+        "the isolated journal may reconstruct its one committed signal but must not duplicate it"
+    );
 }
 
 /// Regeneration is deliberately separate from the replay law above: the law
@@ -2087,12 +2283,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     }
 }
 
-pub(super) fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> RuntimeInvocation {
-    RuntimeInvocation::effect(
-        lash_core::runtime::RuntimeScope::for_turn("session", "turn", 1, 0),
+pub(super) fn runtime_invocation(
+    kind: RuntimeEffectKind,
+    effect_id: &str,
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(
+            durable_turn_scope("session", "turn"),
+            format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
+        )
+        .expect("valid recording-context effect address"),
+        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
         effect_id,
-        kind,
-        format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
     )
 }
 

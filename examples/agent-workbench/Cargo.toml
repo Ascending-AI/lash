@@ -34,7 +34,9 @@ futures-util = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-http-transport = { workspace = true }
 lashlang = { workspace = true }
+lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
 lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
+lash-plugin-rolling-history = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-postgres-store = { workspace = true }
@@ -42,10 +44,8 @@ lash-restate = { workspace = true }
 lash-remote-protocol = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true }
-lash-standard-plugins = { workspace = true }
 lash-subagents = { workspace = true }
 lash-sim = { path = "../../crates/lash-sim", optional = true }
-lash-tools = { package = "lash-internal-tools", path = "../../crates/lash-tools", default-features = false, features = ["lashlang"] }
 percent-encoding = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }

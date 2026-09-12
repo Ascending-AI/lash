@@ -587,9 +587,9 @@ pub mod remote {
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
             RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
-            RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeEffectKind,
-            RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
-            RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
+            RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeAttribution,
+            RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
+            RemoteRuntimeSubject, RemoteSessionScope, RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 
@@ -673,6 +673,7 @@ pub mod process {
     pub use crate::process_admin::Processes;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
+    pub use lash_core::runtime::publish_process_execution_env;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ObserverInheritance, ProcessChange, ProcessCompletionOutcome,
@@ -683,9 +684,9 @@ pub mod process {
         WakeDiscardReason,
     };
     pub use lash_core::{
-        AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, NativeProcessWork,
-        ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind,
-        ProcessCompletionAuthority, ProcessContinuationStore, ProcessEvent,
+        AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, CausalRef,
+        NativeProcessWork, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
+        ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore, ProcessEvent,
         ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog, ProcessEventType,
         ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
         ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessIncarnation, ProcessInput,
@@ -775,23 +776,23 @@ pub mod runtime {
     pub use lash_core::runtime::{
         ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver,
         CheckpointClaimSet, CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
-        DirectCompletionClient, EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost,
-        EventSink, ExecutionScope, GroupExecutors, GroupSettlement, GroupWakePolicy, LashRuntime,
-        LlmRequestSpec, LoserPolicy, NativeQueuedWork, NativeRuntimeEffectController,
-        NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, NoopEventSink,
-        NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome, QueuedLaneAcquisition,
-        QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
-        QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
-        QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
-        QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
-        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
-        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-        RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
-        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
-        RuntimeProviderConfig, RuntimeScope, RuntimeTracingConfig, RuntimeTurnPhase,
-        RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
+        EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
+        GroupWakePolicy, LashRuntime, LlmRequestSpec, LoserPolicy, NativeQueuedWork,
+        NativeRuntimeEffectController, NativeSubstrateConfig, NativeSubstrateConfigError,
+        NoQueuedWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
+        QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
+        QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,
+        QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure,
+        QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
+        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup,
+        RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
+        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
+        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
         SessionWorkTarget, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
         TurnContext, TurnControlBinding, TurnControlParticipation, WorkCadencePolicy,
         WorkerSweepPolicy,

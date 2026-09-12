@@ -6,6 +6,7 @@ use lash_core::StoreError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::runtime_boundaries::EFFECT_SCOPE_ID;
 use crate::runtime_contracts::{RuntimeTurnObservation, RuntimeUsageTotals, runtime_turn_contract};
 use crate::scheduler::{BoundaryEvent, BoundaryKind};
 use crate::trace::{
@@ -942,7 +943,9 @@ impl ModelStore {
                         sequence,
                         event_type: "process.wake".to_string(),
                         event_invocation: lash_core::RuntimeInvocation {
-                            scope: lash_core::runtime::RuntimeScope::new(session.clone()),
+                            attribution: lash_core::RuntimeAttribution::for_session(
+                                session.clone(),
+                            ),
                             subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
                                 process_id: ProcessId::from(process_id.clone()),
                                 sequence,
@@ -1199,11 +1202,14 @@ impl ModelStore {
             .unwrap_or(&event.boundary_id)
             .to_string();
         let envelope = lash_core::RuntimeEffectEnvelope::new(
-            lash_core::RuntimeInvocation::effect(
-                lash_core::runtime::RuntimeScope::new(event.actor_alias.clone()),
+            lash_core::RuntimeEffectInvocation::new(
+                lash_core::EffectAddress::new(
+                    lash_core::ExecutionScope::runtime_operation(EFFECT_SCOPE_ID),
+                    durable_key.clone(),
+                )
+                .expect("abstract durable effect carries an admitted effect scope"),
+                lash_core::RuntimeAttribution::for_session(event.actor_alias.clone()),
                 effect_id.clone(),
-                lash_core::RuntimeEffectKind::ToolAttempt,
-                durable_key.clone(),
             ),
             lash_core::RuntimeEffectCommand::ToolAttempt {
                 call: lash_core::PreparedToolCall::from_parts(

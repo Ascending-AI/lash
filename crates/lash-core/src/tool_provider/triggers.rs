@@ -22,7 +22,7 @@ impl<'run> ToolTriggerClient<'run> {
         })?;
         let outcome = request.clone();
         let report = router
-            .emit(request, dispatch.effect_controller.controller())
+            .emit(request, &dispatch.effect_controller.scoped())
             .await?;
         dispatch
             .trigger_outcomes

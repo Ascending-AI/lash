@@ -151,16 +151,9 @@ impl<'run> HostBridge<'run> {
                 .ctx
                 .parent_invocation()
                 .and_then(|invocation| {
-                    invocation.effect_id().map(|effect_id| {
-                        if let Some(turn_id) = invocation.scope.turn_id.as_deref() {
-                            format!(
-                                "effect:{}:{turn_id}:{effect_id}",
-                                invocation.scope.session_id
-                            )
-                        } else {
-                            format!("effect:{}:{effect_id}", invocation.scope.session_id)
-                        }
-                    })
+                    invocation
+                        .effect_address()
+                        .map(lash_core::EffectAddress::graph_key)
                 })
                 .unwrap_or_else(|| self.ctx.session_id().to_string());
             let mut call_id = format!(
@@ -258,7 +251,7 @@ impl LashlangExecutionTrace {
 
     pub(super) fn emit(&self, event: TraceLanguageExecution) {
         let mut context = self.base_context.clone();
-        context.session_id = Some(self.identity.scope.session_id.clone());
+        context.session_id = self.identity.scope.session_id.clone();
         context.turn_id = self.identity.scope.turn_id.clone();
         context.turn_index = self.identity.scope.turn_index;
         context.protocol_iteration = self.identity.scope.protocol_iteration;

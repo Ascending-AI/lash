@@ -10,9 +10,15 @@ use crate::ProcessId;
 
 type RetrySleepShape = (bool, Option<crate::ExecutionScope>);
 
+#[derive(Clone, Debug)]
+struct RetrySleepObservation {
+    shape: RetrySleepShape,
+    invocation: crate::RuntimeEffectInvocation,
+}
+
 #[derive(Default)]
 struct RetrySleepShapeRecorder {
-    sleeps: std::sync::Mutex<Vec<RetrySleepShape>>,
+    sleeps: std::sync::Mutex<Vec<RetrySleepObservation>>,
 }
 
 impl crate::AwaitEventResolver for RetrySleepShapeRecorder {}
@@ -26,9 +32,10 @@ impl crate::RuntimeEffectController for RetrySleepShapeRecorder {
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
             let options = local_executor.into_sleep_options();
-            self.sleeps
-                .lock_recover()
-                .push((options.observe_turn_cancel, options.turn_cancel_scope));
+            self.sleeps.lock_recover().push(RetrySleepObservation {
+                shape: (options.observe_turn_cancel, options.turn_cancel_scope),
+                invocation: envelope.invocation,
+            });
             Ok(crate::RuntimeEffectOutcome::Sleep)
         } else {
             local_executor.execute(envelope).await
@@ -39,7 +46,9 @@ impl crate::RuntimeEffectController for RetrySleepShapeRecorder {
 async fn retry_sleep_shape(
     identity: ToolAttemptEffectIdentity,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
-) -> RetrySleepShape {
+    execution_scope: crate::ExecutionScope,
+    ambient_session_id: &str,
+) -> RetrySleepObservation {
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorder = Arc::new(RetrySleepShapeRecorder::default());
@@ -51,7 +60,11 @@ async fn retry_sleep_shape(
         observed_attempts,
         retry_after_ms: Some(25),
     }));
-    context.effect_controller = RuntimeEffectControllerHandle::shared(recorder.clone());
+    context.session_id = crate::SessionId::from(ambient_session_id);
+    context.effect_controller = RuntimeEffectControllerHandle::borrowed(
+        crate::ScopedEffectController::shared(recorder.clone(), execution_scope)
+            .expect("valid retry witness scope"),
+    );
     let manifest =
         resolve_callable_manifest(&context, "retry_probe").expect("the retry probe is callable");
     let call = crate::PreparedToolCall::identity(
@@ -105,11 +118,13 @@ async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
             process_id: ProcessId::from("process-1"),
         },
         crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+        crate::ExecutionScope::process("process-1"),
+        "ambient-session-a",
     )
     .await;
 
     assert_eq!(
-        shape,
+        shape.shape,
         (false, None),
         "a process-body retry sleep must not attach the turn-cancel gate"
     );
@@ -121,20 +136,50 @@ async fn retry_sleep_under_a_turn_keeps_the_turn_cancel_gate() {
         ToolAttemptEffectIdentity::Scalar { parent: None },
         crate::runtime::TurnCancelWait::observing(
             tokio_util::sync::CancellationToken::new(),
-            crate::ExecutionScope::runtime_operation("test-runtime-effect-controller"),
+            crate::ExecutionScope::turn("session", "turn"),
         ),
+        crate::ExecutionScope::turn("session", "turn"),
+        "session",
     )
     .await;
 
     assert!(
-        shape.0,
+        shape.shape.0,
         "a turn-driven retry sleep observes turn cancellation"
     );
     assert_eq!(
-        shape.1,
-        Some(crate::ExecutionScope::runtime_operation(
-            "test-runtime-effect-controller"
-        )),
+        shape.shape.1,
+        Some(crate::ExecutionScope::turn("session", "turn")),
         "the retry sleep registers the owning turn gate scope"
     );
+    assert_eq!(
+        shape.invocation.attribution.session_id.as_deref(),
+        Some("session"),
+        "a parentless scalar call keeps the admitted session provenance"
+    );
+}
+
+#[tokio::test]
+async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
+    let observe = |ambient_session_id| {
+        retry_sleep_shape(
+            ToolAttemptEffectIdentity::Process {
+                parent: None,
+                process_id: ProcessId::from("stable-process"),
+            },
+            crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
+            crate::ExecutionScope::process("stable-process"),
+            ambient_session_id,
+        )
+    };
+    let first = observe("ambient-session-a").await;
+    let second = observe("ambient-session-b").await;
+
+    assert_eq!(first.invocation.address(), second.invocation.address());
+    assert_eq!(
+        first.invocation.replay_key(),
+        "process:stable-process:tool:retry_probe:attempt:1:sleep"
+    );
+    assert!(first.invocation.attribution.is_none());
+    assert!(second.invocation.attribution.is_none());
 }

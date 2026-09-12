@@ -21,10 +21,9 @@ members = [
     "crates/lash-plugin-mcp",
     "crates/lash-plugin-process-controls",
     "crates/lash-plugin-tool-output-budget",
+    "crates/lash-plugin-rolling-history",
     "crates/lash-llm-tools",
     "crates/lash-tool-support",
-    "crates/lash-tools",
-    "crates/lash-standard-plugins",
     "crates/lash-provider-anthropic",
     "crates/lash-provider-google",
     "crates/lash-provider-openai",
@@ -63,11 +62,10 @@ default-members = [
     "crates/lash-postgres-store",
     "crates/lash-s3-store",
     "crates/lash-tool-support",
-    "crates/lash-tools",
-    "crates/lash-standard-plugins",
     "crates/lash-plugin-mcp",
     "crates/lash-plugin-process-controls",
     "crates/lash-plugin-tool-output-budget",
+    "crates/lash-plugin-rolling-history",
     "crates/lash-subagents",
 ]
 resolver = "3"
@@ -246,6 +244,7 @@ lash-s3-store = { package = "lash-internal-s3-store", path = "crates/lash-s3-sto
 lash-plugin-mcp = { package = "lash-internal-plugin-mcp", path = "crates/lash-plugin-mcp", version = "=0.0.0-dev" }
 lash-plugin-process-controls = { package = "lash-internal-plugin-process-controls", path = "crates/lash-plugin-process-controls", version = "=0.0.0-dev" }
 lash-plugin-tool-output-budget = { package = "lash-internal-plugin-tool-output-budget", path = "crates/lash-plugin-tool-output-budget", version = "=0.0.0-dev" }
+lash-plugin-rolling-history = { package = "lash-internal-plugin-rolling-history", path = "crates/lash-plugin-rolling-history", version = "=0.0.0-dev" }
 lash-protocol-rlm = { package = "lash-internal-protocol-rlm", path = "crates/lash-protocol-rlm", version = "=0.0.0-dev" }
 lash-protocol-standard = { package = "lash-internal-protocol-standard", path = "crates/lash-protocol-standard", version = "=0.0.0-dev" }
 lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = "crates/lash-provider-anthropic", version = "=0.0.0-dev" }
@@ -257,10 +256,8 @@ lash-remote-protocol = { package = "lash-internal-remote-protocol", path = "crat
 lash-restate = { package = "lash-internal-restate", path = "crates/lash-restate", version = "=0.0.0-dev" }
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
-lash-standard-plugins = { package = "lash-internal-standard-plugins", path = "crates/lash-standard-plugins", version = "=0.0.0-dev" }
 lash-subagents = { package = "lash-internal-subagents", path = "crates/lash-subagents", version = "=0.0.0-dev" }
 lash-tool-support = { package = "lash-internal-tool-support", path = "crates/lash-tool-support", version = "=0.0.0-dev" }
-lash-tools = { package = "lash-internal-tools", path = "crates/lash-tools", version = "=0.0.0-dev" }
 lash-trace = { package = "lash-internal-trace", path = "crates/lash-trace", version = "=0.0.0-dev" }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "crates/lash-sqlite-store", version = "=0.0.0-dev" }
 lashlang = { package = "lash-internal-lashlang", path = "crates/lashlang", version = "=0.0.0-dev" }

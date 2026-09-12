@@ -1023,8 +1023,12 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
             "selected-session-graph",
             &SessionId::from(selected_session_id),
             TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(selected_session_id, "turn-1"),
+                    "selected-session-effect",
+                )
+                .expect("valid selected-session effect address"),
                 effect_id: "selected-session-effect".to_string(),
-                kind: "test".to_string(),
             },
             Vec::new(),
         ),

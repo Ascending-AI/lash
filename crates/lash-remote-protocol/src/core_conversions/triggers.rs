@@ -422,13 +422,16 @@ impl From<lash_core::TriggerOwnerScope> for RemoteTriggerOwnerScope {
     }
 }
 
-impl From<RemoteTriggerOwnerScope> for lash_core::TriggerOwnerScope {
-    fn from(value: RemoteTriggerOwnerScope) -> Self {
-        match value {
+impl TryFrom<RemoteTriggerOwnerScope> for lash_core::TriggerOwnerScope {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteTriggerOwnerScope) -> Result<Self, Self::Error> {
+        value.validate("RemoteTriggerOwnerScope")?;
+        Ok(match value {
             RemoteTriggerOwnerScope::Session { session_id } => Self::Session { session_id },
             RemoteTriggerOwnerScope::Host { binding_id } => Self::Host { binding_id },
             RemoteTriggerOwnerScope::Platform => Self::Platform,
-        }
+        })
     }
 }
 
@@ -603,7 +606,7 @@ impl TryFrom<RemoteTriggerSubscriptionRecord> for lash_core::TriggerSubscription
         } = value;
         Ok(Self {
             subscription_id,
-            owner_scope: owner_scope.into(),
+            owner_scope: owner_scope.try_into()?,
             subscription_key,
             incarnation,
             revision,

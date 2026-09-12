@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+mod await_event_support;
 pub(crate) mod control;
 mod controller_error;
 mod native_controller;
@@ -19,6 +20,7 @@ mod scoped;
 mod task_panic;
 mod trigger;
 
+pub use await_event_support::await_event_scope_not_retirable;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
@@ -27,7 +29,6 @@ pub use control::{
     ResolveOutcome, RuntimeEffectController, RuntimeEffectFailureDisposition, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
     ToolIntentSubmissionGuard, TurnControlBinding, TurnControlParticipation,
-    await_event_scope_not_retirable,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,
@@ -47,7 +48,7 @@ use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
 use super::envelope::{
     ProcessCommand, ProcessEffectOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectOutcome,
+    RuntimeEffectEnvelope, RuntimeEffectOutcome,
 };
 use super::outcome::llm_call_error_from_transport;
 
@@ -955,18 +956,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// effect.
     pub async fn execute_trigger(
         self,
-        invocation: crate::RuntimeInvocation,
+        invocation: crate::RuntimeEffectInvocation,
         command: crate::TriggerCommand,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let operation_id = invocation
-            .effect_id()
-            .ok_or_else(|| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectInvocationSubject,
-                    "trigger effect requires an effect id",
-                )
-            })?
-            .to_string();
+        let operation_id = invocation.effect_id().to_string();
         match self.state {
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
                 let result = execution.execute(&operation_id, command).await?;
@@ -1077,7 +1070,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
             RuntimeEffectCommand::ToolBatch { batch } => {
                 let outcome = Box::pin(self.context.execute_prepared_tool_batch_launches(
                     batch,
-                    envelope.invocation,
+                    envelope.invocation.into_runtime_invocation(),
                     self.child_trace_hooks,
                 ))
                 .await?;
@@ -1099,7 +1092,7 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
                     execution_grant,
                     attempt,
                     max_attempts,
-                    envelope.invocation,
+                    envelope.invocation.into_runtime_invocation(),
                     child_execution_trace_hook,
                     self.completion_key,
                 ))
@@ -1143,15 +1136,18 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             ));
         };
         let mut dispatch = (*self.dispatch).clone();
-        dispatch.parent_invocation = Some(envelope.invocation.clone());
+        dispatch.parent_invocation = Some(envelope.invocation.clone().into_runtime_invocation());
         dispatch.direct_completions = dispatch
             .direct_completions
-            .with_parent_invocation(Some(envelope.invocation.clone()));
+            .with_tool_attempt_parent_invocation(
+                envelope.invocation.clone().into_runtime_invocation(),
+            );
         dispatch.trigger_outcomes = crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         let dispatch = Arc::new(dispatch);
-        let tool_context = self
-            .tool_context
-            .with_attempt_dispatch(Arc::clone(&dispatch), envelope.invocation);
+        let tool_context = self.tool_context.with_attempt_dispatch(
+            Arc::clone(&dispatch),
+            envelope.invocation.into_runtime_invocation(),
+        );
         tool_context.install_prederived_completion_key(self.completion_key);
         let outcome = Box::pin(crate::tool_dispatch::execute_prepared_tool_attempt_effect(
             dispatch.as_ref(),
@@ -1193,7 +1189,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .run_llm_call(
                         Arc::new((*request).into_request(None, None)),
                         runner.protocol_iteration,
-                        envelope.invocation,
+                        envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,
                         &runner.cancellation,
                     )
@@ -1216,7 +1212,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 ),
             RuntimeEffectCommand::ToolBatch { batch } => Box::pin(runner.driver.run_tool_batch(
                 batch,
-                envelope.invocation,
+                envelope.invocation.into_runtime_invocation(),
                 &runner.event_tx,
                 &runner.cancellation,
             ))
@@ -1234,7 +1230,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         &code,
                         runner.messages.clone(),
                         runner.protocol_iteration,
-                        envelope.invocation,
+                        envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,
                         &runner.cancellation,
                     )
@@ -1435,7 +1431,7 @@ async fn sleep_with_cancellation(
 #[cfg(test)]
 mod task_boundary_tests {
     use super::*;
-    use crate::RuntimeInvocation;
+    use crate::RuntimeEffectInvocation;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct TaskIdentityRunner {
@@ -1472,11 +1468,14 @@ mod task_boundary_tests {
             let parent_id = tokio::task::id();
             let outcome = executor
                 .execute(RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        crate::RuntimeScope::new("task-boundary"),
+                    RuntimeEffectInvocation::new(
+                        crate::EffectAddress::new(
+                            crate::ExecutionScope::runtime_operation("task-boundary"),
+                            "task-boundary:exec",
+                        )
+                        .expect("valid task-boundary address"),
+                        crate::RuntimeAttribution::none(),
                         "exec",
-                        RuntimeEffectKind::ExecCode,
-                        "task-boundary:exec",
                     ),
                     RuntimeEffectCommand::ExecCode {
                         language: "text".to_string(),
@@ -1551,17 +1550,16 @@ mod task_boundary_tests {
             Ok(RuntimeEffectOutcome::Sleep)
         });
         let controller = NativeRuntimeEffectController::default();
-        let (proxy, mut requests) = EffectTaskController::scoped(
-            &controller,
-            ExecutionScope::runtime_operation("replay-skips-local"),
-        )
-        .expect("task controller");
+        let execution_scope = ExecutionScope::runtime_operation("replay-skips-local");
+        let (proxy, mut requests) =
+            EffectTaskController::scoped(&controller, execution_scope.clone())
+                .expect("task controller");
         let envelope = RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                crate::RuntimeScope::new("replay-skips-local"),
+            RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(execution_scope, "replay-skips-local:sleep")
+                    .expect("valid task proxy address"),
+                crate::RuntimeAttribution::none(),
                 "sleep",
-                RuntimeEffectKind::Sleep,
-                "replay-skips-local:sleep",
             ),
             RuntimeEffectCommand::Sleep { duration_ms: 0 },
         );

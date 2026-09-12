@@ -78,8 +78,8 @@ tokens containing `INJECT`.
 ## Phase 1 — Establish an in-flight turn
 
 Send a task that requires this exact multi-iteration shape: first use Lashlang `sleep` for
-15 seconds without calling a tool, then call `web.search` for one side of a current
-comparison, call `web.search` for the other side in a later iteration (do not batch the
+15 seconds without calling a tool, then call the Parallel web-search MCP tool for one side
+of a current comparison, call it for the other side in a later iteration (do not batch the
 searches), and only then answer. If provider evidence does not show the initial sleep before
 the first tool batch, restart with a fresh turn; this scenario must not rely on a merely
 "likely" multi-step task. During that initial sleep, inject before the first search/tool

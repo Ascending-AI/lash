@@ -31,7 +31,7 @@ pub(super) struct AgentScenario {
     pub(super) expected_final_value: Option<serde_json::Value>,
     pub(super) tool_provider: Option<Arc<dyn ToolProvider>>,
     pub(super) install_subagents: bool,
-    pub(super) install_shell_processes: bool,
+    pub(super) install_process_composition: bool,
     pub(super) max_turns: Option<usize>,
     pub(super) precompleted_process: Option<(ProcessId, lash_core::ProcessAwaitOutput)>,
     pub(super) expected_contracts: AgentScenarioExpectations,
@@ -48,7 +48,7 @@ impl AgentScenario {
             expected_final_value: None,
             tool_provider: None,
             install_subagents: false,
-            install_shell_processes: false,
+            install_process_composition: false,
             max_turns: None,
             precompleted_process: None,
             expected_contracts: AgentScenarioExpectations::default(),
@@ -89,8 +89,8 @@ impl AgentScenario {
         self
     }
 
-    pub(super) fn install_shell_processes(mut self) -> Self {
-        self.install_shell_processes = true;
+    pub(super) fn install_process_composition(mut self) -> Self {
+        self.install_process_composition = true;
         self
     }
 
@@ -191,7 +191,7 @@ struct AgentScenarioSetup {
     scripted_provider_usage: LlmUsage,
     tool_provider: Option<Arc<dyn ToolProvider>>,
     install_subagents: bool,
-    install_shell_processes: bool,
+    install_process_composition: bool,
     install_llm_tools: bool,
     max_turns: Option<usize>,
 }
@@ -203,7 +203,7 @@ impl AgentScenarioSetup {
             scripted_provider_usage: LlmUsage::default(),
             tool_provider: None,
             install_subagents: false,
-            install_shell_processes: false,
+            install_process_composition: false,
             install_llm_tools: false,
             max_turns: None,
         }
@@ -229,8 +229,8 @@ impl AgentScenarioSetup {
         self
     }
 
-    fn install_shell_processes(mut self, install_shell_processes: bool) -> Self {
-        self.install_shell_processes = install_shell_processes;
+    fn install_process_composition(mut self, install_process_composition: bool) -> Self {
+        self.install_process_composition = install_process_composition;
         self
     }
 
@@ -275,11 +275,8 @@ impl AgentScenarioSetup {
         if self.install_subagents {
             builder = builder.plugin(subagents_plugin());
         }
-        if self.install_shell_processes {
+        if self.install_process_composition {
             builder = builder
-                .plugin(Arc::new(
-                    lash_tools::shell::StandardShellPluginFactory::new(),
-                ))
                 .plugin(Arc::new(
                     lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
                 ))
@@ -341,7 +338,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .response_usage(case.scripted_provider_usage.clone())
         .maybe_tool_provider(case.tool_provider.clone())
         .install_subagents(case.install_subagents)
-        .install_shell_processes(case.install_shell_processes)
+        .install_process_composition(case.install_process_composition)
         .max_turns(case.max_turns)
         .build()?;
     let session = runtime.core.session(&case.session_id).open().await?;

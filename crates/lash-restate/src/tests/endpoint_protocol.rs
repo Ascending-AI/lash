@@ -206,7 +206,7 @@ fn decode_call_frame(frame: &[u8]) -> Option<RestateCallFrame> {
 }
 
 /// One command the deployed handler journaled: its frame, and the completion
-/// id a timer or call answers on.
+/// id a timer, call, or one-way invocation-id notification answers on.
 #[derive(Clone, Debug)]
 pub(super) struct RecordedCommand {
     pub message_type: u16,
@@ -239,6 +239,10 @@ pub(super) fn restate_recorded_commands(output: &[u8]) -> Option<Vec<RecordedCom
                         Some((call.service, call.handler)),
                     )
                 }
+                0x040E => (
+                    Some(u32::try_from(protobuf_varint_field(frame.get(8..)?, 10)?).ok()?),
+                    None,
+                ),
                 _ => (None, None),
             };
             commands.push(RecordedCommand {
@@ -264,6 +268,18 @@ pub(super) fn encode_recorded_commands_replay<T: serde::Serialize>(
     outputs: &[&[u8]],
     complete: impl Fn(&RecordedCommand) -> Option<serde_json::Value>,
 ) -> Result<Bytes, TerminalError> {
+    encode_recorded_commands_with_invocations_replay(workflow_key, input, outputs, &[], complete)
+}
+
+/// Replay recorded commands and complete one-way process starts with their
+/// observed invocation identities, in journal order.
+pub(super) fn encode_recorded_commands_with_invocations_replay<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    outputs: &[&[u8]],
+    invocation_ids: &[&str],
+    complete: impl Fn(&RecordedCommand) -> Option<serde_json::Value>,
+) -> Result<Bytes, TerminalError> {
     let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
     let mut commands = Vec::new();
     for output in outputs {
@@ -271,6 +287,16 @@ pub(super) fn encode_recorded_commands_replay<T: serde::Serialize>(
             restate_recorded_commands(output)
                 .ok_or_else(|| TerminalError::new("recorded output omitted a valid frame"))?,
         );
+    }
+    let one_way_count = commands
+        .iter()
+        .filter(|command| command.message_type == 0x040E)
+        .count();
+    if one_way_count != invocation_ids.len() {
+        return Err(TerminalError::new(format!(
+            "expected {one_way_count} one-way invocation ids, found {}",
+            invocation_ids.len()
+        )));
     }
     let known_entries = u32::try_from(1 + commands.len())
         .map_err(|_| TerminalError::new("too many commands in recorded replay fixture"))?;
@@ -280,13 +306,29 @@ pub(super) fn encode_recorded_commands_replay<T: serde::Serialize>(
     for command in &commands {
         body.extend_from_slice(&command.frame);
     }
+    let mut invocation_ids = invocation_ids.iter();
     for command in &commands {
-        let (Some(completion_id), Some(value)) = (command.completion_id, complete(command)) else {
+        let Some(completion_id) = command.completion_id else {
             continue;
         };
         match command.message_type {
-            0x040C => body.extend_from_slice(&encode_sleep_completion(completion_id)),
+            0x040E => body.extend_from_slice(&encode_invocation_id_completion(
+                completion_id,
+                invocation_ids
+                    .next()
+                    .expect("validated one-way invocation-id count"),
+            )),
+            0x040C => {
+                let Some(value) = complete(command) else {
+                    continue;
+                };
+                debug_assert_eq!(value, serde_json::Value::Null);
+                body.extend_from_slice(&encode_sleep_completion(completion_id));
+            }
             0x040D => {
+                let Some(value) = complete(command) else {
+                    continue;
+                };
                 let value = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
                 body.extend_from_slice(&encode_call_completion(completion_id, &value));
             }
@@ -495,104 +537,6 @@ pub(super) fn encode_process_segment_send_replay<T: serde::Serialize>(
     body.extend_from_slice(&encode_invocation_id_completion(
         completion_id,
         "inv_fig788_successor",
-    ));
-    Ok(body.freeze())
-}
-
-/// FIG-806: splice a deployed one-way process start and complete its
-/// invocation-id notification so the redrive can advance to its next command.
-pub(super) fn encode_one_way_call_replay<T: serde::Serialize>(
-    workflow_key: &str,
-    input: &T,
-    suspended_output: &[u8],
-) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let one_way_call = restate_message_frame(suspended_output, 0x040E)
-        .ok_or_else(|| TerminalError::new("suspended attempt omitted OneWayCallCommand"))?;
-    let completion_id = u32::try_from(
-        protobuf_varint_field(
-            one_way_call
-                .get(8..)
-                .ok_or_else(|| TerminalError::new("one-way call omitted its frame payload"))?,
-            10,
-        )
-        .ok_or_else(|| TerminalError::new("one-way call omitted its invocation-id index"))?,
-    )
-    .map_err(|_| TerminalError::new("one-way call invocation-id index exceeded u32"))?;
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 2));
-    body.extend_from_slice(&encode_input_command(&input));
-    body.extend_from_slice(one_way_call);
-    body.extend_from_slice(&encode_invocation_id_completion(
-        completion_id,
-        "inv_fig806_trigger_process",
-    ));
-    Ok(body.freeze())
-}
-
-/// FIG-811: splice the two process starts and the following call from a
-/// multi-subscription attempt, completing them with the invocation identities
-/// the live attempt observed.
-pub(super) fn encode_two_one_way_calls_and_call_replay<T: serde::Serialize>(
-    workflow_key: &str,
-    input: &T,
-    suspended_output: &[u8],
-    invocation_ids: [&str; 2],
-    call_completion: serde_json::Value,
-) -> Result<Bytes, TerminalError> {
-    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
-    let one_way_calls = restate_message_frames(suspended_output, 0x040E)
-        .ok_or_else(|| TerminalError::new("invalid suspended attempt frames"))?;
-    if one_way_calls.len() != invocation_ids.len() {
-        return Err(TerminalError::new(format!(
-            "expected {} one-way calls, found {}",
-            invocation_ids.len(),
-            one_way_calls.len()
-        )));
-    }
-    let terminal_call = restate_message_frame(suspended_output, 0x040D)
-        .ok_or_else(|| TerminalError::new("suspended attempt omitted its following CallCommand"))?;
-    let call_completion_id = u32::try_from(
-        protobuf_varint_field(
-            terminal_call
-                .get(8..)
-                .ok_or_else(|| TerminalError::new("following call omitted its frame payload"))?,
-            11,
-        )
-        .ok_or_else(|| TerminalError::new("following call omitted its completion id"))?,
-    )
-    .map_err(|_| TerminalError::new("following call completion id exceeded u32"))?;
-    let call_completion =
-        serde_json::to_vec(&call_completion).map_err(TerminalError::from_error)?;
-
-    let mut body = BytesMut::new();
-    body.extend_from_slice(&encode_start_message(workflow_key, 4));
-    body.extend_from_slice(&encode_input_command(&input));
-    let mut invocation_completions = Vec::with_capacity(invocation_ids.len());
-    for (one_way_call, invocation_id) in one_way_calls.into_iter().zip(invocation_ids) {
-        let completion_id = u32::try_from(
-            protobuf_varint_field(
-                one_way_call
-                    .get(8..)
-                    .ok_or_else(|| TerminalError::new("one-way call omitted its frame payload"))?,
-                10,
-            )
-            .ok_or_else(|| TerminalError::new("one-way call omitted its invocation-id index"))?,
-        )
-        .map_err(|_| TerminalError::new("one-way call invocation-id index exceeded u32"))?;
-        body.extend_from_slice(one_way_call);
-        invocation_completions.push((completion_id, invocation_id));
-    }
-    body.extend_from_slice(terminal_call);
-    for (completion_id, invocation_id) in invocation_completions {
-        body.extend_from_slice(&encode_invocation_id_completion(
-            completion_id,
-            invocation_id,
-        ));
-    }
-    body.extend_from_slice(&encode_call_completion(
-        call_completion_id,
-        &call_completion,
     ));
     Ok(body.freeze())
 }

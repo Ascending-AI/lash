@@ -37,7 +37,7 @@ impl CanonicalRuntimeEffectEnvelope {
             )
         })?;
         let hash =
-            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v2", json.as_bytes());
+            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", json.as_bytes());
         Ok(Self { json, hash })
     }
 
@@ -62,7 +62,7 @@ impl CanonicalRuntimeEffectEnvelope {
 
     fn verify(&self, side: &str) -> Result<(), RuntimeEffectControllerError> {
         let actual =
-            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v2", self.json.as_bytes());
+            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", self.json.as_bytes());
         if actual == self.hash {
             return Ok(());
         }
@@ -120,7 +120,7 @@ impl RuntimeEffectReplayTrace {
     }
 
     fn emit(&self, event: TraceEffectEnvelopeDiffEvent) {
-        crate::trace::emit_trace(
+        crate::trace::emit_projected_trace(
             &Some(Arc::clone(&self.sink)),
             &self.base_context,
             self.context.clone(),
@@ -321,7 +321,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{RuntimeEffectCommand, RuntimeEffectKind, RuntimeInvocation, RuntimeScope};
+    use crate::{RuntimeEffectCommand, RuntimeEffectInvocation};
 
     #[derive(Default)]
     struct RecordingSink {
@@ -337,10 +337,13 @@ mod tests {
 
     fn envelope(input: Value) -> RuntimeEffectEnvelope {
         RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope::for_turn("session", "turn", 0, 0),
-                "tool-attempt:test",
-                RuntimeEffectKind::ToolAttempt,
+            RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn("session", "turn"),
+                    "tool-attempt:test",
+                )
+                .expect("valid validation address"),
+                crate::RuntimeAttribution::for_turn("session", "turn", 0, 0),
                 "tool-attempt:test",
             ),
             RuntimeEffectCommand::ToolAttempt {
@@ -545,6 +548,64 @@ mod tests {
                 Arc::new(crate::SystemClock),
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn emitted_effect_diff_keeps_authoritative_projection_and_host_metadata() {
+        let sink = Arc::new(RecordingSink::default());
+        let sink_dyn: Arc<dyn TraceSink> = sink.clone();
+        let mut base = TraceContext::default()
+            .for_session("ambient-session")
+            .for_turn("ambient-turn")
+            .for_turn_index(12)
+            .for_protocol_iteration(7);
+        base.run_id = Some("host-run".to_string());
+        base.parent_graph_node_id = Some("host:explicit-parent".to_string());
+        base.metadata
+            .insert("host_key".to_string(), serde_json::json!("kept"));
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::process("effect-trace-process"),
+                "effect-trace",
+            )
+            .expect("valid effect address"),
+            crate::RuntimeAttribution::none(),
+            "effect-trace",
+        )
+        .with_caused_by(Some(crate::CausalRef::Process {
+            process_id: crate::ProcessId::from("cause-process"),
+        }));
+        let trace = RuntimeEffectReplayTrace::for_divergence(
+            Some(&sink_dyn),
+            base,
+            crate::trace::trace_context_from_effect_invocation(&invocation),
+            Arc::new(crate::SystemClock),
+        )
+        .expect("configured divergence trace");
+
+        validate_replayed_effect_envelope(
+            &canonical(json!({"value": 1})),
+            &canonical(json!({"value": 2})),
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            Some(&trace),
+        )
+        .expect_err("mismatch emits the relevant effect event");
+
+        let records = sink.records.lock_recover();
+        let context = &records[0].context;
+        assert_eq!(context.session_id, None);
+        assert_eq!(context.turn_id, None);
+        assert_eq!(context.turn_index, None);
+        assert_eq!(context.protocol_iteration, None);
+        assert_eq!(
+            context.parent_graph_node_id.as_deref(),
+            Some("host:explicit-parent")
+        );
+        assert_eq!(context.run_id.as_deref(), Some("host-run"));
+        assert_eq!(
+            context.metadata.get("host_key"),
+            Some(&serde_json::json!("kept"))
         );
     }
 }

@@ -45,7 +45,7 @@ pub(crate) fn workbench_prompt(dialect: lash::rlm::RlmDialect) -> &'static str {
 pub(crate) const WORKBENCH_PROMPT_LASHLANG: &str = r###"You are running inside the Agent Workbench demo.
 
 Available host features:
-- Web access is limited to `web.search(...)` and `web.fetch(...)`, both backed by the same Tavily tools the CLI uses.
+- Web access is provided by the free Parallel Search MCP server (`parallel`): use its web search and web fetch tools. The server is attached without an API key, and its tools are simply absent while the connection is down.
 - You may call `agents.spawn(...)` for independent investigation.
 - You may use Lashlang process definitions for work that should run independently. A `start` creates a process run immediately; a trigger registration is the durable rule that creates future runs when the host emits a matching event.
 - When you start a process and need its `finish` value, write `result = (await handle)?`. Bare `await handle` waits, but returns the result wrapper, so `result.field` will not read fields from the finished value.
@@ -134,7 +134,7 @@ Use background processes or subagents only when they clarify the user's request 
 pub(crate) const WORKBENCH_PROMPT_TYPESCRIPT: &str = r###"You are running inside the Agent Workbench demo.
 
 Available host features:
-- Web access is limited to `web.search(...)` and `web.fetch(...)`, both backed by the same Tavily tools the CLI uses.
+- Web access is provided by the free Parallel Search MCP server (`parallel`): use its web search and web fetch tools. The server is attached without an API key, and its tools are simply absent while the connection is down.
 - You may call `agents.spawn(...)` for independent investigation.
 - You may use durable process definitions for work that should run independently. A `start` creates a process run immediately; a trigger registration is the durable rule that creates future runs when the host emits a matching event.
 - `await start(process, args)` waits for the run and gives you the value the run returned — there is no result wrapper, so read its fields directly. An un-awaited handle can still be signalled and awaited later.

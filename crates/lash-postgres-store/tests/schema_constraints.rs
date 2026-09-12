@@ -192,6 +192,20 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         "ck_session_meta_caused_by_kind",
     )
     .await;
+    sqlx::query(
+        "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind)
+         VALUES ('effect-address-cause', 'child', 'effect_address')",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("current effect-address discriminator is admitted");
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind)
+         VALUES ('legacy-effect-cause', 'child', 'effect')",
+        "ck_session_meta_caused_by_kind",
+    )
+    .await;
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_session_meta (

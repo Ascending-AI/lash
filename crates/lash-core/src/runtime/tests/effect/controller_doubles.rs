@@ -1,10 +1,74 @@
-//! The negative effect-controller doubles: a controller that refuses
-//! concurrency, one that rejects every effect, and one that answers with the
-//! wrong outcome shape. They exist to prove the turn loop fails explicitly
-//! rather than silently, and they share the recording harness in the parent
-//! module.
+//! Effect-controller test support: a strict replay journal plus controllers
+//! that refuse concurrency, reject effects, or answer with the wrong outcome
+//! shape. The doubles share the recording harness in the parent module.
 
 use super::*;
+
+type StrictReplayEntry = (String, CanonicalRuntimeEffectEnvelope);
+
+#[derive(Clone, Default)]
+pub(super) struct StrictReplayJournal {
+    enabled: bool,
+    outcomes: Arc<
+        Mutex<
+            std::collections::BTreeMap<
+                String,
+                (CanonicalRuntimeEffectEnvelope, RuntimeEffectOutcome),
+            >,
+        >,
+    >,
+}
+
+impl StrictReplayJournal {
+    pub(super) fn enable(&mut self) {
+        self.enabled = true;
+    }
+
+    pub(super) fn prepare(
+        &self,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Result<Option<StrictReplayEntry>, RuntimeEffectControllerError> {
+        self.enabled
+            .then(|| {
+                Ok((
+                    envelope.invocation.address.graph_key(),
+                    envelope.canonical_form()?,
+                ))
+            })
+            .transpose()
+    }
+
+    pub(super) fn replay(
+        &self,
+        prepared: &Option<StrictReplayEntry>,
+    ) -> Result<Option<RuntimeEffectOutcome>, RuntimeEffectControllerError> {
+        let Some((key, reconstructed)) = prepared else {
+            return Ok(None);
+        };
+        let Some((recorded, outcome)) = self.outcomes.lock_recover().get(key).cloned() else {
+            return Ok(None);
+        };
+        validate_replayed_effect_envelope(
+            &recorded,
+            reconstructed,
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+            None,
+        )?;
+        Ok(Some(outcome))
+    }
+
+    pub(super) fn record(
+        &self,
+        prepared: Option<StrictReplayEntry>,
+        outcome: &Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+    ) {
+        if let (Some((key, canonical)), Ok(outcome)) = (prepared, outcome) {
+            self.outcomes
+                .lock_recover()
+                .insert(key, (canonical, outcome.clone()));
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub(super) struct SerialOnlyEffectController {

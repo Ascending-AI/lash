@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     source_node_id                    TEXT,
     observer_inheritance_kind         TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
-    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only'))
 );
 
@@ -573,12 +573,12 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// Version 55 keeps that phase present under an opaque write token associated
 /// with its manifest session until a restoring backend put succeeds, so failed
 /// re-puts and explicit host recovery can restore it exactly.
-/// Version 56 requires pending-input claim identity and token to be either both
-/// NULL or both populated; version 55 catalogs are recreated.
-/// Version 57 replaces permanent ownerless artifact roots with exact owner
-/// edges and permanent execution-owner publication fences. Version 56
-/// catalogs are rejected and recreated; there is no compatibility path.
-pub(crate) const SCHEMA_VERSION: i32 = 57;
+/// Version 56 persists full effect addresses in session causal metadata.
+/// Version 57 also requires pending-input claim identity and token to be either
+/// both NULL or both populated; both version-56 parent catalogs are recreated.
+/// Version 58 adds exact owner edges and permanent execution-owner publication
+/// fences. Version-57 catalogs are rejected and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 58;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -856,9 +856,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version-29 registries are rejected rather than migrated.
 /// Version 31 removes the unread process waiting projection and its index.
 /// Version-30 registries are rejected rather than migrated.
-/// Version 33 makes Process Prune retain exact artifact-release evidence until
+/// Version 33 persists full admitted effect addresses and optional truthful
+/// attribution in process registration and wake payloads. Older registries are
+/// rejected rather than fabricating an execution scope or session owner.
+/// Version 34 makes Process Prune retain exact artifact-release evidence until
 /// every configured artifact store acknowledges owner severance.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 33;
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 34;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1088,9 +1091,12 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // children, groups, and await-event promises in one transaction and leaves a
 // tombstone every admission path refuses. Pre-17 effect databases are
 // rejected at open; there is no migration arm.
-// Version 18 makes that lifecycle evidence own execution-artifact cleanup
-// completion. Pre-18 effect databases are rejected rather than migrated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 18;
+// Version 18 persists the admitted execution scope with every replay key.
+// Pre-18 journals are rejected because their keys cannot identify the scope
+// whose authority admitted the effect.
+// Version 19 makes that lifecycle evidence own execution-artifact cleanup
+// completion. Pre-19 effect databases are rejected rather than migrated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 19;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -1425,6 +1431,17 @@ mod check_constraint_tests {
             &core,
             "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
              VALUES ('bad-cause', 'child', 'timer')",
+            "ck_session_meta_caused_by_kind",
+        );
+        core.execute_batch(
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
+             VALUES ('effect-address-cause', 'child', 'effect_address')",
+        )
+        .expect("current effect-address discriminator is admitted");
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
+             VALUES ('legacy-effect-cause', 'child', 'effect')",
             "ck_session_meta_caused_by_kind",
         );
         assert_check_rejects(

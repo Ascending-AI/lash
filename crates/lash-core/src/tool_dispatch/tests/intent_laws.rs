@@ -85,9 +85,12 @@ fn runtime_execution_for_intent_law(
 
 fn intent_law_batch_parent(label: &str) -> crate::RuntimeInvocation {
     crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::for_turn("session", "intent-law-turn", 0, 0),
-        label,
-        crate::RuntimeEffectKind::ToolBatch,
+        crate::EffectAddress::new(
+            crate::ExecutionScope::turn("session", "intent-law-turn"),
+            label,
+        )
+        .expect("valid intent-law address"),
+        crate::RuntimeAttribution::for_turn("session", "intent-law-turn", 0, 0),
         label,
     )
 }

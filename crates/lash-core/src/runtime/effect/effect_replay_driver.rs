@@ -209,7 +209,6 @@ enum EffectReplayFailure {
     Decode,
     Encode,
     HashConflict,
-    KeyMissing,
     LeaseLost,
     Missing,
     Store,
@@ -246,9 +245,6 @@ impl EffectReplayVocabulary {
             (EffectReplayBackend::Sqlite, EffectReplayFailure::HashConflict) => {
                 RuntimeErrorCode::SqliteEffectReplayHashConflict
             }
-            (EffectReplayBackend::Sqlite, EffectReplayFailure::KeyMissing) => {
-                RuntimeErrorCode::SqliteEffectReplayKeyMissing
-            }
             (EffectReplayBackend::Sqlite, EffectReplayFailure::LeaseLost) => {
                 RuntimeErrorCode::SqliteEffectReplayLeaseLost
             }
@@ -269,9 +265,6 @@ impl EffectReplayVocabulary {
             }
             (EffectReplayBackend::Postgres, EffectReplayFailure::HashConflict) => {
                 RuntimeErrorCode::PostgresEffectReplayHashConflict
-            }
-            (EffectReplayBackend::Postgres, EffectReplayFailure::KeyMissing) => {
-                RuntimeErrorCode::PostgresEffectReplayKeyMissing
             }
             (EffectReplayBackend::Postgres, EffectReplayFailure::LeaseLost) => {
                 RuntimeErrorCode::PostgresEffectReplayLeaseLost
@@ -1242,6 +1235,14 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         self.await_events.cancel_session(session_id).await
     }
 
+    /// List the registered, unresolved promise keys of one session.
+    pub async fn list_outstanding_await_event_keys(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        self.await_events.outstanding_for_session(session_id).await
+    }
+
     /// The promise half of scope retirement, answered from the whole: a
     /// non-session scope's promises go with its journal in one transaction
     /// (N4), so this lever is [`retire_effect_journal`](Self::retire_effect_journal)
@@ -1401,6 +1402,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         cancel: Option<&CancellationToken>,
         busy: BusyPolicy,
     ) -> Result<EffectRun, RuntimeEffectControllerError> {
+        envelope.invocation.validate_execution_scope(scope)?;
         scope
             .validate()
             .map_err(RuntimeEffectControllerError::from)?;
@@ -1486,16 +1488,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         reconstructed_envelope: &CanonicalRuntimeEffectEnvelope,
     ) -> Result<PreparedEffect, RuntimeEffectControllerError> {
         let vocabulary = self.vocabulary();
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .ok_or_else(|| {
-                vocabulary.error(
-                    EffectReplayFailure::KeyMissing,
-                    "runtime effect envelope requires replay.key",
-                )
-            })?
-            .to_string();
+        let replay_key = envelope.invocation.replay_key().to_string();
         let envelope_json = serde_json::to_string(reconstructed_envelope)
             .map_err(|err| vocabulary.encode_error(err))?;
         let journal_identity = scope

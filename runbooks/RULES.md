@@ -197,7 +197,8 @@ Apply every rule below to the browser surface:
   reason to guess.
 
 **Real tokens, deliberate runs.** Except for an explicitly documented, dev-only provider
-scenario in a runbook, the examples call OpenRouter (and Tavily for web tools) with keys
+scenario in a runbook, the examples call OpenRouter (web tools ride the keyless Parallel
+Search MCP server) with keys
 from the environment / repo `.env`. Browser scenarios are deliberate, token-spending,
 and model-nondeterministic unless their runbook names that exception. Export the model the
 row's tier names (`OPENROUTER_MODEL`, and confirm it from the row's own evidence rather than

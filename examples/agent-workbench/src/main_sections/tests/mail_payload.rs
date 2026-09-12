@@ -54,6 +54,55 @@ async fn inject_message_scopes_emission_to_requested_session() {
         .sessions
         .ensure(&SessionId::from(scoped_session_id), state.rlm_dialect);
 
+    let environment = lashlang::LashlangHostEnvironment::new(
+        workbench_lashlang_resources(),
+        workbench_lashlang_abilities(),
+    );
+    let linked = lashlang::LinkedModule::link(
+        lashlang::parse(
+            "process mail_listener(event: mail.Received) -> str { finish event.title }",
+        )
+        .expect("parse mail-listener process"),
+        environment,
+    )
+    .expect("link mail-listener process");
+    let artifact_store = lash_sqlite_store::Store::open(&data_dir.path().join("artifacts.db"))
+        .await
+        .expect("open workbench Lashlang artifact store");
+    lashlang::LashlangArtifactStore::publish_module_artifact(
+        &artifact_store,
+        &lash::process::ArtifactOwner::host("mail-payload-test"),
+        &linked.artifact,
+    )
+    .await
+    .expect("publish mail-listener module");
+    let process_input = lash_lashlang_runtime::LashlangProcessInput {
+        module_ref: linked.module_ref,
+        process_ref: linked
+            .artifact
+            .process_ref("mail_listener")
+            .expect("mail-listener process ref")
+            .clone(),
+        host_requirements_ref: linked.host_requirements_ref,
+        process_name: "mail_listener".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let process_identity = process_input.process_identity();
+    let process_env_store = lash_sqlite_store::Store::open(&data_dir.path().join("process-env.db"))
+        .await
+        .expect("open workbench process environment store");
+    let process_env_spec = lash::process::ProcessExecutionEnvSpec::new(
+        Default::default(),
+        lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+    );
+    let process_env_ref = lash::process::publish_process_execution_env(
+        &process_env_store,
+        &lash::process::ArtifactOwner::host("mail-payload-test"),
+        &process_env_spec,
+    )
+    .await
+    .expect("publish mail-listener process environment");
+
     let account_summary = state
         .mail_world
         .add_account("Test Inbox")
@@ -70,15 +119,14 @@ async fn inject_message_scopes_emission_to_requested_session() {
             )),
             draft: lash::triggers::TriggerSubscriptionDraft::for_process(
                 "mail-listener".to_string(),
-                lash::process::ProcessExecutionEnvRef::new("process-env:mail-listener"),
+                process_env_ref,
                 MAIL_RECEIVED_SOURCE_TYPE,
                 lash::triggers::empty_trigger_source_key(MAIL_RECEIVED_SOURCE_TYPE)
                     .expect("source key"),
-                lash::process::ProcessInput::Engine {
-                    kind: "mail-listener-engine".to_string(),
-                    payload: serde_json::json!({}),
-                },
-                lash::process::ProcessIdentity::new("mail-listener-engine"),
+                process_input
+                    .into_process_input()
+                    .expect("encode mail-listener process input"),
+                process_identity,
             )
             .with_payload_schema(mail_received_payload_schema()),
         },

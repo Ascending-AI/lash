@@ -34,8 +34,6 @@ use harness::{
     ScratchSchema, assert_mutation_is_rejected, pool_with_search_path, postgres_server_version_num,
 };
 
-const RETAINED_PRIOR_COMPONENT_GENERATION: i32 = 86;
-
 /// Append-request replay depends on one durable receipt per session and turn.
 /// Dropping the receipt table's primary key would silently admit conflicting
 /// identities for the same append operation.
@@ -985,7 +983,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 87")
+                && rendered.contains(&format!("expected {}", PostgresStorage::schema_version()))
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
@@ -998,10 +996,7 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
 /// update from silently targeting an older synthetic witness instead.
 #[tokio::test]
 async fn postgres_retained_prior_component_is_refused_at_open() {
-    assert_eq!(
-        RETAINED_PRIOR_COMPONENT_GENERATION + 1,
-        PostgresStorage::schema_version()
-    );
+    let retained_prior = PostgresStorage::schema_version() - 1;
     let Some(database_url) = database_url() else {
         eprintln!("skipping retained Postgres predecessor refusal: database URL is not set");
         return;
@@ -1010,7 +1005,7 @@ async fn postgres_retained_prior_component_is_refused_at_open() {
     scratch
         .apply(&format!(
             "UPDATE lash_schema_versions
-                SET version = {RETAINED_PRIOR_COMPONENT_GENERATION}
+                SET version = {retained_prior}
               WHERE component = 'lash-postgres-store'"
         ))
         .await;
@@ -1018,12 +1013,10 @@ async fn postgres_retained_prior_component_is_refused_at_open() {
     let error = PostgresStorage::from_pool(scratch.pool.clone())
         .await
         .err()
-        .unwrap_or_else(|| {
-            panic!("component {RETAINED_PRIOR_COMPONENT_GENERATION} must be refused at open")
-        });
+        .unwrap_or_else(|| panic!("component {retained_prior} must be refused at open"));
     let rendered = error.to_string();
     assert!(
-        rendered.contains(&format!("version {RETAINED_PRIOR_COMPONENT_GENERATION}"))
+        rendered.contains(&format!("version {retained_prior}"))
             && rendered.contains(&format!("expected {}", PostgresStorage::schema_version())),
         "the predecessor refusal must identify found and expected versions: {rendered}"
     );
@@ -1083,7 +1076,8 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
             let rendered = error.to_string();
             assert!(
                 rendered.contains("has version 65")
-                    && rendered.contains("expected 87")
+                    && rendered
+                        .contains(&format!("expected {}", PostgresStorage::schema_version()))
                     && rendered.contains("no applicable migration")
                     && rendered.contains("does not relax it"),
                 "the destructive version boundary was lost for {provisioning:?} + {check:?}: \
@@ -1363,10 +1357,11 @@ async fn report_remedies_match_the_finding_class() {
     );
 
     scratch
-        .apply(
-            "UPDATE lash_schema_versions SET version = 87 WHERE component = 'lash-postgres-store';
+        .apply(&format!(
+            "UPDATE lash_schema_versions SET version = {} WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
-        )
+            PostgresStorage::schema_version()
+        ))
         .await;
     let shape_report = PostgresStorage::verify_schema_for(&scratch.pool)
         .await
@@ -1491,11 +1486,12 @@ async fn the_schema_gate_emits_its_decision_basis() {
         .open_host_provisioned(SchemaCheck::Enforce)
         .await
         .expect("open a conformant schema");
+    let found_version = format!("found_version=Some({})", PostgresStorage::schema_version());
     assert_evidence(
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(87)", "finding_total=0"],
+        &[found_version.as_str(), "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -1667,7 +1663,8 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=87"]
+    let expected_version = format!("expected_version={}", PostgresStorage::schema_version());
+    for field in ["component=lash-postgres-store", expected_version.as_str()]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

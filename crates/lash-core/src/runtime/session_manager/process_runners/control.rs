@@ -1,6 +1,5 @@
 use super::*;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -242,8 +241,21 @@ impl<'scope> ProcessCommandRunner<'scope> {
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
         let effect_id = command.effect_id();
+        let scoped = self.effect_controller_handle.scoped();
+        let attribution = self
+            .parent_invocation
+            .as_ref()
+            .map(|parent| parent.attribution.clone())
+            .unwrap_or_else(|| {
+                scoped
+                    .execution_scope()
+                    .session_id()
+                    .map(crate::RuntimeAttribution::for_session)
+                    .unwrap_or_else(crate::RuntimeAttribution::none)
+            });
         let invocation = crate::runtime::causal::process_effect_invocation(
-            &self.current.session_id,
+            scoped.execution_scope(),
+            attribution,
             self.parent_invocation.clone(),
             &effect_id,
         );
@@ -254,7 +266,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         // Route through the controller explicitly selected by the process
         // operation scope: host-configured for host/API paths, scoped for
         // in-turn paths.
-        let scoped = self.effect_controller_handle.scoped();
         let (owned_controller, task_requests): (
             Arc<dyn crate::RuntimeEffectController>,
             Option<
@@ -296,15 +307,14 @@ impl<'scope> ProcessCommandRunner<'scope> {
         let outcome = if let Some(task_requests) = task_requests {
             crate::runtime::effect::drive_effect_controller_task(
                 self.effect_controller,
+                scoped.execution_scope().clone(),
                 envelope,
                 local_executor,
                 task_requests,
             )
             .await?
         } else {
-            self.effect_controller
-                .execute_effect(envelope, local_executor)
-                .await?
+            scoped.execute_effect(envelope, local_executor).await?
         };
         outcome.into_process().map_err(crate::PluginError::from)
     }

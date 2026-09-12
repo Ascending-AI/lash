@@ -60,6 +60,68 @@ pub(crate) fn emit_trace_at(
     }
 }
 
+/// Emit a context projected from a runtime invocation. Invocation-owned
+/// identity is authoritative, including absent fields; host-owned run metadata
+/// and an explicit host parent remain intact.
+pub(crate) fn emit_projected_trace(
+    sink: &Option<Arc<dyn TraceSink>>,
+    base_context: &TraceContext,
+    context: TraceContext,
+    event: TraceEvent,
+    clock: &dyn crate::Clock,
+) {
+    emit_projected_trace_at(
+        sink,
+        base_context,
+        context,
+        event,
+        clock.timestamp_datetime(),
+    );
+}
+
+fn emit_projected_trace_at(
+    sink: &Option<Arc<dyn TraceSink>>,
+    base_context: &TraceContext,
+    context: TraceContext,
+    event: TraceEvent,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) {
+    let Some(sink) = sink else {
+        return;
+    };
+    let mut merged = merge_runtime_projection(base_context, context);
+    assign_span_identity(&mut merged, &event);
+    if let Err(err) = sink.append(&TraceRecord::new_with_timestamp(merged, event, timestamp)) {
+        tracing::warn!(error = %err, "failed to append trace record");
+    }
+}
+
+fn merge_runtime_projection(base: &TraceContext, projection: TraceContext) -> TraceContext {
+    let explicit_parent = base.parent_graph_node_id.clone();
+    let projected_parent = projection.parent_graph_node_id.clone();
+    let projected_session = projection.session_id.clone();
+    let projected_turn = projection.turn_id.clone();
+    let projected_graph_node = projection.graph_node_id.clone();
+    let projected_turn_index = projection.turn_index;
+    let projected_protocol_iteration = projection.protocol_iteration;
+    let projected_effect = projection.effect_id.clone();
+    let projected_llm_call = projection.llm_call_id.clone();
+
+    let mut merged = base.clone();
+    merged.metadata.remove("replay_key");
+    merged.metadata.remove("caused_by");
+    merge_context(&mut merged, projection);
+    merged.session_id = projected_session;
+    merged.turn_id = projected_turn;
+    merged.graph_node_id = projected_graph_node;
+    merged.parent_graph_node_id = explicit_parent.or(projected_parent);
+    merged.turn_index = projected_turn_index;
+    merged.protocol_iteration = projected_protocol_iteration;
+    merged.effect_id = projected_effect;
+    merged.llm_call_id = projected_llm_call;
+    merged
+}
+
 /// Emit evidence only for store failures whose typed class means persisted
 /// state is corrupt or a monotonic durable identity cannot advance.
 pub(crate) fn emit_store_error(
@@ -215,7 +277,8 @@ fn set_span(context: &mut TraceContext, self_id: Option<String>, parent_id: Opti
     if context.graph_node_id.is_none() {
         context.graph_node_id = self_id;
     }
-    if let Some(parent_id) = parent_id
+    if context.parent_graph_node_id.is_none()
+        && let Some(parent_id) = parent_id
         && context.graph_node_id.as_deref() != Some(parent_id.as_str())
     {
         context.parent_graph_node_id = Some(parent_id);
@@ -255,16 +318,17 @@ fn causal_node_id(caused_by: &crate::CausalRef) -> String {
             session_id,
             turn_id,
         } => format!("turn:{session_id}:{turn_id}"),
-        crate::CausalRef::Effect { effect_id, .. } => format!("effect:{effect_id}"),
+        crate::CausalRef::Effect { address } => address.graph_key(),
         crate::CausalRef::ToolCall { call_id, .. } => format!("tool:{call_id}"),
         crate::CausalRef::Process { process_id } => format!("process:{process_id}"),
         crate::CausalRef::ProcessEvent {
             process_id,
             sequence,
         } => format!("process:{process_id}:{sequence}"),
-        crate::CausalRef::TriggerOccurrence { occurrence_id, .. } => {
-            format!("trigger:{occurrence_id}")
-        }
+        crate::CausalRef::TriggerOccurrence { .. } => format!(
+            "trigger:{}",
+            serde_json::to_string(caused_by).expect("causal references serialize")
+        ),
         crate::CausalRef::SessionNode {
             session_id,
             node_id,
@@ -273,29 +337,72 @@ fn causal_node_id(caused_by: &crate::CausalRef) -> String {
 }
 
 pub(crate) fn trace_context_from_invocation(invocation: &crate::RuntimeInvocation) -> TraceContext {
-    let mut context = TraceContext::default().for_session(invocation.scope.session_id.clone());
-    if let Some(turn_id) = invocation.scope.turn_id.as_ref() {
-        context = context.for_turn(turn_id.clone());
-    }
-    if let Some(turn_index) = invocation.scope.turn_index {
-        context = context.for_turn_index(turn_index);
-    }
-    if let Some(protocol_iteration) = invocation.scope.protocol_iteration {
-        context = context.for_protocol_iteration(protocol_iteration);
-    }
-    if let Some(effect_id) = invocation.effect_id() {
-        context.effect_id = Some(effect_id.to_string());
-    }
-    if let Some(replay) = invocation.replay.as_ref() {
+    trace_context_for_invocation(TraceContext::default(), invocation)
+}
+
+pub(crate) fn trace_context_for_invocation(
+    context: TraceContext,
+    invocation: &crate::RuntimeInvocation,
+) -> TraceContext {
+    trace_context_for_invocation_parts(
+        context,
+        &invocation.attribution,
+        invocation.effect_id(),
+        invocation.replay_key(),
+        invocation.caused_by.as_ref(),
+    )
+}
+
+pub(crate) fn trace_context_from_effect_invocation(
+    invocation: &crate::RuntimeEffectInvocation,
+) -> TraceContext {
+    trace_context_for_effect_invocation(TraceContext::default(), invocation)
+}
+
+pub(crate) fn trace_context_for_effect_invocation(
+    context: TraceContext,
+    invocation: &crate::RuntimeEffectInvocation,
+) -> TraceContext {
+    trace_context_for_invocation_parts(
+        context,
+        &invocation.attribution,
+        Some(invocation.effect_id()),
+        Some(invocation.replay_key()),
+        invocation.caused_by.as_ref(),
+    )
+}
+
+fn trace_context_for_invocation_parts(
+    mut context: TraceContext,
+    attribution: &crate::RuntimeAttribution,
+    effect_id: Option<&str>,
+    replay_key: Option<&str>,
+    caused_by: Option<&crate::CausalRef>,
+) -> TraceContext {
+    // Invocation identity replaces any ambient identity on the host context.
+    // Run/experiment metadata and an explicit graph parent remain host-owned.
+    context.session_id = attribution.session_id.clone();
+    context.turn_id = attribution.turn_id.clone();
+    context.turn_index = attribution.turn_index;
+    context.protocol_iteration = attribution.protocol_iteration;
+    context.effect_id = effect_id.map(str::to_string);
+    context.metadata.remove("replay_key");
+    context.metadata.remove("caused_by");
+    if let Some(replay_key) = replay_key {
         context
             .metadata
-            .insert("replay_key".to_string(), serde_json::json!(replay.key));
+            .insert("replay_key".to_string(), serde_json::json!(replay_key));
     }
-    if let Some(caused_by) = invocation.caused_by.as_ref() {
+    if let Some(caused_by) = caused_by {
         context = trace_context_with_causal_ref(context, caused_by);
-        if context.parent_graph_node_id.is_none() {
-            context.parent_graph_node_id = Some(causal_node_id(caused_by));
-        }
+    }
+    if context.parent_graph_node_id.is_none()
+        && let (Some(session_id), Some(turn_id)) = (
+            attribution.session_id.as_ref(),
+            attribution.turn_id.as_ref(),
+        )
+    {
+        context.parent_graph_node_id = Some(format!("turn:{session_id}:{turn_id}"));
     }
     context
 }
@@ -306,6 +413,9 @@ pub(crate) fn trace_context_with_causal_ref(
 ) -> TraceContext {
     if let Ok(value) = serde_json::to_value(caused_by) {
         context.metadata.insert("caused_by".to_string(), value);
+    }
+    if context.parent_graph_node_id.is_none() {
+        context.parent_graph_node_id = Some(causal_node_id(caused_by));
     }
     context
 }
@@ -874,6 +984,117 @@ mod span_identity_tests {
         assert_eq!(
             context.parent_graph_node_id.as_deref(),
             Some("tool:call_parent")
+        );
+    }
+
+    #[test]
+    fn effect_projection_replaces_ambient_identity_but_keeps_host_metadata_and_parent() {
+        let mut base = TraceContext::default()
+            .for_session("ambient-session")
+            .for_turn("ambient-turn")
+            .for_turn_index(99)
+            .for_protocol_iteration(42);
+        base.run_id = Some("host-run".to_string());
+        base.parent_graph_node_id = Some("host:explicit-parent".to_string());
+        base.metadata
+            .insert("host_key".to_string(), serde_json::json!("kept"));
+        base.metadata
+            .insert("caused_by".to_string(), serde_json::json!({"stale": true}));
+        base.metadata
+            .insert("replay_key".to_string(), serde_json::json!("stale"));
+
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::process("host-process"),
+                "process-step",
+            )
+            .expect("valid process effect address"),
+            crate::RuntimeAttribution::none(),
+            "descriptive-label",
+        )
+        .with_caused_by(Some(crate::CausalRef::Process {
+            process_id: crate::ProcessId::from("causal-process"),
+        }));
+
+        let context = trace_context_for_effect_invocation(base, &invocation);
+        assert_eq!(context.session_id, None);
+        assert_eq!(context.turn_id, None);
+        assert_eq!(context.turn_index, None);
+        assert_eq!(context.protocol_iteration, None);
+        assert_eq!(context.run_id.as_deref(), Some("host-run"));
+        assert_eq!(
+            context.parent_graph_node_id.as_deref(),
+            Some("host:explicit-parent")
+        );
+        assert_eq!(
+            context.metadata.get("host_key"),
+            Some(&serde_json::json!("kept"))
+        );
+        assert_eq!(
+            context.metadata.get("replay_key"),
+            Some(&serde_json::json!("process-step"))
+        );
+        assert_eq!(
+            context.metadata.get("caused_by"),
+            Some(&serde_json::to_value(invocation.caused_by.as_ref().unwrap()).unwrap())
+        );
+    }
+
+    #[test]
+    fn effect_projection_uses_full_scoped_cause_before_real_turn_fallback() {
+        let parent_address = crate::EffectAddress::new(
+            crate::ExecutionScope::process("parent-process"),
+            "shared-replay-key",
+        )
+        .expect("valid causal effect address");
+        let cause = crate::CausalRef::Effect {
+            address: parent_address.clone(),
+        };
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("child-session", "child-turn"),
+                "child-key",
+            )
+            .expect("valid child effect address"),
+            crate::RuntimeAttribution::for_turn("child-session", "child-turn", 3, 1),
+            "child-effect",
+        )
+        .with_caused_by(Some(cause));
+
+        let context = trace_context_from_effect_invocation(&invocation);
+        assert_eq!(
+            context.parent_graph_node_id.as_deref(),
+            Some(parent_address.graph_key().as_str())
+        );
+
+        let turn_only = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                crate::ExecutionScope::turn("fallback-session", "fallback-turn"),
+                "fallback-key",
+            )
+            .expect("valid fallback effect address"),
+            crate::RuntimeAttribution::for_turn("fallback-session", "fallback-turn", 0, 0),
+            "fallback-effect",
+        );
+        let context = trace_context_from_effect_invocation(&turn_only);
+        assert_eq!(
+            context.parent_graph_node_id.as_deref(),
+            Some("turn:fallback-session:fallback-turn")
+        );
+    }
+
+    #[test]
+    fn trigger_trace_parent_distinguishes_equal_occurrence_ids_by_full_cause() {
+        let parent = |subscription_id: &str| crate::CausalRef::TriggerOccurrence {
+            occurrence_id: "shared-occurrence".to_string(),
+            subscription_id: Some(subscription_id.to_string()),
+            subscription_incarnation: Some("incarnation".to_string()),
+            subscription_revision: Some(7),
+        };
+
+        assert_ne!(
+            causal_node_id(&parent("subscription-a")),
+            causal_node_id(&parent("subscription-b"))
         );
     }
 

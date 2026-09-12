@@ -685,10 +685,13 @@ mod tests {
                 sequence: 1,
                 event_type: "producer.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
-                    crate::RuntimeScope::new("wake-target"),
+                    crate::EffectAddress::new(
+                        crate::ExecutionScope::process("reused-wake-delivery"),
+                        "wake-replay",
+                    )
+                    .expect("valid wake delivery address"),
+                    crate::RuntimeAttribution::none(),
                     "wake-effect",
-                    crate::RuntimeEffectKind::Process,
-                    "wake-replay",
                 ),
                 process_caused_by: None,
                 authority: crate::QueuedWorkAuthority::default(),

@@ -87,7 +87,6 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
@@ -287,7 +286,6 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),
@@ -547,8 +545,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(record.outcome.is_none());
     let registration_digest = record
         .registration_fingerprint
-        .strip_prefix("process-registration-definition:v2:blake3:")
-        .expect("process registration uses the v2 BLAKE3 definition-fingerprint family");
+        .strip_prefix("process-registration-definition:v5:blake3:")
+        .expect("process registration uses the v5 BLAKE3 definition-fingerprint family");
     assert_eq!(registration_digest.len(), 64);
     assert!(
         registration_digest
@@ -954,6 +952,24 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         compacted, 0,
         "unprojected deletions must retain their tombstones"
     );
+    let pending_cleanup = registry
+        .pending_process_artifact_cleanup()
+        .await
+        .expect("list retained process artifact cleanup");
+    assert_eq!(
+        pending_cleanup
+            .iter()
+            .map(|cleanup| cleanup.process_id.as_str())
+            .collect::<Vec<_>>(),
+        [external_id, process_id],
+        "tombstones remain protected until exact artifact cleanup is acknowledged"
+    );
+    for cleanup in pending_cleanup {
+        registry
+            .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
+            .await
+            .expect("acknowledge process artifact cleanup");
+    }
     assert_eq!(
         registry
             .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None,)
@@ -1031,7 +1047,6 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),

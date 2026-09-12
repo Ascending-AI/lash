@@ -3,7 +3,7 @@ use crate::runtime::{RuntimeError, RuntimeErrorCode};
 
 use serde::{Deserialize, Serialize};
 
-use super::RuntimeEffectKind;
+use crate::RuntimeEffectKind;
 
 #[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
 #[error("{code}: {message}")]
@@ -84,6 +84,12 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
             summary: err.summary,
             cause: err.cause,
         }
+    }
+}
+
+impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
+    fn from(error: lash_sansio::EffectIdentityError) -> Self {
+        RuntimeError::from(error).into()
     }
 }
 

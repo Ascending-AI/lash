@@ -726,6 +726,3 @@ terminal are carried as request config / tool-access, not lost.
   `request_process_abandon`, and `get_process_lease` (state-only).
 - `crates/lash/src/process_admin.rs` — the global `Processes` facade with the
   `observed_by` / `originated_by` filters and `request_abandon` / `prune`.
-- `crates/lash-tools/src/shell/mod.rs` / `shell/runtime.rs` — `shell.start`
-  `detach: true` (double-fork/`setsid`, `ExternallyOwned` row terminal at birth)
-  and the `ShellProcessTable` teardown SIGKILL.

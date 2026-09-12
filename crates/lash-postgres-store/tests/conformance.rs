@@ -32,8 +32,12 @@ mod artifact_races;
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]
 mod attachment_recovery;
+#[path = "conformance/await_event_discovery.rs"]
+mod await_event_discovery;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
+#[path = "conformance/effect_host.rs"]
+mod effect_host;
 #[path = "conformance/occurrence_listing.rs"]
 mod occurrence_listing;
 
@@ -118,10 +122,12 @@ fn sync_await<T: Send + 'static>(
 
 fn postgres_conformance_invocation(
     controller: PostgresRuntimeEffectController,
+    execution_scope: ExecutionScope,
 ) -> lash_conformance::ConformanceInvocation {
     let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
     lash_conformance::ConformanceInvocation::new(
         live,
+        execution_scope,
         lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
@@ -895,9 +901,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         sequence: 1,
         event_type: "producer.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::new(session_id),
-            "wake-source-lock",
-            lash_core::RuntimeEffectKind::Process,
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::process("wake-source-lock-process"),
+                "wake-source-lock",
+            )
+            .expect("valid wake effect address"),
+            lash_core::RuntimeAttribution::for_session(session_id),
             "wake-source-lock",
         ),
         process_caused_by: None,
@@ -1385,11 +1394,17 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 85, "Postgres component schema pin");
+    // Derive the expected version from the compiled store instead of pinning a
+    // literal. `check_version_bumps.py` already forces the component bump when
+    // the guarded schema shape moves, so a literal here only adds a second,
+    // staler copy of the number that reds trunk on every schema bump that
+    // reaches main before the pin is advanced. This assertion keeps the real
+    // invariant: the live database must record the version the compiled store
+    // expects.
     assert_eq!(
-        current_version - 1,
-        84,
-        "immediate predecessor adjacency pin"
+        current_version,
+        PostgresStorage::schema_version(),
+        "live component version must match the compiled store schema version"
     );
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
@@ -1504,177 +1519,6 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_effect_host_satisfies_cold_instance_await_event_conformance_when_configured() {
-    let Some((database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres cold-instance AwaitEvent conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(&storage).await;
-    drop(storage);
-    let database_url = database_url().expect("configured Postgres database URL");
-    lash_conformance::effect_host_await_events_cold_instance(|| {
-        let database_url = database_url.clone();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("cold PostgreSQL effect host")
-        });
-        Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
-    })
-    .await;
-    drop(database_lock);
-}
-
-/// The durable PostgreSQL tier answers the effect-group contract the same way
-/// the in-memory reference host does (FIG-1564).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_effect_host_satisfies_the_effect_group_contract_when_configured() {
-    let Some((database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres effect-group conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(&storage).await;
-    drop(storage);
-    let database_url = database_url().expect("configured Postgres database URL");
-    lash_conformance::effect_group_host_conformance(|executors| {
-        let database_url = database_url.clone();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("PostgreSQL effect-group host")
-        });
-        let host = storage.effect_host();
-        // Registration is what makes the host support groups at all: since
-        // FIG-1578 a group carries envelopes, and what runs a child is the
-        // resolver its host was built with. `None` is the unregistered host two
-        // laws are about, over the same database as the wired ones.
-        if let Some(executors) = executors {
-            host.register_group_executors(executors)
-                .expect("a freshly connected host has no resolver yet");
-        }
-        Arc::new(host) as Arc<dyn EffectHost>
-    })
-    .await;
-    drop(database_lock);
-}
-
-/// A cancelled child's cancellation is journaled as its terminal, and a host
-/// that was not running when the close happened reads it back (FIG-1564).
-///
-/// The reading host is the point: it holds none of the closing host's memory,
-/// so the terminal it serves came out of the effect journal or from nowhere.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_journals_a_cancelled_child_as_its_terminal_when_configured() {
-    let Some((database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres cancelled-child terminal test: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(&storage).await;
-    drop(storage);
-    let database_url = database_url().expect("configured Postgres database URL");
-    lash_conformance::effect_group_cancelled_child_terminal_is_durable(|executors| {
-        let database_url = database_url.clone();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("PostgreSQL effect-group host")
-        });
-        let host = storage.effect_host();
-        // Registration is what makes the host support groups at all: since
-        // FIG-1578 a group carries envelopes, and what runs a child is the
-        // resolver its host was built with.
-        if let Some(executors) = executors {
-            host.register_group_executors(executors)
-                .expect("a freshly connected host has no resolver yet");
-        }
-        Arc::new(host) as Arc<dyn EffectHost>
-    })
-    .await;
-    drop(database_lock);
-}
-
-/// Retiring a runtime-operation scope removes its group and child rows in one
-/// transaction and leaves the fence, while an in-flight operation keeps every
-/// row (FIG-2500).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_retires_a_runtime_operation_journal_atomically() {
-    let Some((database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres runtime-operation retirement test: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(&storage).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    let (retired, in_flight) =
-        lash_conformance::effect_group_runtime_operation_retirement_is_atomic(|executors| {
-            let database_url = database_url.clone();
-            let storage = sync_await(async move {
-                PostgresStorage::connect(&database_url)
-                    .await
-                    .expect("PostgreSQL effect-group host")
-            });
-            let host = storage.effect_host();
-            if let Some(executors) = executors {
-                host.register_group_executors(executors)
-                    .expect("a freshly connected host has no resolver yet");
-            }
-            Arc::new(host) as Arc<dyn EffectHost>
-        })
-        .await;
-    let count = |sql: &'static str, scope_id: String| {
-        let pool = storage.pool().clone();
-        async move {
-            sqlx::query_scalar::<_, i64>(sql)
-                .bind(scope_id)
-                .fetch_one(&pool)
-                .await
-                .expect("count journal rows")
-        }
-    };
-    let groups = "SELECT COUNT(*) FROM lash_runtime_effect_group WHERE scope_id = $1";
-    let children = "SELECT COUNT(*) FROM lash_runtime_effect_replay WHERE scope_id = $1";
-    let fences = "SELECT COUNT(*) FROM lash_effect_scope_retirements WHERE scope_id = $1";
-    assert_eq!(
-        count(groups, retired.clone()).await,
-        0,
-        "retired scope keeps no group row"
-    );
-    assert_eq!(
-        count(children, retired.clone()).await,
-        0,
-        "retired scope keeps no child row"
-    );
-    assert_eq!(
-        count(fences, retired).await,
-        1,
-        "retired scope leaves one fence"
-    );
-    assert_eq!(
-        count(groups, in_flight.clone()).await,
-        1,
-        "in-flight scope keeps its group"
-    );
-    assert_eq!(
-        count(children, in_flight.clone()).await,
-        2,
-        "in-flight scope keeps its children"
-    );
-    assert_eq!(
-        count(fences, in_flight).await,
-        0,
-        "in-flight scope is not fenced"
-    );
-    drop(database_lock);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_await_event_key_mint_is_pure_and_signatures_match_sqlite_when_seeded() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
@@ -1711,11 +1555,29 @@ async fn postgres_await_event_key_mint_is_pure_and_signatures_match_sqlite_when_
         first, second,
         "concurrent openers must read one store secret"
     );
+    let observer = storage.effect_host();
+    assert!(
+        observer
+            .list_outstanding_await_event_keys(&SessionId::from("unknown-pure-key-session"))
+            .await
+            .expect("unknown session read")
+            .is_empty()
+    );
+    assert!(
+        observer
+            .list_outstanding_await_event_keys(&SessionId::from("pure-key-session"))
+            .await
+            .expect("minted-only session read")
+            .is_empty()
+    );
     let wait_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_await_event_waits")
         .fetch_one(storage.pool())
         .await
         .expect("count await-event waits");
-    assert_eq!(wait_count, 0, "key mint must not register a promise row");
+    assert_eq!(
+        wait_count, 0,
+        "key mint and administrative reads must not register a promise row"
+    );
     let secret: Vec<u8> = sqlx::query_scalar(
         "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
     )
@@ -2076,36 +1938,34 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
         "the process and the retired runtime operation each leave one permanent fence"
     );
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-conformance",
-    ));
+    let scope = ExecutionScope::runtime_operation("postgres-effect-controller-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_journaled_effect_replay(|| {
-        postgres_conformance_invocation(controller.clone())
+        postgres_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-mismatch-conformance",
-    ));
+    let scope =
+        ExecutionScope::runtime_operation("postgres-effect-controller-mismatch-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_replay_mismatch_diagnostics(
-        || postgres_conformance_invocation(controller.clone()),
+        || postgres_conformance_invocation(controller.clone(), scope.clone()),
         "postgres_effect_replay_hash_conflict",
     )
     .await;
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-concurrent-conformance",
-    ));
+    let scope =
+        ExecutionScope::runtime_operation("postgres-effect-controller-concurrent-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_concurrent_replay_deterministic(|| {
-        postgres_conformance_invocation(controller.clone())
+        postgres_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 
-    let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
-        "postgres-effect-controller-tool-conformance",
-    ));
+    let scope = ExecutionScope::runtime_operation("postgres-effect-controller-tool-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
     lash_conformance::effect_controller_tool_attempt_fanout_replay_deterministic(|| {
-        postgres_conformance_invocation(controller.clone())
+        postgres_conformance_invocation(controller.clone(), scope.clone())
     })
     .await;
 }

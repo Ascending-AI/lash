@@ -108,8 +108,6 @@ Configuration is read from `.env` or the process environment:
 
 - `OPENROUTER_API_KEY`: model provider key. Startup refuses to continue when it is
   unset or empty unless `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` is active.
-- `TAVILY_API_KEY`: Tavily key for the bundled `web.search(...)` and
-  `web.fetch(...)` tools.
 - `AGENT_WORKBENCH_ADDR`: bind address, default `127.0.0.1:3030`. Passing a
   port to the `just` recipes, for example `just agent-workbench 3000`, binds
   `127.0.0.1:<port>`.
@@ -175,6 +173,11 @@ Configuration is read from `.env` or the process environment:
   no provider network calls, print a startup warning, and use the visible
   `dev/failure-paths` model id. Unknown values fail startup.
 
+Web search and fetch come from the free Parallel Search MCP server (`parallel`),
+attached at startup with no API key or auth headers. An unreachable server never
+fails startup: the workbench serves without web tools and reconnects in the
+background.
+
 Open the workbench at `http://127.0.0.1:3030` by default, or at the port passed
 to the `just` recipe. Restate ingress is
 `http://127.0.0.1:8080`; the local Restate admin/UI is on
@@ -223,6 +226,16 @@ session, and request time to the host-owned `<data-dir>/approvals.db`, and
 returns `ToolOutcome::Pending`. The right-rail approval ledger and
 `GET /api/approvals` list those waits; approve and deny actions resolve the
 existing key through `LashCore::completions()`.
+
+`GET /api/sessions/{session_id}/waits` separately demonstrates the
+deployment-administrative discovery read. It returns every currently
+registered, unresolved durable wait for that session, not approval requests;
+tool arguments, classification, and decision history remain in the approval
+ledger. The result is a concurrent snapshot, so a key can settle before an
+operator acts on it. Because each returned key carries the authority accepted
+by `Completions::resolve`, the example protects the route with both session
+observation and deployment-operator authorization; production hosts must apply
+their own equivalent policy.
 
 Approval is host policy. Lash core will never grow a manifest approval flag or
 approval/revert API: hosts decide which tools need sign-off, how operators are

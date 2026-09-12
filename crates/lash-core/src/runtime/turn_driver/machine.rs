@@ -144,6 +144,14 @@ impl RuntimeTurnDriver<'_> {
                     self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx, &cancel)
                         .await?;
                 }
+                Effect::ReportToolCalls { completed } => {
+                    self.report_undispatched_turn_tool_calls(
+                        completed,
+                        machine.protocol_iteration(),
+                        &event_tx,
+                    )
+                    .await?;
+                }
                 Effect::Log { event } => self.handle_log_event(event),
                 Effect::ExecCode { id, language, code } => {
                     self.handle_exec_code_effect(

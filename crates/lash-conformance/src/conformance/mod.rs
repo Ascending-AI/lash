@@ -22,7 +22,7 @@
 //! entry points can be called from backend-specific `#[tokio::test]` functions.
 
 pub use lash_core::testing::coordinate_tool_provider_with_services;
-use lash_sansio::SessionId;
+use lash_sansio::{EffectAddress, SessionId};
 
 mod attachment_adoption;
 pub use attachment_adoption::{
@@ -127,14 +127,14 @@ use crate::{
     EffectHost, ExecutionScope, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, ModelSpec, PluginState, ProtocolEvent,
     ProtocolTurnOptions, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaimBoundary,
-    QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    RuntimePersistence, RuntimeScope, RuntimeSessionState, RuntimeSubject, RuntimeTurnCommitStamp,
-    ScopedEffectController, SessionMeta, SessionNodePayload, SessionNodeRecord,
-    SessionObservationEvent, SessionObservationEventPayload, SessionPolicy,
-    SessionProcessEventKind, SessionQueueEventKind, SessionRelation, SessionRevision, StoreError,
-    TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
+    QueuedWorkPayload, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCommit,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence, RuntimeSessionState,
+    RuntimeSubject, RuntimeTurnCommitStamp, ScopedEffectController, SessionMeta,
+    SessionNodePayload, SessionNodeRecord, SessionObservationEvent, SessionObservationEventPayload,
+    SessionPolicy, SessionProcessEventKind, SessionQueueEventKind, SessionRelation,
+    SessionRevision, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnActivity, TurnEvent,
 };
 use crate::{AttachmentStore, AttachmentStoreError, AttachmentStorePersistence};
 use crate::{
@@ -301,6 +301,35 @@ mod tests {
             .await
             .expect("seed populated sibling");
 
+        let late_leafless_request = session_store_request(
+            &SessionId::from("late-leafless-sibling"),
+            "graph-integrity-model",
+            crate::SessionRelation::Root,
+        );
+        let late_leafless = factory
+            .create_store(&late_leafless_request)
+            .await
+            .expect("create leafless sibling after populated history");
+        late_leafless
+            .admit_and_bind_session(&crate::SessionBinding::from_create_request(
+                &late_leafless_request,
+            ))
+            .await
+            .expect("bind late leafless sibling");
+        let late_leafless_state = crate::RuntimeSessionState {
+            session_id: late_leafless_request.session_id.clone(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        late_leafless
+            .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+                &late_leafless_state,
+                &[],
+            ))
+            .await
+            .expect("seed late leafless sibling head");
+
         let read = leafless
             .load_session()
             .await
@@ -308,6 +337,14 @@ mod tests {
             .expect("leafless sibling has a durable head");
         assert!(read.graph.nodes.is_empty());
         assert!(read.graph.leaf_node_id.is_none());
+
+        let late_read = late_leafless
+            .load_session()
+            .await
+            .expect("late leafless sibling load is isolated")
+            .expect("late leafless sibling has a durable head");
+        assert!(late_read.graph.nodes.is_empty());
+        assert!(late_read.graph.leaf_node_id.is_none());
     }
 
     #[async_trait::async_trait]
@@ -639,13 +676,13 @@ mod tests {
         let process_work = Arc::new(crate::NativeProcessWork::for_registry(
             registry.clone() as Arc<dyn ProcessRegistry>
         ));
-        wake_delivery_crash_matrix(
+        Box::pin(wake_delivery_crash_matrix(
             factory,
             registry,
             clock,
             process_work,
             ProcessTerminalWaitWitness::Direct,
-        )
+        ))
         .await;
     }
 
@@ -767,16 +804,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn non_enumerable_effect_host_reports_typed_unsupported() {
+        let error = RecordingEffectHost::default()
+            .list_outstanding_await_event_keys(&SessionId::from("unsupported-session"))
+            .await
+            .expect_err("the default host implementation must not claim an empty registry");
+        assert_eq!(error.code, crate::RuntimeErrorCode::AwaitEventUnsupported);
+    }
+
+    #[tokio::test]
     async fn recording_effect_host_records_selected_scope_and_envelope() {
         let host = RecordingEffectHost::default();
         let scope = ExecutionScope::runtime_operation("trigger:button-1");
         let scoped = host.scoped(scope.clone()).expect("scoped controller");
         let envelope = RuntimeEffectEnvelope::new(
-            crate::RuntimeInvocation::effect(
-                RuntimeScope::new("session-1"),
+            crate::RuntimeEffectInvocation::new(
+                EffectAddress::new(scope.clone(), "trigger:button-1:sleep-effect")
+                    .expect("valid recording address"),
+                RuntimeAttribution::for_session("session-1"),
                 "sleep-effect",
-                RuntimeEffectKind::Sleep,
-                "trigger:button-1:sleep-effect",
             ),
             RuntimeEffectCommand::Sleep { duration_ms: 0 },
         );
@@ -792,7 +838,10 @@ mod tests {
         let records = host.records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].execution_scope, scope);
-        assert_eq!(records[0].runtime_scope, RuntimeScope::new("session-1"));
+        assert_eq!(
+            records[0].runtime_attribution,
+            RuntimeAttribution::for_session("session-1")
+        );
         assert_eq!(records[0].effect_id, "sleep-effect");
         assert_eq!(records[0].effect_kind, RuntimeEffectKind::Sleep);
         assert_eq!(

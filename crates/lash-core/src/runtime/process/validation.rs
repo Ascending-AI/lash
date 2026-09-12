@@ -662,26 +662,16 @@ pub fn prepare_process_registration(
     Ok(registration)
 }
 
-const LEGACY_PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 2;
 // Bumped to 4 (FIG-1383): the definition preimage's process-status tag registry
 // gained `caller_departed`. The versioned-surface guard fails closed on any
 // preimage edit, so the family version moves with it even though tag 7 is
 // additive and every pre-existing preimage encodes byte-identically.
-const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 4;
+// Bumped to 5 (FIG-2828): effect causes now encode their admitted execution
+// scope and replay key instead of descriptive session/effect fields.
+const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 5;
 
-fn process_registration_family_version(registration: &ProcessRegistration) -> u8 {
-    match registration.input.as_ref() {
-        super::model::ProcessInput::ToolCall { call }
-            if call
-                .replay
-                .as_ref()
-                .and_then(|replay| replay.origin.as_ref())
-                .is_some() =>
-        {
-            PROCESS_REGISTRATION_FAMILY_VERSION
-        }
-        _ => LEGACY_PROCESS_REGISTRATION_FAMILY_VERSION,
-    }
+fn process_registration_family_version(_registration: &ProcessRegistration) -> u8 {
+    PROCESS_REGISTRATION_FAMILY_VERSION
 }
 
 /// Permanent tag registry for the process-registration definition fingerprint.
@@ -935,17 +925,9 @@ fn project_registration_causal_ref(
             identity.string(session_id);
             identity.string(turn_id);
         }
-        crate::CausalRef::Effect {
-            session_id,
-            turn_id,
-            effect_id,
-        } => {
+        crate::CausalRef::Effect { address } => {
             identity.tag(2);
-            identity.string(session_id);
-            identity.optional(turn_id.as_deref(), |identity, turn_id| {
-                identity.string(turn_id)
-            });
-            identity.string(effect_id);
+            crate::runtime::causal::project_effect_address(identity, address);
         }
         crate::CausalRef::ToolCall {
             session_id,

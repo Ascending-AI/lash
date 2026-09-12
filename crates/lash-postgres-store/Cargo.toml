@@ -56,7 +56,6 @@ lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", fe
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }
 lash-plugin-process-controls = { workspace = true }
 lash-subagents = { workspace = true }
-lash-tools = { workspace = true }
 lash-sqlite-store = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }

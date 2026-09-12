@@ -177,9 +177,13 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         entry_ref: graph.entry_ref.clone(),
         entry_name: graph.entry_name.clone(),
     };
+    let context = TraceContext {
+        session_id: graph.scope.session_id.clone(),
+        ..Default::default()
+    };
     store
         .append(&TraceRecord::new(
-            TraceContext::default().for_session(graph.scope.session_id.clone()),
+            context,
             TraceEvent::LanguageExecution {
                 language: "lashlang".to_string(),
                 event: TraceLanguageExecution {
@@ -447,7 +451,6 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
@@ -529,7 +532,6 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
@@ -809,7 +811,6 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
@@ -932,7 +933,7 @@ async fn inbox_authority_resolves_for_any_account_name_inner() {
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
+            WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
@@ -1018,7 +1019,7 @@ finish initial
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
+            WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
@@ -1083,7 +1084,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_mail_world(mail_world.clone()),
+            WorkbenchPluginFactory::new().with_mail_world(mail_world.clone()),
         ))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
@@ -1106,7 +1107,6 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(1024),
@@ -1291,7 +1291,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(Arc::clone(&process_registry))
         .trigger_store(trigger_store)
         .advanced()
@@ -1316,7 +1316,6 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
@@ -1465,7 +1464,7 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
         .provider(provider)
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
@@ -1494,7 +1493,6 @@ async fn reset_chat_deletes_old_session_and_clears_trigger_started_work_inner() 
             model: "test-model".to_string(),
             model_variant: Default::default(),
         })),
-        web_configured: false,
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(1024),
@@ -1971,7 +1969,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .trigger_store(Arc::clone(&trigger_store))
         .trace_sink(Arc::clone(&trace_sink))
         .trace_level(TraceLevel::Extended)
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
         .effect_host(turn_deployment.effect_host())
         .process_work(process_deployment.process_work())
@@ -2004,7 +2002,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
             model: "mock-model".to_string(),
             model_variant: Some("high".to_string()),
         })),
-        web_configured: false,
         trace_sink: Some(trace_sink),
         lashlang_execution,
         event_tx,
@@ -2291,7 +2288,7 @@ fn test_workbench_core(
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
         .store_factory(session_store_factory)
-        .plugin(Arc::new(WorkbenchPluginFactory::new("")))
+        .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(process_registry)
         .trigger_store(trigger_store)
         .advanced()

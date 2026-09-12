@@ -14,8 +14,6 @@
 //! again, and the flat Tool Catalog is never mutated — resolution is
 //! link-scoped only.
 
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -104,35 +102,20 @@ pub trait DeferredToolResolver: Send + Sync {
 /// no deferral.
 pub type SharedDeferredToolResolver = Arc<dyn DeferredToolResolver>;
 
-/// Stable identity of one `ExecCode` link. The scope distinguishes logical
-/// turns and protocol iterations, while the effect and replay keys distinguish
-/// individual code effects and their durable re-drives.
+/// Stable identity of one `ExecCode` link.
+///
+/// The admitted address is the whole identity: `effect_id` remains a
+/// descriptive label and changing it cannot discard resolutions recorded for
+/// the same durable code effect.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeferredResolutionLinkKey {
-    pub session_id: SessionId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<TurnId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_index: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_iteration: Option<usize>,
-    pub effect_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replay_key: Option<String>,
+    pub address: lash_core::EffectAddress,
 }
 
 impl DeferredResolutionLinkKey {
     pub fn from_exec_code_invocation(invocation: &lash_core::RuntimeInvocation) -> Option<Self> {
-        if invocation.effect_kind() != Some(lash_core::RuntimeEffectKind::ExecCode) {
-            return None;
-        }
         Some(Self {
-            session_id: invocation.scope.session_id.clone(),
-            turn_id: invocation.scope.turn_id.clone(),
-            turn_index: invocation.scope.turn_index,
-            protocol_iteration: invocation.scope.protocol_iteration,
-            effect_id: invocation.effect_id()?.to_string(),
-            replay_key: invocation.replay_key().map(str::to_string),
+            address: invocation.effect_address()?.clone(),
         })
     }
 }
@@ -294,6 +277,35 @@ mod tests {
     use lash_sansio::sync::MutexExt;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn deferred_link_identity_ignores_descriptive_effect_label() {
+        let address = lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::turn("session", "turn"),
+            "exec-code:0",
+        )
+        .expect("valid deferred-link address");
+        let invocation = |effect_id: &str| {
+            lash_core::RuntimeInvocation::effect(
+                address.clone(),
+                lash_core::RuntimeAttribution::for_turn("session", "turn", 0, 0),
+                effect_id,
+            )
+        };
+
+        assert_eq!(
+            DeferredResolutionLinkKey::from_exec_code_invocation(&invocation("first")),
+            DeferredResolutionLinkKey::from_exec_code_invocation(&invocation("renamed")),
+        );
+        assert_eq!(
+            serde_json::to_value(
+                DeferredResolutionLinkKey::from_exec_code_invocation(&invocation("first"))
+                    .expect("effect invocation has a link identity")
+            )
+            .expect("link identity encodes"),
+            serde_json::json!({"address": address})
+        );
+    }
 
     fn grant(name: &str, module: &str, operation: &str) -> ToolGrant {
         let definition = lash_core::ToolDefinition::raw(

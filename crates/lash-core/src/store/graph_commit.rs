@@ -1,5 +1,6 @@
 use super::{GraphAppend, OperationId, StoreError, derive_history_node_id};
 use crate::SessionId;
+use crate::facade_support::SessionGraphFacadeOps;
 
 impl GraphAppend {
     pub fn derive_node_ids(
@@ -36,6 +37,28 @@ impl GraphAppend {
 
     pub fn appended_nodes(&self) -> impl Iterator<Item = &crate::SessionNodeRecord> {
         self.nodes.iter()
+    }
+
+    pub(crate) fn derive_current_frame_node_id(
+        &self,
+        resident_graph: &crate::SessionGraph,
+    ) -> Option<crate::FrameNodeId> {
+        if let Some(frame_node) = self
+            .nodes
+            .iter()
+            .rev()
+            .find(|node| matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }))
+        {
+            return Some(crate::FrameNodeId::new(frame_node.node_id.clone()));
+        }
+
+        let resident_parent_node_id = self.nodes.first().map_or_else(
+            || self.leaf_node_id.as_deref(),
+            |first| first.parent_node_id.as_deref(),
+        );
+        resident_graph
+            .nearest_frame_node_id(resident_parent_node_id)
+            .map(crate::FrameNodeId::new)
     }
 
     pub fn validate_append_topology(&self) -> Result<(), StoreError> {

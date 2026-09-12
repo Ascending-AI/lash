@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 87.
+-- lash-postgres-store schema, component version 88.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     source_node_id TEXT,
     observer_inheritance_kind TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
-    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_session_meta_catalog
@@ -637,7 +637,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 87)
+VALUES ('lash-postgres-store', 88)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

@@ -15,7 +15,7 @@ pub struct OperationId {
 }
 
 pub(super) const LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
 
 /// Shared backend-independent decision for an existing runtime commit receipt.
 ///
@@ -306,17 +306,17 @@ fn push_causal_ref(encoded: &mut Vec<u8>, caused_by: &crate::CausalRef) {
             push_string(encoded, session_id);
             push_string(encoded, turn_id);
         }
-        crate::CausalRef::Effect {
-            session_id,
-            turn_id,
-            effect_id,
-        } => {
+        crate::CausalRef::Effect { address } => {
             encoded.push(1);
-            push_string(encoded, session_id);
-            push_optional(encoded, turn_id.as_ref(), |encoded, value| {
-                push_string(encoded, value)
-            });
-            push_string(encoded, effect_id);
+            push_string(
+                encoded,
+                address
+                    .execution_scope
+                    .journal_identity()
+                    .expect("causal effect address contains a valid execution scope")
+                    .key(),
+            );
+            push_string(encoded, &address.replay_key);
         }
         crate::CausalRef::ToolCall {
             session_id,
@@ -683,39 +683,48 @@ fn append_node_identity_bytes(node: &crate::SessionAppendNode) -> Result<Vec<u8>
 }
 
 pub(super) fn append_request_identity_encoding_version(nodes: &[crate::SessionAppendNode]) -> u32 {
-    let has_route = nodes.iter().any(|node| match node {
-        crate::SessionAppendNode::Message { message } => message.parts.iter().any(|part| {
-            part.tool_replay
-                .as_ref()
-                .and_then(|replay| replay.origin.as_ref())
-                .or_else(|| {
-                    part.reasoning_meta
-                        .as_ref()
-                        .and_then(|replay| replay.origin.as_ref())
+    let has_current_identity_vocabulary = nodes.iter().any(|node| match node {
+        crate::SessionAppendNode::Message { message } => {
+            matches!(
+                message.origin.as_ref(),
+                Some(crate::MessageOrigin::Process {
+                    caused_by: Some(crate::CausalRef::Effect { .. }),
+                    ..
                 })
-                .or_else(|| {
-                    part.response_meta
-                        .as_ref()
-                        .and_then(|meta| meta.origin.as_ref())
-                })
-                .is_some()
-        }),
+            ) || message.parts.iter().any(|part| {
+                part.tool_replay
+                    .as_ref()
+                    .and_then(|replay| replay.origin.as_ref())
+                    .or_else(|| {
+                        part.reasoning_meta
+                            .as_ref()
+                            .and_then(|replay| replay.origin.as_ref())
+                    })
+                    .or_else(|| {
+                        part.response_meta
+                            .as_ref()
+                            .and_then(|meta| meta.origin.as_ref())
+                    })
+                    .is_some()
+            })
+        }
         _ => false,
     });
-    if has_route {
+    if has_current_identity_vocabulary {
         APPEND_REQUEST_IDENTITY_ENCODING_VERSION
     } else {
         LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION
     }
 }
 
-/// Version 1 canonical bytes, in order:
+/// Canonical request bytes, in order:
 ///
 /// 1. operation storage key: `u64` big-endian UTF-8 byte length, then bytes;
 /// 2. requested ancestor: one byte (`0` for absent, `1` for present), followed
 ///    when present by its `u64` big-endian UTF-8 byte length and bytes;
 /// 3. ordered semantic nodes: `u64` big-endian node count, then for each node
-///    its hand-written tagged projection, framed by a `u64` big-endian length.
+///    its hand-written tagged projection for the selected encoding generation,
+///    framed by a `u64` big-endian length.
 ///
 /// No domain string, encoding version, node id, timestamp, head, or other
 /// environmental value is included. The version lives beside the digest in
@@ -754,6 +763,10 @@ pub(super) fn append_request_identity_hash(
         &append_request_identity_bytes(operation, requested_ancestor_node_id, nodes)?,
     ))
 }
+
+#[cfg(test)]
+#[path = "commit_identity_v4_effect_tests.rs"]
+mod commit_identity_v4_effect_tests;
 
 #[cfg(test)]
 mod append_request_identity_tests {
@@ -1047,11 +1060,6 @@ mod append_request_identity_tests {
                 session_id: SessionId::from("s"),
                 turn_id: TurnId::from("t"),
             },
-            crate::CausalRef::Effect {
-                session_id: SessionId::from("s"),
-                turn_id: None,
-                effect_id: "e".to_string(),
-            },
             crate::CausalRef::ToolCall {
                 session_id: SessionId::from("s"),
                 call_id: "c".to_string(),
@@ -1077,7 +1085,6 @@ mod append_request_identity_tests {
 
         let causal_names = [
             "causal_variant_0",
-            "causal_variant_1",
             "causal_variant_2",
             "causal_variant_3",
             "causal_variant_4",
@@ -1130,6 +1137,11 @@ mod append_request_identity_tests {
             .filter(|line| !line.trim().is_empty())
             .map(|line| line.split_once('=').expect("name=hex golden corpus row"))
             .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            expected.get("causal_variant_1"),
+            Some(&"0100000000000000017300000000000000000165"),
+            "the unrepresentable pre-address Effect cause remains frozen as historical v1 bytes"
+        );
         let rendered_len = rendered.len();
         for (name, actual) in rendered {
             let Some(expected) = expected.get(name) else {
@@ -1137,7 +1149,11 @@ mod append_request_identity_tests {
             };
             assert_eq!(actual, **expected, "v1 bytes moved for {name}");
         }
-        assert_eq!(rendered_len, expected.len(), "golden corpus row count");
+        assert_eq!(
+            rendered_len + 1,
+            expected.len(),
+            "golden corpus row count includes one historical Effect cause that current types cannot manufacture"
+        );
     }
 
     #[test]

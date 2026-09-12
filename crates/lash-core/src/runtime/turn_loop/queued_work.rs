@@ -411,6 +411,7 @@ impl LashRuntime {
                     opts.events_or_noop(),
                     opts.turn_events_or_noop(),
                     scoped_effect_controller,
+                    None,
                     cancel,
                     LogicalTurnClaims::new(
                         Vec::new(),
@@ -686,6 +687,7 @@ impl LashRuntime {
             opts.events_or_noop(),
             opts.turn_events_or_noop(),
             scoped_effect_controller,
+            None,
             cancel,
             LogicalTurnClaims::new(vec![claim], Vec::new()),
             &mut session_execution_lease,

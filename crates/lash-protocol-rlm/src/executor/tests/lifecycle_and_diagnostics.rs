@@ -816,13 +816,13 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:01082ba3b70f91a21c1b533f:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:01082ba3b70f91a21c1b533f:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:01082ba3b70f91a21c1b533f:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:01082ba3b70f91a21c1b533f:1"
             )
         );
 
@@ -836,11 +836,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/1763d2d44f878585f3e9b7aa3fd6ed335bde30df8f6e08fe78fb62650d95e3b4"
+            "frame-key/v2/dbb642b7a1bd5a0878e7c10f33e29dde43e89cbde2d5ddfd36cb0fd54edfa9ec"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/1763d2d44f878585f3e9b7aa3fd6ed335bde30df8f6e08fe78fb62650d95e3b4"
+            "frame-key/v2/dbb642b7a1bd5a0878e7c10f33e29dde43e89cbde2d5ddfd36cb0fd54edfa9ec"
         );
     });
 }

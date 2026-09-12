@@ -51,7 +51,7 @@ async fn row_store() -> SqliteEffectReplayRowStore {
 #[tokio::test]
 async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution() {
     let scope = ExecutionScope::turn("cutover-session", "cutover-turn");
-    let controller = SqliteRuntimeEffectController::memory(scope)
+    let controller = SqliteRuntimeEffectController::memory(scope.clone())
         .await
         .expect("open the in-memory effect journal");
     let v2_identity = lash_core::derive_tool_intent_identity(
@@ -61,31 +61,25 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
         0,
     )
     .expect("derive the v2 identity");
-    let v2_invocation = lash_core::RuntimeInvocation {
-        replay: Some(lash_core::RuntimeReplay {
-            key: v2_identity.replay_key.clone(),
-            attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
-                v2_identity.clone(),
-            )),
-        }),
-        ..lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cutover-session", "cutover-turn", 0, 0),
-            "cutover-effect",
-            lash_core::RuntimeEffectKind::ExecCode,
-            v2_identity.replay_key.clone(),
-        )
-    };
+    let v2_invocation = lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(scope.clone(), v2_identity.replay_key.clone())
+            .expect("valid cutover address"),
+        lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 0, 0),
+        "cutover-effect",
+    )
+    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
+        v2_identity.clone(),
+    ));
     let v1_replay_key = lash_core::facade_support::legacy_tool_intent_v1_lookup_key(&v2_invocation)
         .expect("derive the pre-cutover lookup key");
     let mut v1_identity = v2_identity;
     v1_identity.replay_key = v1_replay_key.clone();
-    let v1_invocation = lash_core::RuntimeInvocation {
-        replay: Some(lash_core::RuntimeReplay {
-            key: v1_replay_key,
-            attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(v1_identity)),
-        }),
-        ..v2_invocation.clone()
-    };
+    let v1_invocation = lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(scope, v1_replay_key).expect("valid v1 cutover address"),
+        lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 0, 0),
+        "cutover-effect",
+    )
+    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(v1_identity));
     let command = lash_core::RuntimeEffectCommand::ExecCode {
         language: "cutover-witness".to_string(),
         code: "return 1".to_string(),
@@ -533,10 +527,10 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
     let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
     let scope = ExecutionScope::turn("cold-session", "cold-turn");
     let envelope = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeInvocation::effect(
-            lash_core::RuntimeScope::for_turn("cold-session", "cold-turn", 1, 0),
-            "cold-effect",
-            lash_core::RuntimeEffectKind::ExecCode,
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(scope.clone(), "cold-effect")
+                .expect("valid cold effect address"),
+            lash_core::RuntimeAttribution::for_turn("cold-session", "cold-turn", 1, 0),
             "cold-effect",
         ),
         lash_core::RuntimeEffectCommand::ExecCode {

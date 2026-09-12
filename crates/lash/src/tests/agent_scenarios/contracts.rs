@@ -15,7 +15,7 @@ pub(super) struct GraphContract {
 #[derive(Debug)]
 struct GraphFact {
     graph_key: String,
-    session_id: SessionId,
+    session_id: Option<SessionId>,
     turn_id: Option<TurnId>,
     subject_kind: String,
     subject_id: String,
@@ -61,8 +61,8 @@ impl GraphContract {
         let mut links = Vec::new();
         for graph in graphs {
             let (subject_kind, subject_id) = match &graph.subject {
-                crate::tracing::TraceRuntimeSubject::Effect { effect_id, kind } => {
-                    (format!("effect:{kind}"), effect_id.clone())
+                crate::tracing::TraceRuntimeSubject::Effect { effect_id, .. } => {
+                    ("effect".to_string(), effect_id.clone())
                 }
                 crate::tracing::TraceRuntimeSubject::Process { process_id } => {
                     ("process".to_string(), process_id.to_string())
@@ -279,10 +279,10 @@ fn assert_foreground_exec_graph_completed(run: &AgentScenarioRun) {
         .graph_snapshots
         .iter()
         .find(|graph| {
-            graph.scope.session_id == *session_id
+            graph.scope.session_id.as_ref() == Some(session_id)
                 && matches!(
                     &graph.subject,
-                    crate::tracing::TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
+                    crate::tracing::TraceRuntimeSubject::Effect { .. }
                 )
         })
         .unwrap_or_else(|| {
@@ -418,10 +418,10 @@ pub(super) fn assert_min_completed_child_session_exec_graphs(
         .graph_snapshots
         .iter()
         .filter(|graph| {
-            graph.scope.session_id != root_session_id
+            graph.scope.session_id.as_ref() != Some(root_session_id)
                 && matches!(
                     &graph.subject,
-                    crate::tracing::TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
+                    crate::tracing::TraceRuntimeSubject::Effect { .. }
                 )
                 && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
         })
@@ -454,7 +454,7 @@ pub(super) fn assert_subagent_bridge_exec_graphs(
                 graph.scope.turn_id.as_deref() == Some(process_id)
                     && matches!(
                         &graph.subject,
-                        crate::tracing::TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
+                        crate::tracing::TraceRuntimeSubject::Effect { .. }
                     )
                     && graph.status == expected_status
             }),
@@ -473,11 +473,11 @@ pub(super) fn assert_session_turn_child_graph(
         .graph_snapshots
         .iter()
         .find(|graph| {
-            graph.scope.session_id == child_session_id
+            graph.scope.session_id.as_ref() == Some(child_session_id)
                 && graph.scope.turn_id.as_deref() == Some(process_id)
                 && matches!(
                     &graph.subject,
-                    crate::tracing::TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
+                    crate::tracing::TraceRuntimeSubject::Effect { .. }
                 )
         })
         .unwrap_or_else(|| {

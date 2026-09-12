@@ -515,7 +515,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     let registration = external_registration("task-smoke")
         .with_wake_session_id(Some(SessionId::from("wake-smoke")));
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
-        runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-smoke"),
+        runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-smoke").into_runtime_invocation(),
     ));
 
     let outcome = host

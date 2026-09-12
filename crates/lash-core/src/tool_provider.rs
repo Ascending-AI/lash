@@ -3,7 +3,6 @@ use crate::SessionId;
 pub(crate) use completion_support::AttemptCompletionSupport;
 use std::sync::{Arc, Mutex};
 
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::llm::types::ProviderReplayMeta;
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};

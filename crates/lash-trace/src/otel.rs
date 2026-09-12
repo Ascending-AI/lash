@@ -1120,10 +1120,12 @@ fn language_execution_attributes(
         attr::LASH_LANGUAGE_EXECUTION_GRAPH_KEY,
         event.identity.graph_key(),
     ));
-    attrs.push(KeyValue::new(
-        attr::LASH_LANGUAGE_EXECUTION_SESSION_ID,
-        event.identity.scope.session_id.to_string(),
-    ));
+    if let Some(session_id) = &event.identity.scope.session_id {
+        attrs.push(KeyValue::new(
+            attr::LASH_LANGUAGE_EXECUTION_SESSION_ID,
+            session_id.to_string(),
+        ));
+    }
     if let Some(turn_id) = &event.identity.scope.turn_id {
         attrs.push(KeyValue::new(
             attr::LASH_LANGUAGE_EXECUTION_TURN_ID,
@@ -1148,7 +1150,7 @@ fn language_execution_attributes(
         event.identity.entry_name.clone(),
     ));
     match &event.identity.subject {
-        crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
+        crate::TraceRuntimeSubject::Effect { effect_id, .. } => {
             attrs.push(KeyValue::new(
                 attr::LASH_LANGUAGE_EXECUTION_SUBJECT_TYPE,
                 "effect",
@@ -1156,10 +1158,6 @@ fn language_execution_attributes(
             attrs.push(KeyValue::new(
                 attr::LASH_LANGUAGE_EXECUTION_EFFECT_ID,
                 effect_id.clone(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_LANGUAGE_EXECUTION_EFFECT_KIND,
-                kind.clone(),
             ));
         }
         crate::TraceRuntimeSubject::Process { process_id } => {
@@ -1244,7 +1242,7 @@ fn language_execution_attributes(
                 child.graph_key(),
             ));
             match &child.subject {
-                crate::TraceRuntimeSubject::Effect { effect_id, kind } => {
+                crate::TraceRuntimeSubject::Effect { effect_id, .. } => {
                     attrs.push(KeyValue::new(
                         attr::LASH_LANGUAGE_EXECUTION_CHILD_SUBJECT_TYPE,
                         "effect",
@@ -1252,10 +1250,6 @@ fn language_execution_attributes(
                     attrs.push(KeyValue::new(
                         attr::LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_ID,
                         effect_id.clone(),
-                    ));
-                    attrs.push(KeyValue::new(
-                        attr::LASH_LANGUAGE_EXECUTION_CHILD_EFFECT_KIND,
-                        kind.clone(),
                     ));
                 }
                 crate::TraceRuntimeSubject::Process { process_id } => {

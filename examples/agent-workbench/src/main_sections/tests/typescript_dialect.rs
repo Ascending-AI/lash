@@ -201,9 +201,8 @@ fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = workbench_lashlang_resources();
     lashlang::add_trigger_resource_operations(&mut resources)
         .expect("trigger resource operations are unique");
-    let modules: [(&[&str], &str, &[&str]); 5] = [
+    let modules: [(&[&str], &str, &[&str]); 4] = [
         (&["agents"], "Agents", &["spawn"]),
-        (&["web"], "Web", &["search", "fetch"]),
         (&["inbox", "work"], "Inbox", &["list", "send", "delete"]),
         (&["inbox", "personal"], "Inbox", &["list", "send", "delete"]),
         // The `tool-value` scenario's own tool, installed by

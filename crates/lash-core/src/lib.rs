@@ -229,6 +229,25 @@ pub mod store_backend_support {
 
 #[doc(hidden)]
 pub mod facade_support {
+    /// Apply the canonical runtime invocation projection to an existing trace
+    /// context. Durable hosts use this instead of maintaining a second
+    /// projection with different parent or attribution precedence.
+    #[doc(hidden)]
+    pub fn trace_context_for_runtime_invocation(
+        context: lash_trace::TraceContext,
+        invocation: &crate::RuntimeInvocation,
+    ) -> lash_trace::TraceContext {
+        crate::trace::trace_context_for_invocation(context, invocation)
+    }
+
+    /// Apply the canonical effect-header projection to an existing trace context.
+    #[doc(hidden)]
+    pub fn trace_context_for_runtime_effect_invocation(
+        context: lash_trace::TraceContext,
+        invocation: &crate::RuntimeEffectInvocation,
+    ) -> lash_trace::TraceContext {
+        crate::trace::trace_context_for_effect_invocation(context, invocation)
+    }
     pub use crate::runtime::bounded_multiplicative_jitter;
     pub use crate::runtime::run_head_advancing_commit_attempt;
     pub use crate::runtime::turn_loop::{
@@ -1127,7 +1146,7 @@ pub use runtime::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
-    EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement,
+    EffectAddress, EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
     GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy,
     InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LiveReplayEventDraft,
@@ -1165,11 +1184,12 @@ pub use runtime::{
     QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
     QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority, QueuedWorkBatchingConfig,
     QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkSubstrate, RecoveryContract, Resolution,
-    ResolveOutcome, RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
-    RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
-    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
     ScopeBoundController, ScopedEffectController, SegmentHandover, SegmentProgress,
     SessionAdministration, SessionCursor, SessionCursorError, SessionDeleteContext,
     SessionDeleteExecution, SessionDrainOutcome, SessionId, SessionListFilter,

@@ -1729,6 +1729,119 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     );
 }
 
+#[tokio::test]
+pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_terminals() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitIndexImpl.serve())
+        .build();
+    let object_key = "fig2946-session";
+    let mut state = BTreeMap::new();
+
+    let mint_probe = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "is_revoked",
+        fig1943_invocation_with_state(object_key, &(), &state),
+    )
+    .await
+    .expect("probe an unknown FIG-2946 session before minting");
+    assert_eq!(restate_output_json::<bool>(&mint_probe), Some(false));
+    let before_mint_probe = state.clone();
+    fig1943_apply_state_commands(&mut state, &mint_probe);
+    assert_eq!(
+        state, before_mint_probe,
+        "the ingress mint probe writes no state"
+    );
+
+    let unknown = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "outstanding",
+        fig1943_invocation_with_state(object_key, &(), &state),
+    )
+    .await
+    .expect("list an unknown FIG-2946 session");
+    assert_eq!(
+        restate_output_json::<Vec<AwaitEventKey>>(&unknown),
+        Some(Vec::new())
+    );
+    let before_read = state.clone();
+    fig1943_apply_state_commands(&mut state, &unknown);
+    assert_eq!(
+        state, before_read,
+        "an unknown-session read writes no state"
+    );
+
+    let key = restate_await_event_key(
+        &durable_turn_scope(object_key, "turn"),
+        AwaitEventWaitIdentity::TurnCancelGate,
+    )
+    .expect("derive FIG-2946 control key");
+    let registered = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "register",
+        fig1943_invocation_with_state(
+            object_key,
+            &RestateDurableWaitIndexRequest { key: key.clone() },
+            &state,
+        ),
+    )
+    .await
+    .expect("register FIG-2946 control wait");
+    fig1943_apply_state_commands(&mut state, &registered);
+    let state_key = durable_wait_index_state_key(&RestateDurableWaitAddress::for_key(&key));
+    assert!(state.contains_key(&state_key));
+
+    let pending = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "outstanding",
+        fig1943_invocation_with_state(object_key, &(), &state),
+    )
+    .await
+    .expect("list registered FIG-2946 control wait");
+    assert_eq!(
+        restate_output_json::<Vec<AwaitEventKey>>(&pending),
+        Some(vec![key.clone()])
+    );
+
+    let settled = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "settle",
+        fig1943_invocation_with_state(
+            object_key,
+            &RestateDurableWaitSettleRequest {
+                key: key.clone(),
+                resolution: Resolution::Cancelled,
+            },
+            &state,
+        ),
+    )
+    .await
+    .expect("settle FIG-2946 control wait");
+    fig1943_apply_state_commands(&mut state, &settled);
+    assert!(
+        state.contains_key(&state_key),
+        "Restate deliberately retains the settled control preimage"
+    );
+
+    let terminal = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "outstanding",
+        fig1943_invocation_with_state(object_key, &(), &state),
+    )
+    .await
+    .expect("list after FIG-2946 control settlement");
+    assert_eq!(
+        restate_output_json::<Vec<AwaitEventKey>>(&terminal),
+        Some(Vec::new()),
+        "retained control state with a terminal is not outstanding"
+    );
+}
+
 #[test]
 pub(super) fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
     let error = validate_durable_wait_index_epoch(None, &["waits".to_string()])
@@ -1833,11 +1946,14 @@ pub(super) fn durable_wait_index_k_effect_measurements_are_linear() {
 
 #[test]
 pub(super) fn restate_effect_name_uses_lash_replay_key() {
-    let invocation = RuntimeInvocation::effect(
-        lash_core::runtime::RuntimeScope::for_turn("session", "turn", 1, 2),
+    let invocation = lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(
+            durable_turn_scope("session", "turn"),
+            "session:turn:1:2:tool_attempt:effect",
+        )
+        .expect("valid Restate effect-name address"),
+        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 2),
         "effect",
-        RuntimeEffectKind::ToolAttempt,
-        "session:turn:1:2:tool_attempt:effect",
     );
 
     assert_eq!(

@@ -35,16 +35,16 @@ use lash_core::ProcessWorkSubstrate as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
 use lash_core::{
-    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
-    ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome,
-    ProcessExecutionContext, ProcessExecutionEnvStore, ProcessExternalRef, ProcessQuery as _,
-    ProcessRegistry, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneProbe, Resolution,
-    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
-    ScopedEffectController, facade_support::DurableProcessWorker, facade_support::TurnAddress,
-    facade_support::TurnAttach,
+    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectAddress,
+    EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
+    ProcessEffectOutcome, ProcessExecutionContext, ProcessExecutionEnvStore, ProcessExternalRef,
+    ProcessQuery as _, ProcessRegistry, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneProbe,
+    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, ScopedEffectController, facade_support::DurableProcessWorker,
+    facade_support::TurnAddress, facade_support::TurnAttach,
 };
-use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
+use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
@@ -80,14 +80,15 @@ use endpoint_protocol::{
     durable_wait_index_call_response, encode_call_replay, encode_captured_run_and_call_replay,
     encode_captured_run_and_interrupted_call_replay, encode_captured_run_command_replay,
     encode_completed_gate_sleep_replay, encode_completed_intent_drain_replay,
-    encode_completed_sleep_replay, encode_one_way_call_replay, encode_process_segment_send_replay,
-    encode_process_terminal_delivery_replay, encode_recorded_commands_replay, encode_run_replay,
-    encode_two_one_way_calls_and_call_replay, invoke_endpoint, invoke_endpoint_body,
-    invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
-    invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
-    invoke_process_workflow_endpoint, restate_call_frames, restate_command_frame_types,
-    restate_completed_promise, restate_error_code, restate_error_message, restate_message_types,
-    restate_output_failure_message, restate_output_json,
+    encode_completed_sleep_replay, encode_process_segment_send_replay,
+    encode_process_terminal_delivery_replay, encode_recorded_commands_replay,
+    encode_recorded_commands_with_invocations_replay, encode_run_replay, invoke_endpoint,
+    invoke_endpoint_body, invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses,
+    invoke_endpoint_open, invoke_endpoint_with_named_call_responses,
+    invoke_endpoint_with_scripted_responses, invoke_process_workflow_endpoint, restate_call_frames,
+    restate_command_frame_types, restate_completed_promise, restate_error_code,
+    restate_error_message, restate_message_types, restate_output_failure_message,
+    restate_output_json,
 };
 
 fn registry_local_executor(
@@ -168,12 +169,169 @@ async fn assert_restate_queued_lane_conformance() {
     assert_eq!(host_probe.pause_calls.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let scoped = controller
+        .scoped_effect_controller(ExecutionScope::process("admitted-restate-process"))
+        .expect("scoped Restate controller");
+    let envelope = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::process("wrong-restate-process"),
+                "shared-replay-key",
+            )
+            .expect("wrong-scope effect address"),
+            lash_core::RuntimeAttribution::none(),
+            "restate-scope-admission-sleep",
+        ),
+        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+    );
+
+    let error = scoped
+        .controller()
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(|_envelope| async {
+                panic!("wrong-scope Restate effect must not execute locally")
+            }),
+        )
+        .await
+        .expect_err("wrong Restate scope must be refused");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch
+    );
+    assert_eq!(context.scope_effect_begins.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingress() {
+    let transport = Arc::new(effect_execution::ScriptedHttpTransport::new([]));
+    let host = RestateEffectHost::new(RestateConnection::with_transport(
+        "https://restate.example",
+        transport.clone(),
+    ));
+    let scoped = host
+        .scoped(ExecutionScope::process("admitted-deployment-process"))
+        .expect("scoped deployment host");
+    let envelope = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::process("wrong-deployment-process"),
+                "wrong-deployment-effect",
+            )
+            .expect("wrong-scope deployment address"),
+            lash_core::RuntimeAttribution::none(),
+            "wrong-deployment-effect",
+        ),
+        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+    );
+    let local_executions = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&local_executions);
+
+    let error = scoped
+        .controller()
+        .execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(RuntimeEffectOutcome::Sleep)
+            }),
+        )
+        .await
+        .expect_err("raw bound controller must reject a foreign effect address");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch
+    );
+    assert!(
+        transport.requests().is_empty(),
+        "scope refusal must precede the retired-scope probe and effect ingress"
+    );
+    assert_eq!(local_executions.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn restate_scope_controller_refuses_wrong_scope_group_before_index_or_handoff() {
+    let context = Arc::new(RecordingContext::default());
+    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let admitted = ExecutionScope::process("admitted-restate-process");
+    let scoped = controller
+        .scoped_effect_controller(admitted.clone())
+        .expect("scoped Restate controller");
+    let group_key = "restate-scope-group";
+    let child = RuntimeEffectEnvelope::new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                ExecutionScope::process("wrong-restate-process"),
+                format!("{group_key}:child:0"),
+            )
+            .expect("wrong-scope child address"),
+            lash_core::RuntimeAttribution::none(),
+            "restate-scope-admission-child",
+        ),
+        RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "scope-admission-child".to_string(),
+        },
+    );
+    let group = lash_core::RuntimeEffectGroup::try_new(
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(admitted, format!("{group_key}:group"))
+                .expect("admitted group address"),
+            lash_core::RuntimeAttribution::none(),
+            "restate-scope-admission-group",
+        ),
+        group_key,
+        vec![child],
+        lash_core::GroupWakePolicy::All,
+        lash_core::LoserPolicy::RunToCompletion,
+    )
+    .expect("the independently valid group assembles before admission");
+
+    let error = scoped
+        .controller()
+        .open_effect_group(group)
+        .await
+        .expect_err("wrong-scope Restate group must be refused");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectScopeMismatch
+    );
+    assert_eq!(context.scope_group_records.load(Ordering::SeqCst), 0);
+}
+
 fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::ProcessWorkWiring {
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let registry = Arc::clone(watched.registry());
     lash_core::ProcessWorkWiring::new(
         watched,
         Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+    )
+}
+
+fn test_turn_effect_invocation(
+    session_id: &str,
+    turn_id: &str,
+    turn_index: usize,
+    protocol_iteration: usize,
+    effect_id: impl Into<String>,
+    replay_key: impl Into<String>,
+) -> lash_core::RuntimeEffectInvocation {
+    lash_core::RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(ExecutionScope::turn(session_id, turn_id), replay_key)
+            .expect("valid Restate test effect address"),
+        lash_core::RuntimeAttribution::for_turn(
+            session_id,
+            turn_id,
+            turn_index,
+            protocol_iteration,
+        ),
+        effect_id,
     )
 }
 
@@ -773,6 +931,22 @@ impl HttpTransport for Fig779DurableCancelTransport {
 #[derive(Debug)]
 struct Fig779SuspendingProcessRunner;
 
+fn scoped_runtime_invocation(
+    scope: &ExecutionScope,
+    kind: RuntimeEffectKind,
+    effect_id: &str,
+) -> RuntimeEffectInvocation {
+    RuntimeEffectInvocation::new(
+        EffectAddress::new(
+            scope.clone(),
+            format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
+        )
+        .expect("valid scoped runtime effect address"),
+        RuntimeAttribution::for_turn("session", "turn", 1, 0),
+        effect_id,
+    )
+}
+
 #[async_trait::async_trait]
 impl RestateProcessRunner for Fig779SuspendingProcessRunner {
     async fn run_process_segment(
@@ -787,7 +961,11 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
             .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::Sleep, "fig779-redrive-sleep"),
+                    scoped_runtime_invocation(
+                        scoped_effect_controller.execution_scope(),
+                        RuntimeEffectKind::Sleep,
+                        "fig779-redrive-sleep",
+                    ),
                     RuntimeEffectCommand::Sleep {
                         duration_ms: 60_000,
                     },
@@ -838,7 +1016,11 @@ impl RestateProcessRunner for Fig788TerminalRedriveRunner {
             .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::Sleep, "fig788-terminal-redrive-sleep"),
+                    scoped_runtime_invocation(
+                        scoped_effect_controller.execution_scope(),
+                        RuntimeEffectKind::Sleep,
+                        "fig788-terminal-redrive-sleep",
+                    ),
                     RuntimeEffectCommand::Sleep {
                         duration_ms: 60_000,
                     },
@@ -945,7 +1127,11 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
             .controller()
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    runtime_invocation(RuntimeEffectKind::Sleep, "fig811-effectful-terminal-sleep"),
+                    scoped_runtime_invocation(
+                        scoped_effect_controller.execution_scope(),
+                        RuntimeEffectKind::Sleep,
+                        "fig811-effectful-terminal-sleep",
+                    ),
                     RuntimeEffectCommand::Sleep { duration_ms: 1 },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),
@@ -986,9 +1172,15 @@ impl Fig806TriggerRedrive for Fig806TriggerRedriveImpl {
         Json(input): Json<Fig806TriggerRedriveInput>,
     ) -> HandlerResult<Json<lash_core::facade_support::TriggerEmitReport>> {
         let controller = RestateRuntimeEffectController::new(ctx);
+        let scoped = controller
+            .scoped_effect_controller(ExecutionScope::runtime_operation(format!(
+                "fig806-trigger:{}",
+                input.occurrence.idempotency_key
+            )))
+            .map_err(HandlerError::from)?;
         let report = self
             .router
-            .emit(input.occurrence, &controller)
+            .emit(input.occurrence, &scoped)
             .await
             .map_err(HandlerError::from)?;
         let request: restate_sdk::context::Request<'_, Json<()>, Json<()>> = ContextClient::request(
@@ -1056,10 +1248,12 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
         let outcome = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn("fig793-session", "fig793-turn", 1, 0),
+                    test_turn_effect_invocation(
+                        "fig793-session",
+                        "fig793-turn",
+                        1,
+                        0,
                         "turn_cancel.after_llm.0",
-                        RuntimeEffectKind::PeekAwaitEvent,
                         "turn_cancel.after_llm.0",
                     ),
                     RuntimeEffectCommand::PeekAwaitEvent { key },
@@ -1165,10 +1359,12 @@ fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
     let mut request = llm_spec();
     request.model = format!("model-v{model_version}");
     RuntimeEffectEnvelope::new(
-        RuntimeInvocation::effect(
-            RuntimeScope::for_turn("fig1142-session", "fig1142-turn", 0, 0),
+        test_turn_effect_invocation(
+            "fig1142-session",
+            "fig1142-turn",
+            0,
+            0,
             "fig1142-replay-divergence",
-            RuntimeEffectKind::LlmCall,
             "fig1142-replay-divergence",
         ),
         RuntimeEffectCommand::LlmCall {
@@ -1207,10 +1403,12 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
         let pending = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn("fig1126-session", "fig1126-turn", 0, 0),
+                    test_turn_effect_invocation(
+                        "fig1126-session",
+                        "fig1126-turn",
+                        0,
+                        0,
                         "fig1126-pending-tool",
-                        RuntimeEffectKind::ToolAttempt,
                         "fig1126-pending-tool",
                     ),
                     RuntimeEffectCommand::ToolAttempt {
@@ -1250,10 +1448,12 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
         let waited = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
-                    RuntimeInvocation::effect(
-                        RuntimeScope::for_turn("fig1126-session", "fig1126-turn", 0, 0),
+                    test_turn_effect_invocation(
+                        "fig1126-session",
+                        "fig1126-turn",
+                        0,
+                        0,
                         "fig1126-await-pending-tool",
-                        RuntimeEffectKind::AwaitEvent,
                         "fig1126-await-pending-tool",
                     ),
                     RuntimeEffectCommand::AwaitEvent { key: *key },

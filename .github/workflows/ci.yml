@@ -29,6 +29,17 @@ on:
   # its own `gh-readonly-queue/...` ref. Without this trigger a queue entry gets
   # no checks at all and the queue stalls.
   merge_group:
+  # Trunk breadth, not a second copy of the queue run (FIG-2789). The queue
+  # validates the required core board on its merge-group commit and merges main
+  # by fast-forwarding to that same commit, so this push carries an identical
+  # tree. It runs again because the breadth families — Test heavy suites, Test
+  # S3 store, Functional E2E, Restate workers E2E, Fuzz smoke, Confidence fast —
+  # are deliberately off the merge-queue critical path and are gated to
+  # `push`/`workflow_dispatch` only. Those jobs consume this run's checkout and
+  # build, so the core board re-runs alongside them instead of in a separate
+  # pipeline; that overlap is the accepted cost of keeping breadth off the
+  # queue. Do not remove this trigger without first giving the breadth families
+  # another home.
   push:
     branches:
       - main
@@ -1444,15 +1455,15 @@ jobs:
           # Pull both images up front with retries so a transient Docker Hub
           # error fails the pull instead of leaving `docker run` to report
           # "No such image" and take the whole trunk run red.
-          bash scripts/docker-pull-with-retry.sh minio/minio:RELEASE.2025-04-22T22-12-26Z
-          bash scripts/docker-pull-with-retry.sh minio/mc:RELEASE.2025-04-16T18-13-26Z
+          bash scripts/docker-pull-with-retry.sh quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+          bash scripts/docker-pull-with-retry.sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
           docker run -d --name lash-ci-minio \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
             -p 9000:9000 \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
           for attempt in $(seq 1 60); do
-            if docker run --rm --network host minio/mc:RELEASE.2025-04-16T18-13-26Z \
+            if docker run --rm --network host quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z \
               alias set ci http://127.0.0.1:9000 minioadmin minioadmin; then
               break
             fi
@@ -1462,7 +1473,7 @@ jobs:
             fi
             sleep 1
           done
-          docker run --rm --network host --entrypoint /bin/sh minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
+          docker run --rm --network host --entrypoint /bin/sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
             'mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin >/dev/null && mc mb --ignore-existing ci/lash-attachments'
 
       - name: Test S3 store conformance

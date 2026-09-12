@@ -325,17 +325,14 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // backend put settles, and explicit recovery can remove exactly that attempt's
 // intent, so component-83 stores are rejected rather than running the old unsafe
 // re-put lifecycle.
-// Version 85 requires pending-input claim identity and token to be either both
-// NULL or both populated. Component-84 stores are recreated; there is no
-// migration into this generation.
-// Version 86 replaces ownerless artifact roots with exact owner edges and
-// permanent execution-owner publication fences. Component-85 stores are
-// recreated; there is no compatibility path.
-// Version 87 retains exact Process Prune artifact-release evidence and extends
-// scope-retirement evidence with artifact-cleanup completion until every
-// configured store acknowledges owner severance. Component-86 stores are
-// recreated; there is no compatibility path.
-const SCHEMA_VERSION: i32 = 87;
+// Version 86 combines full admitted effect addresses and truthful attribution with
+// all-or-none pending-input claim identity and token fencing. Both incompatible
+// component-85 parent shapes are rejected and recreated.
+// Version 87 adds exact artifact-owner edges and permanent execution-owner
+// publication fences. Version 88 retains exact Process Prune artifact-release
+// evidence and scope-retirement cleanup completion until every configured store
+// acknowledges owner severance. Components 86 and 87 are rejected and recreated.
+const SCHEMA_VERSION: i32 = 88;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

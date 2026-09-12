@@ -1,5 +1,4 @@
 use super::*;
-use crate::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::sync::MutexExt;
 
 impl<'run> RuntimeTurnDriver<'run> {
@@ -8,8 +7,9 @@ impl<'run> RuntimeTurnDriver<'run> {
         machine: &TurnMachine,
         effect_id: crate::sansio::EffectId,
         effect_kind: RuntimeEffectKind,
-    ) -> Result<RuntimeInvocation, RuntimeEffectControllerError> {
+    ) -> Result<RuntimeEffectInvocation, RuntimeEffectControllerError> {
         Ok(crate::runtime::causal::turn_effect_invocation(
+            self.scoped_effect_controller.execution_scope(),
             &self.session_id,
             &self.turn_id,
             self.turn_index,
@@ -37,7 +37,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 task_controller,
             );
             let outcome = scoped_effect_controller
-                .controller()
                 .execute_effect(envelope, local_executor)
                 .await;
             self.apply_turn_effect_update(&update);
@@ -58,6 +57,7 @@ impl<'run> RuntimeTurnDriver<'run> {
             );
             let outcome = crate::runtime::effect::drive_effect_controller_task(
                 scoped_effect_controller.controller(),
+                scoped_effect_controller.execution_scope().clone(),
                 envelope,
                 local_executor,
                 task_requests,

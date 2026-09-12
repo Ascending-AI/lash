@@ -181,16 +181,11 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
         .controller()
         .execute_effect(
             lash_core::RuntimeEffectEnvelope::new(
-                lash_core::RuntimeInvocation::effect(
-                    lash_core::RuntimeScope::for_turn(
-                        "scope-retirement-recovery",
-                        "late-turn",
-                        1,
-                        0,
-                    ),
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(scope.clone(), "late-effect-replay")
+                        .expect("valid late-effect address"),
+                    lash_core::RuntimeAttribution::none(),
                     "late-effect",
-                    lash_core::RuntimeEffectKind::Sleep,
-                    "late-effect-replay",
                 ),
                 lash_core::RuntimeEffectCommand::Sleep { duration_ms: 0 },
             ),

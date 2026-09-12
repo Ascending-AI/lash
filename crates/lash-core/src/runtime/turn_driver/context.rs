@@ -3,6 +3,22 @@ use crate::PluginError;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 
 impl<'run> RuntimeTurnDriver<'run> {
+    pub(super) fn turn_cancel_scope(&self) -> crate::ExecutionScope {
+        match self.scoped_effect_controller.execution_scope() {
+            crate::ExecutionScope::Turn { .. } => {
+                crate::ExecutionScope::turn(self.session_id.clone(), self.turn_id.clone())
+            }
+            admitted_scope => admitted_scope.clone(),
+        }
+    }
+
+    pub(super) fn turn_cancel_wait(
+        &self,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> crate::runtime::TurnCancelWait {
+        crate::runtime::TurnCancelWait::observing(cancellation, self.turn_cancel_scope())
+    }
+
     pub(in crate::runtime) async fn finish_parent_end_actions(
         &self,
     ) -> Result<Vec<SessionStreamEvent>, crate::RuntimeError> {
@@ -78,6 +94,10 @@ impl<'run> RuntimeTurnDriver<'run> {
                 self.recorded_intent_outcomes.clone(),
                 Arc::clone(&self.host.core.attachment_source_policy),
             )
-            .map(|context| context.with_turn_phase_probe(self.turn_phase_probe.clone()))
+            .map(|context| {
+                context
+                    .with_turn_cancel_scope(self.turn_cancel_scope())
+                    .with_turn_phase_probe(self.turn_phase_probe.clone())
+            })
     }
 }

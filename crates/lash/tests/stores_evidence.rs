@@ -212,13 +212,6 @@ pub(crate) fn store_area_test_support_witnesses() {
     fn method_witness_0035<T: crate::facade_support::SessionGraphFacadeOps>(value: &T) {
         let _ = crate::facade_support::SessionGraphFacadeOps::active_path_nodes(value);
     }
-    // FIG-2105-TEST-WITNESS-0036: lash_core::facade_support::SessionGraphFacadeOps::extend_node_records [function]
-    fn method_witness_0036<T: crate::facade_support::SessionGraphFacadeOps>(value: &mut T) {
-        crate::facade_support::SessionGraphFacadeOps::extend_node_records(
-            value,
-            Vec::<crate::SessionNodeRecord>::new(),
-        );
-    }
     // FIG-2105-TEST-WITNESS-0037: lash_conformance::GraphIntegrityCorruption [enum]
     type_witness::<lash_conformance::GraphIntegrityCorruption>();
     // FIG-2105-TEST-WITNESS-0038: lash_conformance::GraphIntegrityCorruption::DanglingLeafId [variant]

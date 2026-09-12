@@ -193,7 +193,7 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .await
             .expect("open config change process registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
-        let plugin = Arc::new(WorkbenchPluginFactory::new(""));
+        let plugin = Arc::new(WorkbenchPluginFactory::new());
         let config_changes = plugin.config_changes();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-config-change-provider")
@@ -271,7 +271,7 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             .await
             .expect("open context transform process registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
-        let plugin = Arc::new(WorkbenchPluginFactory::new(""));
+        let plugin = Arc::new(WorkbenchPluginFactory::new());
         let context_budget = plugin.context_budget();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let requests_for_provider = Arc::clone(&requests);
@@ -393,11 +393,11 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
         let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
         configure_workbench_plugins(
             &mut plugins,
-            String::new(),
             mail::MailWorld::new(),
             subagent_registry,
             deferred_tools::WorkbenchDeferredTools::in_memory().expect("open deferred-tool grants"),
             approvals::WorkbenchApprovals::in_memory().expect("open approval ledger"),
+            Arc::new(lash_plugin_mcp::McpPluginFactory::empty()),
         );
         let host = lash::plugins::PluginHost::new(plugins.into_factories());
         let session = host

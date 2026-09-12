@@ -48,7 +48,7 @@ async fn approval_test_core(
             data_dir.join("lash-sessions"),
         )))
         .plugin(Arc::new(
-            WorkbenchPluginFactory::new("").with_approvals(approvals),
+            WorkbenchPluginFactory::new().with_approvals(approvals),
         ))
         .trigger_store(trigger_store)
         .without_queued_work()
@@ -135,12 +135,45 @@ finish result
         assert_eq!(approval.tool, approvals::APPROVAL_TOOL_NAME);
         assert_eq!(approval.requesting_session, "approval-approve");
         assert_eq!(key.key_id, approval.key);
+        let discovered = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let waits = core
+                    .completions()
+                    .outstanding(&lash::SessionId::from("approval-approve"))
+                    .await
+                    .expect("discover session waits");
+                if waits.contains(&key) {
+                    break waits;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("approval wait becomes registered");
+        let discovered_approval = discovered
+            .iter()
+            .find(|candidate| *candidate == &key)
+            .cloned()
+            .expect("approval wait is discoverable among all session waits");
+        assert!(discovered.iter().any(|candidate| matches!(
+            &candidate.wait,
+            lash::AwaitEventWaitIdentity::TurnCancelGate
+        )));
         let accepted = core
             .completions()
-            .resolve(key.clone(), approvals::approval_resolution(&approval))
+            .resolve(
+                discovered_approval,
+                approvals::approval_resolution(&approval),
+            )
             .await
             .expect("approve completion");
         assert_eq!(accepted, lash::ResolveOutcome::Accepted);
+        let remaining = core
+            .completions()
+            .outstanding(&lash::SessionId::from("approval-approve"))
+            .await
+            .expect("settled approval is absent from wait discovery");
+        assert!(!remaining.contains(&key));
         let already_resolved = core
             .completions()
             .resolve(key.clone(), approvals::approval_resolution(&approval))

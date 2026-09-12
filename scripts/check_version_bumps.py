@@ -66,6 +66,11 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-2945: the public serialized sans-IO turn checkpoint is enrolled at
+    # v2 when completed pre-dispatch reporting joins its pending effect vocabulary.
+    "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
+        "sha256:ee760686edf120042dd150c32569bc1a4d46d56ab14a165c140351ec6db0a6c5"
+    ),
     # FIG-2164: native channel surfaces are new relative to main. Parked
     # state honestly advanced from lane v1 to v2 when unused prose was removed;
     # transport v1 stamps the previously unversioned lane envelope.
@@ -281,8 +286,12 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-core/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
         "sha256:d3a77b92196da92208db28436247f96f29491dcc6e4012511649cfbb38e8c993"
     ),
+    # FIG-2828: the process-transfer preimage helper moved into the extracted
+    # effect identity module. Its version constant stays at the original
+    # envelope path so the checker retains merge-base identity; emitted bytes
+    # remain pinned by the unchanged v1 golden.
     "crates/lash-core/src/runtime/effect/envelope.rs:PROCESS_TRANSFER_FAMILY_VERSION": (
-        "sha256:9895021a91c5fc12b52d2dc9baf215e33078b50d3a5ad3032c8cad5e237fad4e"
+        "sha256:d3b31f3bbd8eb783fca3d671c69fc55a2baefb988b37f5c1b546b91e43299b77"
     ),
     "crates/lash-core/src/runtime/process/events.rs:PROCESS_CANCELLATION_FAMILY_VERSION": (
         "sha256:55328d292629d8021ac81b8998697dcff2a998b9d9bc7842a0333ee31db2d7e8"

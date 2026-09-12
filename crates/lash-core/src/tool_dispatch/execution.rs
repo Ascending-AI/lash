@@ -297,7 +297,7 @@ pub(crate) async fn coordinate_prepared_tool_call_launch_with_execution_context<
         ),
     );
     let dispatch = Arc::new(context.clone());
-    super::coordinate_tool_invocation(
+    Box::pin(super::coordinate_tool_invocation(
         context,
         prepared,
         execution_grant,
@@ -315,7 +315,7 @@ pub(crate) async fn coordinate_prepared_tool_call_launch_with_execution_context<
                 completion_key,
             )
         },
-    )
+    ))
     .await
     .launch
 }
@@ -356,14 +356,14 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
         tool_context.with_prepared_payload(prepared.prepared_payload.clone()),
     );
     let completion_context = tool_context.clone();
-    let attempt_result = execute_leaf_tool_attempt(
+    let attempt_result = Box::pin(execute_leaf_tool_attempt(
         context,
         &authority,
         &prepared,
         tool_context,
         attempt,
         max_attempts,
-    )
+    ))
     .await;
     let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
     let (result, intents) = match attempt_result {

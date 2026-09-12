@@ -169,6 +169,31 @@ impl AwaitEventResolver for RestateEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for RestateEffectHost {
+    async fn list_outstanding_await_event_keys(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
+        if session_id.trim().is_empty() {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvalidAwaitEventSessionId,
+                "await-event session id must be non-empty",
+            ));
+        }
+        let keys: Vec<AwaitEventKey> = self
+            .controller
+            .await_event_ingress
+            .ingress
+            .call_object_empty_json("LashDurableWaitIndex", session_id, "outstanding")
+            .await
+            .map_err(|err| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RestateAwaitEventPeek,
+                    format!("failed to list outstanding Restate await-events: {err}"),
+                )
+            })?;
+        Ok(outstanding_owned_by_session(session_id, keys))
+    }
+
     fn turn_attach(&self) -> Option<Arc<dyn lash_core::facade_support::TurnAttach>> {
         Some(self.turn_attach.clone())
     }
@@ -270,6 +295,15 @@ impl EffectHost for RestateEffectHost {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(binding.registrations);
     }
+}
+
+fn outstanding_owned_by_session(
+    session_id: &SessionId,
+    keys: Vec<AwaitEventKey>,
+) -> Vec<AwaitEventKey> {
+    keys.into_iter()
+        .filter(|key| key.scope.session_id() == Some(session_id))
+        .collect()
 }
 
 impl RestateEffectHost {
@@ -442,6 +476,7 @@ impl RuntimeEffectController for FencedRestateController {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        envelope.invocation.validate_execution_scope(&self.scope)?;
         self.refuse_if_retired().await?;
         self.controller
             .execute_effect(envelope, local_executor)
@@ -452,6 +487,7 @@ impl RuntimeEffectController for FencedRestateController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(&self.scope)?;
         self.refuse_if_retired().await?;
         // The group is a live child of this scope until its index reports
         // every child settled: recorded in the scope's index so a
@@ -934,6 +970,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        group.validate_execution_scope(group.invocation().execution_scope())?;
         let ingress = &self.await_event_ingress.ingress;
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
@@ -1255,10 +1292,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
             format!(
                 "effect `{}` must enter a Restate handler and use RestateRuntimeEffectController::scoped_effect_controller",
-                envelope
-                    .invocation
-                    .effect_id()
-                    .unwrap_or_else(|| envelope.command.kind().as_str())
+                envelope.invocation.effect_id()
             ),
         ))
     }
@@ -1290,5 +1324,25 @@ mod tests {
         let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(503));
 
         assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
+    }
+
+    #[test]
+    fn session_administrative_read_rejects_non_session_scope_aliases() {
+        for scope in [
+            ExecutionScope::process("alias-process"),
+            ExecutionScope::runtime_operation("alias-operation"),
+        ] {
+            let alias = SessionId::from(durable_wait_index_key_for_scope(&scope));
+            let key = restate_await_event_key(
+                &scope,
+                AwaitEventWaitIdentity::tool_completion("alias-wait"),
+            )
+            .expect("derive non-session wait key");
+
+            assert!(
+                outstanding_owned_by_session(&alias, vec![key]).is_empty(),
+                "a non-session wait indexed at `{alias}` must not be advertised as session-owned"
+            );
+        }
     }
 }

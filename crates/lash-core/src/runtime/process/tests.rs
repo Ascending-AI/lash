@@ -165,7 +165,7 @@ fn wake_delivery(
         sequence: 7,
         event_type: event_type.clone(),
         event_invocation: crate::RuntimeInvocation {
-            scope: crate::RuntimeScope::new("target"),
+            attribution: crate::RuntimeAttribution::for_session("target"),
             subject: crate::RuntimeSubject::ProcessEvent {
                 process_id: ProcessId::from("process-1"),
                 sequence: 7,
@@ -898,11 +898,14 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     )
     .expect("serialize shared events");
     let controller = crate::NativeRuntimeEffectController::default();
-    let invocation = crate::RuntimeInvocation::effect(
-        crate::RuntimeScope::new("deleted"),
+    let invocation = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            crate::ExecutionScope::session_delete("deleted"),
+            "deleted:delete-session",
+        )
+        .expect("valid delete-session address"),
+        crate::RuntimeAttribution::for_session("deleted"),
         "process:delete-session:deleted",
-        crate::RuntimeEffectKind::Process,
-        "deleted:delete-session",
     );
 
     let outcome = crate::RuntimeEffectController::execute_effect(

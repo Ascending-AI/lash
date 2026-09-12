@@ -5,7 +5,9 @@ use crate::plugin::{ProtocolDriverPlugin, ProtocolSessionPlugin};
 use lash_sansio::sync::MutexExt;
 mod controller_doubles;
 pub(in crate::runtime::tests) use controller_doubles::RejectingEffectController;
-use controller_doubles::{SerialOnlyEffectController, WrongOutcomeEffectController};
+use controller_doubles::{
+    SerialOnlyEffectController, StrictReplayJournal, WrongOutcomeEffectController,
+};
 mod fig1127;
 mod fig1416;
 
@@ -43,6 +45,7 @@ pub(super) struct RecordingEffectController {
     controller_owned_replay: bool,
     engine_paced_lane: bool,
     replay_by_key: bool,
+    strict_replay: StrictReplayJournal,
     execute_llm_locally: bool,
     execute_code_locally: bool,
     fail_exec_after_local: Arc<std::sync::atomic::AtomicBool>,
@@ -108,6 +111,11 @@ impl RecordingEffectController {
 
     pub(super) fn with_replay_by_key(mut self) -> Self {
         self.replay_by_key = true;
+        self
+    }
+
+    pub(super) fn with_strict_replay_by_address(mut self) -> Self {
+        self.strict_replay.enable();
         self
     }
 
@@ -224,11 +232,17 @@ impl RecordingEffectController {
             .count()
     }
 
-    fn record(&self, invocation: &RuntimeInvocation) {
+    pub(super) fn has_kind_for_turn(&self, kind: RuntimeEffectKind, turn_id: &TurnId) -> bool {
+        self.records()
+            .iter()
+            .any(|record| record.kind == kind && record.turn_id.as_ref() == Some(turn_id))
+    }
+
+    fn record(&self, envelope: &RuntimeEffectEnvelope) {
         self.records.lock_recover().push(EffectControllerRecord {
-            kind: invocation.effect_kind().expect("effect kind"),
-            turn_id: invocation.scope.turn_id.clone(),
-            replay_key: invocation.replay_key().expect("replay key").to_string(),
+            kind: envelope.command.kind(),
+            turn_id: envelope.invocation.attribution.turn_id.clone(),
+            replay_key: envelope.invocation.replay_key().to_string(),
         });
     }
 }
@@ -245,11 +259,8 @@ pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &TurnId,
 ) -> ScopedEffectController<'a> {
-    ScopedEffectController::borrowed(
-        controller,
-        ExecutionScope::turn("effect-test-session", turn_id),
-    )
-    .expect("scoped effect controller")
+    ScopedEffectController::borrowed(controller, ExecutionScope::turn("root", turn_id))
+        .expect("scoped effect controller")
 }
 
 #[async_trait::async_trait]
@@ -391,11 +402,11 @@ impl RuntimeEffectController for RecordingEffectController {
                 "forced parent-end failure",
             ));
         }
-        let replay_key = envelope
-            .invocation
-            .replay_key()
-            .expect("replay key")
-            .to_string();
+        let strict_replay = self.strict_replay.prepare(&envelope)?;
+        if let Some(outcome) = self.strict_replay.replay(&strict_replay)? {
+            return Ok(outcome);
+        }
+        let replay_key = envelope.invocation.replay_key().to_string();
         if self.replay_by_key
             && let Some(outcome) = self
                 .replay_outcomes
@@ -408,7 +419,7 @@ impl RuntimeEffectController for RecordingEffectController {
         self.envelopes
             .lock_recover()
             .push(serde_json::to_string(&envelope).expect("serialize effect envelope"));
-        self.record(&envelope.invocation);
+        self.record(&envelope);
         if matches!(
             envelope.command,
             RuntimeEffectCommand::AssistantResponseHooks { .. }
@@ -694,6 +705,7 @@ impl RuntimeEffectController for RecordingEffectController {
                 .lock_recover()
                 .insert(replay_key, outcome.clone());
         }
+        self.strict_replay.record(strict_replay, &outcome);
         outcome
     }
 }
@@ -2056,6 +2068,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     let discriminator =
         crate::runtime::causal::direct_request_discriminator(None, Some(&caused_by), 1);
     let expected_replay_key = crate::runtime::causal::direct_effect_invocation(
+        &ExecutionScope::turn("root", "turn-1"),
         &SessionId::from("root"),
         "direct-test",
         discriminator,
@@ -2063,7 +2076,6 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
         Some(caused_by),
     )
     .replay_key()
-    .expect("derived direct-effect replay key")
     .to_string();
     assert!(recorder.records().iter().any(|record| {
         record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key
@@ -2196,8 +2208,8 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
         .map(|record| record.replay_key)
         .collect::<Vec<_>>();
     assert_eq!(replay_keys.len(), 2);
-    assert!(replay_keys[0].starts_with("direct:v2:blake3:"));
-    assert!(replay_keys[1].starts_with("direct:v2:blake3:"));
+    assert!(replay_keys[0].starts_with("direct:v3:blake3:"));
+    assert!(replay_keys[1].starts_with("direct:v3:blake3:"));
     assert_ne!(replay_keys[0], replay_keys[1]);
 }
 

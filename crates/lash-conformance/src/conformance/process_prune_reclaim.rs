@@ -342,23 +342,24 @@ async fn fork_and_advance(
     let parent_node_id = state.session_graph.leaf_node_id.clone();
     state
         .session_graph
-        .push_node_record(crate::SessionNodeRecord {
-            node_id: child_node_id.to_string(),
-            parent_node_id,
-            timestamp: "2026-08-17T00:00:00Z".to_string(),
-            payload: crate::SessionNodePayload::Event {
-                event: crate::SessionHistoryRecord::Protocol(
-                    crate::ProtocolEvent::typed(
-                        "prune-reclaim-child-event",
-                        serde_json::json!({ "content": "child node" }),
-                    )
-                    .expect("typed child event"),
-                ),
-            },
-        });
-    state
-        .session_graph
-        .set_leaf_node_id(Some(child_node_id.to_string()));
+        .apply_append(&crate::GraphAppend {
+            nodes: vec![crate::SessionNodeRecord {
+                node_id: child_node_id.to_string(),
+                parent_node_id,
+                timestamp: "2026-08-17T00:00:00Z".to_string(),
+                payload: crate::SessionNodePayload::Event {
+                    event: crate::SessionHistoryRecord::Protocol(
+                        crate::ProtocolEvent::typed(
+                            "prune-reclaim-child-event",
+                            serde_json::json!({ "content": "child node" }),
+                        )
+                        .expect("typed child event"),
+                    ),
+                },
+            }],
+            leaf_node_id: Some(child_node_id.to_string()),
+        })
+        .expect("append child node");
     child
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await

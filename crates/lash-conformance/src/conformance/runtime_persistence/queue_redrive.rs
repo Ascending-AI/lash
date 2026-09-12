@@ -1624,7 +1624,7 @@ pub(super) fn policy_test_wake(
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
-            scope: RuntimeScope::new(session_id),
+            attribution: RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
                 process_id: ProcessId::from(process_id.to_string()),
                 sequence,

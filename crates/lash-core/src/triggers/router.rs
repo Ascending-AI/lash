@@ -552,7 +552,7 @@ impl TriggerRouter {
     pub async fn emit_recorded(
         &self,
         request: TriggerOccurrenceRequest,
-        effect_controller: &dyn crate::RuntimeEffectController,
+        effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<TriggerEmitReport, PluginError> {
         let report = self.emit(request, effect_controller).await?;
         let mut deliveries = Vec::with_capacity(report.deliveries.len());
@@ -572,7 +572,7 @@ impl TriggerRouter {
     pub async fn emit(
         &self,
         request: TriggerOccurrenceRequest,
-        effect_controller: &dyn crate::RuntimeEffectController,
+        effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<TriggerEmitReport, PluginError> {
         let TriggerIngressReceipt {
             occurrence,
@@ -622,7 +622,7 @@ impl TriggerRouter {
         &self,
         reservation: &TriggerDeliveryReservation,
         process_registry: Arc<dyn crate::ProcessRegistry>,
-        effect_controller: &dyn crate::RuntimeEffectController,
+        effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<(), PluginError> {
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
@@ -638,12 +638,6 @@ impl TriggerRouter {
         let args =
             materialize_trigger_process_args(&subscription.input_template, &occurrence.payload)?;
         let target = apply_trigger_inputs(subscription.target.clone(), args)?;
-        // `registrant_scope_id` is the owner *namespace*, which for session
-        // ownership is the session id and for host/platform ownership is not.
-        // `RuntimeScope::new` already took it as its session id before this
-        // wave; typing it here changes no bytes and does not widen that
-        // pre-existing conflation.
-        let originator_scope_id = SessionId::from(subscription.registrant_scope_id());
         let trigger_causal_ref = crate::CausalRef::TriggerOccurrence {
             occurrence_id: occurrence.occurrence_id.clone(),
             subscription_id: Some(subscription.subscription_id.clone()),
@@ -651,8 +645,12 @@ impl TriggerRouter {
             subscription_revision: Some(subscription.revision),
         };
         let trigger_occurrence_invocation = crate::runtime::causal::trigger_occurrence_invocation(
-            &originator_scope_id,
-            &occurrence.occurrence_id,
+            subscription
+                .registrant_session_id()
+                .cloned()
+                .map(crate::RuntimeAttribution::for_session)
+                .unwrap_or_else(crate::RuntimeAttribution::none),
+            &trigger_causal_ref,
         );
         // Engine-admission ruling (FIG-1488): this route deliberately stays
         // outside the gate. A delivery does not carry a caller-supplied engine
@@ -693,17 +691,24 @@ impl TriggerRouter {
             execution_context: Box::new(execution_context),
         };
         let effect_id = command.effect_id();
-        let invocation = crate::RuntimeInvocation::effect(
-            crate::RuntimeScope::new(originator_scope_id.clone()),
+        let invocation = crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                effect_controller.execution_scope().clone(),
+                format!(
+                    "trigger:{}:{}:{}:{}",
+                    occurrence.occurrence_id,
+                    subscription.subscription_id,
+                    subscription.incarnation,
+                    subscription.revision
+                ),
+            )
+            .expect("trigger delivery uses the already admitted controller scope"),
+            subscription
+                .registrant_session_id()
+                .cloned()
+                .map(crate::RuntimeAttribution::for_session)
+                .unwrap_or_else(crate::RuntimeAttribution::none),
             effect_id.clone(),
-            crate::RuntimeEffectKind::Process,
-            format!(
-                "trigger:{}:{}:{}:{}",
-                occurrence.occurrence_id,
-                subscription.subscription_id,
-                subscription.incarnation,
-                subscription.revision
-            ),
         )
         .with_caused_by(Some(trigger_causal_ref));
         let outcome = effect_controller
@@ -1486,11 +1491,16 @@ mod tests {
             crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
         );
         let controller = crate::NativeRuntimeEffectController::default();
+        let scoped_controller = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::ExecutionScope::runtime_operation("trigger-blue-report"),
+        )
+        .expect("bind trigger report scope");
 
         let report = router
             .emit(
                 button_occurrence(source_key.clone(), "button-blue-report"),
-                &controller,
+                &scoped_controller,
             )
             .await
             .expect("emit trigger");
@@ -1517,7 +1527,7 @@ mod tests {
         let replay = router
             .emit(
                 button_occurrence(source_key, "button-blue-report"),
-                &controller,
+                &scoped_controller,
             )
             .await
             .expect("replay trigger");
@@ -1547,11 +1557,17 @@ mod tests {
                 Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>
             ),
         );
+        let controller = crate::NativeRuntimeEffectController::default();
+        let scoped_controller = crate::ScopedEffectController::borrowed(
+            &controller,
+            crate::ExecutionScope::runtime_operation("session-trigger-blue"),
+        )
+        .expect("bind session trigger scope");
 
         let report = router
             .emit(
                 button_occurrence(source_key, "session-button-blue"),
-                &crate::NativeRuntimeEffectController::default(),
+                &scoped_controller,
             )
             .await
             .expect("emit session trigger");

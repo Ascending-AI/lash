@@ -165,12 +165,8 @@ impl<'run> AttemptAtomicitySentinel<'run> {
 }
 
 fn effect_crossing_label(envelope: &RuntimeEffectEnvelope) -> String {
-    let kind = envelope
-        .invocation
-        .effect_kind()
-        .map(RuntimeEffectKind::as_str)
-        .unwrap_or("no_effect_kind");
-    let effect_id = envelope.invocation.effect_id().unwrap_or("no_effect_id");
+    let kind = envelope.command.kind().as_str();
+    let effect_id = envelope.invocation.effect_id();
     format!("execute_effect:{kind}:{effect_id}")
 }
 
@@ -274,16 +270,12 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let opens_attempt =
-            envelope.invocation.effect_kind() == Some(RuntimeEffectKind::ToolAttempt);
+        let effect_kind = envelope.command.kind();
+        let opens_attempt = effect_kind == RuntimeEffectKind::ToolAttempt;
         let crossing = effect_crossing_label(&envelope);
         self.ledger.record_intent_crossing(
-            envelope.invocation.effect_kind(),
-            envelope
-                .invocation
-                .replay
-                .as_ref()
-                .and_then(|replay| replay.attribution.as_ref()),
+            Some(effect_kind),
+            envelope.invocation.replay_attribution(),
             &crossing,
         );
         self.ledger.record(crossing);

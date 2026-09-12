@@ -96,7 +96,9 @@ pub use lashlang_graph::{
 /// Version 19 adds the attempt usage disposition to retry attempts so an
 /// aborted or failed call whose usage never arrived is distinguishable from
 /// a free one.
-pub const TRACE_SCHEMA_VERSION: u32 = 19;
+/// Version 20 carries admitted effect addresses, independently optional
+/// attribution, and complete trigger cause identity in trace graph subjects.
+pub const TRACE_SCHEMA_VERSION: u32 = 20;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1295,7 +1297,8 @@ impl TraceDurableTimerStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRuntimeScope {
-    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1305,32 +1308,43 @@ pub struct TraceRuntimeScope {
 }
 
 impl TraceRuntimeScope {
-    pub fn new(session_id: impl Into<SessionId>) -> Self {
+    pub fn none() -> Self {
         Self {
-            session_id: session_id.into(),
+            session_id: None,
             turn_id: None,
             turn_index: None,
             protocol_iteration: None,
         }
+    }
+
+    pub fn for_session(session_id: impl Into<SessionId>) -> Self {
+        Self {
+            session_id: Some(session_id.into()),
+            ..Self::none()
+        }
+    }
+
+    pub fn new(session_id: impl Into<SessionId>) -> Self {
+        Self::for_session(session_id)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TraceRuntimeSubject {
-    Effect { effect_id: String, kind: String },
-    Process { process_id: ProcessId },
+    Effect {
+        address: lash_sansio::EffectAddress,
+        effect_id: String,
+    },
+    Process {
+        process_id: ProcessId,
+    },
 }
 
 impl TraceRuntimeSubject {
-    pub fn graph_key(&self, scope: &TraceRuntimeScope) -> String {
+    pub fn graph_key(&self) -> String {
         match self {
-            Self::Effect { effect_id, .. } => match scope.turn_id.as_deref() {
-                Some(turn_id) if !turn_id.is_empty() => {
-                    format!("effect:{}:{turn_id}:{effect_id}", scope.session_id)
-                }
-                _ => format!("effect:{}:{effect_id}", scope.session_id),
-            },
+            Self::Effect { address, .. } => address.graph_key(),
             Self::Process { process_id } => format!("process:{process_id}"),
         }
     }
@@ -1349,7 +1363,7 @@ pub struct TraceLanguageExecutionIdentity {
 
 impl TraceLanguageExecutionIdentity {
     pub fn graph_key(&self) -> String {
-        self.subject.graph_key(&self.scope)
+        self.subject.graph_key()
     }
 }
 
@@ -1418,7 +1432,7 @@ pub struct TraceLanguageChildExecution {
 
 impl TraceLanguageChildExecution {
     pub fn graph_key(&self) -> String {
-        self.subject.graph_key(&self.scope)
+        self.subject.graph_key()
     }
 }
 

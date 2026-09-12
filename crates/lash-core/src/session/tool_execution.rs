@@ -511,7 +511,7 @@ impl RuntimeExecutionContext<'_> {
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
         attempt_dispatch.direct_completions = attempt_dispatch
             .direct_completions
-            .with_parent_invocation(Some(attempt_invocation.clone()));
+            .with_tool_attempt_parent_invocation(attempt_invocation.clone());
         attempt_dispatch.trigger_outcomes =
             crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         let attempt_dispatch = std::sync::Arc::new(attempt_dispatch);
@@ -612,20 +612,7 @@ impl RuntimeExecutionContext<'_> {
             output: output.clone(),
             duration_ms: outcome.record.duration_ms,
         };
-        self.emit_tool_call_completed_trace(&record, &attempts);
-        self.emit_turn_activity(
-            tool_correlation_id,
-            TurnEvent::ToolCallCompleted {
-                call_id: Some(call_id.clone()),
-                name: outcome.record.tool.clone(),
-                args: outcome.record.args.clone(),
-                output: output.clone(),
-                duration_ms: outcome.record.duration_ms,
-                graph_key: self.code_block_graph_key(),
-                parent_call_id: self.batch_parent_call_id(),
-            },
-        )
-        .await;
+        self.emit_tool_call_completed(&record, &attempts).await;
         CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
@@ -639,6 +626,67 @@ impl RuntimeExecutionContext<'_> {
             },
             record,
         }
+    }
+
+    async fn emit_tool_call_completed(
+        &self,
+        record: &ToolCallRecord,
+        attempts: &[lash_trace::TraceRetryAttempt],
+    ) {
+        self.emit_tool_call_completed_trace(record, attempts);
+        self.emit_turn_activity(
+            tool_activity_id(record.call_id.as_deref().unwrap_or_default()),
+            TurnEvent::ToolCallCompleted {
+                call_id: record.call_id.clone(),
+                name: record.tool.clone(),
+                args: record.args.clone(),
+                output: record.output.clone(),
+                duration_ms: record.duration_ms,
+                graph_key: self.code_block_graph_key(),
+                parent_call_id: self.batch_parent_call_id(),
+            },
+        )
+        .await;
+    }
+
+    pub(crate) async fn complete_undispatched_tool_call(
+        &self,
+        call_id: String,
+        replay: Option<crate::llm::types::ProviderReplayMeta>,
+        outcome: ToolDispatchOutcome,
+    ) -> CompletedProtocolToolCall {
+        self.emit_tool_call_started(
+            &call_id,
+            &outcome.record.tool,
+            outcome.record.args.clone(),
+            tool_activity_id(&call_id),
+        )
+        .await;
+        self.complete_tool_call(call_id, replay, outcome).await
+    }
+
+    pub(crate) async fn report_undispatched_tool_call(
+        &self,
+        completed: &crate::sansio::CompletedToolCall,
+    ) {
+        self.emit_tool_call_started(
+            &completed.call_id,
+            &completed.tool_name,
+            completed.args.clone(),
+            tool_activity_id(&completed.call_id),
+        )
+        .await;
+        self.emit_tool_call_completed(
+            &ToolCallRecord {
+                call_id: Some(completed.call_id.clone()),
+                tool: completed.tool_name.clone(),
+                args: completed.args.clone(),
+                output: completed.output.clone(),
+                duration_ms: completed.duration_ms,
+            },
+            &[],
+        )
+        .await;
     }
 
     pub(crate) async fn pending_completion_dispatch_outcome(
@@ -720,15 +768,23 @@ impl RuntimeExecutionContext<'_> {
             parent
         } else {
             fallback = crate::RuntimeInvocation::effect(
-                crate::RuntimeScope::new(&self.dispatch.session_id),
-                format!("tool:{call_id}:await"),
-                crate::RuntimeEffectKind::AwaitEvent,
+                crate::EffectAddress::new(
+                    self.dispatch
+                        .effect_controller
+                        .scoped()
+                        .execution_scope()
+                        .clone(),
+                    format!("tool:{call_id}:await"),
+                )
+                .expect("tool await carries an admitted effect scope"),
+                self.dispatch.parentless_attribution(),
                 format!("tool:{call_id}:await"),
             );
             &fallback
         };
         let parent_effect_id = parent.effect_id().unwrap_or("tool");
         let invocation = crate::runtime::causal::child_effect_invocation(
+            self.dispatch.effect_controller.scoped().execution_scope(),
             parent,
             format!("{parent_effect_id}:{replay_suffix}"),
             crate::RuntimeEffectKind::AwaitEvent,
@@ -742,7 +798,7 @@ impl RuntimeExecutionContext<'_> {
         let outcome = self
             .dispatch
             .effect_controller
-            .controller()
+            .scoped()
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
                     invocation,
@@ -833,9 +889,10 @@ impl RuntimeExecutionContext<'_> {
         args: serde_json::Value,
         _index: usize,
     ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, None)
-            .await;
+        let executed = Box::pin(
+            self.execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, None),
+        )
+        .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }
@@ -910,7 +967,9 @@ impl RuntimeExecutionContext<'_> {
                 intents: crate::ToolIntents::default(),
                 intent_outcomes: Vec::new(),
             };
-            return self.complete_tool_call(call_id, replay, outcome).await;
+            return self
+                .complete_undispatched_tool_call(call_id, replay, outcome)
+                .await;
         };
         self.emit_tool_call_started(&call_id, &name, args.clone(), tool_correlation_id.clone())
             .await;
@@ -939,9 +998,16 @@ impl RuntimeExecutionContext<'_> {
                             .runtime_execution_context(self.clone().with_parent_invocation(
                                 parent_invocation.clone().unwrap_or_else(|| {
                                     crate::RuntimeInvocation::effect(
-                                        crate::RuntimeScope::new(&dispatch.session_id),
-                                        format!("orchestration:{call_id}"),
-                                        crate::RuntimeEffectKind::Direct,
+                                        crate::EffectAddress::new(
+                                            dispatch
+                                                .effect_controller
+                                                .scoped()
+                                                .execution_scope()
+                                                .clone(),
+                                            format!("orchestration:{call_id}"),
+                                        )
+                                        .expect("orchestration carries an admitted effect scope"),
+                                        dispatch.parentless_attribution(),
                                         format!("orchestration:{call_id}"),
                                     )
                                 }),
@@ -1048,14 +1114,14 @@ impl RuntimeExecutionContext<'_> {
         parent_invocation: Option<crate::RuntimeInvocation>,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     ) -> CompletedProtocolToolCall {
-        self.execute_tool_call(
+        Box::pin(self.execute_tool_call(
             call_id,
             ToolCallAuthorization::Catalog(tool_id),
             args,
             replay,
             parent_invocation,
             child_execution_trace_hook,
-        )
+        ))
         .await
     }
 
@@ -1068,16 +1134,15 @@ impl RuntimeExecutionContext<'_> {
         args: serde_json::Value,
         _index: usize,
     ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call(
-                call_id,
-                ToolCallAuthorization::Granted(Box::new(grant)),
-                args,
-                None,
-                None,
-                None,
-            )
-            .await;
+        let executed = Box::pin(self.execute_tool_call(
+            call_id,
+            ToolCallAuthorization::Granted(Box::new(grant)),
+            args,
+            None,
+            None,
+            None,
+        ))
+        .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }
@@ -1092,16 +1157,15 @@ impl RuntimeExecutionContext<'_> {
         _index: usize,
         trace_hook: crate::ToolChildExecutionTraceHook,
     ) -> ToolInvocationReply {
-        let executed = self
-            .execute_tool_call(
-                call_id,
-                ToolCallAuthorization::Granted(Box::new(grant)),
-                args,
-                None,
-                None,
-                Some(trace_hook),
-            )
-            .await;
+        let executed = Box::pin(self.execute_tool_call(
+            call_id,
+            ToolCallAuthorization::Granted(Box::new(grant)),
+            args,
+            None,
+            None,
+            Some(trace_hook),
+        ))
+        .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }

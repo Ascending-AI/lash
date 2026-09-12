@@ -35,7 +35,7 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
         })
         .build()
         .into_handle();
-    let plugin = Arc::new(WorkbenchPluginFactory::new(""));
+    let plugin = Arc::new(WorkbenchPluginFactory::new());
     let notes = plugin.derived_notes();
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)

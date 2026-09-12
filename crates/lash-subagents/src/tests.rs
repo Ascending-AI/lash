@@ -871,11 +871,8 @@ finish result
     let parent = graphs
         .iter()
         .find(|graph| {
-            graph.scope.session_id == "root"
-                && matches!(
-                    &graph.subject,
-                    TraceRuntimeSubject::Effect { kind, .. } if kind == "exec_code"
-                )
+            graph.scope.session_id.as_deref() == Some("root")
+                && matches!(&graph.subject, TraceRuntimeSubject::Effect { .. })
                 && graph
                     .children
                     .iter()

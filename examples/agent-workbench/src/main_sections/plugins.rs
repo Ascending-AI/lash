@@ -2,7 +2,6 @@ use super::*;
 use lash::SessionId;
 
 pub(crate) struct WorkbenchPluginFactory {
-    pub(crate) tavily_api_key: String,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) derived_notes: WorkbenchDerivedNotes,
     pub(crate) config_changes: WorkbenchConfigChanges,
@@ -12,9 +11,8 @@ pub(crate) struct WorkbenchPluginFactory {
 }
 
 impl WorkbenchPluginFactory {
-    pub(crate) fn new(tavily_api_key: impl Into<String>) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            tavily_api_key: tavily_api_key.into(),
             mail_world: mail::MailWorld::new(),
             derived_notes: WorkbenchDerivedNotes::default(),
             config_changes: WorkbenchConfigChanges::default(),
@@ -64,6 +62,12 @@ impl WorkbenchPluginFactory {
     }
 }
 
+impl Default for WorkbenchPluginFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PluginFactory for WorkbenchPluginFactory {
     fn id(&self) -> &'static str {
         "agent_workbench"
@@ -92,7 +96,6 @@ impl PluginFactory for WorkbenchPluginFactory {
         let dialect = tutorial_dialect(ctx)?;
         Ok(Arc::new(WorkbenchSessionPlugin {
             dialect,
-            tavily_api_key: self.tavily_api_key.clone(),
             mail_world: self.mail_world.clone(),
             derived_notes: self.derived_notes.clone(),
             config_changes: self.config_changes.clone(),
@@ -105,7 +108,6 @@ impl PluginFactory for WorkbenchPluginFactory {
 
 pub(crate) struct WorkbenchSessionPlugin {
     pub(crate) dialect: lash::rlm::RlmDialect,
-    pub(crate) tavily_api_key: String,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) derived_notes: WorkbenchDerivedNotes,
     pub(crate) config_changes: WorkbenchConfigChanges,
@@ -151,14 +153,6 @@ impl SessionPlugin for WorkbenchSessionPlugin {
             MAIL_EVENT_EVENT,
             mail_received_payload_schema(),
         ))?;
-        reg.tools()
-            .provider(Arc::new(lash_tools::web::web_search_provider(
-                self.tavily_api_key.clone(),
-            )))?;
-        reg.tools()
-            .provider(Arc::new(lash_tools::web::fetch_url_provider(
-                self.tavily_api_key.clone(),
-            )))?;
         reg.tools()
             .provider(self.deferred_tools.search_provider())?;
         reg.tools()

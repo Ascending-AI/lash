@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod causal;
 #[doc(hidden)]
 pub mod core_support;
+mod effect_identity;
 mod frame_key;
 pub mod identity;
 pub mod llm;
@@ -29,6 +30,9 @@ pub use attachment::{
     InvalidAttachmentId, InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
+pub use effect_identity::{
+    EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
+};
 pub use frame_key::{FrameKey, FrameKeyError};
 pub use identity::{BatchId, InputId, NodeId, ProcessId, SessionId, TurnId};
 pub use llm::capability::{
@@ -49,7 +53,8 @@ pub use redacted::Redacted;
 pub use sansio::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, LlmCallError,
-    PendingToolCall, ProjectorContext, ProtocolDriverHandle, Response, TurnCause, TurnCheckpoint,
+    PendingToolCall, ProjectorContext, ProtocolDriverHandle, Response,
+    TURN_CHECKPOINT_SCHEMA_VERSION, TurnCause, TurnCheckpoint, TurnCheckpointRestoreError,
     TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol, WaitingExecState,
     WaitingLlmState, render_turn_causes_prompt,
 };
