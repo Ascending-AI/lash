@@ -36,6 +36,7 @@ lash-provider-openai = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["perf-witness"] }
 lash-standard-plugins = { workspace = true, features = ["lashlang"] }
+lash-plugin-rolling-history = { workspace = true }
 lash-subagents = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }

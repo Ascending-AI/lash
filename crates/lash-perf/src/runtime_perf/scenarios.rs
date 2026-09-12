@@ -1,4 +1,5 @@
-use lash_standard_plugins::{RollingHistoryConfig, StandardContextApproach};
+use lash_plugin_rolling_history::RollingHistoryConfig;
+use lash_standard_plugins::StandardContextApproach;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ExecutionMode {

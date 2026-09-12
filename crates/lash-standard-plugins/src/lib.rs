@@ -1,16 +1,13 @@
-pub mod rolling_history;
-
 use std::sync::Arc;
 
 use lash_core::plugin::{PluginSpec, StaticPluginFactory};
 use lash_core::{ToolProvider, facade_support::PluginStack};
 use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
+use lash_plugin_rolling_history::{RollingHistoryConfig, RollingHistoryPluginFactory};
 use lash_plugin_tool_output_budget::{ToolOutputBudgetPluginFactory, tool_output_budget_stack};
 use lash_sansio::Redacted;
 use lash_tools::shell::StandardShellPluginFactory;
 use lash_tools::web::{fetch_url_provider, web_search_provider};
-use rolling_history::RollingHistoryPluginFactory;
-pub use rolling_history::{ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS, RollingHistoryConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StandardContextApproachKind {

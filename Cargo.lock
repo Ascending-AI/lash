@@ -66,6 +66,7 @@ dependencies = [
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-tools",
  "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-rolling-history",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
@@ -73,7 +74,6 @@ dependencies = [
  "lash-internal-restate",
  "lash-internal-rlm-types",
  "lash-internal-sqlite-store",
- "lash-internal-standard-plugins",
  "lash-internal-subagents",
  "lash-internal-tools",
  "lash-internal-typescript",
@@ -2258,6 +2258,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-plugin-rolling-history"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core",
+ "lash-internal-sansio",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "lash-internal-plugin-tool-output-budget"
 version = "0.0.0-dev"
 dependencies = [
@@ -2538,15 +2550,13 @@ dependencies = [
 name = "lash-internal-standard-plugins"
 version = "0.0.0-dev"
 dependencies = [
- "async-trait",
  "lash-internal-core",
  "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-rolling-history",
  "lash-internal-plugin-tool-output-budget",
  "lash-internal-sansio",
  "lash-internal-tools",
  "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -2646,6 +2656,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-tools",
+ "lash-internal-plugin-rolling-history",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
@@ -2715,6 +2726,7 @@ dependencies = [
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-tools",
  "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-rolling-history",
  "lash-internal-plugin-tool-output-budget",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
@@ -2724,7 +2736,6 @@ dependencies = [
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
- "lash-internal-standard-plugins",
  "lash-internal-subagents",
  "lash-internal-tool-support",
  "lash-internal-tools",

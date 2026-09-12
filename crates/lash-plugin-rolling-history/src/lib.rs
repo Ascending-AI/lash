@@ -3,8 +3,7 @@
 //! Owns rolling prompt-view shaping and the explicit `/compact`
 //! summarization strategy.
 //!
-//! Registered as a default plugin by
-//! the first-party default tool bundles from `lash-standard-plugins`,
+//! Registered as a default plugin by the first-party default tool bundles,
 //! so standard lash sessions pick it up automatically.
 
 use lash_sansio::{SessionId, TurnId};
