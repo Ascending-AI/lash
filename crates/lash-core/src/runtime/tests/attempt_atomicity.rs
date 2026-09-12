@@ -490,7 +490,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
         scoped,
         &fixtures,
         Arc::clone(&provider) as Arc<dyn crate::ToolProvider>,
-        Vec::new(),
+        vec![PureLeafProbeProvider::definition()],
         true,
     );
 
@@ -511,13 +511,17 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                     .as_ref()
                     .expect("tool context carries runtime dispatch"),
             );
-            let result = crate::tool_dispatch::execute_once(
-                dispatch.as_ref(),
-                &prepared_tool_call(),
-                tool,
-                None,
-            )
-            .await;
+            let prepared = prepared_tool_call();
+            assert!(
+                crate::tool_dispatch::resolve_callable_manifest_by_id(
+                    dispatch.as_ref(),
+                    &prepared.tool_id,
+                )
+                .is_some(),
+                "the attempt is admitted through the production catalog authority"
+            );
+            let result =
+                crate::tool_dispatch::execute_once(dispatch.as_ref(), &prepared, tool, None).await;
             // Assert the provider's sentinel value at the test level, not just
             // the Done shape. A recorded attempt body runs under
             // `catch_unwind`, so an assertion that panics *inside* the provider

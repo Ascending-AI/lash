@@ -58,23 +58,7 @@ pub(crate) async fn execute_once<'run>(
     tool_context: ToolContext<'run>,
     grant: Option<&crate::ToolExecutionGrant>,
 ) -> crate::ToolAttemptOutcome {
-    let Some(authority) =
-        AttemptAuthority::resolve(context, &prepared.tool_id, grant).or_else(|| {
-            // This entry point is also used by the low-level attempt-atomicity
-            // harness, which intentionally bypasses catalog construction. Keep
-            // that direct seam working from the provider's registered manifest;
-            // normal dispatch always resolves through the catalog above.
-            grant
-                .is_none()
-                .then(|| {
-                    context
-                        .tools
-                        .resolve_manifest_by_id(&prepared.tool_id)
-                        .map(|manifest| AttemptAuthority::Catalog(Box::new(manifest)))
-                })
-                .flatten()
-        })
-    else {
+    let Some(authority) = AttemptAuthority::resolve(context, &prepared.tool_id, grant) else {
         return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::failure(
             crate::ToolFailure::runtime(
                 crate::ToolFailureClass::Unavailable,
