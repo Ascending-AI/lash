@@ -888,8 +888,8 @@ impl TurnInputStore for Store {
                         || !matches!(observed, lash_core::TurnCancelIntentSnapshot::Absent);
                     if closure_required != settlement.is_some()
                         || closure.is_some_and(|authorization| {
-                            authorization.session_id() != &session_id
-                                || authorization.turn_id() != &turn_id
+                            authorization.session_id() != session_id
+                                || authorization.turn_id() != turn_id
                         })
                     {
                         return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
@@ -897,14 +897,13 @@ impl TurnInputStore for Store {
                             turn_id: turn_id.clone(),
                         });
                     }
-                    if let Some(closure) = closure {
-                        if stored.as_deref() != Some(encode_json(closure)?.as_str()) {
+                    if let Some(closure) = closure
+                        && stored.as_deref() != Some(encode_json(closure)?.as_str()) {
                             return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                                 session_id: session_id.clone(),
                                 turn_id: turn_id.clone(),
                             });
                         }
-                    }
                     let repaired = repair_orphaned_active_turn_inputs_conn(
                         tx,
                         &session_id,

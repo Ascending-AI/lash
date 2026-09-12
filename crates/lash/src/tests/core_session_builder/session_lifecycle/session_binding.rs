@@ -167,12 +167,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
             .effect_host(receiving_host)
             .build(owner)?;
 
-    let parked = source
-        .session("owner-preserved")
-        .open()
-        .await?
-        .park()
-        .await?;
+    let parked = Box::pin(source.session("owner-preserved").open().await?.park()).await?;
     let resumed = receiving.resume(parked).await?;
     let result = resumed
         .turn(TurnInput::text("use receiving core live configuration"))

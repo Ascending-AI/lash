@@ -101,7 +101,7 @@ impl PreparedTurn {
         if !has_durable_store
             || !super::commit_admission::requires_local_commit_admission(effect_controller)
         {
-            return self.commit_after_admission(request).await;
+            return Box::pin(self.commit_after_admission(request)).await;
         }
         let session_id = self.turn_pipeline.state().session_id.clone();
         let work_identity = request.trace_turn_id.to_string();
@@ -144,9 +144,8 @@ impl PreparedTurn {
             turn_cancel_closure_settlement,
             turn_control_resolver,
         } = request;
-        let accepted = self
-            .turn_pipeline
-            .final_commit(
+        let accepted = Box::pin(
+            self.turn_pipeline.final_commit(
                 &mut self.turn,
                 session,
                 staged_usage.deltas(),
@@ -164,8 +163,9 @@ impl PreparedTurn {
                 release_session_execution_lease
                     .then(|| session_execution_lease.map(SessionExecutionLeaseGuard::completion))
                     .flatten(),
-            )
-            .await?;
+            ),
+        )
+        .await?;
         Ok(CommittedTurn {
             turn: self.turn,
             events: self.events,
@@ -855,14 +855,8 @@ impl LashRuntime {
         let turn_control_binding =
             turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
         let turn_control_resolver = match &turn_control_binding {
-            crate::TurnControlBinding::HostOwned {
-                resolver, peek: _, ..
-            }
-            | crate::TurnControlBinding::RunScoped {
-                resolver,
-                durable_cancel_after_llm: _,
-                ..
-            } => *resolver,
+            crate::TurnControlBinding::HostOwned { resolver, .. }
+            | crate::TurnControlBinding::RunScoped { resolver, .. } => *resolver,
         };
         let turn_control = Arc::new(
             ActiveTurnControl::new(

@@ -933,12 +933,12 @@ async fn draining_task_is_retired_by_the_reclaim_sweep(pg: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_draining_task_is_retired_by_the_reclaim_sweep() {
-    draining_task_is_retired_by_the_reclaim_sweep(false).await;
+    Box::pin(draining_task_is_retired_by_the_reclaim_sweep(false)).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_draining_task_is_retired_by_the_reclaim_sweep() {
-    draining_task_is_retired_by_the_reclaim_sweep(true).await;
+    Box::pin(draining_task_is_retired_by_the_reclaim_sweep(true)).await;
 }
 
 /// The sweep retires facade-minted scopes only. A caller-supplied

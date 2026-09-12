@@ -6,9 +6,11 @@ async fn postgres_cross_owner_attachment_adoption_conformance() {
         return;
     };
     reset(&storage).await;
-    lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
-        storage.session_store_factory(),
-    ))
+    Box::pin(
+        lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
+            storage.session_store_factory(),
+        )),
+    )
     .await;
 }
 

@@ -373,7 +373,7 @@ impl SessionCommitStore for PostgresSessionStore {
                     turn_id: closure.turn_id().clone(),
                 })?;
             ensure_session_execution_lease_tx(&mut tx, &commit.session_id, current_fence).await?;
-            if closure.session_id() != &commit.session_id
+            if closure.session_id() != commit.session_id
                 || commit.interrupted_turn_input_turn_id.as_ref() != Some(closure.turn_id())
             {
                 return Err(StoreError::TurnCancelClosureAuthorizationMismatch {

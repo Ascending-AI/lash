@@ -152,11 +152,7 @@ mod tests {
                     .turn_control_binding(&local_scoped)
                     .await
                     .expect("local binding"),
-                crate::TurnControlBinding::HostOwned {
-                    resolver: _,
-                    peek: _,
-                    ..
-                }
+                crate::TurnControlBinding::HostOwned { .. }
             ),
             "a local native host must construct HostOwned turn control"
         );

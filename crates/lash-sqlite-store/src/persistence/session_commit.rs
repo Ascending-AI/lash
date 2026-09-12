@@ -423,7 +423,7 @@ impl SessionCommitStore for Store {
                             current_fence,
                             now,
                         )?;
-                        if closure.session_id() != &commit.session_id
+                        if closure.session_id() != commit.session_id
                             || commit.interrupted_turn_input_turn_id.as_ref()
                                 != Some(closure.turn_id())
                         {

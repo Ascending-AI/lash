@@ -123,9 +123,7 @@ impl ManagedSessionCapability {
                 usage.record_token_usage(&source, &turn.state.policy.model.id, &remainder);
             }
         }
-        usage
-            .persist_current_usage_ledger(current, &turn_id)
-            .await?;
+        Box::pin(usage.persist_current_usage_ledger(current, &turn_id)).await?;
         turn
     }
 

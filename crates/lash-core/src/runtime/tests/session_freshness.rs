@@ -19,8 +19,8 @@ async fn append_history(runtime: &mut LashRuntime, depth: usize) {
     if depth == 1 {
         return;
     }
-    runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: format!("freshness-depth-{depth}"),
             nodes: (1..depth)
                 .map(|ordinal| {
@@ -31,9 +31,10 @@ async fn append_history(runtime: &mut LashRuntime, depth: usize) {
                 })
                 .collect(),
             requires_ancestor_node_id: None,
-        })
-        .await
-        .expect("append freshness history");
+        }),
+    )
+    .await
+    .expect("append freshness history");
     assert_eq!(runtime.state.session_graph.nodes.len(), depth);
 }
 
@@ -130,7 +131,7 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
 async fn unchanged_session_freshness_is_independent_of_history_depth() {
     for depth in [10, 256] {
         let (mut runtime, store) = freshness_runtime().await;
-        append_history(&mut runtime, depth).await;
+        Box::pin(append_history(&mut runtime, depth)).await;
         let head_reads_before = store.load_session_head_meta_count();
         let full_loads_before = store.load_session_count();
 
@@ -155,7 +156,7 @@ async fn unchanged_session_freshness_is_independent_of_history_depth() {
 #[tokio::test]
 async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let head_reads_before = store.load_session_head_meta_count();
     let full_loads_before = store.load_session_count();
     runtime.resident_session.mark_graph_head_stale();
@@ -182,7 +183,7 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
 #[tokio::test]
 async fn freshness_hydrates_when_revision_changed() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let mut head = store
         .load_session_head_meta()
         .await
@@ -208,7 +209,7 @@ async fn freshness_hydrates_when_revision_changed() {
 #[tokio::test]
 async fn resident_refresh_adopts_the_durable_head_prompt() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     runtime
         .add_prompt_contribution(crate::PromptContribution::guidance(
             "Settled host change",
@@ -244,7 +245,7 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
 #[tokio::test]
 async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_path() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
 
     let mut durable_head = store
         .load_session_head_meta()
@@ -286,7 +287,7 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
 #[tokio::test]
 async fn resident_refresh_adopts_the_durable_head_model() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let settled_model = crate::ModelSpec::builder("settled-live-model")
         .context_window_tokens(123_456)
         .build()
@@ -331,7 +332,7 @@ async fn resident_refresh_adopts_the_durable_head_model() {
 #[tokio::test]
 async fn resident_refresh_adopts_the_durable_head_provider_id() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let settled_provider = TestProvider::builder()
         .kind("settled-live-provider")
         .complete_error("provider must not be called by refresh")
@@ -369,7 +370,7 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
 #[tokio::test]
 async fn freshness_hydrates_when_leaf_changed() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let frame_node_id = runtime.state.session_graph.nodes[0].node_id.clone();
     let mut head = store
         .load_session_head_meta()
@@ -396,7 +397,7 @@ async fn freshness_hydrates_when_leaf_changed() {
 #[tokio::test]
 async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let mut head = store
         .load_session_head_meta()
         .await
@@ -427,7 +428,7 @@ async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
 #[tokio::test]
 async fn freshness_skips_hydration_when_nothing_changed() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let resident_head = (
         runtime.state.head_revision,
         runtime.state.session_graph.leaf_node_id.clone(),
@@ -493,7 +494,7 @@ async fn protocol_turn_options_settle_through_the_commanded_write() {
 #[tokio::test]
 async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_head() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let options = commanded_turn_options("survives-invalidation-reload");
 
     runtime
@@ -551,7 +552,7 @@ async fn protocol_turn_options_all_frames_setter_settles_durably() {
 #[tokio::test]
 async fn live_policy_override_then_invalidation_reload_yields_the_head_values() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let overridden_model = crate::ModelSpec::builder("live-override-model")
         .context_window_tokens(123_456)
         .build()
@@ -635,7 +636,7 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
         store.clone() as Arc<dyn crate::RuntimePersistence>,
     )
     .await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
 
     runtime.invalidate_resident_session_state();
     let head_probes_before = store.load_session_head_meta_count();
@@ -684,7 +685,7 @@ fn reopen_prompt(label: &str) -> crate::PromptLayer {
 #[tokio::test]
 async fn reopen_seed_delayed_retry_adopts_advanced_head() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let base = store.load_session_head_meta().await.unwrap().unwrap();
     runtime.state.policy.prompt = reopen_prompt("seed");
     let retry = runtime.state.clone();
@@ -714,7 +715,7 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
 #[tokio::test]
 async fn reopen_seed_same_base_replay_is_idempotent() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let base = store.load_session_head_meta().await.unwrap().unwrap();
     runtime.state.policy.prompt = reopen_prompt("seed");
     let retry = runtime.state.clone();
@@ -738,7 +739,7 @@ async fn reopen_seed_same_base_replay_is_idempotent() {
 #[tokio::test]
 async fn reopen_seed_alternating_seeds_advance_without_panicking() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     for label in ["a", "b", "a", "b"] {
         let base = store.load_session_head_meta().await.unwrap().unwrap();
         runtime.state.policy.prompt = reopen_prompt(label);
@@ -766,7 +767,7 @@ async fn reopen_seed_alternating_seeds_advance_without_panicking() {
 #[tokio::test]
 async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted_head() {
     let (mut runtime, store) = freshness_runtime().await;
-    append_history(&mut runtime, 2).await;
+    Box::pin(append_history(&mut runtime, 2)).await;
     let model = runtime.state.effective_policy().model.id.clone();
 
     // Durable holes committed outside this handle: two billed attempts whose

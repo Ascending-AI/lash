@@ -506,15 +506,18 @@ async fn postgres_complete_runtime_checkpoint_component_set_survives_cold_reopen
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_conformance::complete_runtime_checkpoint_component_set_survives_cold_reopens(|| {
-        let database_url = database_url.clone();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("construct post-write Postgres checkpoint pool")
-        });
-        Arc::new(storage.session_store("checkpoint-component-refs")) as Arc<dyn RuntimePersistence>
-    })
+    Box::pin(
+        lash_conformance::complete_runtime_checkpoint_component_set_survives_cold_reopens(|| {
+            let database_url = database_url.clone();
+            let storage = sync_await(async move {
+                PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("construct post-write Postgres checkpoint pool")
+            });
+            Arc::new(storage.session_store("checkpoint-component-refs"))
+                as Arc<dyn RuntimePersistence>
+        }),
+    )
     .await;
 }
 

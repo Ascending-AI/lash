@@ -15,7 +15,7 @@ pub(super) async fn cross_owner_attachment_adoption(
         Arc::new(postgres.session_store_factory()),
     ];
     for factory in factories {
-        lash_conformance::cross_owner_attachment_adoption_conformance(factory).await;
+        Box::pin(lash_conformance::cross_owner_attachment_adoption_conformance(factory)).await;
     }
 }
 

@@ -287,29 +287,30 @@ pub(super) async fn load_turn_cancel_request_pg(
     Ok(record)
 }
 
+type TurnCancelIntentRow = (String, Option<String>, Option<String>, String, String, i64);
+
 pub(super) async fn load_turn_cancel_intent_snapshot_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
-    let row: Option<(String, Option<String>, Option<String>, String, String, i64)> =
-        sqlx::query_as(
-            "SELECT request_id, origin, reason, disposition, mode, intent_revision
+    let row: Option<TurnCancelIntentRow> = sqlx::query_as(
+        "SELECT request_id, origin, reason, disposition, mode, intent_revision
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
-        )
-        .bind(session_id.as_str())
-        .bind(turn_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     turn_cancel_snapshot_from_row(session_id, turn_id, row)
 }
 
 fn turn_cancel_snapshot_from_row(
     session_id: &SessionId,
     turn_id: &TurnId,
-    row: Option<(String, Option<String>, Option<String>, String, String, i64)>,
+    row: Option<TurnCancelIntentRow>,
 ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
     let Some((request_id, origin, reason, disposition, mode, revision)) = row else {
         return Ok(lash_core::TurnCancelIntentSnapshot::Absent);
@@ -751,10 +752,9 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     }
     if let Some(evidence) =
         settlement.and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+        && !reconcile_turn_cancel_winner_tx(tx, session_id, turn_id, observed, evidence).await?
     {
-        if !reconcile_turn_cancel_winner_tx(tx, session_id, turn_id, observed, evidence).await? {
-            return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
-        }
+        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
     }
     let rows: Vec<(String, String, String, String, Option<String>, i64)> = sqlx::query_as(
         "SELECT input_id, state, ingress_json, input_json, claim_token, claim_session_lease_generation

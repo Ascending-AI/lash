@@ -390,9 +390,11 @@ async fn replay_case(
 ) -> Result<RunShape, TestCaseError> {
     let mut scenario = SessionGraphScenario::new(seed, factory);
     for (step, operation) in operations.iter().enumerate() {
-        scenario.apply(operation).await.map_err(|reason| {
-            TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
-        })?;
+        Box::pin(scenario.apply(operation))
+            .await
+            .map_err(|reason| {
+                TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
+            })?;
         scenario.assert_model_agreement().await.map_err(|reason| {
             TestCaseError::fail(format!(
                 "model agreement at step {step} {operation:?}: {reason}"
@@ -420,7 +422,7 @@ impl SessionGraphScenario {
                 session,
                 node_count,
                 requirement,
-            } => self.append(*session, *node_count, *requirement).await,
+            } => Box::pin(self.append(*session, *node_count, *requirement)).await,
             SessionGraphContractOp::Fork {
                 source,
                 target,
@@ -439,9 +441,11 @@ impl SessionGraphScenario {
             }
             SessionGraphContractOp::ColdReload { session } => self.cold_reload(*session).await,
             SessionGraphContractOp::Malformed { session, shape } => {
-                self.malformed(*session, *shape).await
+                Box::pin(self.malformed(*session, *shape)).await
             }
-            SessionGraphContractOp::StaleHeadCas { session } => self.stale_head_cas(*session).await,
+            SessionGraphContractOp::StaleHeadCas { session } => {
+                Box::pin(self.stale_head_cas(*session)).await
+            }
         }
     }
 
@@ -515,14 +519,15 @@ impl SessionGraphScenario {
                 )
             })
             .collect();
-        let result = runtime
-            .append_session_nodes(crate::AppendSessionNodesRequest {
+        let result = Box::pin(
+            runtime.append_session_nodes(crate::AppendSessionNodesRequest {
                 operation_id,
                 nodes,
                 requires_ancestor_node_id: required.clone(),
-            })
-            .await
-            .map_err(|error| error.to_string())?;
+            }),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
 
         let required_is_live = required
             .as_ref()
@@ -898,7 +903,7 @@ impl SessionGraphScenario {
             .get(&slot)
             .is_none_or(|session| session.path.is_empty())
         {
-            self.append(slot, 1, 0).await?;
+            Box::pin(self.append(slot, 1, 0)).await?;
         }
         assert_bounded_resident_rejection(shape % 4)?;
         self.shape.bounded_traversals += 1;
@@ -951,7 +956,7 @@ impl SessionGraphScenario {
             .get(&slot)
             .is_none_or(|session| session.path.is_empty())
         {
-            self.append(slot, 1, 0).await?;
+            Box::pin(self.append(slot, 1, 0)).await?;
         }
         if self
             .model

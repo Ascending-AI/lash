@@ -6,7 +6,7 @@ async fn recording_store_satisfies_runtime_persistence_conformance(
 ) {
     let clock = Arc::new(crate::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
-    crate::conformance::runtime_persistence(
+    Box::pin(crate::conformance::runtime_persistence(
         move |session_id| {
             let store = RecordingStore::with_clock(store_clock.clone());
             store.bind_session_for_conformance(&SessionId::from(session_id));
@@ -17,7 +17,7 @@ async fn recording_store_satisfies_runtime_persistence_conformance(
             move |duration_ms| clock.advance(duration_ms)
         }),
         law,
-    )
+    ))
     .await;
 }
 

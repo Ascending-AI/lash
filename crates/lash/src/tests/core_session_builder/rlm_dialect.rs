@@ -123,7 +123,7 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
         .restore_execution(&execution_snapshot)
         .await?;
 
-    let parked = session.park().await?;
+    let parked = Box::pin(session.park()).await?;
     let resumed = Box::pin(core.resume(parked)).await?;
     let second = resumed
         .turn(TurnInput::text("compute again"))
@@ -670,7 +670,7 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
         )
         .await
         .expect("an unrecorded termination accepts a write");
-    session.close().await?;
+    Box::pin(session.close()).await?;
 
     let reopened = core.session("rlm-write-roundtrip").open().await?;
     let recorded = reopened.rlm_config().expect("recorded config decodes");
@@ -698,7 +698,7 @@ async fn stating_a_disagreeing_dialect_at_open_refuses_instead_of_falling_back()
     let session = stating_dialect(core.session("rlm-open-refusal"), RlmDialect::Typescript)
         .open()
         .await?;
-    session.close().await?;
+    Box::pin(session.close()).await?;
 
     let Err(error) = stating_dialect(core.session("rlm-open-refusal"), RlmDialect::Lashlang)
         .open()

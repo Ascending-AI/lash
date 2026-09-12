@@ -579,11 +579,13 @@ mod tests {
     async fn in_memory_complete_runtime_checkpoint_component_set_survives_cold_reopens() {
         let substrate =
             Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn RuntimePersistence>;
-        complete_runtime_checkpoint_component_set_survives_cold_reopens(move || {
-            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(Arc::clone(
-                &substrate,
-            ))
-        })
+        Box::pin(
+            complete_runtime_checkpoint_component_set_survives_cold_reopens(move || {
+                crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(Arc::clone(
+                    &substrate,
+                ))
+            }),
+        )
         .await;
     }
 

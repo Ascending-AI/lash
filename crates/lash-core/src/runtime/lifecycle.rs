@@ -963,7 +963,7 @@ mod tests {
             .await
             .expect("delete session before park commit");
 
-        let error = match runtime.park().await {
+        let error = match Box::pin(runtime.park()).await {
             Ok(_) => panic!("park commit must refuse the retired session"),
             Err(error) => error,
         };
@@ -1032,7 +1032,7 @@ mod tests {
                 "temporary park backend outage".to_string(),
             ));
 
-        let error = match runtime.park().await {
+        let error = match Box::pin(runtime.park()).await {
             Ok(_) => panic!("park commit must surface the injected backend failure"),
             Err(error) => error,
         };

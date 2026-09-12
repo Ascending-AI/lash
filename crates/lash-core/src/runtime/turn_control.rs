@@ -879,12 +879,7 @@ impl TurnWorkDriver {
                     RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
                 })?;
             base_winner =
-                match ActiveTurnControl::peek_base_cancel_evidence(resolver, &request.address)
-                    .await?
-                {
-                    Some(evidence) => Some(evidence),
-                    None => None,
-                };
+                ActiveTurnControl::peek_base_cancel_evidence(resolver, &request.address).await?;
         }
         let record = store
             .turn_cancel_request(&request.address)

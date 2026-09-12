@@ -619,11 +619,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             .turn_control_binding(&native_scoped)
             .await
             .expect("inline binding"),
-        lash::runtime::TurnControlBinding::HostOwned {
-            resolver: _,
-            peek: _,
-            ..
-        }
+        lash::runtime::TurnControlBinding::HostOwned { .. }
     ));
     let durable_scoped = durable_host.scoped(scope).expect("durable scope");
     assert!(matches!(

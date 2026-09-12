@@ -441,14 +441,13 @@ impl Backend {
             extra_plugins,
         )
         .await;
-        runtime
-            .append_session_nodes(AppendSessionNodesRequest {
-                operation_id: "fig2521-seed".to_string(),
-                requires_ancestor_node_id: None,
-                nodes: seed_nodes("original"),
-            })
-            .await
-            .expect("append seed");
+        Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
+            operation_id: "fig2521-seed".to_string(),
+            requires_ancestor_node_id: None,
+            nodes: seed_nodes("original"),
+        }))
+        .await
+        .expect("append seed");
         let snapshot = runtime
             .snapshot_execution_state()
             .await
@@ -462,7 +461,7 @@ impl Backend {
             .restore_execution_state(&snapshot)
             .await
             .expect("restore snapshot");
-        runtime.park().await.expect("park");
+        Box::pin(runtime.park()).await.expect("park");
         drop(plugins);
 
         let durable = lash_core::store::load_persisted_session_state(base.as_ref())
@@ -714,14 +713,13 @@ async fn faulted_append_rollback(backend: Backend) {
         serde_json::json!("UNCOMMITTED-GLOBAL"),
     );
     store.arm(CommitFault::FailNext);
-    let error = runtime
-        .append_session_nodes(AppendSessionNodesRequest {
-            operation_id: "fig2521-discarded".to_string(),
-            requires_ancestor_node_id: None,
-            nodes: rlm_seed_initial_nodes(discarded),
-        })
-        .await
-        .expect_err("the faulted append must fail");
+    let error = Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
+        operation_id: "fig2521-discarded".to_string(),
+        requires_ancestor_node_id: None,
+        nodes: rlm_seed_initial_nodes(discarded),
+    }))
+    .await
+    .expect_err("the faulted append must fail");
     let message = error.to_string();
     assert!(
         message.contains("injected commit failure")
@@ -1133,14 +1131,13 @@ async fn storeless_runtime(
     runtime
         .configure_protocol_on_materialize(&lash_core::PluginOptions::empty(), true)
         .expect("materialize protocol");
-    runtime
-        .append_session_nodes(AppendSessionNodesRequest {
-            operation_id: "fig2521-storeless-seed".to_string(),
-            requires_ancestor_node_id: None,
-            nodes: seed_nodes("original"),
-        })
-        .await
-        .expect("append seed");
+    Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
+        operation_id: "fig2521-storeless-seed".to_string(),
+        requires_ancestor_node_id: None,
+        nodes: seed_nodes("original"),
+    }))
+    .await
+    .expect("append seed");
     runtime
 }
 
@@ -1197,14 +1194,14 @@ impl lash_core::facade_support::SessionPlugin for FailFirstTurnPersisted {
 /// must stay resident and the reload must rebuild from it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_storeless_reload_after_turn_persisted_failure_keeps_the_accepted_global() {
-    let mut runtime = storeless_runtime(
+    let mut runtime = Box::pin(storeless_runtime(
         vec![
             establish_response(),
             read_response(),
             "global missing".to_string(),
         ],
         vec![Arc::new(FailFirstTurnPersisted)],
-    )
+    ))
     .await;
 
     let first = turn(&mut runtime, "commit-then-fail-delivery").await;
@@ -1237,8 +1234,11 @@ async fn rlm_storeless_reload_after_turn_persisted_failure_keeps_the_accepted_gl
 /// touches anything; the accepted execution and the next turn are unchanged.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_storeless_stale_ancestor_append_keeps_the_accepted_execution() {
-    let mut runtime =
-        storeless_runtime(vec![establish_response(), read_response()], Vec::new()).await;
+    let mut runtime = Box::pin(storeless_runtime(
+        vec![establish_response(), read_response()],
+        Vec::new(),
+    ))
+    .await;
     assert_final_value(
         "storeless",
         &turn(&mut runtime, "establish").await,
@@ -1250,14 +1250,13 @@ async fn rlm_storeless_stale_ancestor_append_keeps_the_accepted_execution() {
         .expect("snapshot")
         .expect("execution state");
     let graph = format!("{:?}", runtime.export_persistence_state().session_graph);
-    let outcome = runtime
-        .append_session_nodes(AppendSessionNodesRequest {
-            operation_id: "fig2521-stale".to_string(),
-            requires_ancestor_node_id: Some("absent".to_string()),
-            nodes: seed_nodes("discarded"),
-        })
-        .await
-        .expect("a stale ancestor is an outcome, not an error");
+    let outcome = Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
+        operation_id: "fig2521-stale".to_string(),
+        requires_ancestor_node_id: Some("absent".to_string()),
+        nodes: seed_nodes("discarded"),
+    }))
+    .await
+    .expect("a stale ancestor is an outcome, not an error");
     assert!(
         matches!(
             outcome,
@@ -1361,14 +1360,13 @@ async fn next_commit_after(backend: &Backend, rolled_back_append: bool) -> NextC
         discarded
             .globals
             .insert("discarded".to_string(), serde_json::json!([1, 2, 3, 4]));
-        runtime
-            .append_session_nodes(AppendSessionNodesRequest {
-                operation_id: "fig2521-parity-discarded".to_string(),
-                requires_ancestor_node_id: None,
-                nodes: rlm_seed_initial_nodes(discarded),
-            })
-            .await
-            .expect_err("the faulted append must fail");
+        Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
+            operation_id: "fig2521-parity-discarded".to_string(),
+            requires_ancestor_node_id: None,
+            nodes: rlm_seed_initial_nodes(discarded),
+        }))
+        .await
+        .expect_err("the faulted append must fail");
         assert_eq!(
             runtime
                 .snapshot_execution_state()
@@ -1500,17 +1498,16 @@ async fn message_append_keeps_the_committed_execution(backend: Backend) {
         .await
         .expect("snapshot")
         .expect("execution state");
-    runtime
-        .append_session_nodes(AppendSessionNodesRequest {
-            operation_id: "fig2521-message".to_string(),
-            requires_ancestor_node_id: None,
-            nodes: vec![SessionAppendNode::message(
+    Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
+        operation_id: "fig2521-message".to_string(),
+        requires_ancestor_node_id: None,
+        nodes: vec![SessionAppendNode::message(
                 lash_core::PluginMessage::text(lash_core::MessageRole::User, "message only")
                     .with_id("fig2521-message"),
             )],
-        })
-        .await
-        .expect("message append");
+    }))
+    .await
+    .expect("message append");
     assert_eq!(
         runtime
             .snapshot_execution_state()
@@ -1588,10 +1585,10 @@ async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
 /// executor's `REJECTED`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rlm_storeless_rejected_turn_does_not_reach_the_next_turn() {
-    let mut runtime = storeless_runtime(
+    let mut runtime = Box::pin(storeless_runtime(
         vec![establish_response(), reassign_response(), read_response()],
         vec![refuse_second_turn_finalize()],
-    )
+    ))
     .await;
     assert_final_value(
         "storeless",

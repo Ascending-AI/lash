@@ -236,7 +236,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         crate::MaintenanceStop::Failed(crate::StoreError::TurnCancelClosureLifecyclePinned {
             ref session_id,
             pending_count: 1,
-        }) if session_id == &request.session_id
+        }) if session_id == request.session_id
     ));
     assert!(matches!(
         store

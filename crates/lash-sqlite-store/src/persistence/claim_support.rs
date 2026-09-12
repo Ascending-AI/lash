@@ -939,10 +939,9 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
     }
     if let Some(evidence) =
         settlement.and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+        && !reconcile_turn_cancel_winner_conn(conn, session_id, turn_id, observed, evidence)?
     {
-        if !reconcile_turn_cancel_winner_conn(conn, session_id, turn_id, observed, evidence)? {
-            return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
-        }
+        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
     }
     let candidates = {
         let mut stmt = conn

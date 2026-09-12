@@ -1,8 +1,8 @@
 use std::sync::Arc;
 #[tokio::test]
 async fn in_memory_cross_owner_attachment_adoption_conformance() {
-    crate::cross_owner_attachment_adoption_conformance(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    Box::pin(crate::cross_owner_attachment_adoption_conformance(
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
     ))
     .await;
 }

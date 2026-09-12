@@ -42,8 +42,8 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         const ROLLED_BACK_MARKER: &str = "must-not-survive-stale-append";
         let writer = session.runtime.writer();
         let mut runtime = writer.lock().await;
-        let result = runtime
-            .append_session_nodes(lash_core::AppendSessionNodesRequest {
+        let result = Box::pin(
+            runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
                 operation_id: "leaf-bearing-stale-append".to_string(),
                 nodes: vec![lash_core::SessionAppendNode::message(
                     lash_core::PluginMessage::text(
@@ -53,8 +53,9 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                     .with_id("leaf-bearing-stale-append-message"),
                 )],
                 requires_ancestor_node_id: Some("inactive-ancestor".to_string()),
-            })
-            .await?;
+            }),
+        )
+        .await?;
         assert!(matches!(
             result,
             lash_core::AppendSessionNodesOutcome::StaleBranch { ref required_node_id }

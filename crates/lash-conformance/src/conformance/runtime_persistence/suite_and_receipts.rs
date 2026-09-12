@@ -60,7 +60,12 @@ pub async fn runtime_persistence_reopenable<F>(
             runtime_persistence_survives_reopen(make("root")).await
         }
         _ => {
-            runtime_persistence_suite(|session_id| make(session_id).open, &lease_timing, law).await
+            Box::pin(runtime_persistence_suite(
+                |session_id| make(session_id).open,
+                &lease_timing,
+                law,
+            ))
+            .await
         }
     }
 }
@@ -589,7 +594,7 @@ pub(super) async fn runtime_persistence_suite<F>(
         RuntimePersistenceLaw::checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows => { checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(make("root")).await; },
         RuntimePersistenceLaw::load_rejects_token_usage_overflow => { load_rejects_token_usage_overflow(make("root")).await; },
         RuntimePersistenceLaw::usage_delta_identity_is_idempotent_across_commits => { usage_delta_identity_is_idempotent_across_commits(make("root")).await; },
-        RuntimePersistenceLaw::usage_ordinal_reuse_with_different_payload_survives_receipt_replay => { usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make("root")).await; },
+        RuntimePersistenceLaw::usage_ordinal_reuse_with_different_payload_survives_receipt_replay => { Box::pin(usage_ordinal_reuse_with_different_payload_survives_receipt_replay(make("root"))).await; },
         RuntimePersistenceLaw::execution_state_replace_then_clear_removes_the_live_checkpoint_ref => { execution_state_replace_then_clear_removes_the_live_checkpoint_ref(make(
         "execution-state-replace-then-clear",
     ))

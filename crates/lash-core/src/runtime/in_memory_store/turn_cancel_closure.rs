@@ -52,7 +52,7 @@ pub(super) fn validate_after_receipt_miss(
             },
         )?;
     store.verify_session_execution_lease(&commit.session_id, current_fence, transaction_now)?;
-    if closure.session_id() != &commit.session_id
+    if closure.session_id() != commit.session_id
         || commit.interrupted_turn_input_turn_id.as_ref() != Some(closure.turn_id())
     {
         return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
