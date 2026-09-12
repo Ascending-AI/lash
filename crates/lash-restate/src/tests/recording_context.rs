@@ -1403,7 +1403,7 @@ fn replace_equal_length_bytes(input: &[u8], from: &[u8], to: &[u8]) -> (Vec<u8>,
 /// Isolate an old process-reference identity from the earlier envelope and
 /// durable-wait shape changes. The current supported endpoint corpus is
 /// rebound byte-for-byte to the equal-length historical replay key. Restate
-/// must refuse its obsolete command name before reconstructing the effect.
+/// must refuse its obsolete command name before duplicate execution can occur.
 #[tokio::test]
 pub(super) async fn pre_cutover_process_reference_name_refuses_before_duplicate_effect() {
     let historical_bytes =
