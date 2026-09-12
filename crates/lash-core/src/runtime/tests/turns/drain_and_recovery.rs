@@ -1033,7 +1033,11 @@ pub(super) async fn external_invoke_can_create_session_from_current_snapshot() {
                                             Ok(snapshot) => Ok(crate::plugin::ErasedPluginOperationOutcome {
                                                 output: json!({
                                                 "session_id": handle.session_id,
-                                                "message_count": snapshot.read_model().messages.len(),
+                                                "message_count": snapshot
+                                                    .read_model()
+                                                    .expect("test snapshot frame scope resolves")
+                                                    .messages
+                                                    .len(),
                                                 }),
                                                 events: Vec::new(),
                                                 directives: Vec::new(),
@@ -1397,7 +1401,7 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
         1,
         "child history must not retain the parent frame root"
     );
-    let read_model = graph.read_model();
+    let read_model = graph.read_model(None).unwrap();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].parts[0].content, "parent hello");
@@ -1652,6 +1656,7 @@ pub(super) async fn turn_driver_normalizes_alias_effort_into_outgoing_request() 
         cache_control: None,
         stream_termination: None,
         sampling: crate::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     };
     let model = crate::ModelSpec::builder("mock-model")
         .variant(crate::ReasoningSelection::Effort("xhigh".to_string()))
@@ -1736,6 +1741,7 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         cache_control: None,
         stream_termination: None,
         sampling: crate::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     };
     let model = crate::ModelSpec::builder("mock-model")
         .variant(crate::ReasoningSelection::Effort("turbo".to_string()))

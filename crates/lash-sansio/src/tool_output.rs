@@ -64,8 +64,7 @@ pub enum ProcessParentEndPolicy {
 
 /// Recorded teardown metadata for a successfully started child process.
 ///
-/// The durable tool-batch outcome carries this value so parent-end handling
-/// can be reconstructed after a crash without consulting live side state.
+/// Parent-end handling depends on an in-memory buffer until FIG-2963 lands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentParentEnd {
     pub process_id: ProcessId,

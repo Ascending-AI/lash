@@ -46,7 +46,7 @@ pub(super) async fn execute_leaf_tool_attempt<'run>(
 
 /// Runs a leaf tool body exactly once, with no retry ladder around it.
 ///
-/// The grant selects the execution seam and the attachment producer name;
+/// The grant selects the source route and the attachment producer name;
 /// everything else — the attempt context, panic containment, attachment
 /// normalization — is identical on both routes.
 pub(crate) async fn execute_once<'run>(
@@ -55,12 +55,11 @@ pub(crate) async fn execute_once<'run>(
     tool_context: ToolContext<'run>,
     grant: Option<&crate::ToolExecutionGrant>,
 ) -> crate::ToolAttemptOutcome {
-    let mut attempt_result = match build_attempt_context(context, prepared, &tool_context).await {
-        Ok(attempt_context) => {
-            execute_attempt_body(context, prepared, grant, &attempt_context).await
-        }
-        Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
-    };
+    let mut attempt_result =
+        match build_attempt_context(context, prepared, &tool_context, grant).await {
+            Ok(attempt_context) => execute_attempt_body(context, prepared, &attempt_context).await,
+            Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
+        };
     // A granted attempt is keyed on the grant name, never on whatever name the
     // provider's prepared call carries: the grant is the authority that
     // admitted the call, so it is the producer the attachment policy judges.
@@ -75,25 +74,12 @@ pub(crate) async fn execute_once<'run>(
 async fn execute_attempt_body(
     context: &ToolDispatchContext<'_>,
     prepared: &PreparedToolCall,
-    grant: Option<&crate::ToolExecutionGrant>,
     attempt_context: &crate::AttemptContext<'_>,
 ) -> crate::ToolAttemptOutcome {
-    let body = async {
-        match grant {
-            Some(grant) => {
-                context
-                    .tools
-                    .execute_granted_attempt(grant, &prepared.args, attempt_context)
-                    .await
-            }
-            None => {
-                context
-                    .tools
-                    .execute_attempt_by_id(&prepared.tool_id, &prepared.args, attempt_context)
-                    .await
-            }
-        }
-    };
+    let body =
+        context
+            .tools
+            .execute_attempt_by_id(&prepared.tool_id, &prepared.args, attempt_context);
     std::panic::AssertUnwindSafe(body)
         .catch_unwind()
         .await
@@ -106,6 +92,7 @@ async fn build_attempt_context<'run>(
     context: &ToolDispatchContext<'_>,
     prepared: &PreparedToolCall,
     tool_context: &ToolContext<'run>,
+    grant: Option<&crate::ToolExecutionGrant>,
 ) -> Result<crate::AttemptContext<'run>, ToolOutcome> {
     let scoped = tool_context.effect_controller.scoped();
     let completion_key = tool_context.completion.load();
@@ -115,7 +102,7 @@ async fn build_attempt_context<'run>(
     // controller for a provider that never declared the capability.
     let completion_support = if completion_key.is_some() {
         crate::tool_provider::AttemptCompletionSupport::Available
-    } else if !context.tools.attempt_may_defer(&prepared.tool_id) {
+    } else if !context.attempt_may_defer(&prepared.tool_id, grant) {
         crate::tool_provider::AttemptCompletionSupport::NotDeclared
     } else {
         crate::tool_provider::AttemptCompletionSupport::ControllerUnsupported

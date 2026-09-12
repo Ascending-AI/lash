@@ -426,7 +426,9 @@ fn prune_recovery_core(
     let provider = mock_provider();
     let provider_id = provider.kind().to_string();
     let config = process_runtime_host_config(env_store, provider.clone())
-        .with_process_engine(engine as Arc<dyn lash_core::ProcessEngine>);
+        .with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
+            engine as Arc<dyn lash_core::ProcessEngine>,
+        ));
     LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .session_spec(
             crate::SessionSpec::new()
@@ -1592,11 +1594,16 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
 #[derive(Clone, Default)]
 struct CollectingProcessEventSink {
     events: Arc<std::sync::Mutex<Vec<(String, u64)>>>,
+    faults: Arc<std::sync::Mutex<Vec<lash_core::facade_support::ProcessWorkerFault>>>,
 }
 
 impl CollectingProcessEventSink {
     fn collected(&self) -> Vec<(String, u64)> {
         self.events.lock_recover().clone()
+    }
+
+    fn faults(&self) -> Vec<lash_core::facade_support::ProcessWorkerFault> {
+        self.faults.lock_recover().clone()
     }
 }
 
@@ -1607,6 +1614,237 @@ impl lash_core::facade_support::ProcessEventSink for CollectingProcessEventSink 
             .lock_recover()
             .push((event.event_type.clone(), event.sequence));
     }
+
+    async fn emit_worker_fault(&self, fault: &lash_core::facade_support::ProcessWorkerFault) {
+        self.faults.lock_recover().push(fault.clone());
+    }
+}
+
+#[derive(Clone)]
+struct SwitchableArtifactStore {
+    inner: Arc<lash_sqlite_store::Store>,
+    unavailable: Arc<std::sync::atomic::AtomicBool>,
+    failed_reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl SwitchableArtifactStore {
+    fn new(inner: Arc<lash_sqlite_store::Store>) -> Self {
+        Self {
+            inner,
+            unavailable: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            failed_reads: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    fn set_unavailable(&self, unavailable: bool) {
+        self.unavailable
+            .store(unavailable, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn failed_reads(&self) -> usize {
+        self.failed_reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::LashlangArtifactStore for SwitchableArtifactStore {
+    fn durability_tier(&self) -> lashlang::DurabilityTier {
+        lashlang::DurabilityTier::Durable
+    }
+
+    async fn publish_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        artifact: &lashlang::ModuleArtifact,
+    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::publish_module_artifact(
+            self.inner.as_ref(),
+            owner,
+            artifact,
+        )
+        .await
+    }
+
+    async fn retain_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::retain_module_artifact(
+            self.inner.as_ref(),
+            owner,
+            module_ref,
+        )
+        .await
+    }
+
+    async fn transfer_module_artifact(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::transfer_module_artifact(
+            self.inner.as_ref(),
+            from,
+            to,
+            module_ref,
+        )
+        .await
+    }
+
+    async fn release_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::release_module_artifact(
+            self.inner.as_ref(),
+            owner,
+            module_ref,
+        )
+        .await
+    }
+
+    async fn retire_module_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
+        lash_lashlang_runtime::LashlangArtifactStore::retire_module_artifact_owner(
+            self.inner.as_ref(),
+            owner,
+        )
+        .await
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &lashlang::ModuleRef,
+    ) -> std::result::Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError>
+    {
+        if self.unavailable.load(std::sync::atomic::Ordering::SeqCst) {
+            self.failed_reads
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Err(lashlang::ArtifactStoreError::Backend(
+                "simulated durable artifact store outage".to_string(),
+            ));
+        }
+        lash_lashlang_runtime::LashlangArtifactStore::get_module_artifact(
+            self.inner.as_ref(),
+            module_ref,
+        )
+        .await
+    }
+}
+
+#[derive(Clone)]
+struct DurableAdmissionPaths {
+    sessions: std::path::PathBuf,
+    processes: std::path::PathBuf,
+    triggers: std::path::PathBuf,
+    effects: std::path::PathBuf,
+    artifacts: std::path::PathBuf,
+    attachments: std::path::PathBuf,
+}
+
+impl DurableAdmissionPaths {
+    fn new(root: &std::path::Path) -> Self {
+        Self {
+            sessions: root.join("sessions"),
+            processes: root.join("processes.db"),
+            triggers: root.join("triggers.db"),
+            effects: root.join("effects.db"),
+            artifacts: root.join("artifacts.db"),
+            attachments: root.join("attachments"),
+        }
+    }
+}
+
+async fn durable_admission_core(
+    paths: &DurableAdmissionPaths,
+    artifact_store: Arc<SwitchableArtifactStore>,
+    registry: Arc<lash_sqlite_store::SqliteProcessRegistry>,
+    sink: CollectingProcessEventSink,
+    owner: &str,
+) -> Result<LashCore> {
+    let provider = mock_provider();
+    let provider_id = provider.kind().to_string();
+    let effect_host = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open(&paths.effects)
+            .await
+            .expect("open durable effect journal"),
+    );
+    let trigger_store = Arc::new(
+        lash_sqlite_store::SqliteTriggerStore::open(&paths.triggers)
+            .await
+            .expect("open durable trigger store"),
+    );
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+            &paths.sessions,
+            &paths.processes,
+        ),
+    );
+    let artifact: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> = artifact_store.clone();
+    LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash_protocol_rlm::RlmChannel::Cell)
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
+            artifact,
+        ),
+    )
+    .session_spec(
+        crate::SessionSpec::new()
+            .provider_id(provider_id)
+            .turn_budget(crate::TurnBudget::Unbounded),
+    )
+    .provider(provider)
+    .model(mock_model_spec())
+    .store_factory(store_factory)
+    .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
+        &paths.attachments,
+    )))
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+    .process_env_store(artifact_store.inner.clone())
+    .process_registry(registry)
+    .trigger_store(trigger_store)
+    .effect_host(effect_host)
+    .process_event_sink(Arc::new(sink))
+    .without_queued_work()
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        owner,
+        format!("{owner}:incarnation"),
+    ))
+}
+
+async fn wait_for_worker_fault(
+    sink: &CollectingProcessEventSink,
+    process_id: &ProcessId,
+) -> lash_core::facade_support::ProcessWorkerFault {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let Some(fault) = sink.faults().into_iter().find(|fault| {
+                matches!(
+                    fault,
+                    lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
+                        process_id: fault_process_id,
+                        ..
+                    } if fault_process_id == process_id
+                )
+            }) {
+                return fault;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker reports the retryable artifact-store fault")
 }
 
 fn process_test_core_with_sink(
@@ -1646,6 +1884,240 @@ fn process_test_core_with_sink(
     .advanced()
     .runtime_host_config(process_runtime_host_config(process_env_store, provider))
     .build(crate::testing::runtime_lease_owner())
+}
+
+/// FIG-1838 + FIG-1521: Start admission is a recorded-input decision. A live
+/// artifact-store outage belongs to retryable worker execution, after the
+/// Start outcome and process row are durable, and a cold reopen can redrive it.
+#[tokio::test]
+async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart() -> Result<()> {
+    const SESSION_ID: &str = "durable-artifact-outage-session";
+    let dir = tempfile::tempdir().expect("durable admission tempdir");
+    let paths = DurableAdmissionPaths::new(dir.path());
+    let durable_store = Arc::new(
+        lash_sqlite_store::Store::open(&paths.artifacts)
+            .await
+            .expect("open durable artifact and process-environment store"),
+    );
+    let artifact_store = Arc::new(SwitchableArtifactStore::new(durable_store));
+    let process = LinkedTestProcess::new(
+        artifact_store.as_ref(),
+        r#"process main() -> str { finish "redriven" }"#,
+        "main",
+    )
+    .await;
+    let process_input = lash_lashlang_runtime::LashlangProcessInput {
+        module_ref: process.module_ref.clone(),
+        process_ref: process.process_ref.clone(),
+        host_requirements_ref: process.host_requirements_ref.clone(),
+        process_name: process.process_name.clone(),
+        args: serde_json::Map::new(),
+    }
+    .into_process_input()
+    .expect("durable witness input serializes");
+    let start_request = lash_core::ProcessStartRequest::new(
+        "intent-executor-replaces-this-id",
+        process_input,
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessOriginator::host(),
+    )
+    .with_env_spec(process_env_spec())
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types());
+    let registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(&paths.processes, &paths.sessions)
+            .await
+            .expect("open durable process registry"),
+    );
+    let first_sink = CollectingProcessEventSink::default();
+    let first_core = durable_admission_core(
+        &paths,
+        Arc::clone(&artifact_store),
+        Arc::clone(&registry),
+        first_sink.clone(),
+        "artifact-outage-first-host",
+    )
+    .await?;
+    let first_session = first_core.session(SESSION_ID).open().await?;
+    let first_effect_host = first_session.effect_host();
+    let first_scoped = first_effect_host
+        .scoped_static(lash_core::ExecutionScope::turn(
+            SESSION_ID,
+            "durable-artifact-outage-turn",
+        ))?
+        .expect("SQLite effect host owns a static scoped controller");
+    let first_processes = {
+        let writer = first_session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let intents = lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+        lash_core::StartProcessIntent {
+            session_id: SessionId::from(SESSION_ID),
+            request: start_request,
+            on_parent_end: Default::default(),
+        },
+    ))]);
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let started_tx = Arc::new(std::sync::Mutex::new(Some(started_tx)));
+    let hook = lash_core::ToolChildExecutionTraceHook::new(move |started| {
+        if let Some(sender) = started_tx.lock_recover().take() {
+            let _ = sender.send(started.process_id);
+        }
+        panic!("simulate host interruption after the durable child Start");
+    });
+    let first_intents = intents.clone();
+    let interrupted = tokio::spawn(async move {
+        lash_core::testing::execute_tool_intents_with_services_and_hook(
+            first_scoped,
+            first_processes,
+            &SessionId::from(SESSION_ID),
+            "durable-artifact-outage-start",
+            &first_intents,
+            Some(&hook),
+        )
+        .await
+    });
+    let process_id = started_rx
+        .await
+        .expect("the hook observes Start only after the command returns");
+    artifact_store.set_unavailable(true);
+    let interruption = interrupted
+        .await
+        .expect_err("the host task must be interrupted");
+    assert!(interruption.is_panic());
+    let committed = registry
+        .get_process(&process_id)
+        .await?
+        .expect("the interrupted intent already committed its durable Start row");
+    assert_eq!(committed.status, lash_core::ProcessStatus::Running);
+    drop(first_session);
+    drop(first_core);
+    drop(registry);
+    drop(artifact_store);
+
+    let reopened_store = Arc::new(
+        lash_sqlite_store::Store::open(&paths.artifacts)
+            .await
+            .expect("reopen durable artifact and process-environment store"),
+    );
+    let reopened_artifact_store = Arc::new(SwitchableArtifactStore::new(reopened_store));
+    let reopened_registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(&paths.processes, &paths.sessions)
+            .await
+            .expect("reopen durable process registry"),
+    );
+    let reopened_sink = CollectingProcessEventSink::default();
+    reopened_artifact_store.set_unavailable(true);
+    let reopened_core = durable_admission_core(
+        &paths,
+        Arc::clone(&reopened_artifact_store),
+        Arc::clone(&reopened_registry),
+        reopened_sink.clone(),
+        "artifact-outage-restarted-host",
+    )
+    .await?;
+    let reopened_session = reopened_core.session(SESSION_ID).open().await?;
+    let reopened_effect_host = reopened_session.effect_host();
+    let reopened_processes = {
+        let writer = reopened_session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let replay_scope = || {
+        reopened_effect_host
+            .scoped(lash_core::ExecutionScope::turn(
+                SESSION_ID,
+                "durable-artifact-outage-turn",
+            ))
+            .expect("reopen the recorded intent's durable scope")
+    };
+    let reopened_replay = lash_core::testing::execute_tool_intents_with_services(
+        replay_scope(),
+        Arc::clone(&reopened_processes),
+        &SessionId::from(SESSION_ID),
+        "durable-artifact-outage-start",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    let [
+        lash_core::ToolIntentExecutionOutcome::Executed {
+            kind: lash_core::ToolIntentKind::StartProcess,
+            result,
+            ..
+        },
+    ] = reopened_replay.as_slice()
+    else {
+        panic!(
+            "cold redrive must replay Start success, never persist Refused(CommandFailed): \
+             {reopened_replay:?}"
+        )
+    };
+    let recorded_start: lash_core::ProcessHandleView =
+        serde_json::from_value(result.clone()).expect("Start records a process handle");
+    assert_eq!(
+        recorded_start,
+        lash_core::ProcessHandleView::from_record(committed),
+        "cold redrive must return the exact Start result committed before interruption"
+    );
+    assert_eq!(
+        reopened_artifact_store.failed_reads(),
+        0,
+        "intent redrive must not consult the unavailable artifact store"
+    );
+    let replayed_again = lash_core::testing::execute_tool_intents_with_services(
+        replay_scope(),
+        Arc::clone(&reopened_processes),
+        &SessionId::from(SESSION_ID),
+        "durable-artifact-outage-start",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    assert_eq!(
+        serde_json::to_vec(&reopened_replay)?,
+        serde_json::to_vec(&replayed_again)?,
+        "the durable Start result must replay byte-for-byte"
+    );
+
+    let restarted_worker = lash_core::facade_support::DurableProcessWorker::new(
+        reopened_core.durable_process_worker_config()?,
+    )?;
+    let restarted_drive = restarted_worker.drive_pending_processes().await?;
+    assert_eq!(restarted_drive.admitted, vec![process_id.clone()]);
+    let fault = wait_for_worker_fault(&reopened_sink, &process_id).await;
+    assert!(
+        matches!(
+            fault,
+            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed {
+                ref error,
+                ..
+            } if error.contains("simulated durable artifact store outage")
+        ),
+        "the outage is a retryable worker infrastructure fault: {fault:?}"
+    );
+    assert_eq!(reopened_artifact_store.failed_reads(), 1);
+    let retryable = reopened_registry
+        .get_process(&process_id)
+        .await?
+        .expect("failed execution leaves its durable row");
+    assert_eq!(retryable.status, lash_core::ProcessStatus::Running);
+    assert!(retryable.first_started.is_some());
+
+    reopened_artifact_store.set_unavailable(false);
+    let recovered_drive = restarted_worker.drive_pending_processes().await?;
+    assert_eq!(recovered_drive.admitted, vec![process_id.clone()]);
+    let completed = wait_for_process(
+        &reopened_core,
+        &process_id,
+        "redriven completion",
+        |process| process.lifecycle == lash_core::ProcessStatus::Completed,
+    )
+    .await;
+    assert!(completed.terminal);
+
+    drop(reopened_session);
+    Ok(())
 }
 
 /// native-substrate end to end across the process wait, observation, and retention
@@ -1806,426 +2278,4 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     Ok(())
 }
 
-// --- ADR 0019 disposition-driven recovery, at the facade seam ---------------
-//
-// The disposition/evidence verdicts themselves are pinned by unit and
-// conformance coverage (`process_worker::recovery_tests`, the conformance
-// registry cases). These tests are the END-TO-END evidence the wave scoped: the
-// facade await/observe/prune seams (`core.processes()`) resolving and reflecting
-// those verdicts, and a foreign worker's later sweep never resurrecting a
-// terminalized row.
-
-fn recovery_local_owner(
-    owner_id: &str,
-    _host_id: &str,
-    _process_start: &str,
-) -> lash_core::LeaseOwnerIdentity {
-    lash_core::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
-}
-
-/// A bare recovery worker over `registry` with a known lease owner. It runs no
-/// engine (empty `PluginHost`); it drains and sweeps the registry only, so it
-/// stands in for a host that started OwnerBound work under `owner`.
-fn recovery_process_worker(
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    owner: lash_core::LeaseOwnerIdentity,
-) -> lash_core::facade_support::DurableProcessWorker {
-    let watched = lash_core::facade_support::watch_process_registry(registry);
-    lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
-            lash_core::facade_support::RuntimeHostConfig::in_memory(
-                lash_core::CommitBudget::bounded(1024 * 1024, 512),
-                lash_core::QueuedWorkBatchingConfig::new(1),
-            ),
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
-            owner,
-        ),
-    )
-    .expect("valid test native substrate config")
-}
-
-fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration {
-    lash_core::ProcessRegistration::new(
-        id,
-        lash_core::ProcessInput::External {
-            metadata: serde_json::json!({}),
-        },
-        lash_core::RecoveryContract::OwnerBound,
-        lash_core::ProcessProvenance::host(),
-    )
-}
-
-/// Graceful-drain end to end (ADR 0019): a host holds `await_output` on its own
-/// started OwnerBound work, then drains at close. The held awaiter resolves with
-/// the `Abandoned{OwnerDrain}` terminal naming this owner; a foreign worker's
-/// later sweep never resurrects or re-runs it; the facade prune reclaims it.
-#[tokio::test]
-async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> Result<()> {
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
-    let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(TestLocalProcessRegistry::default());
-    let core = process_test_core(
-        Arc::clone(&artifact_store),
-        Arc::clone(&trigger_store),
-        Arc::clone(&registry),
-        in_memory_process_env_store(),
-    )?;
-
-    let drain_owner = recovery_local_owner("drain-host", "host-a", "drain-start");
-    let worker = recovery_process_worker(Arc::clone(&registry), drain_owner.clone());
-
-    // A started OwnerBound row this host owns (first_started under `drain_owner`).
-    let process_id = "owner-bound-drain";
-    registry
-        .register_process(owner_bound_external_registration(process_id))
-        .await?;
-    registry
-        .record_first_started(
-            &ProcessId::from(process_id),
-            lash_core::ProcessStarted {
-                owner: drain_owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await?;
-
-    // Hold the terminal await on the still-running row through the facade await
-    // seam — it must resolve only once drain terminalizes the work.
-    let await_core = core.clone();
-    let await_id = process_id.to_string();
-    let waiter = tokio::spawn(async move {
-        await_core
-            .processes()
-            .await_output(&ProcessId::from(await_id))
-            .await
-    });
-
-    // The host drains its own started OwnerBound work natively at close.
-    let report = worker.drain_owner_bound_work().await?;
-    assert_eq!(
-        report.abandoned,
-        vec![process_id.to_string()],
-        "drain terminalizes exactly this host's started OwnerBound work"
-    );
-
-    let output = tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
-        .await
-        .expect("held await resolves within bound")
-        .expect("join await task")?;
-    let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = output else {
-        panic!("held await did not resolve to an Abandoned terminal: {output:#?}");
-    };
-    assert_eq!(evidence.writer, lash_core::AbandonWriter::OwnerDrain);
-    assert_eq!(
-        evidence.owner.as_ref(),
-        Some(&drain_owner),
-        "the owner-drain evidence names this host as the abandoned owner"
-    );
-
-    // The Abandoned terminal is model-visible read-side (a fourth terminal peer).
-    let observed = core
-        .processes()
-        .get(&ProcessId::from(process_id))
-        .await?
-        .expect("abandoned row observed through the facade");
-    assert_eq!(observed.lifecycle, lash_core::ProcessStatus::Abandoned);
-    assert!(observed.terminal);
-
-    // A foreign worker's sweep never resurrects or re-runs an abandoned row: the
-    // row is terminal, so it is off the worklist and untouched.
-    let foreign = recovery_process_worker(
-        Arc::clone(&registry),
-        recovery_local_owner("foreign-host", "host-b", "foreign-start"),
-    );
-    let _ = foreign.drive_pending_processes().await?;
-    assert!(
-        registry
-            .list_non_terminal_page(
-                std::num::NonZeroUsize::new(16).expect("non-zero test page size"),
-                None,
-            )
-            .await?
-            .records
-            .is_empty(),
-        "a foreign sweep must not resurrect the abandoned row onto the worklist"
-    );
-    let re_awaited = core
-        .processes()
-        .await_output(&ProcessId::from(process_id))
-        .await?;
-    let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = re_awaited else {
-        panic!("the abandoned terminal was mutated by a foreign sweep: {re_awaited:#?}");
-    };
-    assert_eq!(evidence.writer, lash_core::AbandonWriter::OwnerDrain);
-    assert_eq!(
-        evidence.owner.as_ref(),
-        Some(&drain_owner),
-        "the immutable owner-drain evidence survives a foreign sweep — the row is never re-run"
-    );
-
-    // Retention: the facade prune reclaims the terminal row.
-    let prune = core
-        .processes()
-        .prune(
-            i64::MAX as u64,
-            None,
-            lash_core::ProjectionWatermark::NoProjector,
-        )
-        .await?;
-    assert_eq!(prune.pruned_processes, 1);
-    assert!(
-        matches!(
-            core.processes().get(&ProcessId::from(process_id)).await,
-            Err(crate::EmbedError::Plugin(
-                lash_core::PluginError::ProcessNoLongerRetained { .. }
-            ))
-        ),
-        "the pruned abandoned row is a typed retained-history miss"
-    );
-
-    Ok(())
-}
-
-/// Silent-owner classification + abandon-request reconciliation end to end (ADR
-/// 0019): a started OwnerBound row whose holder lease expired
-/// (a different host) survives a sweep non-terminal; the facade read exposes the
-/// lease facts so a host can classify staleness; an operator's `request_abandon`
-/// is visible read-side while pending; and once the stale lease lapses the next
-/// sweep reconciles it into `Abandoned{ReconciledRequest}` naming the lapsed
-/// owner. Elapsed time alone never terminalized it — only the recorded
-/// authorization did.
-#[tokio::test]
-async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end() -> Result<()> {
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
-    let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(TestLocalProcessRegistry::default());
-    let core = process_test_core(
-        Arc::clone(&artifact_store),
-        Arc::clone(&trigger_store),
-        Arc::clone(&registry),
-        in_memory_process_env_store(),
-    )?;
-
-    // The sweep runs on host-a; the started owner is on host-b, so it is never
-    // available for a claimant — a silent, foreign, expired holder.
-    let sweep_owner = recovery_local_owner("recovery-host", "host-a", "claimant-start");
-    let worker = recovery_process_worker(Arc::clone(&registry), sweep_owner);
-    let silent_owner = recovery_local_owner("silent-owner", "host-b", "silent-start");
-
-    let process_id = "silent-owner-bound";
-    registry
-        .register_process(owner_bound_external_registration(process_id))
-        .await?;
-    registry
-        .record_first_started(
-            &ProcessId::from(process_id),
-            lash_core::ProcessStarted {
-                owner: silent_owner.clone(),
-                fencing_token: 0,
-                attempt: 1,
-                started_at_ms: 1,
-            },
-        )
-        .await?;
-    let silent_lease = registry
-        .claim_process_lease(&ProcessId::from(process_id), &silent_owner, 60_000)
-        .await?
-        .acquired()
-        .expect("silent holder claims its lease");
-
-    // A sweep leaves the silent holder's row non-terminal:
-    // elapsed time / silence alone never terminalizes.
-    let _ = worker.drive_pending_processes().await?;
-    let observed = core
-        .processes()
-        .get(&ProcessId::from(process_id))
-        .await?
-        .expect("silent row observed");
-    assert_eq!(
-        observed.lifecycle,
-        lash_core::ProcessStatus::Running,
-        "a silent holder is left non-terminal by the sweep"
-    );
-    // The read exposes the lease facts a host classifies staleness from.
-    assert_eq!(
-        observed.disposition,
-        lash_core::RecoveryContract::OwnerBound
-    );
-    assert_eq!(
-        observed.lease_holder.as_ref(),
-        Some(&silent_owner),
-        "ObservedProcess exposes the lease holder identity read-side"
-    );
-    assert!(
-        observed.lease_expires_at_ms.is_some(),
-        "ObservedProcess exposes the lease expiry read-side"
-    );
-    assert!(
-        observed.abandon_request.is_none(),
-        "no abandon request has been recorded yet"
-    );
-
-    // A third party records an Abandon Request through the facade: authorization
-    // to accept uncertainty. It terminalizes nothing itself and is visible to
-    // observers while pending.
-    let after_request = core
-        .processes()
-        .request_abandon(
-            &ProcessId::from(process_id),
-            "operator",
-            Some("host retired".to_string()),
-        )
-        .await?;
-    let request = after_request
-        .abandon_request
-        .as_ref()
-        .expect("abandon request visible on the returned observation");
-    assert_eq!(request.requested_by, "operator");
-    assert_eq!(
-        after_request.lifecycle,
-        lash_core::ProcessStatus::Running,
-        "the abandon request does not terminalize the row"
-    );
-    assert!(
-        core.processes()
-            .get(&ProcessId::from(process_id))
-            .await?
-            .and_then(|process| process.abandon_request)
-            .is_some(),
-        "the pending abandon request is visible read-side before reconciliation"
-    );
-
-    // The stale lease lapses (the foreign host finally drops it). Only now may
-    // the sweep reconcile the request.
-    registry
-        .complete_process_lease(&lash_core::ProcessLeaseCompletion::from_lease(
-            &silent_lease,
-        ))
-        .await?;
-    let _ = worker.drive_pending_processes().await?;
-
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        core.processes().await_output(&ProcessId::from(process_id)),
-    )
-    .await
-    .expect("reconciled terminal resolves within bound")?;
-    let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = output else {
-        panic!("reconciliation did not produce an Abandoned terminal: {output:#?}");
-    };
-    assert_eq!(evidence.writer, lash_core::AbandonWriter::ReconciledRequest);
-    assert_eq!(
-        evidence.owner.as_ref().map(|owner| owner.owner_id.as_str()),
-        Some("silent-owner"),
-        "the reconciled abandonment names the started owner as the lapsed owner"
-    );
-
-    Ok(())
-}
-
-/// Caller departure end to end through the host API (FIG-1383). A detached
-/// launch registers its externally-owned audit row, the caller's scope then
-/// departs before any outcome exists, and lash refuses to invent one. The row
-/// stays non-terminal and is observable as `CallerDeparted`; a host await on it
-/// is typed-refused instead of parking forever; and retention policy may name
-/// the state directly, reclaiming those rows while live work survives.
-#[tokio::test]
-async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
-    let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(TestLocalProcessRegistry::default());
-    let core = process_test_core(
-        Arc::clone(&artifact_store),
-        Arc::clone(&trigger_store),
-        Arc::clone(&registry),
-        in_memory_process_env_store(),
-    )?;
-
-    let departed = "facade-caller-departed";
-    let live = "facade-caller-live";
-    for id in [departed, live] {
-        registry
-            .register_process(
-                lash_core::ProcessRegistration::new(
-                    id,
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::json!({}),
-                    },
-                    lash_core::RecoveryContract::ExternallyOwned,
-                    lash_core::ProcessProvenance::host(),
-                )
-                .with_identity(lash_core::ProcessIdentity::new("test")),
-            )
-            .await?;
-    }
-    registry
-        .record_caller_departure(&ProcessId::from(departed))
-        .await?;
-
-    let observed = core
-        .processes()
-        .get(&ProcessId::from(departed))
-        .await?
-        .expect("the caller-departed row is observable");
-    assert_eq!(
-        observed.lifecycle,
-        lash_core::ProcessStatus::CallerDeparted,
-        "the host sees the departure as a lifecycle state, not an invented terminal"
-    );
-
-    // Awaiting it is refused with a typed error rather than parking forever.
-    let refusal = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        core.processes().await_output(&ProcessId::from(departed)),
-    )
-    .await
-    .expect("an await on a caller-departed row must be bounded, not parked")
-    .expect_err("an await on a caller-departed row must be refused");
-    assert!(
-        refusal.to_string().contains("recorded a caller departure"),
-        "unexpected await refusal: {refusal}"
-    );
-
-    // Retention policy names the state directly; live work is untouched.
-    let report = core
-        .processes()
-        .prune(
-            u64::MAX,
-            Some(&lash_core::ProcessListFilter {
-                status: lash_core::ProcessStatusFilter::any_of([
-                    lash_core::ProcessStatus::CallerDeparted,
-                ]),
-                ..lash_core::ProcessListFilter::default()
-            }),
-            lash_core::ProjectionWatermark::NoProjector,
-        )
-        .await?;
-    assert_eq!(
-        report.pruned_processes, 1,
-        "retention reclaims exactly the caller-departed row"
-    );
-    assert_eq!(
-        registry
-            .get_process(&ProcessId::from(live))
-            .await?
-            .expect("the running sibling survives retention")
-            .status,
-        lash_core::ProcessStatus::Running,
-    );
-
-    Ok(())
-}
+mod recovery_dispositions;

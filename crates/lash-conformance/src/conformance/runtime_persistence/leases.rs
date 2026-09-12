@@ -27,7 +27,7 @@ pub(super) async fn commit_increments_head_and_round_trips_agent_frames(
     let second_frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, second_frame_key.as_str());
     assert!(state.session_graph.append_frame_open_with_id_at(
-        second_frame_node_id.to_string(),
+        second_frame_node_id.clone(),
         second_frame_key,
         custom_reason.clone(),
         assignment,
@@ -88,7 +88,10 @@ pub(super) async fn concurrent_head_revision_cas_applies_exactly_once(
         let derived_node_id = node.node_id.clone();
         let commit = RuntimeCommit {
             expected_head_revision: 0,
-            current_frame_node_id: Some(crate::FrameNodeId::new(derived_node_id.clone())),
+            current_frame_node_id: Some(
+                crate::FrameNodeId::new(derived_node_id.clone())
+                    .expect("derived test frame identity is non-empty"),
+            ),
             graph: crate::GraphAppend {
                 nodes: vec![node],
                 leaf_node_id: Some(derived_node_id),
@@ -1693,7 +1696,10 @@ pub(super) async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeP
     .expect("branch fixture graph is valid");
     let state = RuntimeSessionState {
         session_id: SessionId::from("branchy"),
-        current_frame_node_id: Some(crate::FrameNodeId::new(root_node_id.clone())),
+        current_frame_node_id: Some(
+            crate::FrameNodeId::new(root_node_id.clone())
+                .expect("derived test frame identity is non-empty"),
+        ),
         session_graph: graph,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };

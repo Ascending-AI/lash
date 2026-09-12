@@ -105,7 +105,7 @@ fn persisted_event_order(graph: &SessionGraph) -> Vec<String> {
         .collect()
 }
 fn chronological_event_order(graph: &SessionGraph) -> Vec<String> {
-    let read_model = graph.read_model();
+    let read_model = graph.read_model(None).unwrap();
     crate::chronological::ChronologicalProjection::from_read_model(&read_model)
         .entries()
         .iter()
@@ -224,14 +224,14 @@ fn agent_frame_switch_materializes_outcome_seed_without_tool_call_event() {
     );
     let current_read = state
         .session_graph
-        .read_model_for_frame(&expected_frame_node_id);
+        .read_model(Some(&expected_frame_node_id))
+        .unwrap();
     assert_eq!(current_read.messages.len(), 1);
     assert_eq!(current_read.messages[0].parts[0].content, "seed message");
-    let previous_read = state.session_graph.read_model_for_frame(
-        previous_frame_node_id
-            .as_deref()
-            .expect("previous frame node id"),
-    );
+    let previous_read = state
+        .session_graph
+        .read_model(previous_frame_node_id.as_ref())
+        .unwrap();
     assert_eq!(previous_read.messages.len(), 1);
     assert_eq!(previous_read.messages[0].parts[0].content, "old frame");
 }
@@ -307,7 +307,10 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
 
     let current_read = state
         .session_graph
-        .read_model_for_frame(&opened.frame_node_id);
+        .read_model(Some(
+            &crate::FrameNodeId::new(opened.frame_node_id.clone()).unwrap(),
+        ))
+        .unwrap();
     assert_eq!(current_read.messages.len(), 1);
     assert_eq!(
         current_read.messages[0].parts[0].content,
@@ -318,11 +321,10 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         Some(crate::MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == "rolling_history"
     ));
 
-    let previous_read = state.session_graph.read_model_for_frame(
-        previous_frame_node_id
-            .as_deref()
-            .expect("previous frame node id"),
-    );
+    let previous_read = state
+        .session_graph
+        .read_model(previous_frame_node_id.as_ref())
+        .unwrap();
     assert_eq!(previous_read.messages.len(), 1);
     assert_eq!(
         previous_read.messages[0].parts[0].content,
@@ -339,7 +341,10 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
     assert!(!replay.opened);
     let replay_read = state
         .session_graph
-        .read_model_for_frame(&replay.frame_node_id);
+        .read_model(Some(
+            &crate::FrameNodeId::new(replay.frame_node_id.clone()).unwrap(),
+        ))
+        .unwrap();
     assert_eq!(replay_read.messages.len(), 1);
 }
 

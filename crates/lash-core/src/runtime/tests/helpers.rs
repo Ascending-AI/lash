@@ -170,12 +170,14 @@ pub(crate) trait ReadModelState {
 impl ReadModelState for SessionSnapshot {
     fn read_model(&self) -> crate::session_graph::SessionReadModel {
         self.read_model()
+            .expect("test snapshot frame scope resolves")
     }
 }
 
 impl ReadModelState for RuntimeSessionState {
     fn read_model(&self) -> crate::session_graph::SessionReadModel {
         self.read_model()
+            .expect("test runtime frame scope resolves")
     }
 }
 

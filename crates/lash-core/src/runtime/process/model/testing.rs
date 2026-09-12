@@ -1,6 +1,14 @@
 use super::*;
 
 impl InMemoryProcessExecutionEnvStore {
+    #[cfg(test)]
+    pub(crate) fn insert_raw_for_testing(&self, env_ref: ProcessExecutionEnvRef, bytes: Vec<u8>) {
+        self.envs
+            .lock_recover()
+            .bytes
+            .insert(env_ref.as_str().to_string(), bytes);
+    }
+
     pub(crate) fn from_spec_for_testing(
         owner: ArtifactOwner,
         spec: &ProcessExecutionEnvSpec,

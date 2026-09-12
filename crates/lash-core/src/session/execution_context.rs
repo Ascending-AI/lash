@@ -351,14 +351,10 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// Exposes session scope to protocol and process-engine implementors while executing code
     /// against the session runtime.
     pub fn session_scope(&self) -> crate::SessionScope {
-        if self.dispatch.agent_frame_id.is_empty() {
-            crate::SessionScope::new(self.session_id.clone())
-        } else {
-            crate::SessionScope::for_agent_frame(
-                self.session_id.clone(),
-                self.dispatch.agent_frame_id.clone(),
-            )
-        }
+        crate::SessionScope::for_agent_frame(
+            self.session_id.clone(),
+            self.dispatch.agent_frame_id.clone(),
+        )
     }
 
     /// Exposes trigger store to protocol and process-engine implementors while executing code
@@ -1223,7 +1219,7 @@ mod tests {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::default(),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1281,7 +1277,7 @@ mod tests {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::default(),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

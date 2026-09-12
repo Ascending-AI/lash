@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use lash_sansio::llm::types::ProviderFailureKind;
 
-use crate::{HttpTransportError, TransportRetryVerdict};
+use crate::{LlmTransportError, TransportRetryVerdict};
 
 #[async_trait]
 pub trait HttpTransport: Send + Sync + fmt::Debug {
@@ -14,12 +14,12 @@ pub trait HttpTransport: Send + Sync + fmt::Debug {
         &self,
         request: HttpRequest,
         timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError>;
+    ) -> Result<HttpResponse, LlmTransportError>;
 }
 
 #[async_trait]
 pub trait ByteStream: Send + fmt::Debug {
-    async fn next_chunk(&mut self) -> Result<Option<Bytes>, HttpTransportError>;
+    async fn next_chunk(&mut self) -> Result<Option<Bytes>, LlmTransportError>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -266,7 +266,7 @@ impl HttpTransport for ReqwestHttpTransport {
         &self,
         request: HttpRequest,
         timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         let mut http = self
             .client
             .request(request.method.as_reqwest(), &request.url);
@@ -290,7 +290,7 @@ impl HttpTransport for ReqwestHttpTransport {
                         body: HttpResponseBody::from_reqwest_response(response),
                     })
                     .map_err(|err| {
-                        let error = HttpTransportError::new(format!("HTTP request failed: {err}"))
+                        let error = LlmTransportError::new(format!("HTTP request failed: {err}"))
                             .with_kind(ProviderFailureKind::Transport)
                             .with_retry_verdict(reqwest_error_retry_verdict(&err));
                         if let Some(body) = body_for_error {
@@ -320,9 +320,9 @@ impl ReqwestByteStream {
 
 #[async_trait]
 impl ByteStream for ReqwestByteStream {
-    async fn next_chunk(&mut self) -> Result<Option<Bytes>, HttpTransportError> {
+    async fn next_chunk(&mut self) -> Result<Option<Bytes>, LlmTransportError> {
         self.response.chunk().await.map_err(|err| {
-            HttpTransportError::response_read(err.to_string())
+            LlmTransportError::response_read(err.to_string())
                 .with_kind(ProviderFailureKind::Transport)
                 .with_retry_verdict(reqwest_error_retry_verdict(&err))
         })
@@ -333,7 +333,7 @@ pub async fn read_http_body_bytes(
     body: HttpResponseBody,
     timeout: Option<Duration>,
     timeout_message: &str,
-) -> Result<Bytes, HttpTransportError> {
+) -> Result<Bytes, LlmTransportError> {
     match body {
         HttpResponseBody::Buffered(bytes) => Ok(bytes),
         HttpResponseBody::Streamed(mut stream) => {
@@ -357,7 +357,7 @@ pub async fn read_http_body_text(
     body: HttpResponseBody,
     timeout: Option<Duration>,
     timeout_message: &str,
-) -> Result<String, HttpTransportError> {
+) -> Result<String, LlmTransportError> {
     let body = read_http_body_bytes(body, timeout, timeout_message).await?;
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
@@ -431,13 +431,13 @@ pub async fn run_with_timeout<T, F>(
     future: F,
     timeout: Option<Duration>,
     timeout_message: &str,
-) -> Result<T, HttpTransportError>
+) -> Result<T, LlmTransportError>
 where
-    F: Future<Output = Result<T, HttpTransportError>>,
+    F: Future<Output = Result<T, LlmTransportError>>,
 {
     match timeout {
         Some(duration) => tokio::time::timeout(duration, future).await.map_err(|_| {
-            HttpTransportError::new(timeout_message)
+            LlmTransportError::new(timeout_message)
                 .with_kind(ProviderFailureKind::Timeout)
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                 .with_code("timeout")
@@ -489,7 +489,7 @@ mod tests {
         let result = run_with_timeout(
             async {
                 tokio::time::sleep(Duration::from_millis(25)).await;
-                Ok::<_, HttpTransportError>(())
+                Ok::<_, LlmTransportError>(())
             },
             Some(Duration::from_millis(5)),
             "request timed out",

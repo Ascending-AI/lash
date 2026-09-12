@@ -384,7 +384,8 @@ impl ProcessExecutionEnvSpec {
 
     /// Content-addresses the exact bytes persisted by [`Self::to_store_bytes`].
     ///
-    /// Version 5 adds host instruction capabilities to the policy.
+    /// Version 6 adds reasoning-retention capability and selection to the
+    /// policy's semantic identity.
     /// Older environment references are refused at load and must be recreated; a
     /// future byte-format change requires a new textual family version and the
     /// same explicit old-row policy. These bytes follow the final binary's
@@ -408,8 +409,8 @@ impl ProcessExecutionEnvSpec {
 
 fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
     ProcessExecutionEnvRef::new(format!(
-        "process-env:v5:blake3:{}",
-        crate::stable_hash::blake3_hex("lash-process-env/v5", bytes)
+        "process-env:v6:blake3:{}",
+        crate::stable_hash::blake3_hex("lash-process-env/v6", bytes)
     ))
 }
 
@@ -980,10 +981,10 @@ impl SessionScope {
     /// or persisting a session turn.
     pub fn id(&self) -> SessionScopeId {
         match self.agent_frame_id.as_deref() {
-            Some(frame_id) if !frame_id.is_empty() => {
+            Some(frame_id) => {
                 SessionScopeId::new(format!("session:{}/frame:{frame_id}", self.session_id))
             }
-            _ => SessionScopeId::new(format!("session:{}", self.session_id)),
+            None => SessionScopeId::new(format!("session:{}", self.session_id)),
         }
     }
 

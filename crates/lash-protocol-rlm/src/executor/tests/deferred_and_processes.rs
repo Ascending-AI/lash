@@ -115,33 +115,12 @@ impl lash_core::ToolProvider for BindingRecordingDeferredProvider {
         None
     }
 
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &lash_core::ToolExecutionGrant,
-        call: lash_core::ToolPrepareCall<'_>,
-    ) -> Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
-        Ok(lash_core::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
         self.observed_bindings
             .lock_recover()
             .push(call.context.tool_execution_binding().clone());
         lash_core::ToolOutcome::ok(serde_json::json!("deferred ok"))
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &lash_core::ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &lash_core::AttemptContext<'_>,
-    ) -> lash_core::ToolOutcome {
-        self.execute_by_id(&grant.manifest().id, args, context)
-            .await
     }
 }
 
@@ -1039,10 +1018,14 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
@@ -1180,10 +1163,14 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
@@ -1321,10 +1308,14 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let _worker = lash_core::facade_support::DurableProcessWorker::new(

@@ -333,7 +333,7 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
             .prepare_completion_key(
                 context.effect_controller.scoped().execution_scope(),
                 crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
-                context.tools.attempt_may_defer(&call.tool_id),
+                context.attempt_may_defer(&call.tool_id, execution_grant.as_deref()),
             )
             .await
         {

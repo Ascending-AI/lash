@@ -139,8 +139,11 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
             failing_store == "module",
         )),
     });
-    let engines = lash_core::ProcessEngineRegistry::new()
-        .with_engine(engine as Arc<dyn lash_core::ProcessEngine>);
+    let engines = lash_core::ProcessEngineRegistry::new().with_registration(
+        lash_core::ProcessEngineRegistration::accepting(
+            engine as Arc<dyn lash_core::ProcessEngine>,
+        ),
+    );
     let scope =
         lash_core::ExecutionScope::runtime_operation(format!("scope-retirement-{failing_store}"));
     let owner = lash_core::ArtifactOwner::execution(scope.clone());

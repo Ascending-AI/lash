@@ -336,7 +336,8 @@ impl LashRuntime {
         if let Some(session) = self.session.as_mut() {
             let protocol_session = Arc::clone(session.plugins().protocol_session());
             let session_id = state_for_restore.session_id.clone();
-            let mut view = crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore);
+            let mut view = crate::plugin::ProtocolSessionRestoreView::new(&state_for_restore)
+                .map_err(|error| SessionError::Protocol(error.to_string()))?;
             if let Some(snapshot) = execution_before_append {
                 restored_capture = Some(snapshot.clone());
                 view.execution_state = Ok(Some(snapshot));

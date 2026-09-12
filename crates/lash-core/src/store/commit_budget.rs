@@ -583,9 +583,10 @@ mod tests {
             .validate_budget()
             .expect("the commit without an agent frame must fit");
 
-        commit.current_frame_node_id = Some(crate::FrameNodeId::from_raw_for_testing(
-            "f".repeat(BYTE_LIMIT * 2),
-        ));
+        commit.current_frame_node_id = Some(
+            crate::FrameNodeId::new("f".repeat(BYTE_LIMIT * 2))
+                .expect("test frame identity is non-empty"),
+        );
 
         assert!(matches!(
             commit.validate_budget(),

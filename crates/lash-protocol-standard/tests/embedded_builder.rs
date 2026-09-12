@@ -72,7 +72,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     .expect("runtime");
 
     let state = runtime.export_state();
-    let read_view = state.read_view();
+    let read_view = state.read_view().expect("runtime frame scope resolves");
     assert_eq!(read_view.messages().len(), 1);
     assert_eq!(read_view.messages()[0].parts[0].content, "stored question");
     assert_eq!(state.turn_index, 3);

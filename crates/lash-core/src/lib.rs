@@ -316,7 +316,6 @@ pub mod facade_support {
     pub use crate::direct::DirectRole;
     pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
-    pub use crate::llm::transport::ProviderFailure;
     pub use crate::plugin::AbortTurnDirective;
     pub use crate::plugin::AfterToolCallPluginDirective;
     pub use crate::plugin::AfterTurnPluginDirective;
@@ -1104,22 +1103,25 @@ pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
-    AppendSessionNodesRequest, FrameNodeId, KeyRejection, PluginError, PluginExtensions,
-    PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit, PluginStateError,
-    PluginStateStore, ProcessEngineContributionContext, ProtocolBeforeLlmCallContext,
-    ProtocolLlmCallAction, SessionContextOverlay, SessionCreateRequest, SessionGraphService,
-    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
+    PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
+    PluginStateError, PluginStateStore, ProcessEngineContributionContext,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
+    SessionCreateRequest, SessionGraphService, SessionPluginSource, SessionReadView,
+    SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService, SessionToolAccess,
+    SessionToolAccessError, SubagentSessionContext,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,
 };
 
 pub use provider::{
-    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
-    ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
-    SamplingCapability, StreamTermination,
+    AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
+    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
+    InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
+    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,
@@ -1160,8 +1162,8 @@ pub use runtime::{
     PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessArtifactCleanup,
     ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
     ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessContinuationStore, ProcessEffectOutcome, ProcessEngine, ProcessEngineRegistry,
-    ProcessEngineRunContext, ProcessEngineValidationContext, ProcessEvent,
+    ProcessContinuationStore, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext, ProcessEvent,
     ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
@@ -1235,7 +1237,7 @@ pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};
 pub(crate) use session_graph::SessionMessageTreeNode;
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
-    SessionNodePayload, SessionNodeRecord,
+    SessionGraphScopeError, SessionNodePayload, SessionNodeRecord,
 };
 pub(crate) use session_model::RuntimeSessionPolicy;
 

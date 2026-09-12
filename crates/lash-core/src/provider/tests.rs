@@ -2266,7 +2266,7 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
 fn default_failure_classifier_classifies_429_as_retryable_throttle() {
     let classifier = DefaultProviderFailureClassifier;
     let failure = classifier.classify(
-        ProviderFailure::new("Rate limit reached for requests")
+        LlmTransportError::new("Rate limit reached for requests")
             .with_status(429)
             .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
                 retry_after: Some(Duration::from_secs(7)),
@@ -2285,7 +2285,7 @@ fn default_failure_classifier_keeps_quota_exhaustion_non_retryable() {
         "usage_limit_reached",
         "usage_not_included in your plan",
     ] {
-        let failure = classifier.classify(ProviderFailure::new(message).with_status(429));
+        let failure = classifier.classify(LlmTransportError::new(message).with_status(429));
         assert_eq!(failure.kind, ProviderFailureKind::Quota);
         assert!(!failure.is_retryable());
     }
@@ -2304,7 +2304,7 @@ fn default_failure_classifier_keeps_rate_throttling_retryable() {
         "Resource has been exhausted (e.g. check quota).",
         "429 RESOURCE_EXHAUSTED: Quota exceeded for aiplatform.googleapis.com",
     ] {
-        let failure = classifier.classify(ProviderFailure::new(message).with_status(429));
+        let failure = classifier.classify(LlmTransportError::new(message).with_status(429));
         assert_eq!(
             failure.kind,
             ProviderFailureKind::Quota,
@@ -2344,7 +2344,7 @@ fn default_failure_classifier_uses_context_overflow_text_for_unclassified_failur
         "z.ai: model_context_window_exceeded",
     ] {
         let failure = classifier.classify(
-            ProviderFailure::new(message)
+            LlmTransportError::new(message)
                 .with_kind(ProviderFailureKind::Http)
                 .with_status(400),
         );
@@ -2365,7 +2365,7 @@ fn generic_anthropic_and_google_http_overflow_envelopes_use_the_text_fallback() 
         r#"{"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed"}}"#,
     ] {
         let failure = classifier.classify(
-            ProviderFailure::new("provider request failed with 400")
+            LlmTransportError::new("provider request failed with 400")
                 .with_kind(ProviderFailureKind::Http)
                 .with_status(400)
                 .with_raw(raw),
@@ -2384,7 +2384,7 @@ fn generic_anthropic_and_google_http_overflow_envelopes_use_the_text_fallback() 
 #[test]
 fn default_failure_classifier_fails_open_when_unclassified_text_is_uncertain() {
     let failure = DefaultProviderFailureClassifier.classify(
-        ProviderFailure::new("upstream request failed")
+        LlmTransportError::new("upstream request failed")
             .with_raw(r#"{"error":{"message":"ambiguous provider failure"}}"#),
     );
 
@@ -2399,7 +2399,7 @@ fn default_failure_classifier_fails_open_when_unclassified_text_is_uncertain() {
 #[test]
 fn default_failure_classifier_preserves_explicit_non_retryability() {
     let failure = DefaultProviderFailureClassifier.classify(
-        ProviderFailure::new("Anthropic stream error: invalid request")
+        LlmTransportError::new("Anthropic stream error: invalid request")
             .with_retry_verdict(TransportRetryVerdict::NotRetryable),
     );
 
@@ -2413,7 +2413,7 @@ fn default_failure_classifier_makes_structured_validation_forbidden_without_scra
     // Deliberately, the more-specific provider-kind semantics take precedence
     // over an explicitly classified but conflicting transport verdict.
     let failure = DefaultProviderFailureClassifier.classify(
-        ProviderFailure::new("request rejected")
+        LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
             .with_code("invalid_request_error")
             .with_raw(
@@ -2435,7 +2435,7 @@ fn default_failure_classifier_makes_structured_validation_forbidden_without_scra
 #[test]
 fn default_failure_classifier_does_not_override_structured_hard_quota_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
-        ProviderFailure::new("request rejected")
+        LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
             .with_code("invalid_request_error")
             .with_raw(r#"{"echo":"insufficient_quota"}"#),
@@ -2449,7 +2449,7 @@ fn default_failure_classifier_does_not_override_structured_hard_quota_echo() {
 #[test]
 fn default_failure_classifier_does_not_override_structured_content_filter_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
-        ProviderFailure::new("request rejected")
+        LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
             .with_code("invalid_request_error")
             .with_raw(r#"{"echo":"the user asked about safety"}"#),
@@ -2461,7 +2461,7 @@ fn default_failure_classifier_does_not_override_structured_content_filter_echo()
 #[test]
 fn default_failure_classifier_does_not_override_structured_unsupported_model_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
-        ProviderFailure::new("request rejected")
+        LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
             .with_code("invalid_request_error")
             .with_raw(r#"{"echo":"the example model does not exist"}"#),
@@ -2481,7 +2481,7 @@ fn default_failure_classifier_marks_content_filter() {
         "safety filter tripped",
         "sensitive content refused",
     ] {
-        let failure = classifier.classify(ProviderFailure::new(message).with_status(400));
+        let failure = classifier.classify(LlmTransportError::new(message).with_status(400));
         assert_eq!(
             failure.terminal_reason,
             crate::LlmTerminalReason::ContentFilter
@@ -2498,7 +2498,7 @@ fn default_failure_classifier_does_not_treat_rate_limits_as_context_overflow() {
         "throttling because token rate exceeded",
         "insufficient_quota",
     ] {
-        let failure = classifier.classify(ProviderFailure::new(message).with_status(429));
+        let failure = classifier.classify(LlmTransportError::new(message).with_status(429));
         assert_ne!(
             failure.terminal_reason,
             crate::LlmTerminalReason::ContextOverflow

@@ -21,14 +21,14 @@ use lashlang::{ExecutionHost, ExecutionHostError};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    LASHLANG_ENGINE_KIND, LashlangHostError, LashlangProcessEngine, LashlangProcessFailureCode,
-    LashlangProcessInput,
+    LASHLANG_ENGINE_KIND, LashlangHostEnvironmentCheck, LashlangHostError, LashlangProcessEngine,
+    LashlangProcessFailureCode, LashlangProcessInput,
     bridge::{
         lashlang_value_to_json, process_event_payload, protocol_tool_reply_to_lashlang_value,
         sleep_duration_ms,
     },
-    lashlang_host_environment_satisfies_requirements, prepare_lashlang_process_start,
-    resolve_lashlang_module_operation,
+    prepare_lashlang_process_start, resolve_lashlang_module_operation,
+    validate_lashlang_process_admission,
 };
 
 static SEGMENT_BOUNDARY_DECLINED_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -144,6 +144,20 @@ fn validate_lashlang_program_hash(
     Ok(())
 }
 
+pub(crate) fn validate_lashlang_process_for_run(
+    artifact: &lashlang::ModuleArtifact,
+    input: &LashlangProcessInput,
+    host: LashlangHostEnvironmentCheck<'_>,
+) -> Result<(), Box<lash_core::ProcessAwaitOutput>> {
+    validate_lashlang_process_admission(artifact, input, host).map_err(|refusal| {
+        Box::new(process_lashlang_failure(
+            refusal.failure_code(),
+            refusal.to_string(),
+            None,
+        ))
+    })
+}
+
 pub async fn run_lashlang_process(
     engine: LashlangProcessEngine,
     mut context: lash_core::ProcessEngineRunContext<'_>,
@@ -193,28 +207,6 @@ pub async fn run_lashlang_process(
             }
         }
     };
-    if artifact.host_requirements_ref != input.host_requirements_ref {
-        return Ok(process_lashlang_failure(
-            LashlangProcessFailureCode::ProcessHostRequirementsMismatch,
-            format!(
-                "lashlang process `{}` requested surface {}, artifact has {}",
-                input.process_name, input.host_requirements_ref, artifact.host_requirements_ref
-            ),
-            None,
-        )
-        .into());
-    }
-    if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
-        return Ok(process_lashlang_failure(
-            LashlangProcessFailureCode::ProcessRefMismatch,
-            format!(
-                "lashlang module `{}` does not export process `{}` as requested ref {:?}",
-                input.module_ref, input.process_name, input.process_ref
-            ),
-            None,
-        )
-        .into());
-    }
     let (tool_catalog, host_environment) = {
         let _phase = context.named_phase("rlm_process.resolve_environment");
         let tool_catalog = match context.resolved_tool_catalog() {
@@ -227,31 +219,17 @@ pub async fn run_lashlang_process(
             .surface
             .clone()
             .for_process_registry(context.process_registry_available());
-        let host_environment = match surface.host_environment(&tool_catalog) {
-            Ok(host_environment) => host_environment,
-            Err(err) => {
-                return Ok(process_lashlang_failure(
-                    LashlangProcessFailureCode::ProcessHostEnvironmentInvalid,
-                    err.to_string(),
-                    None,
-                )
-                .into());
-            }
-        };
-        if let Err(err) = lashlang_host_environment_satisfies_requirements(
-            &artifact.host_requirements,
-            &host_environment,
+        let host_environment = surface.host_environment(&tool_catalog);
+        if let Err(output) = validate_lashlang_process_for_run(
+            &artifact,
+            &input,
+            LashlangHostEnvironmentCheck::CheckHostEnvironment(
+                host_environment.as_ref().map_err(|error| error.to_string()),
+            ),
         ) {
-            return Ok(process_lashlang_failure(
-                LashlangProcessFailureCode::ProcessHostEnvironmentIncompatible,
-                format!(
-                    "lashlang process `{}` is incompatible with this host surface: {err}",
-                    input.process_name
-                ),
-                None,
-            )
-            .into());
+            return Ok((*output).into());
         }
+        let host_environment = host_environment.expect("admission accepted host environment");
         (tool_catalog, host_environment)
     };
     let compiled = {

@@ -165,6 +165,39 @@ async fn granted_pending_park_returns_a_pending_launch_under_the_grant_binding()
     );
 }
 
+#[test]
+fn unresolvable_grant_source_cannot_borrow_same_id_catalog_deferral() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (mut context, mut grant) = grant_probe_dispatch(
+        GrantProbeMode::PendingWithKey,
+        attempts,
+        ToolRetryPolicy::Never,
+        observed_execution_bindings,
+    );
+    let tool_id = grant.manifest().id.clone();
+    context.tool_registry = Some(context.plugins.tool_registry());
+
+    assert!(
+        context
+            .tool_catalog
+            .tools
+            .iter()
+            .any(|entry| entry.manifest.id == tool_id),
+        "the collision witness must exist in the admitted catalog"
+    );
+    assert!(
+        context.tools.attempt_may_defer(&tool_id),
+        "the colliding catalog provider must support deferral"
+    );
+
+    grant.source_id = Some("missing-grant-source".to_string());
+    assert!(
+        !context.attempt_may_defer(&tool_id, Some(&grant)),
+        "an unresolvable out-of-catalog grant must not borrow catalog deferral"
+    );
+}
+
 /// A granted attempt runs the same retry ladder as a catalog attempt, and the
 /// final failure is marked exhausted rather than left retryable. The ladder is
 /// bounded by the *grant's* manifest policy, which is the only retry policy a

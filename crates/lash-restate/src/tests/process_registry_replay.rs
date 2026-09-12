@@ -106,11 +106,13 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
             ),
             registry_local_executor(registry.clone())
                 .with_process_env_store(process_env_store)
-                .with_process_engines(lash_core::ProcessEngineRegistry::new().with_engine(
-                    Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-                        artifact_store,
-                        lash_lashlang_runtime::LashlangSurface::default(),
-                    )),
+                .with_process_engines(lash_core::ProcessEngineRegistry::new().with_registration(
+                    lash_lashlang_runtime::lashlang_process_engine_registration(
+                        lash_lashlang_runtime::LashlangProcessEngine::new(
+                            artifact_store,
+                            lash_lashlang_runtime::LashlangSurface::default(),
+                        ),
+                    ),
                 )),
         )
         .await
@@ -681,7 +683,7 @@ impl HttpTransport for CeilingCancelWatchTransport {
         &self,
         _request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         self.requests.fetch_add(1, Ordering::SeqCst);
         self.attachment_started.add_permits(1);
         self.expire_attachment
@@ -690,7 +692,7 @@ impl HttpTransport for CeilingCancelWatchTransport {
             .expect("cancel watch transport remains open")
             .forget();
         Err(
-            HttpTransportError::new("cancel watch attach ceiling elapsed")
+            LlmTransportError::new("cancel watch attach ceiling elapsed")
                 .with_kind(lash_core::ProviderFailureKind::Timeout)
                 .with_code("timeout")
                 .with_retry_verdict(
@@ -711,7 +713,7 @@ impl HttpTransport for UnregisteredCancelWatchTransport {
         &self,
         _request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         Ok(HttpResponse {
             status: 404,
             headers: vec![("content-type".to_string(), "application/json".to_string())],
@@ -731,8 +733,8 @@ impl HttpTransport for BrokenCancelWatchTransport {
         &self,
         _request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
-        Err(HttpTransportError::new("cancel watch transport failed"))
+    ) -> Result<HttpResponse, LlmTransportError> {
+        Err(LlmTransportError::new("cancel watch transport failed"))
     }
 }
 
@@ -742,7 +744,7 @@ impl HttpTransport for BlockingCancelSignalTransport {
         &self,
         request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         self.requests.lock_recover().push(request);
         self.started.notify_one();
         self.release.notified().await;

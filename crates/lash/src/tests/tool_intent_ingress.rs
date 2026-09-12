@@ -1566,12 +1566,25 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
             .into(),
         )
     }
+}
 
-    fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {
-        lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
-            .with_label(payload.get("program").and_then(serde_json::Value::as_str))
-            .with_definition(Some(payload.clone()))
-    }
+fn admit_ingress_engine(
+    _kind: &'static str,
+    payload: &serde_json::Value,
+    env: Option<&lash_core::ProcessExecutionEnvSpec>,
+) -> std::result::Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+    let env = env.ok_or_else(|| {
+        lash_core::PluginError::Session(
+            "ingress admission requires the recorded execution environment".to_string(),
+        )
+    })?;
+    Ok(lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
+        .with_label(payload.get("program").and_then(serde_json::Value::as_str))
+        .with_definition(Some(serde_json::json!({
+            "payload": payload,
+            "model": env.policy.model.id,
+            "provider": env.policy.provider_id,
+        }))))
 }
 
 struct IngressAdmissionEnginePlugin;
@@ -1599,8 +1612,12 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     fn process_engine_contributions(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<Arc<dyn lash_core::ProcessEngine>>, lash_core::PluginError> {
-        Ok(vec![Arc::new(IngressAdmissionEngine)])
+    ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
+    {
+        Ok(vec![lash_core::ProcessEngineRegistration::new(
+            Arc::new(IngressAdmissionEngine),
+            lash_core::ProcessEngineAdmission::new(INGRESS_ENGINE_KIND, admit_ingress_engine),
+        )?])
     }
 
     fn build(
@@ -1648,6 +1665,16 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
         )),
         on_parent_end: Default::default(),
     }))
+}
+
+fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
+    lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::default(),
+        lash_core::SessionPolicy {
+            model: mock_model_spec(),
+            ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        },
+    )
 }
 
 /// FIG-1488: the host front door is a start route too. A submitted intent naming
@@ -1718,8 +1745,95 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         .expect("admitted start registers its row");
     assert_eq!(
         started.identity,
-        lash_core::ProcessEngine::identity(&IngressAdmissionEngine, &payload),
+        admit_ingress_engine(
+            INGRESS_ENGINE_KIND,
+            &payload,
+            Some(&ingress_engine_env_spec())
+        )
+        .expect("known payload and recorded environment"),
         "the admitted row must carry the engine identity stamp"
+    );
+    Ok(())
+}
+
+/// FIG-1838: host ingress and session-owned recorded-intent execution must feed
+/// the same immutable request environment into engine admission. Otherwise an
+/// environment-derived identity changes solely with the route used to start it.
+#[tokio::test]
+async fn equivalent_recorded_start_has_same_environment_sensitive_identity_across_routes()
+-> Result<()> {
+    let (core, registry) = ingress_engine_core().await?;
+    let payload = serde_json::json!({"program": "environment-sensitive"});
+
+    let ingress = core.tool_intents(
+        SESSION,
+        lash_core::ExecutionScope::turn(SESSION, "host-ingress-route"),
+    )?;
+    let ingress_key = ingress.key("environment-sensitive-host", 0);
+    let ingress_process_id = ProcessId::from(ingress_key.identity().replay_key.clone());
+    let host_outcome = ingress
+        .submit(
+            ingress_key,
+            engine_start_intent(INGRESS_ENGINE_KIND, payload.clone()),
+        )
+        .await;
+    assert!(
+        matches!(
+            host_outcome,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. },
+                ..
+            }
+        ),
+        "host ingress must admit the environment-sensitive engine"
+    );
+    let ingress_identity = registry
+        .get_process(&ingress_process_id)
+        .await?
+        .expect("host ingress registers a process")
+        .identity;
+
+    let session = core.session(SESSION).open().await?;
+    let effect_host = session.effect_host();
+    let scoped = effect_host.scoped(lash_core::ExecutionScope::turn(
+        SESSION,
+        "session-recorded-intent-route",
+    ))?;
+    let processes = {
+        let writer = session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let intents =
+        lash_core::ToolIntents::v1(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
+    let outcomes = lash_core::testing::execute_tool_intents_with_services(
+        scoped,
+        processes,
+        &SessionId::from(SESSION),
+        "environment-sensitive-session",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    let [lash_core::ToolIntentExecutionOutcome::Executed { identity, .. }] = outcomes.as_slice()
+    else {
+        panic!("session recorded-intent route must execute: {outcomes:?}")
+    };
+    let session_identity = registry
+        .get_process(&ProcessId::from(identity.replay_key.clone()))
+        .await?
+        .expect("session route registers a process")
+        .identity;
+
+    assert_eq!(ingress_identity, session_identity);
+    assert_eq!(
+        ingress_identity.definition,
+        Some(serde_json::json!({
+            "payload": {"program": "environment-sensitive"},
+            "model": mock_model_spec().id,
+            "provider": "",
+        })),
+        "the shared identity must prove the recorded environment reached admission"
     );
     Ok(())
 }

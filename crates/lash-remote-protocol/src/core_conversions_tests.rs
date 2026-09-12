@@ -298,6 +298,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
             cache_control: Some(core_llm::CacheControlDialect::Anthropic),
             stream_termination: Some(core_llm::StreamTermination::RequireTerminalEvidence),
             sampling: core_llm::SamplingCapability::Pinned,
+            reasoning_retention: Default::default(),
         },
         generation: core_llm::GenerationOptions {
             output_token_cap: NonZeroUsize::new(42),
@@ -1760,7 +1761,8 @@ fn remote_session_observation_from_core_maps_snapshot_metadata() {
         ))
     };
     let observation = lash_core::facade_support::SessionObservation {
-        read_view: lash_core::SessionReadView::from_snapshot(&snapshot),
+        read_view: lash_core::SessionReadView::from_snapshot(&snapshot)
+            .expect("test snapshot frame scope resolves"),
         cursor: event.cursor.clone(),
     };
 
@@ -1823,7 +1825,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
 
     let read_view = lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-    ));
+    ))
+    .expect("empty snapshot has an unscoped read view");
     let remote = RemoteSessionObservationEvent::from_core(
         8,
         event(
@@ -1841,7 +1844,8 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     let resident_read_view =
         lash_core::SessionReadView::from_snapshot(&lash_core::SessionSnapshot::new(
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ));
+        ))
+        .expect("empty snapshot has an unscoped read view");
     let remote = RemoteSessionObservationEvent::from_core(
         9,
         event(
@@ -1995,7 +1999,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
-            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         wake_target: Some(lash_core::SessionScope::new("session-a")),
         name: Some("button watcher".to_string()),
@@ -2492,6 +2496,5 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
-
 #[path = "core_conversions_tests/cancellation.rs"]
 mod cancellation;

@@ -217,7 +217,15 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                     lash_core::MessageRole::System => LlmRole::System,
                     lash_core::MessageRole::Assistant => LlmRole::Assistant,
                 };
-                messages.push(LlmMessage::new(role, blocks));
+                let mut projected = LlmMessage::new(role, blocks);
+                projected.starts_user_segment = matches!(
+                    (message.role, message.origin),
+                    (
+                        lash_core::MessageRole::User,
+                        Some(lash_core::MessageOrigin::TurnInput { .. })
+                    )
+                );
+                messages.push(projected);
             }
         }
     });

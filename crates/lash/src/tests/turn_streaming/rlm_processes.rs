@@ -61,10 +61,15 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                 if required_node_id == "inactive-ancestor"
         ));
         assert!(
-            runtime.read_view().messages().iter().all(|message| message
-                .parts
+            runtime
+                .read_view()
+                .expect("test runtime frame scope resolves")
+                .messages()
                 .iter()
-                .all(|part| part.content != ROLLED_BACK_MARKER)),
+                .all(|message| message
+                    .parts
+                    .iter()
+                    .all(|part| part.content != ROLLED_BACK_MARKER)),
             "the stale append must be absent from the reconciled RLM history projection"
         );
         session.runtime.publish_from(&runtime);
@@ -263,13 +268,25 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     drop(store);
     drop(durable);
 
+    let follow_on_requests = Arc::new(StdMutex::new(Vec::<LlmRequest>::new()));
+    let captured_follow_on_requests = Arc::clone(&follow_on_requests);
+    let follow_on_provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(move |request| {
+            captured_follow_on_requests.lock_recover().push(request);
+            async move {
+                Ok(text_response(&lashlang_block(
+                    r#"finish "completed after real SQLite cold reopen""#,
+                )))
+            }
+        })
+        .build()
+        .into_handle();
     let reopened_core = explicit_ephemeral_facets(LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        r#"finish "unused after state inspection""#,
-    )]))
+    .provider(follow_on_provider)
     .model(mock_model_spec())
     .store_factory(sqlite_store_factory)
     .without_queued_work()
@@ -281,6 +298,38 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .snapshot_execution()
         .await?
         .expect("reopened RLM has an execution snapshot");
+
+    let follow_on = reopened_session
+        .queued_turn()
+        .run()
+        .await?
+        .expect("the durable frame handoff must remain claimable after cold reopen");
+    assert_eq!(
+        follow_on.final_value(),
+        Some(&serde_json::json!(
+            "completed after real SQLite cold reopen"
+        ))
+    );
+    assert!(
+        reopened_session.queued_turn().run().await?.ran().is_none(),
+        "the durable frame handoff must be delivered exactly once"
+    );
+    let follow_on_requests = follow_on_requests.lock_recover();
+    assert_eq!(follow_on_requests.len(), 1);
+    let follow_on_json = serde_json::to_string(&follow_on_requests[0])?;
+    assert_eq!(
+        follow_on_json.matches("finish after cold reopen").count(),
+        1,
+        "the committed continuation task must enter the reopened request exactly once: {follow_on_json}"
+    );
+    assert!(
+        follow_on_json.contains("seed:survives"),
+        "the explicit frame seed must enter the reopened request: {follow_on_json}"
+    );
+    assert!(
+        !follow_on_json.contains("switch away from the abandoned frame"),
+        "the previous frame's input must not enter the reopened request: {follow_on_json}"
+    );
 
     Ok(ColdReopenFrameState {
         switch_checkpoint_budget_bytes,
@@ -701,7 +750,10 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
         TurnEvent::FinalValue { .. } | TurnEvent::ToolValue { .. }
     )));
     assert_eq!(assistant_prose(&events), "done in prose");
-    let read_view = result.state.read_view();
+    let read_view = result
+        .state
+        .read_view()
+        .expect("test runtime frame scope resolves");
     let assistant_messages = read_view
         .messages()
         .iter()

@@ -569,27 +569,7 @@ mod tests {
                 .then(|| Arc::new(granted_tool_definition().contract()))
         }
 
-        async fn prepare_granted_tool_call(
-            &self,
-            _grant: &crate::ToolExecutionGrant,
-            call: crate::ToolPrepareCall<'_>,
-        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
-            Ok(crate::PreparedToolCall::identity(
-                call.tool_id,
-                call.pending,
-            ))
-        }
-
         async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-            crate::ToolOutcome::ok(serde_json::json!("catalog leaf"))
-        }
-
-        async fn execute_granted(
-            &self,
-            _grant: &crate::ToolExecutionGrant,
-            _args: &serde_json::Value,
-            _context: &crate::AttemptContext<'_>,
-        ) -> crate::ToolOutcome {
             crate::ToolOutcome::ok(serde_json::json!("granted leaf"))
         }
     }
@@ -658,7 +638,7 @@ mod tests {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: SessionId::from("granted-call-session"),
-            agent_frame_id: crate::FrameNodeId::default(),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1067,7 +1047,7 @@ mod tests {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: SessionId::from("session"),
-            agent_frame_id: crate::FrameNodeId::default(),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

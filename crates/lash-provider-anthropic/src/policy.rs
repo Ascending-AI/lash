@@ -10,6 +10,7 @@
 pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub(crate) const FINE_GRAINED_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
 pub(crate) const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
+pub(crate) const CONTEXT_MANAGEMENT_BETA: &str = "context-management-2025-06-27";
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u64 = 32_768;
 
 /// Resolved thinking configuration for a single request.

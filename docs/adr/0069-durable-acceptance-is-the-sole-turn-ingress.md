@@ -379,9 +379,9 @@ handover events. Not a hypothetical, and not a code review finding — a number.
   can have durable effects without an enumerable accepted input naming it.
 * An unacknowledged crash between the acceptance commit and the caller learning
   of it can duplicate a turn. This is a named, accepted window, not an oversight.
-* `docs/architecture/queued-work-ingress.md` describes the pending-turn-input
-  lane that now carries every turn; its "no pin, by design" reasoning holds
-  unchanged, because a direct turn's batch also does not exist before its claim.
+* The pending-turn-input lane that now carries every turn keeps its "no pin, by
+  design" reasoning unchanged, because a direct turn's batch also does not exist
+  before its claim.
 
 ### Sequencing
 

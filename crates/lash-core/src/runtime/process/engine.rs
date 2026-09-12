@@ -482,44 +482,6 @@ impl<'run> ProcessEngineRunContext<'run> {
     }
 }
 
-pub struct ProcessEngineValidationContext<'a> {
-    plugin_host: &'a crate::PluginHost,
-    tool_catalog: Arc<crate::ToolCatalog>,
-    process_registry_available: bool,
-}
-
-impl<'a> ProcessEngineValidationContext<'a> {
-    pub(crate) fn new(
-        plugin_host: &'a crate::PluginHost,
-        tool_catalog: Arc<crate::ToolCatalog>,
-        process_registry_available: bool,
-    ) -> Self {
-        Self {
-            plugin_host,
-            tool_catalog,
-            process_registry_available,
-        }
-    }
-
-    /// Exposes plugin host to protocol and process-engine implementors while running a durable
-    /// process.
-    pub fn plugin_host(&self) -> &crate::PluginHost {
-        self.plugin_host
-    }
-
-    /// Exposes tool catalog to protocol and process-engine implementors while running a durable
-    /// process.
-    pub fn tool_catalog(&self) -> &crate::ToolCatalog {
-        self.tool_catalog.as_ref()
-    }
-
-    /// Exposes process registry available to protocol and process-engine implementors while running
-    /// a durable process.
-    pub fn process_registry_available(&self) -> bool {
-        self.process_registry_available
-    }
-}
-
 #[async_trait::async_trait]
 /// Deployment extension point for non-kernel process runtimes.
 ///
@@ -530,25 +492,11 @@ impl<'a> ProcessEngineValidationContext<'a> {
 pub trait ProcessEngine: Send + Sync {
     fn kind(&self) -> &'static str;
 
-    async fn validate_start(
-        &self,
-        _context: ProcessEngineValidationContext<'_>,
-        _payload: &serde_json::Value,
-        _env_spec: Option<&ProcessExecutionEnvSpec>,
-    ) -> Result<(), crate::PluginError> {
-        Ok(())
-    }
-
     async fn run(
         &self,
         context: ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
     ) -> Result<ProcessRunOutcome, ProcessInfraError>;
-
-    fn identity(&self, payload: &serde_json::Value) -> ProcessIdentity {
-        let _ = payload;
-        ProcessIdentity::new(self.kind())
-    }
 
     /// Protect artifacts named by a start payload under its replayable staging
     /// owner before process registration.
@@ -590,9 +538,80 @@ pub trait ProcessEngine: Send + Sync {
     }
 }
 
+/// Pure admission policy for immutable, recorded engine-start inputs.
+///
+/// The function pointer cannot capture an engine, store, catalog, or session.
+#[derive(Clone, Copy)]
+pub struct ProcessEngineAdmission {
+    kind: &'static str,
+    admit: fn(
+        &'static str,
+        &serde_json::Value,
+        Option<&ProcessExecutionEnvSpec>,
+    ) -> Result<ProcessIdentity, crate::PluginError>,
+}
+
+impl ProcessEngineAdmission {
+    pub const fn new(
+        kind: &'static str,
+        admit: fn(
+            &'static str,
+            &serde_json::Value,
+            Option<&ProcessExecutionEnvSpec>,
+        ) -> Result<ProcessIdentity, crate::PluginError>,
+    ) -> Self {
+        Self { kind, admit }
+    }
+
+    pub const fn accepting(kind: &'static str) -> Self {
+        Self::new(kind, |kind, _, _| Ok(ProcessIdentity::new(kind)))
+    }
+
+    pub fn kind(self) -> &'static str {
+        self.kind
+    }
+
+    pub fn admit(
+        self,
+        payload: &serde_json::Value,
+        env_spec: Option<&ProcessExecutionEnvSpec>,
+    ) -> Result<ProcessIdentity, crate::PluginError> {
+        (self.admit)(self.kind, payload, env_spec)
+    }
+}
+
+#[derive(Clone)]
+pub struct ProcessEngineRegistration {
+    engine: Arc<dyn ProcessEngine>,
+    admission: ProcessEngineAdmission,
+}
+
+impl ProcessEngineRegistration {
+    pub fn new(
+        engine: Arc<dyn ProcessEngine>,
+        admission: ProcessEngineAdmission,
+    ) -> Result<Self, crate::PluginError> {
+        if engine.kind() != admission.kind() {
+            return Err(crate::PluginError::Registration(format!(
+                "process engine kind `{}` does not match admission kind `{}`",
+                engine.kind(),
+                admission.kind()
+            )));
+        }
+        Ok(Self { engine, admission })
+    }
+
+    /// Pair an engine with the default recorded-input admission policy.
+    pub fn accepting(engine: Arc<dyn ProcessEngine>) -> Self {
+        let admission = ProcessEngineAdmission::accepting(engine.kind());
+        Self { engine, admission }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
+    admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
 }
 
 impl ProcessEngineRegistry {
@@ -600,11 +619,15 @@ impl ProcessEngineRegistry {
         Self::default()
     }
 
-    pub fn with_engine(self, engine: Arc<dyn ProcessEngine>) -> Self {
+    pub fn with_registration(self, registration: ProcessEngineRegistration) -> Self {
         let mut engines = (*self.engines).clone();
+        let mut admissions = (*self.admissions).clone();
+        let ProcessEngineRegistration { engine, admission } = registration;
         engines.insert(engine.kind().to_string(), engine);
+        admissions.insert(admission.kind().to_string(), admission);
         Self {
             engines: Arc::new(engines),
+            admissions: Arc::new(admissions),
         }
     }
 
@@ -655,15 +678,15 @@ impl ProcessEngineRegistry {
     /// engine was wired directly or contributed through the plugin contract.
     pub(crate) fn try_with_engine(
         self,
-        engine: Arc<dyn ProcessEngine>,
+        registration: ProcessEngineRegistration,
     ) -> Result<Self, crate::PluginError> {
-        if self.engines.contains_key(engine.kind()) {
+        if self.engines.contains_key(registration.engine.kind()) {
             return Err(crate::PluginError::Registration(format!(
                 "duplicate process engine kind `{}`; each engine kind may be registered once",
-                engine.kind()
+                registration.engine.kind()
             )));
         }
-        Ok(self.with_engine(engine))
+        Ok(self.with_registration(registration))
     }
 
     pub(crate) fn get(&self, kind: &str) -> Option<Arc<dyn ProcessEngine>> {
@@ -673,28 +696,25 @@ impl ProcessEngineRegistry {
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind
     /// this host never registered.
     ///
-    /// # Engine-admission gate
-    ///
-    /// Every route that turns a caller-supplied `ProcessInput::Engine` into a
-    /// process start crosses an admission gate with two parts:
-    ///
-    /// 1. **Kind + identity** (this method, then [`ProcessEngine::identity`]).
-    ///    Pure and catalog-free, so every route can run it — including host
-    ///    front doors that hold no live session. Without it a caller can
-    ///    journal a start for an engine kind that does not exist on this host,
-    ///    and the row carries no engine identity.
-    /// 2. **Payload validation** ([`ProcessEngine::validate_start`]). Judges the
-    ///    payload against the starting session's resolved tool catalog, so only
-    ///    routes holding that live session can run it. `ProcessEngine::run` is
-    ///    the authoritative backstop: it re-resolves the engine and re-reads its
-    ///    own inputs, so a route that runs part 1 only defers an invalid payload
-    ///    to a retryable run failure rather than admitting an unrunnable row.
-    ///
-    /// Both parts must complete before the start command crosses the journal:
-    /// an admitted start is a committed entry that replays forever.
     pub fn require(&self, kind: &str) -> Result<Arc<dyn ProcessEngine>, crate::PluginError> {
         self.get(kind).ok_or_else(|| {
             crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
         })
+    }
+
+    /// Admit a start using only immutable recorded inputs.
+    pub fn admit(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        env_spec: Option<&ProcessExecutionEnvSpec>,
+    ) -> Result<ProcessIdentity, crate::PluginError> {
+        self.admissions
+            .get(kind)
+            .copied()
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
+            })?
+            .admit(payload, env_spec)
     }
 }

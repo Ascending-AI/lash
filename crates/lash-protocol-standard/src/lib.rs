@@ -1348,7 +1348,10 @@ mod tests {
             ) => text,
             outcome => panic!("unexpected turn outcome: {outcome:?}"),
         };
-        let read_view = turn.state.read_view();
+        let read_view = turn
+            .state
+            .read_view()
+            .expect("accepted turn frame scope resolves");
         let assistant_messages = read_view
             .messages()
             .iter()

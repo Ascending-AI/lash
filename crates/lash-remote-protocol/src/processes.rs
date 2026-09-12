@@ -19,6 +19,9 @@ use crate::turn_result::RemoteCausalRef;
 mod operations;
 pub use operations::*;
 
+#[cfg(test)]
+mod frame_scope_tests;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionScope {
     pub session_id: SessionId,
@@ -48,7 +51,7 @@ impl RemoteSessionScope {
 pub struct RemoteProcessExecutionEnvRef(String);
 
 impl RemoteProcessExecutionEnvRef {
-    pub const PREFIX: &'static str = "process-env:v5:blake3:";
+    pub const PREFIX: &'static str = "process-env:v6:blake3:";
 
     pub fn parse(value: impl Into<String>) -> Result<Self, RemoteProtocolError> {
         let value = value.into();
@@ -57,7 +60,7 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessExecutionEnvRef",
-                message: "env_ref must match `process-env:v5:blake3:<64 lowercase hex>`"
+                message: "env_ref must match `process-env:v6:blake3:<64 lowercase hex>`"
                     .to_string(),
             })
         }
@@ -73,7 +76,7 @@ impl RemoteProcessExecutionEnvRef {
         } else {
             Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
-                message: "env_ref must match `process-env:v5:blake3:<64 lowercase hex>`"
+                message: "env_ref must match `process-env:v6:blake3:<64 lowercase hex>`"
                     .to_string(),
             })
         }
@@ -132,8 +135,15 @@ impl RemoteProcessOriginator {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
             Self::Host { .. } => Ok(()),
-            Self::Session { session_id, .. } => {
-                require_non_empty(type_name, "session_id", session_id)
+            Self::Session {
+                session_id,
+                agent_frame_id,
+            } => {
+                require_non_empty(type_name, "session_id", session_id)?;
+                if let Some(agent_frame_id) = agent_frame_id {
+                    require_non_empty(type_name, "agent_frame_id", agent_frame_id)?;
+                }
+                Ok(())
             }
         }
     }

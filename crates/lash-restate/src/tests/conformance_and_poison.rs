@@ -113,7 +113,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
         &self,
         request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         let request_index = {
             let mut requests = self.request_urls.lock_recover();
             let index = requests.len();
@@ -122,7 +122,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
         };
         match request_index {
             0 => Err(
-                HttpTransportError::new("conformance attachment ceiling elapsed")
+                LlmTransportError::new("conformance attachment ceiling elapsed")
                     .with_kind(lash_core::ProviderFailureKind::Timeout)
                     .with_code("timeout")
                     .with_retry_verdict(
@@ -137,7 +137,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
                         .expect("serialize conformance process terminal"),
                 ),
             }),
-            _ => Err(HttpTransportError::new(
+            _ => Err(LlmTransportError::new(
                 "conformance process wait exceeded one reattachment",
             )),
         }

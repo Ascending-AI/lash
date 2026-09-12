@@ -861,7 +861,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -946,7 +946,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1006,7 +1006,7 @@ fn projection_policy_dispatch_context(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1090,27 +1090,6 @@ impl ToolProvider for ExactDispatchTools {
                 .push(call.context.tool_execution_binding().clone());
         }
         ToolOutcome::ok(json!("host"))
-    }
-
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &crate::ToolExecutionGrant,
-        call: crate::ToolPrepareCall<'_>,
-    ) -> Result<crate::PreparedToolCall, ToolOutcome> {
-        Ok(crate::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &crate::ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        self.execute_by_id(&grant.manifest().id, args, context)
-            .await
     }
 }
 
@@ -1197,7 +1176,7 @@ fn pinned_contract_dispatch_context(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1271,7 +1250,7 @@ fn authority_hidden_dispatch_context(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1318,7 +1297,7 @@ fn exact_dispatch_context_with_plugins(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1446,7 +1425,7 @@ fn pending_dispatch_context(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1502,7 +1481,7 @@ fn parallel_dispatch_context(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: SessionId::from("session"),
-        agent_frame_id: crate::FrameNodeId::default(),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

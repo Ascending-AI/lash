@@ -534,7 +534,11 @@ pub(super) async fn run_once_trace_jsonl(
         export_state_ms,
         total_ms: elapsed_ms(total_started),
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state.read_view().messages().len(),
+        active_path_messages: state
+            .read_view()
+            .expect("runtime frame scope resolves")
+            .messages()
+            .len(),
         extra_counters: trace_counters,
         metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),

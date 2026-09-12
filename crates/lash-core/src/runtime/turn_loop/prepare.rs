@@ -153,7 +153,17 @@ impl LashRuntime {
                 )
                 .await?
                 .with_local_cancel_origin(input.turn_context.local_cancel_origin_hint());
-                let messages = crate::MessageSequence::from_base(self.state.read_model().messages);
+                let messages = crate::MessageSequence::from_base(
+                    self.state
+                        .read_model()
+                        .map_err(|error| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::ContextPrepareTurn,
+                                error.to_string(),
+                            )
+                        })?
+                        .messages,
+                );
                 let mut turn_pipeline = TurnBoundary::from_state_with_clock(
                     self.state.clone(),
                     Arc::clone(&self.host.core.clock),
@@ -210,7 +220,9 @@ impl LashRuntime {
             );
         }
 
-        let base_read_model = self.state.read_model();
+        let base_read_model = self.state.read_model().map_err(|error| {
+            RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
+        })?;
         let base_messages = base_read_model.messages;
         let base_render_cache = base_read_model.prompt_render_cache;
         let mut turn_delta = Vec::new();
@@ -315,7 +327,9 @@ impl LashRuntime {
         let prepare_phase_controller = scoped_effect_controller.clone();
         let turn_ctx = crate::TurnTransformContext {
             session_id: self.state.session_id.clone(),
-            state: self.read_view(),
+            state: self.read_view().map_err(|error| {
+                RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
+            })?,
             prompt_usage: previous_prompt_usage.clone(),
             max_context_tokens: Some(LashRuntime::max_context_tokens(self)),
             sessions: manager.state_service(),

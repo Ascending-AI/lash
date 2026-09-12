@@ -976,9 +976,12 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
         if blocks.is_empty() {
             continue;
         }
-        rendered
-            .messages
-            .push(LlmMessage::new(llm_role_for_message(msg.role), blocks));
+        let mut projected = LlmMessage::new(llm_role_for_message(msg.role), blocks);
+        projected.starts_user_segment = matches!(
+            (msg.role, msg.origin.as_ref()),
+            (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
+        );
+        rendered.messages.push(projected);
     }
 }
 

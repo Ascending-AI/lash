@@ -117,9 +117,11 @@ pub(super) fn reconcile_tool_state_entries(
                     continue;
                 }
                 orphaned.push(id.clone());
-                let mut orphan =
-                    ToolRegistryEntry::orphaned(stored.manifest.clone(), stored.registration_kind);
-                orphan.member = stored.member;
+                let orphan = ToolRegistryEntry::orphaned(
+                    stored.manifest.clone(),
+                    stored.registration_kind,
+                    stored.member,
+                );
                 insert_result_entry(&mut surface, id.clone(), orphan)?;
             }
         }

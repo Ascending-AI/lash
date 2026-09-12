@@ -5,9 +5,7 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
     ProcessEngineContributionContext, SessionAuthorityContext, SessionPlugin,
 };
-use lash_core::{
-    ProcessEngine, TraceContext, facade_support::PluginHost, facade_support::TraceSink,
-};
+use lash_core::{TraceContext, facade_support::PluginHost, facade_support::TraceSink};
 use lash_lashlang_runtime::{
     LashlangArtifactStore, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
     SharedDeferredToolResolver,
@@ -295,7 +293,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
     fn process_engine_contributions(
         &self,
         ctx: &ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<Arc<dyn ProcessEngine>>, PluginError> {
+    ) -> Result<Vec<lash_core::ProcessEngineRegistration>, PluginError> {
         let process_lifecycle = ctx.process_lifecycle_available();
         // Record for the per-session plugin surface; install runs before any
         // session is built on this (shared) factory.
@@ -311,7 +309,9 @@ impl PluginFactory for RlmProtocolPluginFactory {
                 self.lashlang_execution_trace_config.sink.clone(),
                 ctx.trace_context().clone(),
             );
-        Ok(vec![Arc::new(engine)])
+        Ok(vec![
+            lash_lashlang_runtime::lashlang_process_engine_registration(engine),
+        ])
     }
 
     fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {

@@ -65,7 +65,12 @@ pub(super) fn committed_attachment_ids(
             attachment_ids.insert(attachment_ref.id.clone());
         }
     }
-    for message in state.read_model().messages.iter() {
+    for message in state
+        .read_model()
+        .expect("finalized runtime state has a resolvable frame scope")
+        .messages
+        .iter()
+    {
         for part in message.parts.iter() {
             if let Some(attachment_ref) = part
                 .attachment
@@ -95,6 +100,7 @@ pub(super) fn materialize_terminal_output(
     };
     if state
         .read_model()
+        .expect("finalized runtime state has a resolvable frame scope")
         .messages
         .iter()
         .any(|message| message.id == message_id || protocol_output.names(&message.id))
@@ -266,6 +272,7 @@ mod tests {
     fn message_ids(state: &RuntimeSessionState) -> Vec<String> {
         state
             .read_model()
+            .expect("test runtime frame scope resolves")
             .messages
             .iter()
             .map(|message| message.id.clone())
@@ -356,7 +363,11 @@ mod tests {
             &ProtocolTerminalOutput::default(),
         );
 
-        let messages = state.read_model().messages.clone();
+        let messages = state
+            .read_model()
+            .expect("test runtime frame scope resolves")
+            .messages
+            .clone();
         assert_eq!(
             messages
                 .iter()

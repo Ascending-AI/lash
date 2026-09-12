@@ -582,6 +582,7 @@ fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
 fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
     turn.state
         .read_view()
+        .expect("runtime frame scope resolves")
         .active_events()
         .iter()
         .filter_map(|event| {

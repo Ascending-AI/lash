@@ -1163,7 +1163,9 @@ async fn run_seed_probe_inner(
         );
         config = config
             .with_process_env_store(process_env_store.clone())
-            .with_process_engine(process_engine.clone());
+            .with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
+                process_engine.clone(),
+            ));
         config
     });
     let policy = SessionPolicy {
@@ -1194,7 +1196,9 @@ async fn run_seed_probe_inner(
                 );
                 config = config
                     .with_process_env_store(process_env_store)
-                    .with_process_engine(process_engine);
+                    .with_process_engine_registration(
+                        lash_core::ProcessEngineRegistration::accepting(process_engine),
+                    );
                 config
             },
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),

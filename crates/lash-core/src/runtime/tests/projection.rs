@@ -299,7 +299,8 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         .expect("load session")
         .expect("session head")
         .graph
-        .read_model();
+        .read_model(None)
+        .unwrap();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].role, MessageRole::User);
@@ -864,7 +865,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
         .expect("load session")
         .expect("session read");
     let graph = read.graph;
-    let read_model = graph.read_model();
+    let read_model = graph.read_model(None).unwrap();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].parts[0].content, "where did this go?");

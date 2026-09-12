@@ -51,8 +51,64 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
     );
 }
 
+struct InvalidLashlangBindingTool;
+
+impl InvalidLashlangBindingTool {
+    fn definition() -> lash_core::ToolDefinition {
+        let mut definition = lash_core::ToolDefinition::raw(
+            "tool:invalid_lashlang_binding",
+            "invalid_lashlang_binding",
+            "Malformed Lashlang binding fixture.",
+            serde_json::json!({ "type": "object" }),
+            serde_json::Value::Null,
+        );
+        definition.manifest.bindings.insert(
+            lash_lashlang_runtime::LASHLANG_TOOL_BINDING_KEY.to_string(),
+            serde_json::json!({ "not": "a tool binding" }),
+        );
+        definition
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for InvalidLashlangBindingTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "invalid_lashlang_binding").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        unreachable!("the malformed binding must fail before tool execution")
+    }
+}
+
+fn invalid_lashlang_binding_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        "invalid-lashlang-binding",
+        lash_core::facade_support::PluginSpec::new()
+            .with_tool_provider(Arc::new(InvalidLashlangBindingTool)),
+    ))
+}
+
+fn mutate_snapshot_lashlang_input(
+    registration: &mut ProcessRegistration,
+    mutate: impl FnOnce(&mut lash_lashlang_runtime::LashlangProcessInput),
+) {
+    let ProcessInput::Engine { payload, .. } = Arc::make_mut(&mut registration.input) else {
+        panic!("snapshot registration must carry a Lashlang engine input")
+    };
+    let mut input = lash_lashlang_runtime::LashlangProcessInput::from_payload(payload.clone())
+        .expect("decode snapshot Lashlang input");
+    mutate(&mut input);
+    registration.identity = input.process_identity();
+    *payload = serde_json::to_value(input).expect("encode mutated snapshot Lashlang input");
+}
+
 #[tokio::test]
-pub(super) async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin_options() {
+pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure_codes() {
     let temp = tempfile::tempdir().expect("tempdir");
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
@@ -67,12 +123,43 @@ pub(super) async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:revoked").await;
+    let mut requirements_mismatch = snapshot_lashlang_registration(
+        &ProcessId::from("snapshot-requirements-mismatch"),
+        env_ref.clone(),
+    )
+    .await;
+    mutate_snapshot_lashlang_input(&mut requirements_mismatch, |input| {
+        input.host_requirements_ref =
+            lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("mismatch"));
+    });
+    registry_a
+        .register_process(requirements_mismatch)
+        .await
+        .expect("register host-requirements mismatch");
+
+    let mut process_ref_mismatch = snapshot_lashlang_registration(
+        &ProcessId::from("snapshot-process-ref-mismatch"),
+        env_ref.clone(),
+    )
+    .await;
+    mutate_snapshot_lashlang_input(&mut process_ref_mismatch, |input| {
+        input.process_ref = lashlang::ProcessRef::new(lashlang::ContentHash::new("mismatch"), 0);
+    });
+    registry_a
+        .register_process(process_ref_mismatch)
+        .await
+        .expect("register process-ref mismatch");
+
     registry_a
         .register_process(
-            snapshot_lashlang_registration(&ProcessId::from("snapshot-revoked"), env_ref).await,
+            snapshot_lashlang_registration(
+                &ProcessId::from("snapshot-invalid-host-environment"),
+                env_ref.clone(),
+            )
+            .await,
         )
         .await
-        .expect("register revoked snapshot-backed process");
+        .expect("register invalid host environment");
     drop(registry_a);
 
     let registry_b = Arc::new(
@@ -85,32 +172,68 @@ pub(super) async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin
     ) as Arc<dyn ProcessRegistry>;
     let worker_b = recovery_worker_with_plugins(
         Arc::clone(&registry_b),
-        store_factory,
-        vec![snapshot_recovery_tool_factory()],
+        Arc::clone(&store_factory),
+        vec![
+            snapshot_recovery_tool_factory(),
+            invalid_lashlang_binding_factory(),
+        ],
     );
     let _ = worker_b
         .drive_pending_processes()
         .await
-        .expect("recover revoked snapshot-backed process");
+        .expect("drive immutable and invalid-host admission failures");
 
-    let await_output = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-        .await_terminal(&ProcessId::from("snapshot-revoked"))
+    let incompatible_id = ProcessId::from("snapshot-incompatible-host-environment");
+    registry_b
+        .register_process(snapshot_lashlang_registration(&incompatible_id, env_ref).await)
         .await
-        .expect("await terminal revoked snapshot-backed process");
-    let ProcessAwaitOutput::Settled { output } = await_output else {
-        panic!("expected revoked snapshot process failure, got {await_output:#?}");
-    };
-    let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
-        panic!("expected revoked snapshot process failure, got {output:#?}");
-    };
-    assert_eq!(failure.code, "process_host_environment_incompatible");
-    assert!(
-        failure
-            .message
-            .contains("module `tools` does not expose operation `snapshot_echo`"),
-        "{}",
-        failure.message
+        .expect("register incompatible host environment");
+    let worker_c = recovery_worker_with_plugins(
+        Arc::clone(&registry_b),
+        store_factory,
+        vec![snapshot_recovery_tool_factory()],
     );
+    let _ = worker_c
+        .drive_pending_processes()
+        .await
+        .expect("drive incompatible-host admission failure");
+
+    for (process_id, expected_code) in [
+        (
+            "snapshot-requirements-mismatch",
+            "process_host_requirements_mismatch",
+        ),
+        ("snapshot-process-ref-mismatch", "process_ref_mismatch"),
+        (
+            "snapshot-invalid-host-environment",
+            "process_host_environment_invalid",
+        ),
+        (
+            "snapshot-incompatible-host-environment",
+            "process_host_environment_incompatible",
+        ),
+    ] {
+        let await_output = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
+            .await_terminal(&ProcessId::from(process_id))
+            .await
+            .unwrap_or_else(|error| panic!("await terminal {process_id}: {error}"));
+        let ProcessAwaitOutput::Settled { output } = await_output else {
+            panic!("expected {process_id} failure, got {await_output:#?}");
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("expected {process_id} failure, got {output:#?}");
+        };
+        assert_eq!(failure.code, expected_code, "{process_id}");
+        if process_id == "snapshot-incompatible-host-environment" {
+            assert!(
+                failure
+                    .message
+                    .contains("module `tools` does not expose operation `snapshot_echo`"),
+                "{}",
+                failure.message
+            );
+        }
+    }
 }
 
 /// Build a durable registration for a trigger-started Lashlang engine process.

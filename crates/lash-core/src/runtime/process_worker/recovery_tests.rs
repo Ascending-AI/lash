@@ -1287,7 +1287,8 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(nested_engine);
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new()
+        .with_registration(crate::ProcessEngineRegistration::accepting(nested_engine));
     runtime_host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider));
     let policy = test_session_policy();
@@ -1370,10 +1371,11 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    runtime_host.process_engines =
-        crate::ProcessEngineRegistry::new().with_engine(Arc::new(BoundaryThenTerminalEngine {
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
+        crate::ProcessEngineRegistration::accepting(Arc::new(BoundaryThenTerminalEngine {
             runs: Arc::clone(&runs),
-        }));
+        })),
+    );
     let policy = test_session_policy();
     let env_spec =
         crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone());
@@ -1499,10 +1501,11 @@ async fn snapshot_recovery_fixture(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    runtime_host.process_engines =
-        crate::ProcessEngineRegistry::new().with_engine(Arc::new(SnapshotRecordingEngine {
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
+        crate::ProcessEngineRegistration::accepting(Arc::new(SnapshotRecordingEngine {
             payloads: Arc::clone(&payloads),
-        }));
+        })),
+    );
     let policy = test_session_policy();
     let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),

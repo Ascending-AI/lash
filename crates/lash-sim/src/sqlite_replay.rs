@@ -756,7 +756,11 @@ async fn run_provider_turn_task(
         .await
         .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
     let assistant_message = output.assistant_message().unwrap_or_default().to_string();
-    let read_view = output.result.state.read_view();
+    let read_view = output
+        .result
+        .state
+        .read_view()
+        .expect("runtime frame scope resolves");
     let graph_node_count = output.result.state.session_graph.nodes.len();
     let transcript_message_count = read_view.messages().len();
     let provider_exchange_count = transport

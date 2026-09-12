@@ -110,7 +110,10 @@ fn default_root_session_id() -> SessionId {
 /// Version 9 combines full effect addresses and truthful attribution with
 /// explicit ambient-or-restricted resident-tool authority. Both version 8
 /// parent encodings are refused rather than inventing either identity or access.
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 9;
+/// Version 10 persists the host-selected reasoning-retention capability and
+/// selection in the model snapshot. Version 9 heads are refused instead of
+/// silently inventing a retention contract during cold reopen.
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 11;
 
 #[cfg(test)]
 mod prompt_persistence_compat_tests;
@@ -821,7 +824,8 @@ fn remap_optional_node_id(node_id: &mut Option<crate::FrameNodeId>, mapping: &[(
         return;
     };
     if let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str()) {
-        *current = crate::FrameNodeId::new(derived.clone());
+        *current = crate::FrameNodeId::new(derived.clone())
+            .expect("derived graph node identities are non-empty");
     }
 }
 

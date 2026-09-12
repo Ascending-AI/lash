@@ -1,15 +1,84 @@
 #!/usr/bin/env python3
+"""Test the feature coverage gate.
+
+When ``ORB_REAL_CARGO`` is set, fixture workspaces resolve Cargo to that real
+binary so their single-crate checks do not enter the host's heavy-slot queue.
+CI does not set the variable, so its Cargo resolution is unchanged.
+"""
+
 from __future__ import annotations
 
+import os
 import pathlib
+import signal
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CHECKER = ROOT / "scripts" / "check_feature_coverage.py"
+PROCESS_GROUP_GRACE_SECONDS = 0.5
+
+
+def process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def terminate_process_group(process: subprocess.Popen[str]) -> None:
+    process_group = process.pid
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return
+
+    deadline = time.monotonic() + PROCESS_GROUP_GRACE_SECONDS
+    while time.monotonic() < deadline and process_group_exists(process_group):
+        process.poll()
+        time.sleep(0.01)
+    if process_group_exists(process_group):
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait()
+
+
+def run_subprocess(
+    command: list[str],
+    *,
+    cwd: pathlib.Path | None = None,
+    check: bool = False,
+    env: dict[str, str] | None = None,
+    timeout: float,
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        output, _ = process.communicate()
+        raise subprocess.TimeoutExpired(command, timeout, output=output) from None
+
+    completed = subprocess.CompletedProcess(command, process.returncode, output)
+    if check:
+        completed.check_returncode()
+    return completed
 
 
 class FeatureCoverageContractTests(unittest.TestCase):
@@ -48,6 +117,16 @@ class FeatureCoverageContractTests(unittest.TestCase):
             '#[cfg(feature = "testing")]\npub fn support() {}\n',
             encoding="utf-8",
         )
+        self.fixture_env = os.environ.copy()
+        if real_cargo := self.fixture_env.get("ORB_REAL_CARGO"):
+            if not os.access(real_cargo, os.X_OK):
+                self.fail(f"ORB_REAL_CARGO is not executable: {real_cargo}")
+            fixture_bin = self.root / ".fixture-bin"
+            fixture_bin.mkdir()
+            (fixture_bin / "cargo").symlink_to(real_cargo)
+            self.fixture_env["PATH"] = os.pathsep.join(
+                (str(fixture_bin), self.fixture_env.get("PATH", ""))
+            )
         self.write_plan()
         (self.root / ".github" / "workflows" / "ci.yml").write_text(
             textwrap.dedent(
@@ -119,26 +198,21 @@ class FeatureCoverageContractTests(unittest.TestCase):
         )
 
     def check(self) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return run_subprocess(
             ["python3", str(CHECKER), "check", "--root", str(self.root)],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
             timeout=5,
         )
 
     def run_lane(self) -> subprocess.CompletedProcess[str]:
-        subprocess.run(
+        run_subprocess(
             ["cargo", "generate-lockfile", "--offline"],
             cwd=self.root,
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            env=self.fixture_env,
             timeout=30,
         )
-        return subprocess.run(
+        return run_subprocess(
             [
                 "python3",
                 str(CHECKER),
@@ -148,11 +222,99 @@ class FeatureCoverageContractTests(unittest.TestCase):
                 str(self.root),
             ],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            env=self.fixture_env,
             timeout=30,
         )
+
+    def test_fixture_timeout_terminates_grandchild(self) -> None:
+        grandchild_pid = self.root / "grandchild.pid"
+        command = [
+            "sh",
+            "-c",
+            'echo timeout-marker; sleep 60 >/dev/null 2>&1 & echo "$!" > "$1"; wait',
+            "sh",
+            str(grandchild_pid),
+        ]
+        pid: int | None = None
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired) as timeout:
+                run_subprocess(
+                    command,
+                    cwd=self.root,
+                    check=False,
+                    timeout=0.1,
+                )
+            self.assertIn("timeout-marker", timeout.exception.output)
+            pid = int(grandchild_pid.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail(f"grandchild process {pid} survived the fixture timeout")
+        finally:
+            if pid is not None:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_cancelled_checker_terminates_plan_command(self) -> None:
+        plan_group_pid = self.root / "plan-group.pid"
+        grandchild_pid = self.root / "plan-grandchild.pid"
+        runner = self.root / "run-plan-command.py"
+        runner.write_text(
+            textwrap.dedent(
+                f"""
+                import pathlib
+                import runpy
+
+                checker = runpy.run_path({str(CHECKER)!r})
+                checker["run_command"](
+                    [
+                        "sh",
+                        "-c",
+                        'echo "$$" > "$1"; sleep 60 & echo "$!" > "$2"; wait',
+                        "sh",
+                        {str(plan_group_pid)!r},
+                        {str(grandchild_pid)!r},
+                    ],
+                    pathlib.Path({str(self.root)!r}),
+                )
+                """
+            ),
+            encoding="utf-8",
+        )
+        plan_group: int | None = None
+        grandchild: int | None = None
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run_subprocess(
+                    ["python3", str(runner)],
+                    cwd=self.root,
+                    check=False,
+                    timeout=0.5,
+                )
+            plan_group = int(plan_group_pid.read_text(encoding="utf-8"))
+            grandchild = int(grandchild_pid.read_text(encoding="utf-8"))
+            self.assertFalse(process_group_exists(plan_group))
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                self.fail(f"plan command grandchild {grandchild} survived cancellation")
+        finally:
+            if plan_group is not None and process_group_exists(plan_group):
+                os.killpg(plan_group, signal.SIGKILL)
+            if grandchild is not None:
+                try:
+                    os.kill(grandchild, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def add_other_feature_commands(self, *, combined: bool = False) -> None:
         manifest = self.root / "member" / "Cargo.toml"
@@ -730,12 +892,9 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertIn("lacks an exact ON command for member/testing", result.stdout)
 
     def test_workspace_checker_completes_within_ci_budget(self) -> None:
-        result = subprocess.run(
+        result = run_subprocess(
             ["python3", str(CHECKER), "check", "--root", str(ROOT)],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
             timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout)

@@ -981,7 +981,7 @@ mod tests {
             ))
             .with_wake_target(crate::SessionScope::for_agent_frame(
                 "session",
-                crate::FrameNodeId::from_raw_for_testing("frame"),
+                crate::FrameNodeId::new("frame").expect("test frame identity is non-empty"),
             ))
             .with_event_types([crate::ProcessEventType {
                 name: "app.event".to_string(),

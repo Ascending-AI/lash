@@ -279,7 +279,7 @@ pub(crate) async fn complete(
         run(blocking, move || {
             let mut req = req;
             // Sanitize the owned request before the builders borrow it, avoiding
-            // replay_safe_for cloning the resolved-stored byte cache.
+            // reasoning_retention_safe_for cloning the resolved-stored byte cache.
             req.drop_foreign_replay(&build_route);
             let (body, cache_control_emitted) =
                 build_request_body(&builder, &req, endpoint, stream, &build_route)?;

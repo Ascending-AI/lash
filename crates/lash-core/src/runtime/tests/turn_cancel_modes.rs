@@ -445,8 +445,12 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             crate::TurnCancelDisposition::Drop,
         ] {
             let transport = mock_provider(Vec::new());
+            let session_id = SessionId::from(
+                format!("cancel-matrix-{mode:?}-{disposition:?}").to_ascii_lowercase(),
+            );
             let (mut runtime, store) =
-                standard_runtime_with_transport_and_queue_store(transport).await;
+                standard_runtime_with_transport_and_queue_store_for_session(transport, &session_id)
+                    .await;
             let persisted = runtime.export_persistence_state();
             let session_id = persisted.session_id.clone();
             let driver = crate::TurnWorkDriver::for_session(
@@ -541,14 +545,14 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         let config = super::effect::runtime_host_config_with_native_controller(Arc::new(
             crate::NativeRuntimeEffectController::default(),
         ));
-        let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-            Vec::new(),
-            Arc::new(tool.clone()),
-            transport,
-            EmbeddedRuntimeHost::new(config),
-            runtime_store,
-        )
-        .await;
+        let mut runtime = TestRuntime::new(transport)
+            .plugins(Vec::new())
+            .tools(Arc::new(tool.clone()))
+            .host(EmbeddedRuntimeHost::new(config))
+            .store(runtime_store)
+            .with_session_id(format!("cancel-no-drain-{mode:?}").to_ascii_lowercase())
+            .build()
+            .await;
         let persisted = runtime.export_persistence_state();
         let session_id = persisted.session_id.clone();
         let driver = crate::TurnWorkDriver::for_session(

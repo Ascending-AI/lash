@@ -1,5 +1,21 @@
 use super::*;
 
+#[test]
+fn absent_user_segment_marker_decodes_as_non_boundary() {
+    let expected = LlmMessage::text(LlmRole::User, "synthetic user-role observation");
+    let legacy_json = serde_json::to_value(&expected).expect("serialize marker-free message");
+    assert_eq!(legacy_json.get("starts_user_segment"), None);
+    let message: LlmMessage = serde_json::from_value(legacy_json.clone())
+        .expect("legacy message without a boundary marker decodes");
+
+    assert!(!message.starts_user_segment);
+    assert_eq!(message, expected);
+    assert_eq!(
+        serde_json::to_value(message).expect("serialize legacy-compatible message"),
+        legacy_json
+    );
+}
+
 fn response_started() -> LlmStreamEvidence {
     LlmStreamEvidence {
         response_started: true,

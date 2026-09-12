@@ -6,7 +6,7 @@ pub(super) use serde::de::{self, Visitor};
 pub(super) use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub(super) use crate::llm::transport::{
-    LlmTransportError, ProviderFailure, ProviderFailureKind, TransportRetryVerdict,
+    LlmTransportError, ProviderFailureKind, TransportRetryVerdict,
 };
 pub(super) use crate::llm::types::{
     AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,

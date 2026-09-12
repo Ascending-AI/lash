@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::controller::context::guard_restate_context_future;
+use crate::controller::journal_budget::JournaledEffectRecord;
 use crate::controller::{
     RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
     restate_effect_execution, restate_effect_name, restate_timer_turn_cancel_wait_request,
@@ -46,7 +47,7 @@ use lash_core::{
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_http_transport::HttpRequest;
-use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
+use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, LlmTransportError};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -909,12 +910,12 @@ impl HttpTransport for Fig779DurableCancelTransport {
         &self,
         _request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         let cancellation_is_durable = self
             .registry
             .events_after(&self.process_id, 0)
             .await
-            .map_err(|error| HttpTransportError::new(error.to_string()))?
+            .map_err(|error| LlmTransportError::new(error.to_string()))?
             .iter()
             .any(|event| event.event_type == "process.cancel_requested");
         if !cancellation_is_durable {

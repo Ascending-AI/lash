@@ -481,7 +481,11 @@ pub(crate) async fn run_once_writer_contention(
         export_state_ms,
         total_ms: elapsed_ms(total_started),
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state.read_view().messages().len(),
+        active_path_messages: state
+            .read_view()
+            .expect("runtime frame scope resolves")
+            .messages()
+            .len(),
         extra_counters: BTreeMap::from([
             ("writer_contention.workers".to_string(), workers as u64),
             ("writer_contention.operation_kinds".to_string(), 3),
@@ -662,7 +666,11 @@ pub(crate) async fn run_once_async_process_settlement(
         export_state_ms,
         total_ms: elapsed_ms(total_started),
         session_nodes: state.session_graph.nodes.len(),
-        active_path_messages: state.read_view().messages().len(),
+        active_path_messages: state
+            .read_view()
+            .expect("runtime frame scope resolves")
+            .messages()
+            .len(),
         extra_counters: BTreeMap::from([
             ("async_settlement.children".to_string(), children as u64),
             (

@@ -434,7 +434,7 @@ mod tests {
         let graph = Arc::new(SessionGraph::default());
         TurnGraphEditor::new(
             Arc::clone(&graph),
-            graph.read_model(),
+            graph.read_model(None).unwrap(),
             None,
             "turn-graph-editor-test",
             Arc::new(crate::SystemClock),
@@ -466,7 +466,7 @@ mod tests {
 
         let graph = editor.into_session_graph();
         assert_eq!(graph.nodes.len(), 1);
-        assert_eq!(graph.read_model().messages.len(), 1);
+        assert_eq!(graph.read_model(None).unwrap().messages.len(), 1);
     }
 
     #[test]
@@ -493,7 +493,7 @@ mod tests {
         let mut graph = SessionGraph::default();
         graph.append_active_read_delta(&[message("history", "committed")]);
         let graph = Arc::new(graph);
-        let base_read_model = graph.read_model();
+        let base_read_model = graph.read_model(None).unwrap();
         let base = Arc::clone(&base_read_model.messages);
         let editor = TurnGraphEditor::new(
             graph,
@@ -587,7 +587,7 @@ mod tests {
         );
         let durable_graph = editor.into_session_graph();
         assert_eq!(
-            durable_graph.read_model().messages[0].parts[0].content,
+            durable_graph.read_model(None).unwrap().messages[0].parts[0].content,
             "original"
         );
     }

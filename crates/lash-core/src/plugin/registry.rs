@@ -542,7 +542,7 @@ pub trait PluginFactory: Send + Sync {
     fn process_engine_contributions(
         &self,
         _ctx: &ProcessEngineContributionContext<'_>,
-    ) -> Result<Vec<Arc<dyn crate::ProcessEngine>>, PluginError> {
+    ) -> Result<Vec<crate::ProcessEngineRegistration>, PluginError> {
         Ok(Vec::new())
     }
 

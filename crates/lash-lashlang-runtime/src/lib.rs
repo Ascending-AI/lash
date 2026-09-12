@@ -623,6 +623,118 @@ pub struct LashlangProcessInput {
     pub args: serde_json::Map<String, serde_json::Value>,
 }
 
+/// Whether a caller can and must check the live host environment.
+pub enum LashlangHostEnvironmentCheck<'a> {
+    /// Prepare validates immutable artifact claims and deliberately omits live-host checks.
+    OmitHostEnvironment,
+    /// Run validates against the environment it resolved for this attempt.
+    CheckHostEnvironment(Result<&'a LashlangHostEnvironment, String>),
+}
+
+/// Typed refusal shared by prepare and the authoritative run-time recheck.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LashlangProcessAdmissionRefusal {
+    HostRequirementsMismatch {
+        process: String,
+        requested: String,
+        actual: String,
+    },
+    ProcessRefMismatch {
+        module_ref: String,
+        process: String,
+        process_ref: String,
+    },
+    HostEnvironmentInvalid {
+        message: String,
+    },
+    HostEnvironmentIncompatible {
+        process: String,
+        message: String,
+    },
+}
+
+impl LashlangProcessAdmissionRefusal {
+    pub const fn failure_code(&self) -> LashlangProcessFailureCode {
+        match self {
+            Self::HostRequirementsMismatch { .. } => {
+                LashlangProcessFailureCode::ProcessHostRequirementsMismatch
+            }
+            Self::ProcessRefMismatch { .. } => LashlangProcessFailureCode::ProcessRefMismatch,
+            Self::HostEnvironmentInvalid { .. } => {
+                LashlangProcessFailureCode::ProcessHostEnvironmentInvalid
+            }
+            Self::HostEnvironmentIncompatible { .. } => {
+                LashlangProcessFailureCode::ProcessHostEnvironmentIncompatible
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for LashlangProcessAdmissionRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HostRequirementsMismatch {
+                process,
+                requested,
+                actual,
+            } => write!(
+                formatter,
+                "lashlang process `{process}` requested surface {requested}, artifact has {actual}"
+            ),
+            Self::ProcessRefMismatch {
+                module_ref,
+                process,
+                process_ref,
+            } => write!(
+                formatter,
+                "lashlang module `{module_ref}` does not export process `{process}` as requested ref {process_ref}"
+            ),
+            Self::HostEnvironmentInvalid { message } => formatter.write_str(message),
+            Self::HostEnvironmentIncompatible { process, message } => write!(
+                formatter,
+                "lashlang process `{process}` is incompatible with this host surface: {message}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LashlangProcessAdmissionRefusal {}
+
+pub fn validate_lashlang_process_admission(
+    artifact: &lashlang::ModuleArtifact,
+    input: &LashlangProcessInput,
+    host: LashlangHostEnvironmentCheck<'_>,
+) -> Result<(), LashlangProcessAdmissionRefusal> {
+    if artifact.host_requirements_ref != input.host_requirements_ref {
+        return Err(LashlangProcessAdmissionRefusal::HostRequirementsMismatch {
+            process: input.process_name.clone(),
+            requested: input.host_requirements_ref.to_string(),
+            actual: artifact.host_requirements_ref.to_string(),
+        });
+    }
+    if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
+        return Err(LashlangProcessAdmissionRefusal::ProcessRefMismatch {
+            module_ref: input.module_ref.to_string(),
+            process: input.process_name.clone(),
+            process_ref: format!("{:?}", input.process_ref),
+        });
+    }
+    if let LashlangHostEnvironmentCheck::CheckHostEnvironment(host) = host {
+        let host =
+            host.map_err(
+                |message| LashlangProcessAdmissionRefusal::HostEnvironmentInvalid { message },
+            )?;
+        lashlang_host_environment_satisfies_requirements(&artifact.host_requirements, host)
+            .map_err(
+                |error| LashlangProcessAdmissionRefusal::HostEnvironmentIncompatible {
+                    process: input.process_name.clone(),
+                    message: error.to_string(),
+                },
+            )?;
+    }
+    Ok(())
+}
+
 impl LashlangProcessInput {
     pub fn process_identity(&self) -> lash_core::ProcessIdentity {
         lashlang_process_identity(self)
@@ -719,20 +831,18 @@ pub async fn prepare_lashlang_process_start(
             module_ref: start.module_ref.to_string(),
             message: source.to_string(),
         })?;
-    if artifact.host_requirements_ref != start.host_requirements_ref {
-        return Err(LashlangRuntimeError::ArtifactRequirementsMismatch {
-            module_ref: start.module_ref.to_string(),
-            requested: start.host_requirements_ref.to_string(),
-            actual: artifact.host_requirements_ref.to_string(),
-        });
-    }
-    if artifact.process_ref(&start.process_name) != Some(&start.process_ref) {
-        return Err(LashlangRuntimeError::ArtifactProcessMismatch {
-            module_ref: start.module_ref.to_string(),
-            process: start.process_name.clone(),
-            process_ref: format!("{:?}", start.process_ref),
-        });
-    }
+    let admission_input = LashlangProcessInput {
+        module_ref: start.module_ref.clone(),
+        process_ref: start.process_ref.clone(),
+        host_requirements_ref: start.host_requirements_ref.clone(),
+        process_name: start.process_name.clone(),
+        args: serde_json::Map::new(),
+    };
+    validate_lashlang_process_admission(
+        &artifact,
+        &admission_input,
+        LashlangHostEnvironmentCheck::OmitHostEnvironment,
+    )?;
     let process = artifact
         .canonical_ir
         .process(&start.process_name)
@@ -1050,58 +1160,6 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         LASHLANG_ENGINE_KIND
     }
 
-    async fn validate_start(
-        &self,
-        context: lash_core::ProcessEngineValidationContext<'_>,
-        payload: &serde_json::Value,
-        _env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
-    ) -> Result<(), lash_core::PluginError> {
-        let input: LashlangProcessInput =
-            serde_json::from_value(payload.clone()).map_err(|err| {
-                lash_core::PluginError::Session(format!("invalid lashlang process payload: {err}"))
-            })?;
-        let artifact = self
-            .artifact_store
-            .get_module_artifact(&input.module_ref)
-            .await
-            .map_err(|err| lash_core::PluginError::Session(format!("load module artifact: {err}")))?
-            .ok_or_else(|| {
-                lash_core::PluginError::Session(format!(
-                    "missing lashlang module artifact `{}`",
-                    input.module_ref
-                ))
-            })?;
-        if artifact.host_requirements_ref != input.host_requirements_ref {
-            return Err(lash_core::PluginError::Session(format!(
-                "lashlang process `{}` requested surface {}, artifact has {}",
-                input.process_name, input.host_requirements_ref, artifact.host_requirements_ref
-            )));
-        }
-        if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
-            return Err(lash_core::PluginError::Session(format!(
-                "lashlang module `{}` does not export process `{}` as requested ref {:?}",
-                input.module_ref, input.process_name, input.process_ref
-            )));
-        }
-        let surface = self
-            .surface
-            .clone()
-            .for_process_registry(context.process_registry_available());
-        let host_environment = surface
-            .host_environment(context.tool_catalog())
-            .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
-        if let Err(err) = lashlang_host_environment_satisfies_requirements(
-            &artifact.host_requirements,
-            &host_environment,
-        ) {
-            return Err(lash_core::PluginError::Session(format!(
-                "lashlang process `{}` is incompatible with this host surface: {err}",
-                input.process_name
-            )));
-        }
-        Ok(())
-    }
-
     async fn run(
         &self,
         context: lash_core::ProcessEngineRunContext<'_>,
@@ -1113,13 +1171,6 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             payload,
         ))
         .await
-    }
-
-    fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {
-        match LashlangProcessInput::from_payload(payload.clone()) {
-            Ok(input) => lashlang_process_identity(&input),
-            Err(_) => lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND),
-        }
     }
 
     async fn protect_start_artifacts(
@@ -1174,6 +1225,27 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .await
             .map_err(|error| lash_core::PluginError::Session(error.to_string()))
     }
+}
+
+pub fn admit_lashlang_process(
+    _kind: &'static str,
+    payload: &serde_json::Value,
+    _env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
+) -> Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+    let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|err| {
+        lash_core::PluginError::Session(format!("invalid lashlang process payload: {err}"))
+    })?;
+    Ok(lashlang_process_identity(&input))
+}
+
+pub fn lashlang_process_engine_registration(
+    engine: LashlangProcessEngine,
+) -> lash_core::ProcessEngineRegistration {
+    lash_core::ProcessEngineRegistration::new(
+        Arc::new(engine),
+        lash_core::ProcessEngineAdmission::new(LASHLANG_ENGINE_KIND, admit_lashlang_process),
+    )
+    .expect("lashlang engine and admission share a fixed kind")
 }
 
 mod bridge;

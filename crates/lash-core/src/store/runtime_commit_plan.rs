@@ -489,10 +489,10 @@ impl<'a> RuntimeCommitPlan<'a> {
                 schema_version: super::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: self.commit.session_id.clone(),
                 config: self.commit.config.clone(),
-                current_frame_node_id: self
-                    .derived_frame_node_id
-                    .clone()
-                    .map(crate::FrameNodeId::new),
+                current_frame_node_id: self.derived_frame_node_id.clone().map(|frame_node_id| {
+                    crate::FrameNodeId::new(frame_node_id)
+                        .expect("derived graph node identities are non-empty")
+                }),
             },
             self.next_head_revision,
             Some(checkpoint_ref),

@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +19,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PROCESS_GROUP_GRACE_SECONDS = 0.5
 RUST_MASK_START = re.compile(
     r'//|/\*|(?<![A-Za-z0-9_])(?:br|cr|r)(?P<hash>#{0,255})"|(?:b|c)?"|b?\''
 )
@@ -1193,21 +1197,65 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     return packages, plan
 
 
+def process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def terminate_process_group(process: subprocess.Popen[str]) -> None:
+    process_group = process.pid
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return
+
+    deadline = time.monotonic() + PROCESS_GROUP_GRACE_SECONDS
+    while time.monotonic() < deadline and process_group_exists(process_group):
+        process.poll()
+        time.sleep(0.01)
+    if process_group_exists(process_group):
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait()
+
+
 def run_command(command: list[str], root: Path) -> str:
     print("+ " + " ".join(command), flush=True)
-    process = subprocess.Popen(
-        command,
-        cwd=root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    process: subprocess.Popen[str] | None = None
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def cancel_on_sigterm(signum: int, _frame: Any) -> None:
+        signal.signal(signum, signal.SIG_IGN)
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, cancel_on_sigterm)
     output: list[str] = []
-    assert process.stdout is not None
-    for line in process.stdout:
-        output.append(line)
-        print(line, end="", flush=True)
-    return_code = process.wait()
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            output.append(line)
+            print(line, end="", flush=True)
+        return_code = process.wait()
+    except BaseException:
+        if process is not None:
+            terminate_process_group(process)
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
     combined = "".join(output)
     if return_code != 0:
         raise subprocess.CalledProcessError(return_code, command, output=combined)
