@@ -96,8 +96,6 @@ struct CellDetector {
     pending: String,
     inside_cell: bool,
     cell_closed: bool,
-    emitted_start: bool,
-    emitted_end: bool,
     visible_prose: String,
     cell_body: String,
     /// A stream that ended with a response still to come has handed its
@@ -125,8 +123,6 @@ impl CellDetector {
             pending: String::new(),
             inside_cell: false,
             cell_closed: false,
-            emitted_start: false,
-            emitted_end: false,
             visible_prose: String::new(),
             cell_body: String::new(),
             stream_ended: false,
@@ -163,8 +159,6 @@ impl CellDetector {
         self.pending.clear();
         self.inside_cell = false;
         self.cell_closed = false;
-        self.emitted_start = false;
-        self.emitted_end = false;
         self.visible_prose.clear();
         self.cell_body.clear();
     }
@@ -332,8 +326,6 @@ impl CellDetector {
     }
 
     fn start_event(&mut self) -> PluginRuntimeEvent {
-        debug_assert!(!self.emitted_start);
-        self.emitted_start = true;
         PluginRuntimeEvent::Custom {
             name: self.dialect.stream_cell_start_event_name().to_string(),
             payload: serde_json::json!({}),
@@ -341,8 +333,6 @@ impl CellDetector {
     }
 
     fn end_event(&mut self) -> PluginRuntimeEvent {
-        debug_assert!(!self.emitted_end);
-        self.emitted_end = true;
         PluginRuntimeEvent::Custom {
             name: self.dialect.stream_cell_end_event_name().to_string(),
             payload: serde_json::json!({}),
