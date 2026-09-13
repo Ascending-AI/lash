@@ -685,6 +685,20 @@ pub fn code_execution_context_with_invocation(
         .into_runtime()
 }
 
+/// Build an empty code-execution context with a caller-supplied effect
+/// controller and stable parent invocation.
+#[doc(hidden)]
+pub fn code_execution_context_with_effect_controller_and_invocation(
+    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .shared_effect_controller(effect_controller)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
 /// Build a code-execution context with a concrete tool surface and the stable
 /// parent invocation production installs around an `ExecCode` effect.
 pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
@@ -695,6 +709,44 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
     TestExecutionContextBuilder::new()
         .provider(provider)
         .tool_catalog(tool_catalog)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
+/// Build a concrete code-execution context with caller-supplied tool and
+/// effect hosts plus the stable parent invocation.
+#[doc(hidden)]
+pub fn code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .shared_effect_controller(effect_controller)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
+/// Build a concrete code-execution context with an already admitted effect
+/// scope. Durable-controller tests use this instead of the shared-controller
+/// shortcut, whose intentionally synthetic runtime-operation scope is suitable
+/// only for scope-agnostic fakes.
+#[doc(hidden)]
+pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    effect_controller: crate::ScopedEffectController<'static>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .borrowed_effect_controller(effect_controller)
         .runtime_parent_invocation(invocation)
         .build()
         .into_runtime()

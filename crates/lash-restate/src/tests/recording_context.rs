@@ -79,6 +79,16 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "direct_local",
         ),
         (
+            RuntimeEffectCommand::LanguageRuntimeValue {
+                operation: "deferred_tool_resolution:v1:[\"web.fetch\"]".to_string(),
+            },
+            // FIG-2910 intentionally consumes one Restate journal ordinal
+            // before any dependent effect in a resource-bearing ExecCode body.
+            // Pre-cutover in-flight bodies must be drained or recreated; this
+            // command is never folded into the outer DirectLocal run.
+            "journaled_run",
+        ),
+        (
             RuntimeEffectCommand::Checkpoint {
                 checkpoint: lash_core::CheckpointKind::AfterWork,
             },

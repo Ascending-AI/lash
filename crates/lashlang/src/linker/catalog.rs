@@ -664,6 +664,42 @@ impl LashlangHostCatalog {
             .is_some_and(|module| module.operations.contains_key(operation))
     }
 
+    /// Removes one exact callable module binding from an effective link
+    /// environment.
+    ///
+    /// Deferred-resolution replay uses this before applying its recorded
+    /// outcome, so a later ambient definition cannot shadow the authority
+    /// captured for the same call path. Resource-operation schema is removed
+    /// only when no remaining module binding uses it; otherwise the ordinary
+    /// catalog collision checks remain authoritative when the recorded
+    /// definition is folded back in.
+    pub fn mask_module_operation(&mut self, module_path: &str, operation: &str) {
+        let Some(module) = self.module_instances.get_mut(module_path) else {
+            return;
+        };
+        let resource_type = module.resource_type.clone();
+        if module.operations.remove(operation).is_none() {
+            return;
+        }
+        if module.operations.is_empty() {
+            self.module_instances.remove(module_path);
+        }
+        let still_used = self.module_instances.values().any(|module| {
+            module.resource_type == resource_type && module.operations.contains_key(operation)
+        });
+        if !still_used && let Some(resource) = self.resource_types.get_mut(&resource_type) {
+            resource.operations.remove(operation);
+            if resource.operations.is_empty()
+                && !self
+                    .module_instances
+                    .values()
+                    .any(|module| module.resource_type == resource_type)
+            {
+                self.resource_types.remove(&resource_type);
+            }
+        }
+    }
+
     pub fn resolve_value_constructor(
         &self,
         path: &[impl AsRef<str>],

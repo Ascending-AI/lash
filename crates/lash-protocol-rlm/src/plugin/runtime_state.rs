@@ -544,6 +544,20 @@ mod tests {
         }
     }
 
+    fn admitted_context(cell_id: &str) -> lash_core::RuntimeExecutionContext<'static> {
+        let replay_key = format!("exec-code:{cell_id}");
+        lash_core::testing::code_execution_context_with_invocation(
+            lash_core::testing::exec_code_invocation(
+                "runtime-state-session",
+                "runtime-state-turn",
+                0,
+                0,
+                replay_key.clone(),
+                replay_key,
+            ),
+        )
+    }
+
     /// Drive `future` until it is parked inside the resolver, i.e. suspended in
     /// the middle of a cell with the execution state in hand.
     fn poll_until_parked<F: Future>(
@@ -586,10 +600,9 @@ mod tests {
                 // Drive a cell until it is suspended mid-flight, then drop it:
                 // a cancellation with the execution state in the cell's hands.
                 {
-                    let mut cancelled = Box::pin(state.execute_code(
-                        lash_core::testing::code_execution_context(),
-                        cell(PARKING_CELL),
-                    ));
+                    let mut cancelled = Box::pin(
+                        state.execute_code(admitted_context("cancelled"), cell(PARKING_CELL)),
+                    );
                     poll_until_parked(&mut cancelled, &mut cx, &resolver);
                 }
 
@@ -597,7 +610,7 @@ mod tests {
                 // still whole and the next cell runs normally.
                 let next = state
                     .execute_code(
-                        lash_core::testing::code_execution_context(),
+                        admitted_context("survivor"),
                         cell("survivor = 1\nfinish survivor"),
                     )
                     .await
@@ -618,20 +631,17 @@ mod tests {
                 let mut cx = Context::from_waker(Waker::noop());
 
                 // One cell is running: parked mid-flight, holding the state.
-                let mut running = Box::pin(state.execute_code(
-                    lash_core::testing::code_execution_context(),
-                    cell(PARKING_CELL),
-                ));
+                let mut running =
+                    Box::pin(state.execute_code(admitted_context("running"), cell(PARKING_CELL)));
                 poll_until_parked(&mut running, &mut cx, &resolver);
 
                 // A second cell arrives while the first is still running. It
                 // makes no progress whatsoever: it is queued behind the running
                 // cell rather than answered — with a result or with an error.
                 {
-                    let mut waiting = Box::pin(state.execute_code(
-                        lash_core::testing::code_execution_context(),
-                        cell("second_cell = 2"),
-                    ));
+                    let mut waiting = Box::pin(
+                        state.execute_code(admitted_context("waiting"), cell("second_cell = 2")),
+                    );
                     for _ in 0..16 {
                         assert!(
                             waiting.as_mut().poll(&mut cx).is_pending(),
@@ -659,10 +669,7 @@ mod tests {
 
                 // The waiting cell, re-driven, now runs — on that same state.
                 let second = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(),
-                        cell("second_cell = 2"),
-                    )
+                    .execute_code(admitted_context("waiting"), cell("second_cell = 2"))
                     .await
                     .expect("the cell that waited now runs");
                 assert_eq!(second.error, None);
@@ -672,10 +679,7 @@ mod tests {
                     .expect("settle the second returned cell");
 
                 let total = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(),
-                        cell("finish second_cell"),
-                    )
+                    .execute_code(admitted_context("total"), cell("finish second_cell"))
                     .await
                     .expect("execute code");
                 assert_eq!(total.error, None);
