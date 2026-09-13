@@ -462,7 +462,6 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-regress:integration__test",
     "//crates/lash-regress:lash-regress__unit_test",
     "//crates/lash-regress:unicode_property_escapes__test",
-    "//crates/lash-regress:unicodesets__test",
     "//crates/lash-remote-protocol:lash-remote-protocol__unit_test",
     "//crates/lash-restate:lash-restate__unit_test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
@@ -519,6 +518,10 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
     "//runbooks/restate-postgres-workers:lash-e2e-worker__bin__unit_test",
     "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
+]
+
+WORKSPACE_DEFERRED_TEST_TARGETS = [
+    "//crates/lash-regress:unicodesets__test",
 ]
 
 WORKSPACE_CARGO_TEST_TARGETS = [

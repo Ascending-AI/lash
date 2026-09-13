@@ -11,7 +11,15 @@ import sys
 from typing import Mapping
 
 
-FAMILIES = ("rust", "confidence", "stores", "functional_e2e", "workers_e2e")
+FAMILIES = (
+    "rust",
+    "stores",
+    "functional_e2e",
+    "workers_e2e",
+    "workbench",
+    "regress",
+    "schema",
+)
 CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
 
 GATED_JOBS = {
@@ -21,26 +29,22 @@ GATED_JOBS = {
     "workspace-tests": "rust",
     "heavy-tests": "rust",
     "stack-budget": "rust",
-    "confidence-fast": "confidence",
-    "confidence-fast-summary": "confidence",
     "postgres-store": "stores",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
     "functional-e2e-process-operations": "functional_e2e",
     "fuzz-smoke": "rust",
     "unused-deps": "rust",
+    "unicode-tests": "regress",
 }
 
-# The dedicated compile configurations that must witness every head the merge
-# queue is about to publish. Each resolves its own feature graph -- named
-# package features, `lash-runtime` without defaults, and lashlang consumed as an
-# external Git dependency -- so none of them is covered by the workspace check.
-# They are required on merge_group INCLUDING docs-only groups: the change
-# classifier certifies a diff, not the health of the base the group is built
-# over, and a docs-only group over an already broken base is exactly how
-# #1199 and #1198 published a green conclusion over a head that did not
-# compile. They stay skipped on pull_request and keep their `rust` family
-# behaviour on push / workflow_dispatch (FIG-2854).
+# Dedicated compile configurations that witness a queued rust head. Each
+# resolves its own feature graph -- named package features, `lash-runtime`
+# without defaults, and lashlang consumed as an external Git dependency -- so
+# none of them is covered by the workspace check. They stay skipped on
+# pull_request, skip docs-only merge groups (workspace `test-doc` still
+# compiles those heads), skip `push` (the queue already witnessed the SHA),
+# and keep `rust` family behaviour on workflow_dispatch.
 QUEUE_REQUIRED_COMPILE_JOBS = {
     "lashlang-git-consumer",
     "package-feature-checks",
@@ -48,17 +52,15 @@ QUEUE_REQUIRED_COMPILE_JOBS = {
 }
 
 # Jobs deferred entirely to trunk runs (push / workflow_dispatch): their
-# job-level conditions skip them on pull_request and merge_group events per
-# the 2026-08-25 CI-scope ruling; reassess after the FIG-2169 test-prune sweep.
+# job-level conditions skip them on pull_request and merge_group events.
 # postgres-store is intentionally absent: its focused runtime Agent Scenario
 # runs on pull requests and merge groups while its heavier steps remain trunk-only.
 # The QUEUE_REQUIRED_COMPILE_JOBS above are absent for the same kind of reason:
-# they are deferred on pull_request only, and required in the queue.
+# they are deferred on pull_request only, and required in the queue when rust
+# ran.
 TRUNK_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
-    "confidence-fast",
-    "confidence-fast-summary",
     "s3-store",
     "functional-e2e",
     "functional-e2e-process-operations",
@@ -67,14 +69,31 @@ TRUNK_ONLY_JOBS = {
     "fuzz-smoke",
 }
 
+# The merge queue already validated these on the SHA that lands on main.
+# Breadth jobs (heavy, S3, E2E, fuzz, stack-budget, unicode) keep running on
+# push; this set does not.
+PUSH_SKIP_CORE_JOBS = {
+    "facade-only-examples",
+    "test-doc",
+    "repo-gates",
+    "unused-deps",
+    "lashlang-git-consumer",
+    "package-feature-checks",
+    "runtime-feature-boundary",
+    "workspace-tests",
+    "bazel-tests",
+    "lint",
+    "postgres-store",
+}
+
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
-# The PostgreSQL matrix, per event. PG16 is the sole primary lane and runs on
-# every event. The PG14 and PG18 compatibility lanes bracket the supported
-# range and only compare the live catalog artifact, so they are deferred off
-# the pull-request critical path: the merge queue runs all three before
-# anything lands, and so does every push to main. Nothing reaches trunk
-# without compatibility evidence.
+# The PostgreSQL matrix. PG16 is the sole primary lane on pull_request and
+# merge_group. PG14/PG18 compare catalog shape only and run when the diff
+# touches a durable schema crate, or on workflow_dispatch (the full profile,
+# including weekly/release certification). Push skips the postgres job
+# entirely (PUSH_SKIP_CORE_JOBS); weekly confidence backends remain the
+# compatibility witness for unrelated landings.
 POSTGRES_PRIMARY_LEG = {"postgres": "16", "role": "primary"}
 POSTGRES_COMPATIBILITY_LEGS = [
     {"postgres": "14", "role": "compatibility"},
@@ -82,11 +101,16 @@ POSTGRES_COMPATIBILITY_LEGS = [
 ]
 
 
-def postgres_matrix(event_name: str) -> list[dict[str, str]]:
-    if event_name == "pull_request":
+def postgres_matrix(event_name: str, schema: bool = False) -> list[dict[str, str]]:
+    if event_name == "pull_request" and not schema:
         return [POSTGRES_PRIMARY_LEG]
-    legs = [POSTGRES_COMPATIBILITY_LEGS[0], POSTGRES_PRIMARY_LEG, POSTGRES_COMPATIBILITY_LEGS[1]]
-    return legs
+    if schema or event_name == "workflow_dispatch":
+        return [
+            POSTGRES_COMPATIBILITY_LEGS[0],
+            POSTGRES_PRIMARY_LEG,
+            POSTGRES_COMPATIBILITY_LEGS[1],
+        ]
+    return [POSTGRES_PRIMARY_LEG]
 
 UNGATED_JOBS = {
     "worker-artifacts",
@@ -119,7 +143,6 @@ CONFIDENCE_JOB_POLICY = {
     "confidence-generated": "full-consumer",
     "confidence-minimizer": "full-consumer",
     "confidence-backends": "full-consumer",
-    "confidence-workers": "full-consumer",
     "confidence-coverage": "full-consumer",
     "confidence-mutation-core": "full-consumer",
     "confidence-mutation-sim": "full-consumer",
@@ -170,6 +193,18 @@ def _is_global_invalidator(path: str) -> bool:
         or path.startswith("scripts/")
         or path in {"justfile", "deny.toml"}
     )
+
+
+def _is_workbench_path(path: str) -> bool:
+    return path.startswith("examples/agent-workbench/")
+
+
+def _is_regress_path(path: str) -> bool:
+    return path.startswith("crates/lash-regress/")
+
+
+def _is_schema_path(path: str) -> bool:
+    return path.startswith(("crates/lash-postgres-store/", "crates/lash-sqlite-store/"))
 
 
 def _is_docs_path(path: str) -> bool:
@@ -233,7 +268,10 @@ def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
     docs_deletion = any(status == "D" and _is_docs_path(path) for status, path in changes)
     ambiguous = sorted(path for path in paths if not _is_known_path(path))
     docs_only = all(_is_docs_path(path) for path in paths) and not has_deletion
-    run_everything = global_invalidator or not docs_only or bool(ambiguous)
+    non_docs = [path for path in paths if not _is_docs_path(path)]
+    workbench_hit = any(_is_workbench_path(path) for path in paths)
+    only_workbench = bool(non_docs) and all(_is_workbench_path(path) for path in non_docs)
+    run_everything = global_invalidator or bool(ambiguous) or docs_deletion
 
     outputs = {
         "rust_code": str(any(path.endswith(".rs") or path.startswith(("crates/", "src/", "tests/")) for path in paths)).lower(),
@@ -252,10 +290,29 @@ def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
             if global_invalidator
             else "docs-only diff"
             if docs_only
+            else "workbench-only diff"
+            if only_workbench
             else "production-relevant diff"
         ),
     }
-    outputs.update({family: str(run_everything).lower() for family in FAMILIES})
+    if docs_only:
+        outputs.update({family: "false" for family in FAMILIES})
+        return outputs
+    if run_everything:
+        outputs.update({family: "true" for family in FAMILIES})
+        return outputs
+    rust = not only_workbench
+    outputs.update(
+        {
+            "rust": str(rust).lower(),
+            "stores": str(rust).lower(),
+            "functional_e2e": str(rust).lower(),
+            "workers_e2e": str(rust).lower(),
+            "workbench": str(workbench_hit).lower(),
+            "regress": str(any(_is_regress_path(path) for path in paths)).lower(),
+            "schema": str(any(_is_schema_path(path) for path in paths)).lower(),
+        }
+    )
     return outputs
 
 
@@ -292,26 +349,43 @@ def evaluate_conclusion(
         problems.append(f"plan output docs_only is {docs_only!r}, expected 'true' or 'false'")
     if fail_open_output not in {"true", "false"}:
         problems.append(f"plan output fail_open is {fail_open_output!r}, expected 'true' or 'false'")
-    for family in FAMILIES:
-        expectation = plan_outputs.get(family)
-        required = docs_only != "true" or fail_open_output == "true"
-        if expectation not in {"true", "false"}:
-            continue
-        if required and expectation != "true":
-            problems.append(
-                f"plan.{family} is false for a non-docs or fail-open diff; its skipped jobs are wrongly skipped"
-            )
-        elif not required and expectation != "false":
-            problems.append(f"plan.{family} is true for an exact docs-only diff")
+    if fail_open_output == "true":
+        for family in FAMILIES:
+            if plan_outputs.get(family) not in {"true", None}:
+                problems.append(
+                    f"plan.{family} is {plan_outputs.get(family)!r} for a fail-open diff"
+                )
+    elif docs_only == "true":
+        for family in FAMILIES:
+            expectation = plan_outputs.get(family)
+            if expectation not in {"true", "false"}:
+                continue
+            if expectation != "false":
+                problems.append(f"plan.{family} is true for an exact docs-only diff")
+    elif (
+        plan_outputs.get("rust") != "true"
+        and plan_outputs.get("workbench") != "true"
+    ):
+        problems.append(
+            "plan.rust and plan.workbench are both false for a non-docs diff"
+        )
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
+        if event_name == "push" and job in PUSH_SKIP_CORE_JOBS:
+            if result != "skipped":
+                problems.append(
+                    f"{job} ended with {result!r} on a push event, expected skipped"
+                )
+            continue
         if job == BAZEL_TEST_JOB:
-            wanted = "success" if bazel_is_trusted else "skipped"
+            rust_on = plan_outputs.get("rust") == "true"
+            wanted = "success" if bazel_is_trusted and rust_on else "skipped"
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"
-                    f" {'trusted' if bazel_is_trusted else 'untrusted'} event,"
+                    f" {'trusted' if bazel_is_trusted else 'untrusted'}"
+                    f"{'' if rust_on else ' non-rust'} event,"
                     f" expected {wanted}"
                 )
             continue
@@ -328,25 +402,41 @@ def evaluate_conclusion(
                     f" {event_name} event, expected skipped"
                 )
             continue
-        # The dedicated compile lanes are judged by the event before the family
-        # expectation below ever applies: a docs-only merge group still has to
-        # show them green, because the plan classifies the diff and these jobs
-        # witness the head (FIG-2854).
         if job in QUEUE_REQUIRED_COMPILE_JOBS and event_name in DEFERRED_EVENTS:
-            wanted = "skipped" if event_name == "pull_request" else "success"
+            rust_on = plan_outputs.get("rust") == "true" or fail_open_output == "true"
+            wanted = "success" if event_name == "merge_group" and rust_on else "skipped"
             if result != wanted:
                 problems.append(
                     f"queue-required compile job {job} ended with {result!r} on a"
                     f" {event_name} event, expected {wanted}"
                 )
             continue
-        # Every pull request and merge-group run carries the stable PostgreSQL
-        # matrix, independent of path classification. Its aggregate must
-        # therefore fail closed if the matrix is skipped or fails.
         if job == "postgres-store" and event_name in DEFERRED_EVENTS:
-            if result != "success":
+            wanted = "success" if plan_outputs.get("stores") == "true" else "skipped"
+            if result != wanted:
                 problems.append(
-                    f"{job} ended with {result!r} on a {event_name} event, expected success"
+                    f"{job} ended with {result!r} on a {event_name} event, expected {wanted}"
+                )
+            continue
+        if job == "workspace-tests":
+            required = (
+                plan_outputs.get("rust") == "true"
+                or plan_outputs.get("workbench") == "true"
+            )
+            wanted = "success" if required else "skipped"
+            if result != wanted:
+                problems.append(
+                    f"{job} ended with {result!r}, expected {wanted}"
+                )
+            continue
+        if job == "unicode-tests":
+            if event_name in {"push", "workflow_dispatch"}:
+                wanted = "success"
+            else:
+                wanted = "success" if plan_outputs.get("regress") == "true" else "skipped"
+            if result != wanted:
+                problems.append(
+                    f"{job} ended with {result!r} on a {event_name} event, expected {wanted}"
                 )
             continue
         if result in {"failure", "cancelled"}:
@@ -403,6 +493,11 @@ def main() -> int:
 
     matrix_parser = subparsers.add_parser("postgres-matrix")
     matrix_parser.add_argument("--event", required=True)
+    matrix_parser.add_argument(
+        "--schema",
+        choices=("true", "false"),
+        default="false",
+    )
 
     subparsers.add_parser("conclusion")
     args = parser.parse_args()
@@ -420,7 +515,13 @@ def main() -> int:
         return 0
 
     if args.command == "postgres-matrix":
-        _write_outputs({"postgres_matrix": json.dumps(postgres_matrix(args.event))})
+        _write_outputs(
+            {
+                "postgres_matrix": json.dumps(
+                    postgres_matrix(args.event, args.schema == "true")
+                )
+            }
+        )
         return 0
 
     try:
