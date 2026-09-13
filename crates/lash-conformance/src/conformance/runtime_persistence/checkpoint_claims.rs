@@ -1045,5 +1045,6 @@ pub(super) fn attachment_intent(id: &str) -> AttachmentIntent {
         intent_at_epoch_ms: 100,
         owner_kind: None,
         owner_id: None,
+        owner_incarnation: None,
     }
 }

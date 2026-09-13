@@ -355,7 +355,8 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
     committed_at_ms  INTEGER,
     owner_kind       TEXT CHECK (owner_kind IN ('turn', 'process')),
     owner_id         TEXT,
-    CHECK ((owner_kind IS NULL) = (owner_id IS NULL)),
+    owner_incarnation INTEGER,
+    CONSTRAINT ck_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)),
     PRIMARY KEY (session_id, attachment_id)
 );
 
@@ -403,7 +404,7 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
     ON attachment_manifest(committed_at_ms)
     WHERE committed_at_ms IS NULL;
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
-    ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
+    ON attachment_manifest(session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
@@ -578,7 +579,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// both NULL or both populated; both version-56 parent catalogs are recreated.
 /// Version 58 adds exact owner edges and permanent execution-owner publication
 /// fences. Version-57 catalogs are rejected and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 58;
+/// Version 59 qualifies process-owned attachment intents with the registry-minted
+/// incarnation. Version-58 catalogs are rejected so a bare process id is never
+/// reinterpreted as the current incarnation with the same reusable name.
+pub(crate) const SCHEMA_VERSION: i32 = 59;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

@@ -53,10 +53,7 @@ lash_rust_unit_test(
     ],
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
-    tags = [
-        "cargo-service-gate",
-        "manual",
-    ],
+    tags = [],
     version = "0.0.0-dev",
 )
 

@@ -576,8 +576,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 58"),
-        "error must report the real expected version 58: {message}"
+        message.contains("schema version 59"),
+        "error must report the real expected version 59: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -613,7 +613,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 58);
+    assert_eq!(user_version, 59);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -669,6 +669,7 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
             intent_at_epoch_ms: 1,
             owner_kind: Some(lash_core::AttachmentOwnerKind::Process),
             owner_id: Some("missing-process".to_string()),
+            owner_incarnation: Some(lash_core::ProcessIncarnation::from_registration_sequence(1)),
         })
         .expect("record process intent");
 
@@ -727,7 +728,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         Err(error) => error.to_string(),
     };
     assert!(
-        error.contains("schema version 58") && error.contains("version 51"),
+        error.contains("schema version 59") && error.contains("version 51"),
         "{error}"
     );
     let conn = rusqlite::Connection::open(&path).unwrap();

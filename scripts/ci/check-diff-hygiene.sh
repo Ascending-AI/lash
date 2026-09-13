@@ -21,8 +21,14 @@ cd "${repo_root}"
 tmp_dir="$(mktemp -d)"
 
 base_ref="${BASE_REF:-origin/main}"
+# The merge base, never BASE_SHA itself: on a pull request `base.sha` is main's
+# current tip and is normally not an ancestor of the head, so BASE_SHA..HEAD
+# would carry every main commit landed since this branch was cut.
 if [[ -n "${BASE_SHA:-}" ]]; then
-  merge_base="${BASE_SHA}"
+  if ! merge_base="$(git merge-base "${BASE_SHA}" HEAD)"; then
+    echo "Diff hygiene could not resolve merge-base for BASE_SHA '${BASE_SHA}'; fetch enough history for the base commit." >&2
+    exit 1
+  fi
   base_description="${BASE_SHA}"
 else
   if ! merge_base="$(git merge-base "${base_ref}" HEAD)"; then

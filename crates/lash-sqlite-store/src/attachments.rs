@@ -623,6 +623,7 @@ fn live_ref_exists_sql(process_registry_attached: bool) -> String {
             AND NOT EXISTS (
                 SELECT 1 FROM process_registry.processes AS process
                 WHERE process.process_id = manifest.owner_id
+                  AND process.incarnation = manifest.owner_incarnation
             )
         )"
         )
@@ -900,6 +901,13 @@ impl AttachmentManifest for Store {
             let intent_at_ms = intent.intent_at_epoch_ms as i64;
             let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
             let owner_id = intent.owner_id;
+            let owner_incarnation = intent
+                .owner_incarnation
+                .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
+                .transpose()
+                .map_err(|_| {
+                    StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
+                })?;
             self.conn
                 .write_flow(move |tx| {
                     let outcome: Result<(), StoreError> = (|| {
@@ -954,20 +962,22 @@ impl AttachmentManifest for Store {
                         tx.execute(
                             "INSERT INTO attachment_manifest
                             (attachment_id, session_id, canonical_uri, intent_at_ms,
-                             committed_at_ms, owner_kind, owner_id)
-                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)
+                             committed_at_ms, owner_kind, owner_id, owner_incarnation)
+                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)
                          ON CONFLICT(session_id, attachment_id) DO UPDATE SET
                             canonical_uri = excluded.canonical_uri,
                             intent_at_ms = excluded.intent_at_ms,
                             owner_kind = excluded.owner_kind,
-                            owner_id = excluded.owner_id",
+                            owner_id = excluded.owner_id,
+                            owner_incarnation = excluded.owner_incarnation",
                             params![
                                 attachment_id,
                                 session_id.as_str(),
                                 canonical_uri,
                                 intent_at_ms,
                                 owner_kind,
-                                owner_id
+                                owner_id,
+                                owner_incarnation
                             ],
                         )
                         .map_err(sqlite_error)?;
@@ -997,6 +1007,13 @@ impl AttachmentManifest for Store {
             let intent_at_ms = intent.intent_at_epoch_ms as i64;
             let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
             let owner_id = intent.owner_id;
+            let owner_incarnation = intent
+                .owner_incarnation
+                .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
+                .transpose()
+                .map_err(|_| {
+                    StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
+                })?;
             self.conn
                 .write_flow(move |tx| {
                     let outcome: Result<lash_core::AttachmentWriteFence, StoreError> = (|| {
@@ -1056,20 +1073,22 @@ impl AttachmentManifest for Store {
                         tx.execute(
                             "INSERT INTO attachment_manifest
                             (attachment_id, session_id, canonical_uri, intent_at_ms,
-                             committed_at_ms, owner_kind, owner_id)
-                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)
+                             committed_at_ms, owner_kind, owner_id, owner_incarnation)
+                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)
                          ON CONFLICT(session_id, attachment_id) DO UPDATE SET
                             canonical_uri = excluded.canonical_uri,
                             intent_at_ms = excluded.intent_at_ms,
                             owner_kind = excluded.owner_kind,
-                            owner_id = excluded.owner_id",
+                            owner_id = excluded.owner_id,
+                            owner_incarnation = excluded.owner_incarnation",
                             params![
                                 attachment_id,
                                 session_id.as_str(),
                                 canonical_uri,
                                 intent_at_ms,
                                 owner_kind,
-                                owner_id
+                                owner_id,
+                                owner_incarnation
                             ],
                         )
                         .map_err(sqlite_error)?;
@@ -1216,7 +1235,7 @@ impl AttachmentManifest for Store {
                 .call(move |conn| {
                     let mut stmt = conn.prepare(
                         "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                                committed_at_ms, owner_kind, owner_id
+                                committed_at_ms, owner_kind, owner_id, owner_incarnation
                          FROM attachment_manifest
                          WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
                          ORDER BY intent_at_ms ASC",
@@ -1229,6 +1248,19 @@ impl AttachmentManifest for Store {
                         let committed_at_ms: Option<i64> = row.get(4)?;
                         let owner_kind: Option<String> = row.get(5)?;
                         let owner_id: Option<String> = row.get(6)?;
+                        let owner_incarnation = row
+                            .get::<_, Option<i64>>(7)?
+                            .map(|value| {
+                                u64_from_sql("AttachmentManifest", "owner_incarnation", value)
+                            })
+                            .transpose()?;
+                        let (owner_kind, owner_id, owner_incarnation) =
+                            lash_core::store::decode_attachment_owner(
+                                owner_kind.as_deref(),
+                                owner_id,
+                                owner_incarnation,
+                            )
+                            .map_err(sqlite_conversion_error)?;
                         Ok(AttachmentManifestEntry {
                             attachment_id: crate::attachment_id_from_sql(
                                 "AttachmentManifest",
@@ -1247,18 +1279,9 @@ impl AttachmentManifest for Store {
                                     u64_from_sql("AttachmentManifest", "committed_at_ms", value)
                                 })
                                 .transpose()?,
-                            owner_kind: owner_kind
-                                .as_deref()
-                                .map(|value| {
-                                    AttachmentOwnerKind::from_wire_str(value).ok_or_else(|| {
-                                        sqlite_conversion_error(stored_data_corrupt(
-                                            "AttachmentManifest owner kind",
-                                            format_args!("unknown attachment owner kind `{value}`"),
-                                        ))
-                                    })
-                                })
-                                .transpose()?,
+                            owner_kind,
                             owner_id,
+                            owner_incarnation,
                         })
                     })?;
                     rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1291,6 +1314,7 @@ impl AttachmentManifest for Store {
                             AND NOT EXISTS (
                                 SELECT 1 FROM process_registry.processes AS process
                                 WHERE process.process_id = manifest.owner_id
+                                  AND process.incarnation = manifest.owner_incarnation
                             )
                         )"
                         )

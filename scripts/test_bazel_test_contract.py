@@ -34,6 +34,17 @@ def generated_list(name: str) -> list[str]:
     return ast.literal_eval(match.group(1))
 
 
+def inventory_targets() -> list[dict[str, object]]:
+    inventory = json.loads(
+        (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
+    )
+    return [
+        target | {"package": package["package"]}
+        for package in inventory["packages"]
+        for target in package["targets"]
+    ]
+
+
 def test_targets() -> list[dict[str, object]]:
     inventory = json.loads(
         (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
@@ -55,6 +66,16 @@ def workflow() -> dict[str, object]:
 
 def job_step(job: dict[str, object], name: str) -> dict[str, str]:
     return next(step for step in job["steps"] if step.get("name") == name)
+
+
+def shared_cache_action() -> dict[str, object]:
+    parsed = yaml.load(
+        (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text(
+            encoding="utf-8"
+        ),
+        Loader=yaml.BaseLoader,
+    )
+    return parsed["runs"]
 
 
 def generated_nextest_terms() -> set[tuple[str, str, str | None]]:
@@ -92,8 +113,8 @@ class BazelTestContractTests(unittest.TestCase):
         cargo_labels = set(generated_list("WORKSPACE_CARGO_TEST_TARGETS"))
 
         self.assertEqual(110, len(all_labels))
-        self.assertEqual(88, len(bazel_labels))
-        self.assertEqual(22, len(cargo_labels))
+        self.assertEqual(90, len(bazel_labels))
+        self.assertEqual(20, len(cargo_labels))
         self.assertFalse(bazel_labels & cargo_labels)
         self.assertEqual(all_labels, bazel_labels | cargo_labels)
         self.assertEqual(all_labels, set(generated_list("WORKSPACE_TEST_TARGETS")))
@@ -122,7 +143,7 @@ class BazelTestContractTests(unittest.TestCase):
                 "cargo-heavy-suite": 1,
                 "cargo-nested-suite": 2,
                 "cargo-path-assets": 1,
-                "cargo-service-gate": 13,
+                "cargo-service-gate": 11,
                 "cargo-trybuild": 1,
             },
             dict(exception_classes),
@@ -144,7 +165,7 @@ class BazelTestContractTests(unittest.TestCase):
                     None if kind == "unit-test" else target["cargo"],
                 )
             )
-        self.assertEqual(22, len(expected_nextest))
+        self.assertEqual(20, len(expected_nextest))
         self.assertEqual(expected_nextest, generated_nextest_terms())
 
     def test_workspace_suite_and_cli_default_to_the_generated_partition(self) -> None:
@@ -247,7 +268,8 @@ class BazelTestContractTests(unittest.TestCase):
             repository_tests.count("python3 scripts/test_bazel_test_contract.py"),
         )
 
-        runtime = job_step(jobs["bazel-tests"], "Resolve GitHub runner cache identity")
+        setup = shared_cache_action()
+        runtime = job_step(setup, "Resolve GitHub runner cache identity")
         self.assertIn("scripts/ci_plan.py bazel-runtime", runtime["run"])
         with tempfile.TemporaryDirectory() as temporary:
             github_output = pathlib.Path(temporary) / "output"
@@ -271,19 +293,21 @@ class BazelTestContractTests(unittest.TestCase):
                 ),
                 github_output.read_text(encoding="utf-8").strip(),
             )
+        flags = job_step(setup, "Export shared cache flags")["run"]
         bazel_command = job_step(
             jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
-        self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", bazel_command)
-        self.assertIn("--remote_instance_name=kiln", bazel_command)
+        self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", flags)
+        self.assertIn("--remote_instance_name=kiln", flags)
         self.assertIn("--cache_test_results=yes --test_output=errors", bazel_command)
+        self.assertIn("${BAZEL_SHARED_CACHE_FLAGS}", bazel_command)
         self.assertIn(
-            "--remote_default_exec_properties=github_runner_runtime=${{ "
-            "steps.bazel-runtime.outputs.bazel_runtime }}",
-            bazel_command,
+            "--remote_default_exec_properties=github_runner_runtime=${BAZEL_RUNTIME}",
+            flags,
         )
+        self.assertNotIn("kiln_executor_runtime", flags)
         self.assertNotIn("kiln_executor_runtime", bazel_command)
 
     def test_workspace_nextest_step_filters_only_trusted_events(self) -> None:
@@ -332,6 +356,237 @@ class BazelTestContractTests(unittest.TestCase):
                     self.assertEqual(expected_filter, nextest[filter_index + 1])
                 else:
                     self.assertNotIn("-E", nextest)
+
+    def test_doctests_are_an_executable_cached_partition(self) -> None:
+        doctests = [
+            target for target in inventory_targets() if target["kind"] == "doc-test"
+        ]
+        self.assertEqual(35, len(doctests))
+        # rustdoc runs these against the pinned toolchain and the declared
+        # dependency graph, so nothing here is Cargo-owned any more. A label
+        # that reacquires `manual` or a `cargo_only` reason silently leaves the
+        # partition; both are refused here.
+        self.assertTrue(all(target["tags"] == [] for target in doctests))
+        self.assertTrue(all("cargo_only" not in target for target in doctests))
+        self.assertEqual(
+            {target["label"] for target in doctests},
+            set(generated_list("WORKSPACE_DOCTEST_TARGETS")),
+        )
+
+        root_build = (ROOT / "BUILD.bazel").read_text(encoding="utf-8")
+        self.assertIn(
+            'test_suite(\n    name = "workspace_doctests",\n'
+            "    tests = WORKSPACE_DOCTEST_TARGETS,\n)",
+            root_build,
+        )
+
+    def test_clippy_partition_is_the_all_targets_shape(self) -> None:
+        targets = [
+            target for target in inventory_targets() if target["label"] is not None
+        ]
+        build_scripts = {
+            target["label"] for target in targets if target["kind"] == "custom-build"
+        }
+        doctests = {
+            target["label"] for target in targets if target["kind"] == "doc-test"
+        }
+        clippy = set(generated_list("WORKSPACE_CLIPPY_TARGETS"))
+
+        # `cargo clippy --workspace --all-targets` lints every target of the
+        # resolved default graph. The Bazel partition is the same set minus the
+        # build scripts, each of which carries its own recorded exemption.
+        self.assertEqual(
+            set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
+            clippy,
+        )
+        self.assertEqual(171, len(clippy))
+        self.assertFalse(clippy & doctests)
+        self.assertTrue(
+            all(
+                target.get("clippy_exempt")
+                for target in targets
+                if target["label"] in build_scripts
+            )
+        )
+
+        root_build = (ROOT / "BUILD.bazel").read_text(encoding="utf-8")
+        self.assertIn(
+            'lash_rust_clippy(\n    name = "workspace_clippy",\n'
+            "    testonly = True,\n    deps = WORKSPACE_CLIPPY_TARGETS,\n)",
+            root_build,
+        )
+
+    def test_every_lintable_label_contributes_a_clippy_marker(self) -> None:
+        # `lash_rust_clippy` fails analysis when a dep contributes no clippy
+        # marker, so membership in WORKSPACE_CLIPPY_TARGETS is the same fact as
+        # "this label was linted". The partition may therefore only omit a
+        # labelled target that records why, and the exemption list is asserted
+        # here rather than left implicit in the generator's filter.
+        targets = [
+            target for target in inventory_targets() if target["label"] is not None
+        ]
+        clippy = set(generated_list("WORKSPACE_CLIPPY_TARGETS"))
+        doctests = {
+            target["label"] for target in targets if target["kind"] == "doc-test"
+        }
+        exempt = {
+            target["label"]: target["clippy_exempt"]
+            for target in targets
+            if target.get("clippy_exempt")
+        }
+
+        self.assertEqual(
+            {target["label"] for target in targets} - doctests,
+            clippy | set(exempt),
+        )
+        self.assertFalse(clippy & set(exempt))
+        self.assertEqual(
+            {
+                "//crates/lash-protocol-rlm:build_script": (
+                    "cargo_build_script exposes no CrateInfo for the clippy aspect"
+                )
+            },
+            exempt,
+        )
+
+        clippy_bzl = (ROOT / "tools/bazel/clippy.bzl").read_text(encoding="utf-8")
+        self.assertIn('fail("clippy produced no marker for: {}"', clippy_bzl)
+
+    def test_lint_and_doc_jobs_branch_on_the_shared_trust_decision(self) -> None:
+        jobs = workflow()["jobs"]
+        trusted = "needs.plan.outputs.bazel_trusted == 'true'"
+        untrusted = "needs.plan.outputs.bazel_trusted != 'true'"
+
+        for job_id in ("lint", "test-doc"):
+            with self.subTest(job=job_id):
+                self.assertEqual("plan", jobs[job_id]["needs"])
+                self.assertEqual("build-cache", jobs[job_id]["environment"])
+
+        clippy_bazel = job_step(
+            jobs["lint"], "Clippy (workspace, all targets, shared cache)"
+        )
+        self.assertEqual(trusted, clippy_bazel["if"])
+        self.assertIn("//:workspace_clippy", clippy_bazel["run"])
+
+        clippy_cargo = job_step(jobs["lint"], "Clippy (workspace, all targets)")
+        self.assertEqual(untrusted, clippy_cargo["if"])
+        self.assertIn(
+            "cargo clippy --workspace --all-targets --locked "
+            "${LASH_CI_FEATURES} -- -D warnings",
+            clippy_cargo["run"],
+        )
+
+        # The `e2e` feature is outside the resolved default graph, so this
+        # command has no Bazel equivalent and runs on every event.
+        e2e = job_step(jobs["lint"], "Clippy (slack-clone e2e feature)")
+        self.assertNotIn("if", e2e)
+        self.assertIn(
+            "cargo clippy -p slack-clone --all-targets --features e2e "
+            "--locked --no-deps -- -D warnings",
+            e2e["run"],
+        )
+
+        doc_bazel = job_step(
+            jobs["test-doc"], "Check workspace and run doctests with shared cache"
+        )
+        self.assertEqual(f"matrix.lane == 'workspace' && {trusted}", doc_bazel["if"])
+        self.assertIn("//:workspace_compile //:workspace_doctests", doc_bazel["run"])
+
+        check_cargo = job_step(jobs["test-doc"], "Check workspace (all targets)")
+        self.assertEqual(f"matrix.lane == 'workspace' && {untrusted}", check_cargo["if"])
+        self.assertIn(
+            "cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}",
+            check_cargo["run"],
+        )
+
+        doctest_cargo = job_step(jobs["test-doc"], "Test workspace doctests")
+        self.assertEqual(
+            f"matrix.lane == 'workspace' && {untrusted}", doctest_cargo["if"]
+        )
+        self.assertIn(
+            "cargo test --doc --workspace --locked ${LASH_CI_FEATURES}",
+            doctest_cargo["run"],
+        )
+
+        for job_id in ("lint", "test-doc"):
+            with self.subTest(job=job_id):
+                setup = job_step(jobs[job_id], "Configure Bazel shared cache")
+                self.assertEqual(
+                    "./.github/actions/bazel-shared-cache", setup["uses"]
+                )
+    def test_service_jobs_never_reuse_a_cached_service_test_result(self) -> None:
+        """A cached green for a live-service test is a false green.
+
+        Both halves matter: the labels a service job executes must be absent
+        from the cacheable `//:workspace_tests` aggregate, and every Bazel
+        invocation in scripts/ci/store-tests.sh must refuse cached results and
+        keep them off the shared cache. The `--modify_execution_info` filter is
+        scoped to `TestRunner` so the compile actions stay shared.
+        """
+        bazel_labels = set(generated_list("WORKSPACE_BAZEL_TEST_TARGETS"))
+        service_labels = set()
+        for service in ("postgres", "minio"):
+            labels = (
+                ROOT / f"tools/bazel/{service}_test_labels.txt"
+            ).read_text(encoding="utf-8").split()
+            self.assertTrue(labels)
+            service_labels.update(labels)
+        self.assertFalse(service_labels & bazel_labels)
+
+        by_label = {target["label"]: target for target in test_targets()}
+        for label in service_labels:
+            self.assertIn("cargo-service-gate", by_label[label]["tags"])
+
+        script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
+        self.assertIn("--nocache_test_results", script)
+        self.assertIn(
+            "--modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache",
+            script,
+        )
+        self.assertNotIn("--cache_test_results=yes", script)
+        # One database, one bucket: the binaries must not overlap.
+        self.assertIn("--local_test_jobs=1", script)
+
+    def test_store_jobs_run_the_same_suites_on_both_trust_paths(self) -> None:
+        jobs = workflow()["jobs"]
+        suites = []
+        for job_id in ("postgres-store", "s3-store"):
+            job = jobs[job_id]
+            self.assertEqual("build-cache", job["environment"])
+            self.assertEqual(
+                "${{ needs.plan.outputs.bazel_trusted }}", job["env"]["BAZEL_TRUSTED"]
+            )
+            for step in job["steps"]:
+                run = step.get("run", "")
+                if "scripts/ci/store-tests.sh" in run:
+                    suites.append(run.split()[-1])
+                # Cargo toolchain setup exists only for the untrusted path.
+                if step.get("uses", "").startswith("./.github/actions/rust-toolchain"):
+                    self.assertEqual(
+                        "needs.plan.outputs.bazel_trusted != 'true'", step["if"]
+                    )
+        self.assertEqual(
+            [
+                "pg-catalog-compatibility",
+                "pg-store",
+                "pg-pool-wait",
+                "pg-agent-scenario",
+                "pg-cross-backend",
+                "s3-store",
+                "s3-attachment-differential",
+            ],
+            suites,
+        )
+
+        # Every suite the workflow names must dispatch on both trust decisions,
+        # and no suite may exist that the workflow never runs.
+        script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
+        declared = set(re.findall(r"^  ([a-z0-9-]+)\)$", script, flags=re.MULTILINE))
+        self.assertEqual(set(suites), declared)
+        for suite in suites:
+            body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
+            self.assertIn('if [ "${trusted}" = true ]; then', body)
+            self.assertIn("cargo ", body)
 
     def test_ci_policy_accepts_bazel_skip_only_for_untrusted_events(self) -> None:
         needs = {

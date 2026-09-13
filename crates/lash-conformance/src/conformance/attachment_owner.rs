@@ -398,10 +398,9 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
 
 async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     const PROCESS_ID: &str = "attachment-owner-process";
-    const SESSION_ID: &str = "process-env:attachment-owner-process";
-    backend
-        .process_registry
-        .register_process(crate::ProcessRegistration::new(
+    const SESSION_ID: &str = "attachment-owner-process-session";
+    let registration = || {
+        crate::ProcessRegistration::new(
             PROCESS_ID,
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
@@ -412,7 +411,11 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
                 lash_core::ParentScope::Host,
                 lash_core::OnParentEnd::Abandon,
             ),
-        ))
+        )
+    };
+    let first_incarnation = backend
+        .process_registry
+        .register_process(registration())
         .await
         .expect("register process attachment owner");
     let store = backend
@@ -428,7 +431,8 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
         SESSION_ID,
         Arc::clone(&backend.clock),
     ));
-    let _owner_binding = facade.bind_process_scoped(PROCESS_ID);
+    let _owner_binding =
+        facade.bind_process_scoped(crate::ProcessRef::from_record(&first_incarnation));
     let reference = facade
         .put(b"process-owner-bytes".to_vec(), attachment_meta("process"))
         .await
@@ -473,6 +477,23 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
         )
         .await
         .expect("prune process owner");
+    let second_incarnation = backend
+        .process_registry
+        .register_process(registration())
+        .await
+        .expect("re-register process attachment owner");
+    assert_ne!(
+        first_incarnation.incarnation, second_incarnation.incarnation,
+        "precondition: re-registration must allocate a new incarnation"
+    );
+    assert!(
+        !backend
+            .session_store_factory
+            .has_live_attachment_ref(&reference.id, u64::MAX)
+            .await
+            .expect("probe re-incarnated process attachment root"),
+        "a new incarnation with the same process id must not keep the earlier incarnation's attachment rooted"
+    );
     let pruned_report = crate::reclaim_unreferenced_attachments(
         &*backend.session_store_factory,
         &*backend.attachment_store,
@@ -482,13 +503,16 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
         },
     )
     .await
-    .expect("pruned process GC");
+    .expect("re-incarnated process GC");
     assert!(pruned_report.reclaimed_count >= 1);
     assert!(!pruned_report.owner_death_proof_degraded);
-    assert!(matches!(
-        backend.attachment_store.get(&reference.id).await,
-        Err(crate::AttachmentStoreError::NotFound(_))
-    ));
+    assert!(
+        matches!(
+            backend.attachment_store.get(&reference.id).await,
+            Err(crate::AttachmentStoreError::NotFound(_))
+        ),
+        "a new incarnation with the same process id must not resurrect the earlier incarnation's attachment"
+    );
 }
 
 async fn final_turn_commit(
@@ -592,6 +616,7 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
             intent_at_epoch_ms: 0,
             owner_kind: Some(crate::AttachmentOwnerKind::Process),
             owner_id: Some("absent-process-owner".to_string()),
+            owner_incarnation: Some(crate::ProcessIncarnation::from_registration_sequence(1)),
         })
         .expect("record process intent");
     for empty in [false, true] {

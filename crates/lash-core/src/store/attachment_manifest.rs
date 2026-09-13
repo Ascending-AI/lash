@@ -89,6 +89,59 @@ pub struct AttachmentIntent {
     /// execution scope; those rows retain fallback timer semantics.
     pub owner_kind: Option<AttachmentOwnerKind>,
     pub owner_id: Option<String>,
+    /// Store-minted process incarnation when `owner_kind` is `Process`.
+    /// Turn and unowned intents carry no incarnation.
+    pub owner_incarnation: Option<crate::ProcessIncarnation>,
+}
+
+/// Strictly decode the three-column durable attachment-owner identity.
+///
+/// Process names are reusable, so a process owner without the registry-minted
+/// incarnation is a retired pre-cutover shape and must never be reinterpreted
+/// as the current incarnation with the same name.
+#[doc(hidden)]
+pub type DecodedAttachmentOwner = (
+    Option<AttachmentOwnerKind>,
+    Option<String>,
+    Option<crate::ProcessIncarnation>,
+);
+
+#[doc(hidden)]
+pub fn decode_attachment_owner(
+    owner_kind: Option<&str>,
+    owner_id: Option<String>,
+    owner_incarnation: Option<u64>,
+) -> Result<DecodedAttachmentOwner, StoreError> {
+    let corrupt = |message: String| StoreError::StoredDataCorrupt {
+        record_kind: "AttachmentManifest owner",
+        message,
+    };
+    match (owner_kind, owner_id, owner_incarnation) {
+        (None, None, None) => Ok((None, None, None)),
+        (Some("turn"), Some(owner_id), None) => {
+            Ok((Some(AttachmentOwnerKind::Turn), Some(owner_id), None))
+        }
+        (Some("process"), Some(owner_id), Some(incarnation)) => Ok((
+            Some(AttachmentOwnerKind::Process),
+            Some(owner_id),
+            Some(crate::ProcessIncarnation::from_registration_sequence(
+                incarnation,
+            )),
+        )),
+        (Some("process"), Some(owner_id), None) => Err(corrupt(format!(
+            "process attachment owner `{owner_id}` has no incarnation; bare process-owner identities are unsupported"
+        ))),
+        (Some(unknown), _, _) if AttachmentOwnerKind::from_wire_str(unknown).is_none() => {
+            Err(StoreError::StoredDataCorrupt {
+                record_kind: "AttachmentManifest owner kind",
+                message: format!("unknown attachment owner kind `{unknown}`"),
+            })
+        }
+        (kind, id, incarnation) => Err(corrupt(format!(
+            "inconsistent attachment owner fields: kind {kind:?}, id present {}, incarnation {incarnation:?}",
+            id.is_some()
+        ))),
+    }
 }
 
 /// Outcome of the writer-side fence acquisition
@@ -359,6 +412,7 @@ pub struct AttachmentManifestEntry {
     pub committed_at_epoch_ms: Option<u64>,
     pub owner_kind: Option<AttachmentOwnerKind>,
     pub owner_id: Option<String>,
+    pub owner_incarnation: Option<crate::ProcessIncarnation>,
 }
 
 /// The synchronous attachment-manifest surface required from every

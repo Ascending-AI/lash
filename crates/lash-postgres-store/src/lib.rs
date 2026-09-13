@@ -335,7 +335,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 89 adds exact artifact-owner edges, permanent execution-owner
 // publication fences, and durable Process Prune artifact-release evidence.
 // Component-88 stores are rejected and recreated.
-const SCHEMA_VERSION: i32 = 89;
+// Version 90 qualifies process-owned attachment intents with the registry-minted
+// incarnation. Component-89 stores are rejected so a bare process id is never
+// reinterpreted as the current incarnation with the same reusable name.
+const SCHEMA_VERSION: i32 = 90;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

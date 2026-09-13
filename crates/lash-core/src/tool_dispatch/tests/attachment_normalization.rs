@@ -459,7 +459,10 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
     context.tool_registry = Some(context.plugins.tool_registry());
     let _owner = context
         .attachment_store
-        .bind_process_scoped("orchestrating-process");
+        .bind_process_scoped(crate::ProcessRef::new(
+            "orchestrating-process",
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        ));
     assert!(
         persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
         "precondition: the process manifest starts empty"
@@ -497,7 +500,10 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
     let (context, persistence, _) = durable_attachment_context(test_plugins(provider)).await;
     let _owner = context
         .attachment_store
-        .bind_process_scoped("internal-process");
+        .bind_process_scoped(crate::ProcessRef::new(
+            "internal-process",
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        ));
     assert!(
         persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
         "precondition: the process manifest starts empty"

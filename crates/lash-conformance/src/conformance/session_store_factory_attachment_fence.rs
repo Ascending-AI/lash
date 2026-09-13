@@ -35,6 +35,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         intent_at_epoch_ms: 1,
         owner_kind: None,
         owner_id: None,
+        owner_incarnation: None,
     };
     // Nothing is aged out at cutoff 0, so a recorded intent is unambiguously a
     // root and a forgotten one leaves no row at all.
