@@ -716,7 +716,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 return false;
             }
             LlmTerminalReason::OutputLimit => TurnOutcome::Stopped(TurnStop::Incomplete),
-            LlmTerminalReason::ContextOverflow => TurnOutcome::Stopped(TurnStop::ProviderError),
+            LlmTerminalReason::ContextOverflow => TurnOutcome::Stopped(TurnStop::ContextOverflow),
             LlmTerminalReason::ContentFilter => TurnOutcome::Stopped(TurnStop::ProviderError),
             LlmTerminalReason::ProviderError => TurnOutcome::Stopped(TurnStop::ProviderError),
             LlmTerminalReason::Cancelled => TurnOutcome::Stopped(TurnStop::Cancelled {
@@ -872,7 +872,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
             message: format!("LLM error: {}", error.message),
             envelope: Some(envelope),
         });
-        self.finish(TurnOutcome::Stopped(TurnStop::ProviderError));
+        // A failed call whose terminal reason is a context-window overflow stops
+        // as the overflow, not as an undifferentiated provider error: the two
+        // classifier entry points (`is_context_overflow_text` and the OpenAI
+        // `context_length_exceeded` code) both arrive here on the error path,
+        // and a host that can recover from an overflow must be able to tell it
+        // apart here exactly as it can on the Ok path. Every other terminal
+        // reason keeps stopping as `ProviderError`.
+        self.finish(TurnOutcome::Stopped(match error.terminal_reason {
+            LlmTerminalReason::ContextOverflow => TurnStop::ContextOverflow,
+            _ => TurnStop::ProviderError,
+        }));
     }
 
     fn handle_tool_results(&mut self, id: EffectId, completed: Vec<CompletedToolCall>) {

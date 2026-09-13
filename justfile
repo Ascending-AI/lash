@@ -250,6 +250,9 @@ graceful-drain-e2e:
 request-abandon-e2e:
   bash "{{repo}}/scripts/request-abandon-e2e.sh"
 
+context-overflow-recovery-e2e:
+  bash "{{repo}}/scripts/context-overflow-recovery-e2e.sh"
+
 stack-budget:
   bash "{{repo}}/scripts/ci-stack-budget.sh"
 

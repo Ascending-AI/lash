@@ -68,6 +68,37 @@ lash_rust_unit_test(
 )
 
 lash_rust_binary(
+    name = "lash-e2e-context-overflow-recovery__bin",
+    crate_features = [],
+    crate_name = "lash_e2e_context_overflow_recovery",
+    crate_root = "src/bin/context_overflow_recovery.rs",
+    declared_features = [],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":restate-postgres-workers",
+    library_crate_name = "lash_restate_postgres_workers_e2e",
+    manifest_dir = "runbooks/restate-postgres-workers",
+    package_name = "lash-restate-postgres-workers-e2e",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0",
+)
+
+lash_rust_unit_test(
+    name = "lash-e2e-context-overflow-recovery__bin__unit_test",
+    crate_features = [],
+    crate_name = "lash_e2e_context_overflow_recovery",
+    crate_root = "src/bin/context_overflow_recovery.rs",
+    declared_features = [],
+    library = ":restate-postgres-workers",
+    library_crate_name = "lash_restate_postgres_workers_e2e",
+    manifest_dir = "runbooks/restate-postgres-workers",
+    package_name = "lash-restate-postgres-workers-e2e",
+    tags = [],
+    version = "0.0.0",
+)
+
+lash_rust_binary(
     name = "lash-e2e-frame-crash__bin",
     crate_features = [],
     crate_name = "lash_e2e_frame_crash",

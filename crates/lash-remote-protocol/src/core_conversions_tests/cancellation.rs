@@ -127,3 +127,17 @@ fn every_cancellation_origin_survives_record_observation_and_output_transport() 
         assert_eq!(returned.cancel_request, Some(request));
     }
 }
+
+/// A context-overflow stop crosses the core boundary as its own remote
+/// variant; it must not collapse back into `ProviderError` (FIG-1272).
+#[test]
+fn context_overflow_stop_converts_to_its_own_remote_variant() {
+    assert_eq!(
+        RemoteTurnStop::from(lash_core::facade_support::TurnStop::ContextOverflow),
+        RemoteTurnStop::ContextOverflow
+    );
+    assert_eq!(
+        RemoteTurnStop::from(lash_core::facade_support::TurnStop::ProviderError),
+        RemoteTurnStop::ProviderError
+    );
+}
