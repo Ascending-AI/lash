@@ -17,7 +17,6 @@ LOAD = """load(
     "//tools/bazel:lash_rust.bzl",
     "lash_rust_binary",
     "lash_rust_build_script",
-    "lash_rust_doc_test",
     "lash_rust_integration_test",
     "lash_rust_library",
     "lash_rust_unit_test",
@@ -286,19 +285,6 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             if unit_cargo_reason:
                 unit_inventory["cargo_only"] = unit_cargo_reason
             inventory_targets.append(unit_inventory)
-        if library.get("doctest", False):
-            chunks.append(
-                "lash_rust_doc_test(\n"
-                f"    name = {quote(primary_target + '__doc_test')},\n"
-                f"    crate = {quote(':' + primary_target)},\n"
-                ")\n\n"
-            )
-            inventory_targets.append({
-                "kind": "doc-test",
-                "label": f"//{package_dir}:{primary_target}__doc_test",
-                "tags": [],
-            })
-
     for target in targets:
         kind = target["kind"][0]
         if kind == "lib":
@@ -553,9 +539,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     ]
     groups = {
         "WORKSPACE_COMPILE_TARGETS": sorted(
-            target["label"]
-            for target in labels
-            if target["label"] is not None and target["kind"] != "doc-test"
+            target["label"] for target in labels if target["label"] is not None
         ),
         # Cargo lints libs, bins, examples, benches and test crates under
         # `clippy --workspace --all-targets`. Build scripts are excluded here
@@ -566,12 +550,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             target["label"]
             for target in labels
             if target["label"] is not None
-            and target["kind"] not in ("custom-build", "doc-test")
-        ),
-        "WORKSPACE_DOCTEST_TARGETS": sorted(
-            target["label"]
-            for target in labels
-            if target["label"] is not None and target["kind"] == "doc-test"
+            and target["kind"] != "custom-build"
         ),
         "WORKSPACE_RUST_SOURCE_TARGETS": sorted(
             f"//{pathlib.PurePosixPath(package['manifest']).parent.as_posix()}:rust_sources"

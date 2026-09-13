@@ -15,6 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [lib]
 name = "lash_plugin_process_controls"
+doctest = false
 
 [features]
 default = []

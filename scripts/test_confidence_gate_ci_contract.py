@@ -2024,12 +2024,14 @@ derive_mutation_jobs() {{
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
         self.assertIn("--no-fail-fast", workspace_tests)
 
-        # test-doc is the cache writer and the doctest gate, nothing else. Gates
-        # that neither warm nor consume that superset are sibling jobs, not
-        # serial steps behind twelve minutes of compilation.
+        # test-doc is the cache writer and the workspace check, nothing else.
+        # Gates that neither warm nor consume that superset are sibling jobs,
+        # not serial steps behind twelve minutes of compilation. Doctests were
+        # removed from the repository by ruling (2026-09-13), so no half of
+        # this job runs them on either trust path.
         test_doc = workflow_job_block(workflow, "test-doc")
         self.assertIn("cargo check --workspace --all-targets --locked", test_doc)
-        self.assertIn("cargo test --doc --workspace --locked", test_doc)
+        self.assertNotIn("--doc ", test_doc)
         # The trybuild fixture graph is part of that superset. It only reaches
         # the shared cache if the writer builds it, and it is invisible in the
         # workflow's shape — dropping this step costs no gate and no red run,

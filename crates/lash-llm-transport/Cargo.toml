@@ -15,6 +15,7 @@ categories = ["asynchronous", "network-programming"]
 
 [lib]
 name = "lash_llm_transport"
+doctest = false
 
 [features]
 # Exposes the cross-provider response-normalization conformance suite

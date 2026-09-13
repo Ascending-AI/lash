@@ -15,6 +15,7 @@ categories = ["asynchronous", "network-programming"]
 
 [lib]
 name = "lash_http_transport"
+doctest = false
 
 [lints]
 workspace = true

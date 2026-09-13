@@ -18,6 +18,7 @@ categories = ["asynchronous", "api-bindings"]
 [lib]
 name = "lash"
 path = "src/lib.rs"
+doctest = false
 
 [lints]
 workspace = true
